@@ -30,4 +30,5 @@ Thank you to everyone contributing to GDC-transcript!
 
 ## Futurework
 
-- [ ] Auto-generate translations for reviewed transcription
+- [ ] Regenerate transcription for reviewed subtitles
+- [ ] Auto-generate translations for reviewed subtitles
