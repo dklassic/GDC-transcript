@@ -4,6 +4,8 @@
 
 GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK Liao](https://twitter.com/RandomDevDK) in an attempt to transcribe public videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
 
+The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-transcript)
+
 ## Why
 
 In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to.
