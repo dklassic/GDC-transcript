@@ -4,7 +4,9 @@
 
 GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK Liao](https://twitter.com/RandomDevDK) in an attempt to transcribe public videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
 
-The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-transcript)
+## How to use
+
+The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-transcript), enter video ID for to attempt loading the video.
 
 ## Why
 
