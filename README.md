@@ -2,7 +2,7 @@
 
 > An attempt to transcript all GDC YouTube public videos
 
-GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [dklassic](https://twitter.com/RandomDevDK) in an attempt to transcript public videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
+GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK Liao](https://twitter.com/RandomDevDK) in an attempt to transcript public videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
 
 ## Why
 
