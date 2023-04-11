@@ -23,7 +23,7 @@ def move_files(filenames, source_folder, target_folder):
 
 def main():
     input_filename = "to_move.txt"
-    source_folder = "audio"
+    source_folder = "gdc_audio"
     target_folder = "matched_audio"
 
     filenames = read_filenames(input_filename)
