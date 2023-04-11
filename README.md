@@ -22,9 +22,9 @@ Some extensive tests show it is far capable of handling accent, bad audio qualit
 
 As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will often go haywire and make things up which surely exhibits generative AI's trait.
 
-Please create Pull Request following [Contributing Guide](./.github/CONTRIBUTING.md) to help us make these awesome contents available to everyone! Also feel free to create Issue when a video you need isn't transcribed yet.
+Please create Pull Request following [Contributing Guide](./.github/CONTRIBUTING.md) to help us make these awesome contents available to everyone without a hassle! Also feel free to create Issue when a video you need isn't transcribed yet.
 
-Before you start working on something, it's best to check if there is an existing issue first. It's also a good idea to stop by the Discord server and confirm with the team if it makes sense or if someone else is already working on it.
+Before you start working on something, it's best to check if there is an existing issue first.
 
 Thank you to everyone contributing to GDC-transcript!
 
