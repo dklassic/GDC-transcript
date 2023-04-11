@@ -16,7 +16,7 @@ Also with full transcript, it would be a lot easier to find whatever you need wi
 
 We recently discovered there's this nice project by OpenAI called [Whisper](https://github.com/openai/whisper) which turned out to be a pretty good multilingual transcripter.
 
-Some extensive tests show it is far capable at handling accent, bad audio quality, and both.
+Some extensive tests show it is far capable of handling accent, bad audio quality, and both.
 
 ## Contributing
 
