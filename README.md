@@ -16,6 +16,8 @@ Also with full transcription, it would be a lot easier to find whatever you need
 
 We recently discovered there's this nice project by OpenAI called [Whisper](https://github.com/openai/whisper) which turned out to be a pretty good multilingual transcripter.
 
+Some extensive tests show it is far capable at handling accent, bad audio quality, and both.
+
 ## Contributing
 
 As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will often go haywire and make things up which surely exhibits generative AI's trait.
