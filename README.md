@@ -28,6 +28,11 @@ Before you start working on something, it's best to check if there is an existin
 
 Thank you to everyone contributing to GDC-transcript!
 
+## Dependency
+
+- [subtitles-parser](https://github.com/bazh/subtitles-parser) to parse SRT
+- [youtube.external.subtitle](https://github.com/siloor/youtube.external.subtitle) to display external subtitle
+
 ## Futurework
 
 - [ ] Regenerate transcription for reviewed subtitles
