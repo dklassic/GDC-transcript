@@ -6,7 +6,7 @@ GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK L
 
 ## Why
 
-In hopes to help those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to.
+In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to.
 
 For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
 
