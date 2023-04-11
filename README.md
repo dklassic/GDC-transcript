@@ -26,4 +26,4 @@ Also feel free to create Issue when a video you need isn't transcripted yet!
 
 ## Futurework
 
-[ ] Auto-generate translations for reviewed transcription
+- [ ] Auto-generate translations for reviewed transcription
