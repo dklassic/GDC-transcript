@@ -3,7 +3,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # Your API key here. Replace with your own Google API key.
-API_KEY = 'AIzaSyAVUOok0hhTmk1cLPiYHDVEwu1EeDIq6I4'
+API_KEY = 'YOUR_API_KEY'
 
 def get_playlist_videos(playlist_id):
     youtube = build('youtube', 'v3', developerKey=API_KEY)
@@ -42,7 +42,7 @@ def save_to_csv(videos, output_file):
         writer.writerows(videos)
 
 def main():
-    playlist_id = 'PLNCOK8QkQUcr3TcwGyIesPZ4vRKrD5e72'  # Replace with the desired playlist ID
+    playlist_id = 'YOUR_PLAYLIST_ID'  # Replace with the desired playlist ID
     output_file = 'playlist_videos.csv'
 
     videos = get_playlist_videos(playlist_id)
