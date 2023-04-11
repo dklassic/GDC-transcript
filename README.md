@@ -32,7 +32,7 @@ Thank you to everyone contributing to GDC-transcript!
 
 ## Dependency
 
-- [subtitles-parser](https://github.com/bazh/subtitles-parser) to parse SRT
+- [subtitles-parser](https://github.com/bazh/subtitles-parser) to parse SRT ([Neos3452's fork](https://github.com/Neos3452/subtitles-parser) to parse dot seperator)
 - [youtube.external.subtitle](https://github.com/siloor/youtube.external.subtitle) to display external subtitle
 
 ## Futurework
