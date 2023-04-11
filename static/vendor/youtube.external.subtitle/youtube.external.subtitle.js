@@ -183,7 +183,6 @@
             waitFor(function () {
                 return iframeApiLoaded(window);
             }, function () {
-                console.log("DIC")
                 DIC.setYT(window.YT);
                 cb();
             });
@@ -392,7 +391,6 @@
             initService.grantIframeApi(function () {
                 var YT = DIC.getYT();
                 _this.player = new YT.Player(iframe);
-                console.log(YT.Player);
 
                 _this.player.addEventListener('onReady', _this.onPlayerReady);
                 _this.player.addEventListener('onStateChange', _this.onPlayerStateChange);
@@ -445,7 +443,6 @@
             this.setState({ controlsVisible: true });
         };
         Subtitle.prototype.getCurrentVideoId = function () {
-            console.log(this.player.getVideoData);
             return this.player.getVideoData().video_id;
         };
         return Subtitle;
