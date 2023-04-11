@@ -1,2 +1,29 @@
 # GDC-transcript
-An attempt to transcript all GDC YouTube public videos
+
+> An attempt to transcript all GDC YouTube public videos
+
+GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [dklassic](https://twitter.com/RandomDevDK) in an attempt to transcript public videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
+
+## Why
+
+In hopes to help those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to.
+
+For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
+
+Also with full transcription, it would be a lot easier to find whatever you need with text search.
+
+## How
+
+We recently discovered there's this nice project by OpenAI called [Whisper](https://github.com/openai/whisper) which turned out to be a pretty good multilingual transcripter.
+
+## Limit
+
+As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition.
+
+However, it will often go haywire and make things up which surely exhibits generative AI's trait. Please create Pull Request following Contribution Guide to help us make these awesome contents available to everyone!
+
+Also feel free to create Issue when a video you need isn't transcripted yet!
+
+## Futurework
+
+[ ] Auto-generate translations for reviewed transcription
