@@ -18,13 +18,19 @@ Also with full transcript, it would be a lot easier to find whatever you need wi
 
 ## How
 
-We recently discovered there's this nice project by OpenAI called [Whisper](https://github.com/openai/whisper) which turned out to be a pretty good multilingual transcripter.
+We recently discovered there's this nice project by OpenAI called [Whisper](https://github.com/openai/whisper) which turned out to be a pretty good multilingual transcripter. Some extensive tests show it is far capable of handling accent, bad audio quality, and both.
 
-Some extensive tests show it is far capable of handling accent, bad audio quality, and both.
+Though in this case, we opted for a version by m-bain called [whipserX](https://github.com/m-bain/whisperX) which is much better at producing precise subtitle timing.
 
-## Contributing
+## Limitation
 
 As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will often go haywire and make things up which surely exhibits generative AI's trait.
+
+Also in order to make sure all English speaking part is properly transcribed, we forcedfully set the langauge detected as "English," which will cause whipser to transribe and translate the non-English part as well if so exists (such as in the case of [This Nier: Automata talk](https://youtu.be/jKbH9i5axxU)).
+
+Ultimately we might go through these case one by one and produce a much robust version of subtitle including orignal language, so that if anyone choose to translate subtitles to non-English versions can have much more context to work on.
+
+## Contributing
 
 Please create Pull Request following [Contributing Guide](./.github/CONTRIBUTING.md) to help us make these awesome contents available to everyone without a hassle! Also feel free to create Issue when a video you need isn't transcribed yet.
 
