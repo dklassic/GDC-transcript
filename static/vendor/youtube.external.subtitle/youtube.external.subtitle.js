@@ -433,7 +433,7 @@
         Subtitle.prototype.start = function () {
             this.stop();
             var window = DIC.getWindow();
-            this.timeChangeInterval = window.setInterval(this.onTimeChange, 500);
+            this.timeChangeInterval = window.setInterval(this.onTimeChange, 100);
             this.controlsHideTimeout = window.setTimeout(this.onControlsHide, 3000);
             this.onTimeChange();
         };
