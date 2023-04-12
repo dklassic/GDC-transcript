@@ -2,7 +2,7 @@
 
 > An attempt to transcript all GDC YouTube public videos
 
-GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK Liao](https://twitter.com/RandomDevDK) in an attempt to transcribe public videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
+GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK Liao](https://twitter.com/RandomDevDK) in an attempt to transcribe publicly available videos in [Game Developers Conference's YouTube channel](https://www.youtube.com/@Gdconf).
 
 ## How to use
 
@@ -10,17 +10,19 @@ The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-tran
 
 ## Why
 
-In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to.
+In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to. For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
 
-For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
-
-Also with full transcript, it would be a lot easier to find whatever you need with text search.
+With full transcript, it would be a lot easier to find whatever you need with text search. Plus since YouTube has stopped allowing community translation, a possibility to setup community translation would be nice.
 
 ## How
 
 We recently discovered there's this nice project by OpenAI called [Whisper](https://github.com/openai/whisper) which turned out to be a pretty good multilingual transcripter. Some extensive tests show it is far capable of handling accent, bad audio quality, and both.
 
 Though in this case, we opted for a version by m-bain called [whipserX](https://github.com/m-bain/whisperX) which is much better at producing precise subtitle timing.
+
+## Why not just YouTube transcription?
+
+Firstly, Whisper showed better results than YouTube in our testing. Secondly Whisper produces transcripts with better sentence structure that's much easier to read.
 
 ## Limitation
 
