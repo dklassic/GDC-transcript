@@ -6,12 +6,13 @@ import json
 from pytube import YouTube
 
 subtitle_directory = "./static/src/subtitle"
+translation_directory = "./static/src/translation"
+
 json_directory = "./json"
 subtitles_json = "./json/subtitles.json"
 reviewed_subtitles_json = "./json/reviewed.json"
 titles_json = "./json/titles.json"
 os.makedirs(json_directory, exist_ok=True)
-
 
 def getYoutubeTitle(yt : YouTube):
         # https://github.com/pytube/pytube/issues/1479
@@ -38,6 +39,8 @@ srt_list = []
 reviewed_list = []
 titles_dict = {}
 
+video_data_dict = {}
+
 for idx, file_name in enumerate(srt_files):
     file_name_without_ext = os.path.splitext(os.path.basename(file_name))[0]
     full_file_path = os.path.join(subtitle_directory, file_name)
@@ -50,22 +53,39 @@ for idx, file_name in enumerate(srt_files):
 
     print(title)
     video_data = {
-        "id": file_name_without_ext,
+        "id": videoId,
         "title": title,
         "length": yt_length,
         "subtitle": full_file_path,
         "reviewed": False,
+        "translation": {},
     }
-    video_json = os.path.join(json_directory, file_name_without_ext + ".json")
-    with open(video_json, "w") as outfile:
-        json.dump(video_data, outfile)
-    print(f"Created {video_json}")
+    video_data_dict[str(videoId)] = video_data
     
-
     srt_list.append(videoId)
     if (video_data["reviewed"]):
         reviewed_list.append(videoId)
-    titles_dict[str(videoId)] = title;
+    titles_dict[str(videoId)] = title
+
+# Iterate all language directories.
+subdirInTranslation = [f.path for f in os.scandir(translation_directory) if f.is_dir()]
+for idx, lang_dir in enumerate(subdirInTranslation):
+    lang = os.path.basename(lang_dir)
+    print(lang)
+    lang_subtitle_directory = os.path.join(lang_dir, "subtitle")
+    if (os.path.isdir(lang_subtitle_directory)):
+        # iterate .srt files in the specific langauge.
+        lang_srt_files = [f for f in os.listdir(lang_subtitle_directory) if f.endswith('.srt')]
+        for idx, file_name in enumerate(lang_srt_files):
+            videoId = os.path.splitext(os.path.basename(file_name))[0]
+            video_data_dict[str(videoId)]["translation"][str(lang)] = os.path.join(lang_subtitle_directory, file_name)
+
+# Export jsons
+for videoId, video_data in video_data_dict.items():
+    video_json = os.path.join(json_directory, videoId + ".json")
+    with open(video_json, "w") as outfile:
+        json.dump(video_data, outfile)
+    print(f"Created {video_json}")
 
 with open(subtitles_json, "w") as outfile:
     json.dump(srt_list, outfile)
