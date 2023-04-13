@@ -56,8 +56,11 @@ for idx, file_name in enumerate(srt_files):
         "subtitle": full_file_path,
         "reviewed": False,
     }
-    with open(os.path.join(json_directory, file_name_without_ext + ".json"), "w") as outfile:
+    video_json = os.path.join(json_directory, file_name_without_ext + ".json")
+    with open(video_json, "w") as outfile:
         json.dump(video_data, outfile)
+    print(f"Created {video_json}")
+    
 
     srt_list.append(videoId)
     if (video_data["reviewed"]):
