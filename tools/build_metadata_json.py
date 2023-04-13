@@ -2,7 +2,7 @@ import os
 import json
 
 subtitle_directory = "./static/src/subtitle"
-output_json = "./static/src/metadata.json"
+output_json = "./metadata.json"
 
 srt_files = [f for f in os.listdir(subtitle_directory) if f.endswith('.srt')]
 
