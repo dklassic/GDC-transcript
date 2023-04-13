@@ -8,6 +8,8 @@ GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK L
 
 The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-transcript), enter video ID to attempt loading the embedded video with transcript from this repository.
 
+You can also simply use GET method to link to the video. For example: https://blog.chosenconcept.dev/GDC-transcript/?v=c2YRVWZupwo
+
 ## Why
 
 In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to. For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
