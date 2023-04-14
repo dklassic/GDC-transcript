@@ -1,6 +1,9 @@
 # API Documentation
+The front-end can access JSON APIs, which are generated using [`tools/build_metadata_json.py`](tools/build_metadata_json.py) during the deployment workflow.
 
 ## Retrieve all subtitles
+
+```
 GET /json/subtitles.json
 ```
 
