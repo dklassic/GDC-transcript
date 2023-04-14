@@ -3,12 +3,13 @@ import os
 import re
 
 def read_subtitle_file(filepath):
-    with open(filepath, 'r') as f:
+    print("Reading subtitle file:", filepath)
+    with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read()
     return content
 
 def write_transcript_file(filepath, transcript):
-    with open(filepath, 'w') as f:
+    with open(filepath, 'w', encoding='utf-8') as f:
         f.write(transcript)
 
 def convert_srt_to_transcript(srt_content):
