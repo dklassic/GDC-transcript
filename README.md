@@ -51,7 +51,8 @@ Thank you to everyone contributing to GDC-transcript!
 
 ## Futurework
 
-- [x] Allow the resize of video through other means
+- [x] Allow the resize of video through other mean
+- [ ] Show reviewer information
 - [ ] Auto-generate transcript for reviewed subtitles
 - [ ] Auto-generate summary for reviewed subtitles
 - [ ] Auto-generate translations for reviewed subtitles
