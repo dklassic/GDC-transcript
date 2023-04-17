@@ -30,7 +30,7 @@ Secondly Whisper produces transcripts with better sentence structure that's much
 
 ## Limitation
 
-As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will often go haywire and make things up which surely exhibits generative AI's trait.
+As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will sometimes go haywire and make things up which surely exhibits generative AI's trait.
 
 The transcript also tends to mess up when the speaker goes 88 mph and you'll see the the transcript gets messier after that.
 
