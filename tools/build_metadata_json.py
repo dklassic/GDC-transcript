@@ -18,7 +18,7 @@ def getYoutubeTitle(yt : YouTube):
         # https://github.com/pytube/pytube/issues/1479
         exception_count = 0
         title = "<fetch_title_failed>"
-        while (exception_count < 10):
+        while (exception_count < 100):
             try:
                 title = yt.title
                 break
