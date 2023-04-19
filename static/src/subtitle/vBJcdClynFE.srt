@@ -1,0 +1,1648 @@
+1
+00:00:06,357 --> 00:00:07,817
+Hello, I'm Ashton Mason.
+
+2
+00:00:07,997 --> 00:00:10,458
+I'm a software engineer in the Frostbite team
+
+3
+00:00:10,578 --> 00:00:11,358
+at Electronic Arts.
+
+4
+00:00:11,938 --> 00:00:13,119
+And today I'm going to show you our
+
+5
+00:00:13,219 --> 00:00:14,819
+Quad Mesh Simplification technology.
+
+6
+00:00:16,320 --> 00:00:18,260
+So we developed the technology in collaboration
+
+7
+00:00:18,300 --> 00:00:20,601
+with BioWare beginning in early 2012.
+
+8
+00:00:20,941 --> 00:00:24,603
+And this is a hand authored set of LODs
+
+9
+00:00:24,763 --> 00:00:27,023
+or levels of detail, which are authored
+
+10
+00:00:27,063 --> 00:00:28,044
+by a BioWare artist.
+
+11
+00:00:29,024 --> 00:00:31,265
+And you can see that the
+
+12
+00:00:33,383 --> 00:00:36,986
+the LODs have a very regular edge flow and a good quad topology,
+
+13
+00:00:37,326 --> 00:00:39,848
+even though they're quite low detail.
+
+14
+00:00:40,748 --> 00:00:45,712
+And at the time when Bioware asked us to develop this tool,
+
+15
+00:00:46,333 --> 00:00:48,314
+they were always hand authoring their LODs.
+
+16
+00:00:49,235 --> 00:00:53,518
+And this is why, because they kind of want this regular topology in their LODs,
+
+17
+00:00:53,598 --> 00:00:54,219
+as I'll show you.
+
+18
+00:00:57,501 --> 00:01:00,263
+So this is what you would get if you would feed a quad mesh
+
+19
+00:01:00,683 --> 00:01:02,044
+model into
+
+20
+00:01:02,809 --> 00:01:08,593
+LOD technology of the time which was triangle based so it would triangulate the mesh and
+
+21
+00:01:08,813 --> 00:01:13,417
+would produce geometrically a very good result but with a completely different triangle based topology.
+
+22
+00:01:16,619 --> 00:01:23,104
+So here we can see the impact of that. On the left we've got a LOD level of detail generated with
+
+23
+00:01:24,205 --> 00:01:30,550
+triangles, sorry quads, and on the right we've got the same budget but with quads triangles.
+
+24
+00:01:32,029 --> 00:01:39,092
+And you can see that the quad version has better flexing where the character is skinned
+
+25
+00:01:39,692 --> 00:01:46,195
+and is deforming under skinning, whereas the triangulated version has some strange artifacts
+
+26
+00:01:46,275 --> 00:01:52,097
+even in the face where the triangulation is not matching the natural flow of the body
+
+27
+00:01:52,558 --> 00:01:55,199
+and the places where it needs to flex.
+
+28
+00:01:56,800 --> 00:02:01,102
+So here I've drawn the edges on the model so you can see hopefully what I mean.
+
+29
+00:02:01,805 --> 00:02:06,547
+that the quad mesh has edges in the right places using what are called rigging rules,
+
+30
+00:02:06,627 --> 00:02:13,010
+where artists are told to put in rings of edges in the places where the mesh is going to flex, particularly.
+
+31
+00:02:14,150 --> 00:02:18,112
+Whereas the triangulated mesh, of course, just has random triangles in those areas,
+
+32
+00:02:18,212 --> 00:02:20,213
+so the flexing is kind of a bit haphazard.
+
+33
+00:02:21,234 --> 00:02:25,716
+But there's another side to this as well, which is that very often the LOD tools are not perfect,
+
+34
+00:02:25,996 --> 00:02:31,398
+so artists have to hand author these models or tweak them a little bit after they've been generated.
+
+35
+00:02:31,936 --> 00:02:35,358
+And when they do that, the model on the left is a much better starting point
+
+36
+00:02:35,398 --> 00:02:38,179
+because it looks like the kind of thing the artists would have produced themselves.
+
+37
+00:02:41,781 --> 00:02:47,544
+So let's get started. In the talk, I'm going to be covering three different aspects,
+
+38
+00:02:47,604 --> 00:02:53,186
+and then I'll show you some results. The aspects are requirements that Bioware gave us for this
+
+39
+00:02:53,226 --> 00:02:58,549
+LOD generation for character models for quad meshes. So the first one is kind of to handle
+
+40
+00:02:58,569 --> 00:02:59,810
+topology. They wanted the
+
+41
+00:03:00,512 --> 00:03:06,793
+generated LODs to preserve this edge flow, this well-structured quad topology which character
+
+42
+00:03:06,833 --> 00:03:12,395
+models did and which their hand-authored LODs had. So you could kind of say they wanted the LODs to
+
+43
+00:03:12,435 --> 00:03:20,017
+look like hand-authored models, which at the time was a big ask. Then they also wanted the ability
+
+44
+00:03:20,117 --> 00:03:26,139
+to hand-paint priorities onto the models, for example in Maya, and for those priorities to
+
+45
+00:03:26,179 --> 00:03:29,640
+indicate that certain areas should be preserved in more detail than other areas.
+
+46
+00:03:30,135 --> 00:03:33,736
+And the reason they wanted this was because they suspected that as brilliant as our tool would be,
+
+47
+00:03:34,236 --> 00:03:39,039
+they would probably still have to go in and hand-paint some areas to kind of keep detail where they needed it.
+
+48
+00:03:40,059 --> 00:03:42,740
+And then the third requirement was to preserve symmetry on models.
+
+49
+00:03:43,280 --> 00:03:46,422
+So very often character models are symmetric topologically.
+
+50
+00:03:46,442 --> 00:03:51,384
+So in other words, they have the same edge structure, the same topology on the left and right, just mirrored.
+
+51
+00:03:52,244 --> 00:03:54,105
+And so they wanted to retain that.
+
+52
+00:03:56,026 --> 00:03:56,786
+So topology.
+
+53
+00:03:58,785 --> 00:04:02,008
+a sort of well-authored head model with a good quad structure.
+
+54
+00:04:03,109 --> 00:04:05,611
+So how would we go about preserving the topology in the LODs?
+
+55
+00:04:06,271 --> 00:04:09,374
+Like, recall that at the time, as I say, triangulation—
+
+56
+00:04:09,694 --> 00:04:13,517
+sorry, simplification tools were triangulation-based and triangle-based.
+
+57
+00:04:13,837 --> 00:04:16,899
+So they first started off by triangulating the mesh on the left
+
+58
+00:04:17,540 --> 00:04:19,421
+and then generated LODs on the right.
+
+59
+00:04:19,502 --> 00:04:22,824
+And this is the kind of thing we would have generated at the time, back in 2012.
+
+60
+00:04:23,825 --> 00:04:27,188
+And as I said before, this is great from a geometry point of view,
+
+61
+00:04:27,208 --> 00:04:28,348
+but doesn't have the right topology.
+
+62
+00:04:29,508 --> 00:04:31,089
+But how does that process actually work?
+
+63
+00:04:32,330 --> 00:04:34,371
+Like all other tools, pretty much,
+
+64
+00:04:34,691 --> 00:04:36,892
+our tool for triangle mesh simplification
+
+65
+00:04:36,932 --> 00:04:38,113
+works by collapsing edges.
+
+66
+00:04:38,633 --> 00:04:40,654
+So here on the left, we're collapsing the edge in white
+
+67
+00:04:41,315 --> 00:04:46,938
+to a vertex, which is located at a collapse point in red,
+
+68
+00:04:47,918 --> 00:04:50,700
+and in the process, removes two triangles in orange.
+
+69
+00:04:51,320 --> 00:04:54,101
+So by removing, by collapsing an edge to a vertex,
+
+70
+00:04:54,141 --> 00:04:56,022
+you get to remove, in general, two triangles.
+
+71
+00:04:56,883 --> 00:04:58,424
+And this is all done using something
+
+72
+00:04:58,444 --> 00:04:59,024
+called the quadric.
+
+73
+00:04:59,138 --> 00:05:03,281
+error metric, which is a thing proposed by Garland and Heckbert way back when, which
+
+74
+00:05:03,341 --> 00:05:09,085
+basically tells you where to put the collapse point to best approximate the original geometry
+
+75
+00:05:09,105 --> 00:05:13,368
+with only a vertex instead of an edge, and what the cost is of doing that, like a kind
+
+76
+00:05:13,408 --> 00:05:17,491
+of cost metric which tells you how much the geometry will suffer in that area by doing
+
+77
+00:05:19,193 --> 00:05:19,353
+so.
+
+78
+00:05:19,373 --> 00:05:22,375
+So here's how that is used to simplify meshes.
+
+79
+00:05:22,935 --> 00:05:26,958
+This is kind of an animation showing a large number of edge collapses in succession.
+
+80
+00:05:27,737 --> 00:05:29,978
+and each edge collapse removes two triangles.
+
+81
+00:05:30,599 --> 00:05:32,660
+And there's basically a big priority queue,
+
+82
+00:05:32,700 --> 00:05:35,382
+which has all the available edge collapse candidates
+
+83
+00:05:36,383 --> 00:05:40,566
+sorted by cost metric, the Garland and Heckman cost metric,
+
+84
+00:05:41,706 --> 00:05:43,948
+so that you favor the collapses
+
+85
+00:05:43,988 --> 00:05:45,829
+which impact the mesh least.
+
+86
+00:05:46,029 --> 00:05:47,610
+So you remove two triangles
+
+87
+00:05:47,630 --> 00:05:49,772
+for the cheapest impact to the mesh.
+
+88
+00:05:50,753 --> 00:05:52,694
+And that standard practice
+
+89
+00:05:52,734 --> 00:05:54,435
+is exactly how our simplifier worked.
+
+90
+00:05:55,270 --> 00:05:57,912
+And so we kind of knew that we needed something similar, but for quad meshes.
+
+91
+00:05:59,874 --> 00:06:05,879
+We read a bunch of papers and we found this paper by Daniels et al. from SIGGRAPH Asia
+
+92
+00:06:05,919 --> 00:06:09,562
+in 2009, I think, called Quadrilateral Mesh Simplification, promisingly.
+
+93
+00:06:10,503 --> 00:06:16,708
+And it proposes something called polychord collapse, which is kind of edge collapse on
+
+94
+00:06:16,748 --> 00:06:18,309
+steroids for quad meshes.
+
+95
+00:06:19,470 --> 00:06:21,651
+So here's an example of what that paper does.
+
+96
+00:06:22,456 --> 00:06:26,919
+We've got a quad strip here in this quad mesh, like a sequence of adjacent quads separated
+
+97
+00:06:26,959 --> 00:06:27,359
+by edges.
+
+98
+00:06:28,540 --> 00:06:32,603
+And we've collapsed that quad strip down to just a sequence of edges instead, so in the
+
+99
+00:06:32,643 --> 00:06:34,844
+process we've removed all of those quads in orange.
+
+100
+00:06:36,025 --> 00:06:41,488
+And the way it's done is by collapsing edges cunningly, so it's like a bunch of edge collapses
+
+101
+00:06:41,508 --> 00:06:42,849
+done in tandem, atomically.
+
+102
+00:06:44,780 --> 00:06:52,664
+Each edge collapse can be done using a weld operator that operates by replacing v0 or v1
+
+103
+00:06:52,824 --> 00:07:01,968
+with just a v0 and v2 or v3 with just a v2, and then moving the retained vertices v0 and v2 to
+
+104
+00:07:02,008 --> 00:07:07,851
+the computed collapse point locations, updating all the neighboring faces, calculating interpolated
+
+105
+00:07:07,871 --> 00:07:13,873
+UVs and normals, etc, etc, to basically weld the mesh at that point. And in the process,
+
+106
+00:07:14,583 --> 00:07:19,567
+degenerate faces, faces like the orange ones that degenerate away to edges are removed,
+
+107
+00:07:20,468 --> 00:07:23,010
+and Bob's your uncle simplified mesh.
+
+108
+00:07:25,272 --> 00:07:30,837
+But it's not quite that simple because quad strips, and therefore polychords, I should
+
+109
+00:07:30,857 --> 00:07:36,322
+say polychords are just sets of edges, so in the previous example the polychord is the
+
+110
+00:07:36,362 --> 00:07:40,625
+set of all the edges between all the quad faces that are all being collapsed together.
+
+111
+00:07:42,023 --> 00:07:48,485
+So polychords, aka quad strips in this case, can cross each other like they are here, or can cross
+
+112
+00:07:48,505 --> 00:07:53,626
+themselves, or self-intersect. So where that happens, things are a bit more complicated,
+
+113
+00:07:53,706 --> 00:07:58,828
+because it's no longer just a simple single collapse of a single edge. Instead you've got
+
+114
+00:07:59,028 --> 00:08:06,410
+four edges here that are all coincident, they're all touching, and all of those touching edges
+
+115
+00:08:06,530 --> 00:08:11,411
+get collapsed to just a single vertex. And this is something that Daniels et al do.
+
+116
+00:08:12,446 --> 00:08:17,149
+So you can imagine that as a sort of generalized weld operator.
+
+117
+00:08:17,209 --> 00:08:20,712
+Well, firstly, a generalized edge collapse, which is able to collapse more than one edge
+
+118
+00:08:20,772 --> 00:08:21,612
+as long as they're touching.
+
+119
+00:08:21,632 --> 00:08:27,236
+And then also it can be implemented with a generalized weld operator again, which welds
+
+120
+00:08:27,716 --> 00:08:33,260
+by replacing any occurrence of V0, V1, V2, or V3 with just V0,
+
+121
+00:08:33,780 --> 00:08:36,142
+and updating all the neighboring faces.
+
+122
+00:08:39,324 --> 00:08:40,805
+Again, it's not that simple because
+
+123
+00:08:41,772 --> 00:08:46,476
+Single polychords can be arbitrarily long and in particular can snake around the mesh many times
+
+124
+00:08:46,576 --> 00:08:49,758
+like this single polychord shown in orange on this asteroid.
+
+125
+00:08:52,080 --> 00:08:59,667
+So Daniels et al report that polychord collapse in their experience is not enough to handle meshes
+
+126
+00:08:59,707 --> 00:09:06,152
+like that with really long polychords and so they introduce a what's called a quad collapse operator
+
+127
+00:09:06,332 --> 00:09:09,075
+which is different and not reducible to edge collapse.
+
+128
+00:09:10,143 --> 00:09:16,107
+and this operates by collapsing a quad by merging two of its opposite vertices, in this
+
+129
+00:09:16,147 --> 00:09:19,008
+case v0 and v1, to just v0.
+
+130
+00:09:20,049 --> 00:09:24,312
+And so again you can do that with a weld operator but it's not an edge collapse, it's collapsing
+
+131
+00:09:24,372 --> 00:09:25,452
+a quad to two edges.
+
+132
+00:09:26,133 --> 00:09:31,316
+But in the process it untangles the polychord because where previously it crossed itself
+
+133
+00:09:31,756 --> 00:09:32,997
+instead it meets itself.
+
+134
+00:09:34,058 --> 00:09:39,201
+So Daniel Zadal reckoned that by mixing quad collapse and polychord collapse you can...
+
+135
+00:09:40,018 --> 00:09:43,741
+untangle the mesh when you need to, and then get back to doing some polychord collapses.
+
+136
+00:09:44,401 --> 00:09:49,365
+But we actually found we don't need quad collapse, and I'm not quite sure why, but part of the
+
+137
+00:09:49,385 --> 00:09:55,809
+reason might be because our weld operator is quite robustly implemented, and we do everything
+
+138
+00:09:55,829 --> 00:09:56,710
+with the weld operator.
+
+139
+00:09:57,631 --> 00:10:03,475
+But then part of it might also be because we skirt the issue by not only limiting ourselves
+
+140
+00:10:03,535 --> 00:10:05,496
+to collapsing whole polychords.
+
+141
+00:10:05,536 --> 00:10:07,418
+We can collapse parts of polychords.
+
+142
+00:10:07,953 --> 00:10:13,577
+which means we don't actually have to collapse this entire polychord, we can just go and do part of it.
+
+143
+00:10:14,938 --> 00:10:15,458
+So yeah.
+
+144
+00:10:17,239 --> 00:10:22,763
+The other thing to say is that edge collapse is just a special case of polychord collapse,
+
+145
+00:10:22,803 --> 00:10:25,184
+where the polychord only has one edge in the set.
+
+146
+00:10:25,945 --> 00:10:30,868
+So if you have a triangle mesh like this, there are no quads, so there are no quad strips,
+
+147
+00:10:31,869 --> 00:10:34,871
+and instead each polychord, which is just a single edge,
+
+148
+00:10:35,752 --> 00:10:38,153
+terminates at two incident triangles.
+
+149
+00:10:38,913 --> 00:10:41,635
+So it kind of means that if you can do polychord collapse, you can do edge
+
+150
+00:10:41,675 --> 00:10:44,236
+collapse, because it's just a simple special case of it.
+
+151
+00:10:47,317 --> 00:10:51,420
+So we decently implemented the polychord collapse part of Daniel Zadal,
+
+152
+00:10:51,880 --> 00:10:56,602
+and this is the kind of result you get. So it looks pretty good in that we've
+
+153
+00:10:56,662 --> 00:10:59,043
+ticked the topology preservation box, because
+
+154
+00:10:59,644 --> 00:11:02,805
+the edge flow of the model, the sort of flow of edges around the model,
+
+155
+00:11:03,366 --> 00:11:05,387
+looks like an artist authored it, approximately.
+
+156
+00:11:06,930 --> 00:11:13,272
+But the problem with it, if you like, is that our hands are tied at this point, because
+
+157
+00:11:13,872 --> 00:11:19,413
+at this point we were only collapsing entire polychords, or nothing, like doneals at all.
+
+158
+00:11:20,414 --> 00:11:25,255
+And that limits what you can do, because single polychords can go through completely different
+
+159
+00:11:25,275 --> 00:11:28,536
+parts of the mesh, from the face to the back of the head and across to the ear.
+
+160
+00:11:29,176 --> 00:11:32,857
+So if you want to collapse part of the back of the head, it forces you to collapse the
+
+161
+00:11:33,337 --> 00:11:35,577
+part of the ear and the face which you might want to retain.
+
+162
+00:11:36,492 --> 00:11:39,634
+So your ability to locally refine the mesh
+
+163
+00:11:39,674 --> 00:11:42,695
+with different detail levels in different areas is limited.
+
+164
+00:11:44,075 --> 00:11:49,057
+So for that reason, we started to look at collapsing parts
+
+165
+00:11:49,137 --> 00:11:51,078
+of polychords, which we call sub-polychords.
+
+166
+00:11:52,619 --> 00:11:55,500
+And that was also hinted to us by the second requirement,
+
+167
+00:11:55,540 --> 00:11:57,121
+which was priority painting.
+
+168
+00:11:57,201 --> 00:12:01,042
+So priority painting, again, is where an artist comes in
+
+169
+00:12:01,062 --> 00:12:03,463
+and paints part of the mesh, saying they'd like that part
+
+170
+00:12:03,483 --> 00:12:05,604
+to be retained at the expense of other areas.
+
+171
+00:12:06,496 --> 00:12:10,118
+So here's the kind of result we wanted to get from that.
+
+172
+00:12:10,979 --> 00:12:13,140
+These two LODs are both at the same budget,
+
+173
+00:12:13,621 --> 00:12:15,182
+but on the right we've painted the face
+
+174
+00:12:15,222 --> 00:12:16,723
+like I showed in the previous slide.
+
+175
+00:12:17,423 --> 00:12:21,086
+And so we've magically retained more detail in the face.
+
+176
+00:12:22,887 --> 00:12:24,188
+But you can see that doing that
+
+177
+00:12:24,688 --> 00:12:26,529
+forces us to change the topology
+
+178
+00:12:26,589 --> 00:12:28,571
+because we've effectively had to collapse
+
+179
+00:12:28,591 --> 00:12:30,432
+only parts of these long polychords,
+
+180
+00:12:30,592 --> 00:12:33,454
+stopping at the part where the face requires more detail.
+
+181
+00:12:34,178 --> 00:12:38,222
+and in the process we introduce usually a triangle and a singular vertex.
+
+182
+00:12:39,983 --> 00:12:44,107
+So that also hinted to us that we needed to collapse subpolychords rather than polychords.
+
+183
+00:12:45,768 --> 00:12:47,990
+Here's just a little illustration of a subpolychord collapse.
+
+184
+00:12:48,030 --> 00:12:50,412
+So we've got a polychord which extends down into the face,
+
+185
+00:12:51,153 --> 00:12:55,356
+and we only want to collapse the first five edges as little edge collapses.
+
+186
+00:12:56,117 --> 00:12:58,279
+And in doing so, here's the result.
+
+187
+00:12:58,539 --> 00:13:01,081
+We end up introducing a triangle and a singular vertex.
+
+188
+00:13:01,101 --> 00:13:02,082
+And that's it.
+
+189
+00:13:02,102 --> 00:13:02,282
+Thank you. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
+
+190
+00:13:03,325 --> 00:13:08,249
+payoff for changing the topology is being able to vary the detail level locally.
+
+191
+00:13:10,631 --> 00:13:16,395
+But that does present us with a problem because whereas there's only a limited number of polychords
+
+192
+00:13:16,455 --> 00:13:20,419
+in the mesh, there's a very large number of potential sub-polychords. There's a lot of ways
+
+193
+00:13:21,019 --> 00:13:24,842
+to select only some of the edges in a polychord and collapse just those.
+
+194
+00:13:26,183 --> 00:13:30,887
+There's a number of simplifications that make that feasible. One is to only
+
+195
+00:13:31,712 --> 00:13:36,834
+consider contiguous subpolychords, i.e. adjacent edges and not just random edges in the polychord.
+
+196
+00:13:37,574 --> 00:13:41,676
+And the justification for that is that you can always go and do other edges later if you want to.
+
+197
+00:13:43,156 --> 00:13:48,519
+The next is that we don't do a sort of exhaustive search of every possible contiguous subpolychord.
+
+198
+00:13:49,039 --> 00:13:55,362
+Instead, we do a greedy search where we first find a short sequence, in this case three edges,
+
+199
+00:13:55,402 --> 00:13:58,363
+that is the cheapest part of the polychord using a linear search.
+
+200
+00:13:59,218 --> 00:14:02,899
+And then we then incrementally improve that by adding or removing an edge at either end,
+
+201
+00:14:03,419 --> 00:14:09,462
+as long as that improves the value of the result, which is the ratio of the benefits,
+
+202
+00:14:09,502 --> 00:14:13,783
+the number of triangles removed by that collapse, to the cost, which is just the sum of the
+
+203
+00:14:13,823 --> 00:14:15,984
+costs of the edge collapses.
+
+204
+00:14:17,584 --> 00:14:21,606
+And so we hope that that'll sort of hill-climb to a good solution.
+
+205
+00:14:22,482 --> 00:14:26,064
+But we also, as a safeguard, always also consider the solution of just
+
+206
+00:14:26,144 --> 00:14:29,226
+collapsing the entire polychord, because quite often that's the right answer.
+
+207
+00:14:29,306 --> 00:14:30,986
+And you might not reach that by hill climbing.
+
+208
+00:14:33,408 --> 00:14:37,250
+Another thing we do to speed things up is we maintain a data structure, which
+
+209
+00:14:37,310 --> 00:14:43,753
+represents the partitioning of the sub polychord edges into islands of connected
+
+210
+00:14:43,833 --> 00:14:48,615
+edges, because recall each island of connected edges collapses to a vertex in
+
+211
+00:14:48,655 --> 00:14:50,676
+a sort of generalized multi-edge collapse.
+
+212
+00:14:51,817 --> 00:14:51,997
+So.
+
+213
+00:14:53,313 --> 00:14:58,877
+Typically, when we're doing the search for the best subpolychord,
+
+214
+00:14:59,017 --> 00:15:04,221
+we end up testing successive subpolychords that differ by only one edge,
+
+215
+00:15:04,281 --> 00:15:05,301
+either added or removed.
+
+216
+00:15:05,922 --> 00:15:08,904
+So it makes a lot of sense to remember a lot of the information
+
+217
+00:15:08,924 --> 00:15:10,865
+that you computed for the previous subpolychord,
+
+218
+00:15:10,885 --> 00:15:12,426
+which was only different by one edge.
+
+219
+00:15:12,907 --> 00:15:13,847
+So that's what we're doing here.
+
+220
+00:15:14,308 --> 00:15:17,870
+And then when we add an edge, we have to update that data structure.
+
+221
+00:15:18,302 --> 00:15:24,884
+But very often the new edge is not touching any existing edges, so it creates a new single-edge
+
+222
+00:15:25,004 --> 00:15:25,304
+island.
+
+223
+00:15:25,384 --> 00:15:27,625
+So that, the common case, is pretty cheap.
+
+224
+00:15:28,885 --> 00:15:33,987
+And then occasionally an edge comes in which has the effect of merging two islands or something
+
+225
+00:15:34,007 --> 00:15:38,389
+like that, because it's incident to two of the edges already in there.
+
+226
+00:15:39,169 --> 00:15:44,071
+So that update is more complicated, but it's still worth doing because it avoids repeating
+
+227
+00:15:44,111 --> 00:15:47,372
+a lot of calculations from one polychord candidate to the next.
+
+228
+00:15:49,611 --> 00:15:51,472
+So here's just a quick example of that in the wild.
+
+229
+00:15:51,992 --> 00:15:56,594
+So on the left, we've got a subpolychord in orange
+
+230
+00:15:56,614 --> 00:15:58,354
+that we've been building with all its edges
+
+231
+00:15:58,394 --> 00:15:59,515
+that we've selected in white.
+
+232
+00:16:00,375 --> 00:16:01,956
+And we're going to select this edge here
+
+233
+00:16:02,096 --> 00:16:03,396
+and test that candidate.
+
+234
+00:16:04,137 --> 00:16:08,258
+And when we do, that edge is incident to existing,
+
+235
+00:16:08,678 --> 00:16:10,999
+to two existing edges, two existing islands.
+
+236
+00:16:11,479 --> 00:16:13,880
+So they get merged into a single island of three edges.
+
+237
+00:16:13,960 --> 00:16:15,421
+And the way you can tell that that's happened
+
+238
+00:16:15,441 --> 00:16:17,042
+is because there's a single collapse point.
+
+239
+00:16:17,341 --> 00:16:21,902
+computed for all three edges, whereas previously these two edges had separate class points.
+
+240
+00:16:26,184 --> 00:16:32,305
+Another thing we do is, whenever we collapse a polychord, we have to update all the candidates
+
+241
+00:16:32,746 --> 00:16:37,207
+for the polychords whose geometry or topology is affected by that welding of the mesh.
+
+242
+00:16:37,907 --> 00:16:42,589
+So there's kind of a neighborhood of polychords that are no longer valid because their cost
+
+243
+00:16:42,609 --> 00:16:46,070
+will have changed, and so we have to remove them from the priority queue.
+
+244
+00:16:46,715 --> 00:16:48,776
+and recompute their costs and re-add them.
+
+245
+00:16:49,637 --> 00:16:53,859
+And we do that incrementally because usually the area that we have to update is smaller
+
+246
+00:16:53,899 --> 00:16:55,180
+than all of the mesh.
+
+247
+00:16:56,100 --> 00:17:00,863
+In bad cases it can be quite expensive, like this is approaching a third of the mesh, because
+
+248
+00:17:00,883 --> 00:17:03,305
+the mesh is very regular so the polychords are quite long.
+
+249
+00:17:04,385 --> 00:17:06,066
+But usually it's a lot cheaper than that.
+
+250
+00:17:08,788 --> 00:17:11,509
+So here's the result when we have sub-polychord collapse.
+
+251
+00:17:12,150 --> 00:17:12,690
+And you can see...
+
+252
+00:17:13,862 --> 00:17:15,882
+It's an improvement over the previous results we had,
+
+253
+00:17:15,922 --> 00:17:20,024
+in that now we're able to choose to alter the topology
+
+254
+00:17:20,044 --> 00:17:22,665
+of the mesh locally in order to keep detail
+
+255
+00:17:22,725 --> 00:17:25,507
+at a reasonable level and to vary the detail
+
+256
+00:17:25,547 --> 00:17:27,407
+across the mesh, depending where we want it.
+
+257
+00:17:27,748 --> 00:17:29,408
+And in particular, this gives us the ability
+
+258
+00:17:29,428 --> 00:17:30,609
+to do priority painting.
+
+259
+00:17:34,751 --> 00:17:36,531
+But an issue with this result, actually,
+
+260
+00:17:36,571 --> 00:17:39,092
+while we're here, is that it's not symmetric.
+
+261
+00:17:39,272 --> 00:17:41,634
+You can see that the left and right sides of the face
+
+262
+00:17:41,794 --> 00:17:42,914
+are different in topology.
+
+263
+00:17:43,770 --> 00:17:48,353
+And that kind of leads into the third requirement, which is that Bioware wanted us to keep the
+
+264
+00:17:48,533 --> 00:17:51,175
+symmetry of symmetric meshes intact.
+
+265
+00:17:52,336 --> 00:17:57,359
+And that's no small feat, because a lot of meshes, character meshes, are kind of only
+
+266
+00:17:57,459 --> 00:17:58,300
+partly symmetric.
+
+267
+00:17:59,000 --> 00:18:01,262
+Like this one is symmetric in some areas, but not others.
+
+268
+00:18:04,544 --> 00:18:08,566
+And we also made life a little more difficult for ourselves than we maybe needed to, in
+
+269
+00:18:08,606 --> 00:18:13,309
+that we wanted priority painting to be independent and orthogonal to symmetry.
+
+270
+00:18:13,390 --> 00:18:13,510
+So...
+
+271
+00:18:14,199 --> 00:18:17,940
+you could choose to paint only half the face and have that part preserved even though that
+
+272
+00:18:17,960 --> 00:18:22,322
+conflicts with the desire to preserve symmetry. So in that sense our symmetry preservation is
+
+273
+00:18:22,342 --> 00:18:27,204
+kind of soft in that we don't mandate that you always have to do exactly the same on the left
+
+274
+00:18:27,244 --> 00:18:31,806
+and the right. Instead we have a cost metric term which strongly favors collapses that
+
+275
+00:18:31,946 --> 00:18:38,608
+treats edges that collapse both of a set of edges if they are symmetric or doesn't collapse them.
+
+276
+00:18:39,968 --> 00:18:43,030
+So that's useful in that it buys us a lot of flexibility but it also
+
+277
+00:18:43,781 --> 00:18:49,283
+ties into the fact that meshes are not usually completely symmetric, so a method which mandated
+
+278
+00:18:49,323 --> 00:18:56,065
+doing exactly the same to the left and the right would not be feasible, actually. So the soft
+
+279
+00:18:56,105 --> 00:19:03,207
+approach seemed the right way to go, but it does complexify things a bit. So we developed an
+
+280
+00:19:03,567 --> 00:19:07,528
+algorithm for automatically identifying bilateral symmetry in meshes, and I won't go into the
+
+281
+00:19:07,568 --> 00:19:11,609
+details, but basically it does a search of the graph of the edges in the mesh, looking for parts
+
+282
+00:19:11,649 --> 00:19:12,430
+of the graph that are...
+
+283
+00:19:13,269 --> 00:19:19,132
+matching topologically. And so it's able to find symmetries within meshes that are only partly symmetric,
+
+284
+00:19:19,753 --> 00:19:23,015
+and it's also able to find symmetries between different parts of the mesh.
+
+285
+00:19:24,396 --> 00:19:30,420
+So in this example, it's the common case we find entire polychords which exactly match.
+
+286
+00:19:31,720 --> 00:19:35,803
+But as I'm trying to show here, this is actually more complicated than it seems,
+
+287
+00:19:35,863 --> 00:19:40,366
+because the actual symmetry map that we find is per edge. So we find that an individual edge
+
+288
+00:19:40,426 --> 00:19:42,447
+is symmetric to another individual edge.
+
+289
+00:19:43,434 --> 00:19:46,995
+And in the case where entire polychords are found to be symmetric,
+
+290
+00:19:47,035 --> 00:19:50,336
+that's because there's a one-to-one symmetry relationship between their edges.
+
+291
+00:19:51,016 --> 00:19:53,756
+But we don't actually find that polychords themselves are symmetric.
+
+292
+00:19:53,936 --> 00:19:54,937
+Rather, it's all about edges.
+
+293
+00:19:57,757 --> 00:20:03,399
+As an aside, we also found that it's important to handle symmetric pairs of polychords atomically.
+
+294
+00:20:03,419 --> 00:20:08,000
+So rather than collapse the left polychord and then the right polychord immediately afterwards.
+
+295
+00:20:08,717 --> 00:20:13,759
+it's actually necessary to collapse both of them together as one generalized set of edges.
+
+296
+00:20:14,620 --> 00:20:18,021
+And the reason for that is because you, in the cases where they're insolent like this,
+
+297
+00:20:18,081 --> 00:20:23,243
+you only get to know about the whole information of that collapse if you have both polychords
+
+298
+00:20:23,283 --> 00:20:23,704
+available.
+
+299
+00:20:28,025 --> 00:20:33,107
+So given the fact that most of the time we expect to find pairs of polychords that are
+
+300
+00:20:33,148 --> 00:20:38,170
+kind of exactly symmetric, we needed a method to handle that and to find the best
+
+301
+00:20:38,882 --> 00:20:46,024
+pair of subpolychords to collapse as our collapse candidate for that pair of polychords.
+
+302
+00:20:46,804 --> 00:20:52,166
+So we just generalized our previous algorithm which was for a single polychord by just doing
+
+303
+00:20:52,186 --> 00:20:57,707
+the obvious thing and having, finding first a pair of seed polychords, seed subpolychords of
+
+304
+00:20:57,747 --> 00:21:04,089
+a fixed length, the cheapest area in each of the polychords, and then growing those seed
+
+305
+00:21:04,149 --> 00:21:07,990
+subpolychords incrementally in the same way by adding or removing an edge at either end.
+
+306
+00:21:08,481 --> 00:21:14,563
+And we can do that to both polychords or just the one, whichever produces the best value.
+
+307
+00:21:15,843 --> 00:21:20,585
+And then again, we also consider the solution of just collapsing the entire pair, because
+
+308
+00:21:20,605 --> 00:21:21,585
+that's often a good idea.
+
+309
+00:21:25,847 --> 00:21:30,768
+But this rosy picture of exactly matching paired polychords isn't quite true, as I say,
+
+310
+00:21:30,808 --> 00:21:34,430
+because we are dealing with meshes which are partially symmetric.
+
+311
+00:21:35,127 --> 00:21:38,730
+and because our symmetry therefore has to be per edge, not per polychord,
+
+312
+00:21:39,290 --> 00:21:42,172
+you can get situations arising, particularly after a few collapses,
+
+313
+00:21:42,252 --> 00:21:51,880
+where the edge symmetries effectively make multiple polychords related to each other,
+
+314
+00:21:52,181 --> 00:21:53,201
+rather than just pairs.
+
+315
+00:21:54,342 --> 00:21:58,506
+And in this case, for example, there are polychords on the obvious left and right,
+
+316
+00:21:58,546 --> 00:22:00,027
+but there are other polychords involved,
+
+317
+00:22:00,047 --> 00:22:03,310
+which have become kind of entangled with them by other collapses.
+
+318
+00:22:04,371 --> 00:22:04,651
+And so...
+
+319
+00:22:05,468 --> 00:22:12,493
+In general you can have what we call flux of polychords where they're all, any number
+
+320
+00:22:12,513 --> 00:22:15,675
+of polychords can be related by these per-edge symmetry links.
+
+321
+00:22:16,295 --> 00:22:20,878
+So in this case you've got a polychord on the left which is related to two other polychords
+
+322
+00:22:20,938 --> 00:22:21,339
+on the right.
+
+323
+00:22:21,979 --> 00:22:25,701
+And you kind of imagine that actually those two other polychords may have been one polychord
+
+324
+00:22:25,741 --> 00:22:26,902
+but something else has happened.
+
+325
+00:22:27,282 --> 00:22:29,104
+Some part of that polychord has been collapsed.
+
+326
+00:22:29,544 --> 00:22:31,405
+So that now there are three polychords involved.
+
+327
+00:22:34,031 --> 00:22:35,372
+we needed a way to handle this.
+
+328
+00:22:36,192 --> 00:22:39,695
+So the way we handle this is by finding the parts
+
+329
+00:22:39,995 --> 00:22:42,156
+of the polychords which are most symmetric,
+
+330
+00:22:42,857 --> 00:22:44,057
+and from that deducing,
+
+331
+00:22:45,038 --> 00:22:47,400
+finding pairs of polychords in the flock
+
+332
+00:22:47,540 --> 00:22:49,141
+which are most symmetric.
+
+333
+00:22:49,841 --> 00:22:51,902
+Because we shouldn't forget
+
+334
+00:22:51,943 --> 00:22:53,524
+that we're kind of expecting the mesh
+
+335
+00:22:53,564 --> 00:22:55,425
+to be basically bilaterally symmetric,
+
+336
+00:22:55,565 --> 00:22:56,325
+if it is symmetric.
+
+337
+00:22:56,926 --> 00:22:59,647
+And so we expect to find matching left and right pairs
+
+338
+00:23:00,688 --> 00:23:01,929
+or an approximation to that.
+
+339
+00:23:02,429 --> 00:23:02,990
+So rather than.
+
+340
+00:23:03,437 --> 00:23:09,538
+coming up with an algorithm to find the best arbitrary way to collapse any set of edges
+
+341
+00:23:09,578 --> 00:23:12,179
+from a flock of polychords, which would be very expensive.
+
+342
+00:23:12,779 --> 00:23:21,101
+Instead, we go and look for these pairs, and we then do the sort of pairwise seed sub-polychord
+
+343
+00:23:21,221 --> 00:23:24,562
+greedy evaluation thing to each of those pairs.
+
+344
+00:23:25,602 --> 00:23:30,984
+And then we also consider each polychord in the flock individually using the non-paired
+
+345
+00:23:31,684 --> 00:23:32,544
+version of that algorithm.
+
+346
+00:23:33,278 --> 00:23:38,542
+So we're effectively hedging our bets and imagining that the mesh might be either not
+
+347
+00:23:38,562 --> 00:23:42,505
+symmetric, in which case we're going to have single polychors, or symmetric, in which case
+
+348
+00:23:42,525 --> 00:23:43,666
+we're going to find good pairs.
+
+349
+00:23:47,208 --> 00:23:52,712
+So when we've got all of that in place, we now have achieved all three of the requirements,
+
+350
+00:23:52,973 --> 00:23:59,257
+and in particular we can preserve topology. We can also support priority painting.
+
+351
+00:23:59,509 --> 00:24:03,991
+by varying the topology when we need to, to locally adapt detail levels.
+
+352
+00:24:04,671 --> 00:24:08,173
+And we can preserve symmetry, all kind of at the same time,
+
+353
+00:24:08,393 --> 00:24:13,115
+with soft sliders that choose how much topology is important, how much symmetry
+
+354
+00:24:13,135 --> 00:24:15,456
+is important, and how much priority painting is important.
+
+355
+00:24:16,056 --> 00:24:18,677
+And a number of other things as well, like we also have metrics
+
+356
+00:24:19,218 --> 00:24:22,879
+and cost terms that try to preserve detail where it's needed for skimming,
+
+357
+00:24:23,360 --> 00:24:26,521
+and where it's needed for silhouette preservation and things like that.
+
+358
+00:24:28,942 --> 00:24:31,323
+So lastly, I'm just going to rush through some results quickly.
+
+359
+00:24:32,463 --> 00:24:36,184
+So here we're comparing results from our tool at the top row
+
+360
+00:24:36,204 --> 00:24:38,644
+with results from the artist at the bottom row.
+
+361
+00:24:38,804 --> 00:24:42,645
+I say results from the artist authored models in the bottom row.
+
+362
+00:24:43,145 --> 00:24:47,226
+And you can see we geometrically look very similar to the artist models.
+
+363
+00:24:47,266 --> 00:24:51,087
+Where they do differ, it's that the artist has done things that we don't know about.
+
+364
+00:24:51,107 --> 00:24:53,967
+For example, making the hands into mittens rather than keeping the fingers.
+
+365
+00:24:55,801 --> 00:24:59,922
+Here we're comparing LLOYD3, the tool on the left and the artist-authored model on the right.
+
+366
+00:25:00,702 --> 00:25:04,703
+And the idea here is you can kind of see, ignoring things like the mitten fingers,
+
+367
+00:25:05,283 --> 00:25:11,465
+that we match pretty well and our match looks quite a lot like it was authored by an artist, which is the idea.
+
+368
+00:25:13,266 --> 00:25:17,147
+Here we're doing a kind of switch test where we vary the distance to the LLOYDs
+
+369
+00:25:17,427 --> 00:25:19,947
+and change between the LLOYDs according to the distance.
+
+370
+00:25:20,708 --> 00:25:23,728
+And what we're looking for is popping, where we switch between the different LLOYDs.
+
+371
+00:25:24,289 --> 00:25:26,510
+and you can see the difference between them when they change.
+
+372
+00:25:27,450 --> 00:25:29,550
+So you'll notice that the artist-authored model,
+
+373
+00:25:29,610 --> 00:25:32,591
+which is on the right, pops more than the one on the left,
+
+374
+00:25:32,611 --> 00:25:33,831
+which is generated with a tool.
+
+375
+00:25:34,331 --> 00:25:36,632
+And I think that's because the artist-authored model
+
+376
+00:25:37,152 --> 00:25:39,513
+effectively is not just a distilled version
+
+377
+00:25:39,533 --> 00:25:43,034
+of the original model, but rather is remodeled slightly.
+
+378
+00:25:43,754 --> 00:25:45,234
+So you can see slight differences.
+
+379
+00:25:51,816 --> 00:25:53,036
+Here's another Dragon Age model.
+
+380
+00:25:53,917 --> 00:25:57,739
+And again, we're comparing the tool result at the top with the artist-author models at the bottom.
+
+381
+00:25:58,299 --> 00:25:59,719
+And you can see we're pretty similar.
+
+382
+00:26:04,181 --> 00:26:05,681
+Here's a close-up of LOD 3 again.
+
+383
+00:26:06,582 --> 00:26:07,942
+And again, pretty similar.
+
+384
+00:26:08,362 --> 00:26:14,624
+The big difference is that the artist has kind of done some broad simplifications of the silhouette, the big shapes at the top.
+
+385
+00:26:16,045 --> 00:26:20,166
+The other aspect is that the artist has retained detail in the tail,
+
+386
+00:26:20,526 --> 00:26:23,187
+which is needed because the tail flexes when they move.
+
+387
+00:26:24,022 --> 00:26:28,064
+the beast walks, and we haven't done that. We do have a cost term to try and do that,
+
+388
+00:26:28,104 --> 00:26:30,525
+but we'd have to crank it up to get that kind of result.
+
+389
+00:26:33,186 --> 00:26:38,289
+This is just checking symmetry, so the ability to preserve symmetry where the mesh is symmetric,
+
+390
+00:26:39,209 --> 00:26:44,272
+and you can see we're getting the right sort of result. This is just the same thing for the GURM.
+
+391
+00:26:50,123 --> 00:26:52,484
+And then finally, I thought I'd show you a non-character model,
+
+392
+00:26:52,504 --> 00:26:54,766
+because we ended up using this tool not just for characters
+
+393
+00:26:54,826 --> 00:26:55,966
+and not just for quad meshes,
+
+394
+00:26:56,046 --> 00:26:59,588
+but also for triangle-based models and props and vehicles,
+
+395
+00:26:59,748 --> 00:27:01,009
+et cetera, throughout EA.
+
+396
+00:27:01,630 --> 00:27:04,211
+And pretty much every studio in EA uses this tool
+
+397
+00:27:05,972 --> 00:27:07,033
+for all kinds of models.
+
+398
+00:27:08,053 --> 00:27:12,456
+And here we're comparing the tool results at the top
+
+399
+00:27:12,756 --> 00:27:14,957
+with a competitor called Simplygon,
+
+400
+00:27:14,997 --> 00:27:16,978
+a third-party tool called Simplygon at the bottom.
+
+401
+00:27:18,185 --> 00:27:23,509
+You can see for the same budgets we're producing pretty favorable results, I think.
+
+402
+00:27:25,951 --> 00:27:31,575
+Here I'm comparing Simply Gone on the left with the tool in the middle and an artist result,
+
+403
+00:27:31,895 --> 00:27:38,480
+artist-authored mesh on the right, and you can see that we kind of match the artist in the sense
+
+404
+00:27:38,500 --> 00:27:41,883
+that we have a quad-based understanding of the model.
+
+405
+00:27:42,334 --> 00:27:45,057
+which has allowed us to retain the broad features
+
+406
+00:27:45,097 --> 00:27:46,618
+without being distracted by edges
+
+407
+00:27:46,658 --> 00:27:48,460
+which are just there because of triangulation.
+
+408
+00:27:49,121 --> 00:27:50,723
+And I think that's what's allowing us
+
+409
+00:27:50,763 --> 00:27:51,984
+to produce this cleaner result.
+
+410
+00:27:55,567 --> 00:27:56,468
+Anyway, thanks for watching.
+
+411
+00:27:56,548 --> 00:27:58,450
+That's all from me and I hope you enjoyed the talk.
+
+412
+00:27:58,811 --> 00:27:59,011
+Cheers.
+

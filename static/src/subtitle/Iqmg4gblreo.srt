@@ -1,0 +1,2632 @@
+1
+00:00:05,780 --> 00:00:09,541
+Hi, my name is Sanne Vrossen. I'm a senior engineer at Unity Technologies.
+
+2
+00:00:09,541 --> 00:00:15,463
+In my spare time, I work in two open source level editors that run in the Unity editor called RealtimeCSG and Chisel.
+
+3
+00:00:15,463 --> 00:00:18,724
+My talk is about an algorithm I'm implementing for Chisel.
+
+4
+00:00:18,724 --> 00:00:22,726
+Chisel, which is still in development, will be a successor to RealtimeCSG.
+
+5
+00:00:22,726 --> 00:00:26,827
+First, let's quickly go over what CSG really is.
+
+6
+00:00:28,327 --> 00:00:31,249
+First you need to understand the concept of Boolean operations.
+
+7
+00:00:31,249 --> 00:00:33,892
+You basically take some shapes, called brushes,
+
+8
+00:00:33,892 --> 00:00:37,155
+perform a Boolean operation on them, and you end up with a new shape.
+
+9
+00:00:37,155 --> 00:00:43,181
+The most common operations are additive, subtractive, and intersection.
+
+10
+00:00:43,181 --> 00:00:44,923
+You can see here what these operations do.
+
+11
+00:00:44,923 --> 00:00:50,868
+So, to make a level, first you have a couple of brushes.
+
+12
+00:00:50,868 --> 00:00:53,591
+Then you use an operation on them.
+
+13
+00:00:55,108 --> 00:00:58,631
+and then you create a shape that is a combination of both shapes
+
+14
+00:00:58,631 --> 00:01:02,013
+then you use that shape on another shape
+
+15
+00:01:02,013 --> 00:01:04,135
+and if you do that with enough shapes
+
+16
+00:01:04,135 --> 00:01:07,958
+you end up with a level
+
+17
+00:01:07,958 --> 00:01:11,580
+and that's my talk, thank you for watching
+
+18
+00:01:11,580 --> 00:01:13,041
+obviously there's more to it
+
+19
+00:01:13,041 --> 00:01:15,383
+okay, a quick overview
+
+20
+00:01:17,675 --> 00:01:22,257
+First I'll go over the history of constructive solid geometry and hopefully make the case why
+
+21
+00:01:22,257 --> 00:01:26,798
+CSG is a valuable technique in the game industry. After that I'll describe the algorithm, how to do
+
+22
+00:01:26,798 --> 00:01:35,441
+iterative updates, how to find intersections, how to generate meshes, how to categorize polygons to
+
+23
+00:01:35,441 --> 00:01:41,482
+determine which polygons should be visible or not, and finally how to put it all together.
+
+24
+00:01:41,482 --> 00:01:42,923
+So first some history.
+
+25
+00:01:44,738 --> 00:01:47,559
+CSG is an old technique to build geometry with.
+
+26
+00:01:47,559 --> 00:01:50,220
+It originated from outside the game industry.
+
+27
+00:01:50,220 --> 00:01:52,820
+For instance, in the CAD industry,
+
+28
+00:01:52,820 --> 00:01:54,621
+CSG is useful to determine the steps needed
+
+29
+00:01:54,621 --> 00:01:56,502
+to cut shapes from metal.
+
+30
+00:01:56,502 --> 00:01:58,782
+In the game industry, Quake was the first game
+
+31
+00:01:58,782 --> 00:02:01,183
+to use it for level design.
+
+32
+00:02:01,183 --> 00:02:04,084
+A lot of game engines, such as Valve's Source Engine,
+
+33
+00:02:04,084 --> 00:02:05,965
+have been based on the Quake engine
+
+34
+00:02:05,965 --> 00:02:08,005
+and inherited its use of CSG.
+
+35
+00:02:08,005 --> 00:02:11,747
+Other engines, like Unreal, were inspired by Quake
+
+36
+00:02:11,747 --> 00:02:13,767
+and also used CSG for level design.
+
+37
+00:02:16,253 --> 00:02:19,735
+Most of the games made in these engines shipped with their level editors.
+
+38
+00:02:19,735 --> 00:02:25,059
+Modders quickly started making new levels, sometimes even modified these games into completely
+
+39
+00:02:25,059 --> 00:02:30,103
+new experiences, which increased the popularity and greatly extended the lifetime of these
+
+40
+00:02:30,103 --> 00:02:30,543
+games.
+
+41
+00:02:30,543 --> 00:02:34,166
+Several of these mods turned into retail games themselves.
+
+42
+00:02:35,406 --> 00:02:37,727
+Many of the people who started out as modders back then
+
+43
+00:02:37,727 --> 00:02:41,570
+are now the same people who make the levels we all play today.
+
+44
+00:02:41,570 --> 00:02:44,251
+Some of them in their spare time still make levels for games
+
+45
+00:02:44,251 --> 00:02:48,494
+like Quake, Half-Life, or Thief just for the fun of it.
+
+46
+00:02:48,494 --> 00:02:51,416
+CSG has been used in many classic games.
+
+47
+00:02:51,416 --> 00:02:55,558
+And even though CSG has been with us for a long time,
+
+48
+00:02:55,558 --> 00:02:58,000
+it's still very much alive in the game industry.
+
+49
+00:02:58,000 --> 00:03:01,262
+All of these games and many, many more
+
+50
+00:03:01,262 --> 00:03:03,623
+have used CSG somewhere in their development cycle.
+
+51
+00:03:07,321 --> 00:03:12,503
+Early CSG implementations all use binary space partition trees, or BSP for short.
+
+52
+00:03:12,503 --> 00:03:18,445
+The problem with BSP is that it's basically a monolithic bag of polygons, which are often
+
+53
+00:03:18,445 --> 00:03:20,086
+split into multiple pieces.
+
+54
+00:03:20,086 --> 00:03:26,308
+Every time a polygon is added, it grows larger and larger, and more and more complicated.
+
+55
+00:03:26,308 --> 00:03:30,050
+The more polygons you add, the slower and slower it becomes.
+
+56
+00:03:31,060 --> 00:03:35,982
+Due to these scalability issues, it quickly becomes unusably slow,
+
+57
+00:03:35,982 --> 00:03:38,384
+even after a relatively small number of shapes.
+
+58
+00:03:38,384 --> 00:03:41,765
+A second problem is that the tooling around CSG
+
+59
+00:03:41,765 --> 00:03:43,206
+hasn't evolved much over time.
+
+60
+00:03:43,206 --> 00:03:48,329
+Unreal Engine 4, for example, still uses the original PSP code
+
+61
+00:03:48,329 --> 00:03:50,930
+written by Tim Sweeney himself.
+
+62
+00:03:50,930 --> 00:03:54,372
+So some of you might be thinking,
+
+63
+00:03:54,372 --> 00:03:57,754
+why would you build geometry this way in the first place?
+
+64
+00:03:59,845 --> 00:04:00,966
+in a word, workflow.
+
+65
+00:04:00,966 --> 00:04:04,069
+When you work with simple groups of primitives,
+
+66
+00:04:04,069 --> 00:04:07,411
+as you add, enable, disable, and move around,
+
+67
+00:04:07,411 --> 00:04:10,173
+you can very quickly adjust your level.
+
+68
+00:04:10,173 --> 00:04:11,955
+You don't like where this door is placed?
+
+69
+00:04:11,955 --> 00:04:15,698
+Just drag it together with its own hole in the wall, which
+
+70
+00:04:15,698 --> 00:04:17,519
+would simply be a subtractor brush.
+
+71
+00:04:17,519 --> 00:04:20,502
+Those windows that you created here,
+
+72
+00:04:20,502 --> 00:04:22,383
+do they interfere with your gameplay?
+
+73
+00:04:22,383 --> 00:04:23,224
+Just delete them.
+
+74
+00:04:23,224 --> 00:04:25,806
+And your windows, including the hole in the wall, are gone.
+
+75
+00:04:26,603 --> 00:04:29,124
+you can create and adjust things in milliseconds.
+
+76
+00:04:29,124 --> 00:04:31,285
+This makes prototyping and mocking
+
+77
+00:04:31,285 --> 00:04:32,826
+a much more pleasant experience.
+
+78
+00:04:32,826 --> 00:04:36,128
+Now, you might've heard of this thing called Blocktober,
+
+79
+00:04:36,128 --> 00:04:40,190
+which was started by Michael Barclay from Naughty Dog.
+
+80
+00:04:40,190 --> 00:04:42,811
+It's a yearly thing where in October,
+
+81
+00:04:42,811 --> 00:04:45,112
+people in the game industry post images
+
+82
+00:04:45,112 --> 00:04:47,133
+of the games they work on in an in-development state.
+
+83
+00:04:47,133 --> 00:04:49,234
+This is great because it shows
+
+84
+00:04:49,234 --> 00:04:51,315
+how the sausage is made, so to speak.
+
+85
+00:04:52,498 --> 00:04:55,499
+Now, Naughty Dog doesn't actually use CSG,
+
+86
+00:04:55,499 --> 00:04:59,381
+but some developers that do use CSG do post images at Blocktober.
+
+87
+00:04:59,381 --> 00:05:05,323
+For example, these are screenshots of a level made by Andrews Psycho,
+
+88
+00:05:05,323 --> 00:05:08,884
+I hope I pronounced that name correctly, for the game Warframe.
+
+89
+00:05:08,884 --> 00:05:12,045
+It shows how the level was first blocked out in CSG.
+
+90
+00:05:12,045 --> 00:05:19,267
+The whole level is laid out in such a way that the game can be tested
+
+91
+00:05:19,267 --> 00:05:22,328
+before any investment is made into making it look pretty.
+
+92
+00:05:23,258 --> 00:05:28,060
+It shows all the line of sights, all the places where you can take cover,
+
+93
+00:05:28,060 --> 00:05:29,820
+everywhere the player and enemies can get to.
+
+94
+00:05:29,820 --> 00:05:37,423
+This is what the game looks like after pieces of the level are replaced with art.
+
+95
+00:05:37,423 --> 00:05:39,283
+These pieces are created in 3D modeling packages.
+
+96
+00:05:39,283 --> 00:05:41,304
+Another example.
+
+97
+00:05:41,304 --> 00:05:46,725
+These are screenshots from a level made by Alex Greiner for the game Apex Legends.
+
+98
+00:05:46,725 --> 00:05:50,906
+Here it shows how this level was first blocked out in CSG.
+
+99
+00:05:52,756 --> 00:05:57,642
+And here we can see the final result after replacing some brushes with meshes and adding props.
+
+100
+00:05:57,642 --> 00:06:00,706
+Here is another block interface example.
+
+101
+00:06:00,706 --> 00:06:02,328
+And the final result.
+
+102
+00:06:04,150 --> 00:06:09,191
+CZ forces you to consider the larger rough shape of a level before diving into the visual details.
+
+103
+00:06:09,191 --> 00:06:15,374
+With starting with rougher shapes, you can quickly start playtesting and refine your gameplay
+
+104
+00:06:15,374 --> 00:06:20,695
+before you spend lots of resources on making it look good. At this stage, you should be more
+
+105
+00:06:20,695 --> 00:06:25,757
+concerned with things like line of sight, where the player and other characters can actually walk,
+
+106
+00:06:25,757 --> 00:06:30,799
+what the player and other characters can interact with, what the flow of your area is.
+
+107
+00:06:31,882 --> 00:06:37,505
+3D modeling tools on the other hand work on a much lower level, with primitives like triangles and quads.
+
+108
+00:06:37,505 --> 00:06:41,427
+It's a less forgiving environment.
+
+109
+00:06:41,427 --> 00:06:43,588
+And it's much easier to shoot yourself in the foot.
+
+110
+00:06:43,588 --> 00:06:48,491
+It's also much easier to get lost in detailing instead of focusing on the gameplay.
+
+111
+00:06:48,491 --> 00:06:52,072
+Finally, Constructor Solid Geometry is by its very nature solid,
+
+112
+00:06:52,072 --> 00:06:56,215
+which is a nice property to have when you have to deal with physics.
+
+113
+00:06:57,313 --> 00:07:02,677
+You're not likely to have infinitely thin gaps between your triangles, which can mess up your collision detection.
+
+114
+00:07:02,677 --> 00:07:13,565
+It's not a coincidence that games that do not use CSG for their level design tend to usually not use complicated physics in gameplay.
+
+115
+00:07:13,565 --> 00:07:17,268
+CSG is also well suited for procedurally generated geometry.
+
+116
+00:07:18,220 --> 00:07:22,221
+All geometry created with CUT will always be solid by its very nature,
+
+117
+00:07:22,221 --> 00:07:26,102
+and therefore even when a procedural algorithm fails,
+
+118
+00:07:26,102 --> 00:07:31,383
+it will still end up with physically plausible shapes.
+
+119
+00:07:31,383 --> 00:07:35,343
+Your collision mesh will still be valid, you never end up with a polygon soup.
+
+120
+00:07:35,343 --> 00:07:40,004
+You can easily combine layers of geometry by adding and removing
+
+121
+00:07:40,004 --> 00:07:43,405
+geometry, some of it hand created, other parts
+
+122
+00:07:43,405 --> 00:07:47,045
+created procedurally, all seamlessly working together.
+
+123
+00:07:50,301 --> 00:07:55,486
+It's important to consider that level design is not the same as 3D modelling.
+
+124
+00:07:55,486 --> 00:07:59,249
+Level designers and 3D artists have different competencies.
+
+125
+00:07:59,249 --> 00:08:05,895
+The design of a level is not just what it looks like, and it really does help to have good tools for the task at hand.
+
+126
+00:08:05,895 --> 00:08:10,199
+After all, sure, you could mow your lawn with a scissor.
+
+127
+00:08:10,199 --> 00:08:12,881
+But is that really the best tool for the job?
+
+128
+00:08:14,323 --> 00:08:17,305
+Generic tools are often not ideal for most jobs.
+
+129
+00:08:17,305 --> 00:08:23,768
+Specialized tools are great for one particular job, but not necessarily good at other jobs.
+
+130
+00:08:23,768 --> 00:08:28,571
+CSG is obviously not going to be a solution for everything you'd ever want to do with
+
+131
+00:08:28,571 --> 00:08:29,791
+geometry.
+
+132
+00:08:29,791 --> 00:08:34,874
+I would never suggest you build vegetation or characters with CSG for instance, but it's
+
+133
+00:08:34,874 --> 00:08:38,116
+a really good tool for level design and architecture in general.
+
+134
+00:08:38,116 --> 00:08:42,638
+Sadly, CSG has perception problems.
+
+135
+00:08:44,057 --> 00:08:47,119
+Artists often equate CSG with BSP and old tooling.
+
+136
+00:08:47,119 --> 00:08:52,043
+The most common reason given to not use CSG is it's slow and blocky.
+
+137
+00:08:52,043 --> 00:08:54,344
+Yet it doesn't have to be this way.
+
+138
+00:08:54,344 --> 00:08:59,207
+It doesn't have to be blocky.
+
+139
+00:08:59,207 --> 00:09:03,170
+It can be used to drag and drop prefabs including holes.
+
+140
+00:09:03,170 --> 00:09:11,255
+Have tooling that allows you to create more complicated shapes like this.
+
+141
+00:09:11,255 --> 00:09:11,476
+This.
+
+142
+00:09:11,476 --> 00:09:11,876
+Or this.
+
+143
+00:09:14,044 --> 00:09:21,647
+Notice this image. It's a little scene with more than 7000 brushes in it and it's real-time.
+
+144
+00:09:21,647 --> 00:09:26,909
+Being able to draw on any shape and extrude allows you to quickly build your level.
+
+145
+00:09:26,909 --> 00:09:34,131
+And you can still edit brushes like in the olden days, but with real-time feedback.
+
+146
+00:09:34,131 --> 00:09:35,952
+Hopefully I've got your attention.
+
+147
+00:09:35,952 --> 00:09:41,734
+So, how do you implement a modern CSG algorithm?
+
+148
+00:09:43,862 --> 00:09:48,826
+Let's start by why this particular algorithm is interesting in the first place.
+
+149
+00:09:48,826 --> 00:09:52,069
+Now, suppose we perform CSG on a couple of brushes.
+
+150
+00:09:52,069 --> 00:09:59,976
+We combine those shapes together to create a mesh using a couple of Boolean operations.
+
+151
+00:09:59,976 --> 00:10:03,939
+Now, if we look at the contributions from each individual brush on the final shape,
+
+152
+00:10:03,939 --> 00:10:08,563
+we can see that we only need to remove
+
+153
+00:10:09,850 --> 00:10:15,113
+or flip the orientation of pieces of polygons that already exist in our brushes.
+
+154
+00:10:15,113 --> 00:10:21,277
+By determining which parts of our brushes need to be removed or flipped around, we can
+
+155
+00:10:21,277 --> 00:10:22,758
+perform CSG per brush.
+
+156
+00:10:22,758 --> 00:10:28,402
+At the end of the final process, we put all those pieces together and we have our final
+
+157
+00:10:28,402 --> 00:10:29,182
+mesh.
+
+158
+00:10:29,182 --> 00:10:35,446
+The biggest advantage that this gives us is that it makes it possible to have iterative
+
+159
+00:10:35,446 --> 00:10:36,667
+updates.
+
+160
+00:10:36,667 --> 00:10:37,968
+That makes this possible.
+
+161
+00:10:41,193 --> 00:10:43,335
+So how do we perform iterative updates?
+
+162
+00:10:43,335 --> 00:10:47,398
+Take for example, when we want to move brushes around.
+
+163
+00:10:47,398 --> 00:10:50,000
+Here we only need to update the brush that was moved.
+
+164
+00:10:50,000 --> 00:10:54,383
+The brushes it touched before the move,
+
+165
+00:10:54,383 --> 00:10:57,986
+and those it touches after the move.
+
+166
+00:10:57,986 --> 00:11:02,130
+All of the other brushes can be left untouched.
+
+167
+00:11:02,130 --> 00:11:06,293
+Since we can catch the results of our per brush CSG process,
+
+168
+00:11:06,293 --> 00:11:10,076
+we can just reuse the previous results for those brushes.
+
+169
+00:11:11,106 --> 00:11:13,908
+It works the same if you modify the shape of a brush instead.
+
+170
+00:11:13,908 --> 00:11:14,428
+Another example.
+
+171
+00:11:14,428 --> 00:11:17,810
+If you delete a brush, you only need
+
+172
+00:11:17,810 --> 00:11:21,852
+to update the brushes it touched before it was deleted.
+
+173
+00:11:21,852 --> 00:11:25,054
+And when you add a brush, you determine
+
+174
+00:11:25,054 --> 00:11:29,157
+which brushes it touches and update those together
+
+175
+00:11:29,157 --> 00:11:30,257
+with the new brush.
+
+176
+00:11:30,257 --> 00:11:33,799
+All of this essentially turns brushes
+
+177
+00:11:33,799 --> 00:11:35,320
+into a unit of computation.
+
+178
+00:11:35,320 --> 00:11:39,643
+And we can easily split the work across multiple CPU cores.
+
+179
+00:11:40,813 --> 00:11:46,076
+The work per brush never gets too expensive and everything scales well with the number of brushes.
+
+180
+00:11:46,076 --> 00:11:50,479
+So, how do we find those polygon pieces?
+
+181
+00:11:50,479 --> 00:11:58,743
+Well, first we need to find the brushes that intersect with each other.
+
+182
+00:11:58,743 --> 00:12:06,127
+Then we find the intersection vertices between our brushes and use those to form intersection polygons on top of the surface of our brush.
+
+183
+00:12:08,883 --> 00:12:11,665
+Ensuring that our brushes are convex makes this simpler.
+
+184
+00:12:11,665 --> 00:12:16,389
+Just in case you're not familiar with or forgot what convex means.
+
+185
+00:12:16,389 --> 00:12:19,631
+On the left is a convex shape, on the right is a concave shape.
+
+186
+00:12:19,631 --> 00:12:25,075
+What makes the shape on the right concave is this inward bend into the shape.
+
+187
+00:12:25,075 --> 00:12:30,820
+In the convex shape, each polygon never has any vertices in front of it, they are always
+
+188
+00:12:30,820 --> 00:12:32,661
+on the polygon or behind it.
+
+189
+00:12:34,625 --> 00:12:41,728
+Imagine slicing an infinitely sized cube multiple times and creating a shape this way.
+
+190
+00:12:41,728 --> 00:12:44,429
+Just like an animation on the slide, but obviously in 3D.
+
+191
+00:12:44,429 --> 00:12:52,373
+It could be a cube, a cone, or even a sphere, or a million other simple shapes.
+
+192
+00:12:52,373 --> 00:12:55,534
+This is essentially how Context Brush is defined.
+
+193
+00:12:55,534 --> 00:12:58,295
+You have a list of mathematical planes that bound the shape.
+
+194
+00:13:00,217 --> 00:13:04,439
+Now I'd like to just quickly mention it's not a requirement to use convex brushes.
+
+195
+00:13:04,439 --> 00:13:08,321
+It's possible to use non-convex brushes if you really wanted to.
+
+196
+00:13:08,321 --> 00:13:14,905
+But using convex shapes makes everything a lot simpler to implement and a lot faster.
+
+197
+00:13:14,905 --> 00:13:18,327
+You can still build any concave shape out of multiple convex shapes.
+
+198
+00:13:18,327 --> 00:13:24,491
+In case of our convex brushes, edges are where two planes intersect.
+
+199
+00:13:24,491 --> 00:13:29,194
+Vertices are where at least three planes intersect.
+
+200
+00:13:29,857 --> 00:13:33,858
+Take a cube for example. Each corner only has three sides touching it.
+
+201
+00:13:33,858 --> 00:13:35,398
+This is the most common case.
+
+202
+00:13:35,398 --> 00:13:43,200
+However, when you for instance have a cone as a shape, it could have any number of planes intersecting at the vertex that lies at its peak.
+
+203
+00:13:43,200 --> 00:13:47,161
+With these edges and vertices, we define polygons.
+
+204
+00:13:47,161 --> 00:13:49,541
+These polygons are sides of our brushes.
+
+205
+00:13:49,541 --> 00:13:53,782
+Each side polygon only has a single plane going through it.
+
+206
+00:13:57,929 --> 00:14:02,412
+Ok, with that out of the way, the first thing we want to do is find all brushes that touch
+
+207
+00:14:02,412 --> 00:14:03,272
+our brush.
+
+208
+00:14:03,272 --> 00:14:08,955
+We can simply do this the moment we add a brush and store this, or update this information
+
+209
+00:14:08,955 --> 00:14:10,096
+after a brush moves.
+
+210
+00:14:10,096 --> 00:14:17,560
+Keep in mind that when you determine if two brushes intersect, you can use this information
+
+211
+00:14:17,560 --> 00:14:18,881
+for both brushes.
+
+212
+00:14:18,881 --> 00:14:23,424
+If A and B intersect or not, it will be the same as B and A not intersecting or not.
+
+213
+00:14:23,424 --> 00:14:25,985
+There's no point in duplicating our work here.
+
+214
+00:14:27,083 --> 00:14:31,946
+You could use an acceleration data structure like hierarchical hashed grids
+
+215
+00:14:31,946 --> 00:14:35,649
+to find the most likely brushes that you might intersect with.
+
+216
+00:14:35,649 --> 00:14:40,753
+Then do a simple axis-aligned bounding box test
+
+217
+00:14:40,753 --> 00:14:44,655
+and check if each of the vertices of one brush
+
+218
+00:14:44,655 --> 00:14:47,557
+are outside of one of the planes of the other brush.
+
+219
+00:14:47,557 --> 00:14:49,999
+And there are probably better ways of doing this,
+
+220
+00:14:49,999 --> 00:14:52,121
+but honestly this is not a bottleneck
+
+221
+00:14:52,121 --> 00:14:54,242
+and I wouldn't try to be too smart about this part.
+
+222
+00:14:55,352 --> 00:15:00,598
+So now we find all unique pairs of brushes that intersect, and process each pair together at the same time,
+
+223
+00:15:00,598 --> 00:15:04,724
+because there are lots of calculations we can share between the brushes.
+
+224
+00:15:04,724 --> 00:15:09,190
+For each pair we figure out which sides of which brush intersect with the other brush.
+
+225
+00:15:10,202 --> 00:15:16,828
+You can use an acceleration data structure like an octree or something else to quickly find the intersecting sides.
+
+226
+00:15:16,828 --> 00:15:23,413
+Since the shape of the brush is likely to be static, this data structure can be created at the creation time of the brush shape,
+
+227
+00:15:23,413 --> 00:15:27,357
+which could also be shared between multiple brush instances.
+
+228
+00:15:27,357 --> 00:15:36,045
+Now what we want to do is find polygons on top of our side polygon that are formed at a boundary between the two brushes where they intersect.
+
+229
+00:15:37,205 --> 00:15:42,366
+Since we know these brushes are convex, we know that these intersections, if they exist,
+
+230
+00:15:42,366 --> 00:15:47,107
+are always convex themselves. So these polygons would be convex as well.
+
+231
+00:15:47,107 --> 00:15:53,069
+These intersections are also always bound by the shape of the side polygon they're on.
+
+232
+00:15:53,069 --> 00:15:58,611
+They can touch the sides, but they can never cross the sides of the polygon.
+
+233
+00:15:58,611 --> 00:16:04,712
+Before we create the intersection polygons, we need to find the intersection vertices.
+
+234
+00:16:06,355 --> 00:16:10,238
+There are three types of vertices that form these intersection polygons.
+
+235
+00:16:10,238 --> 00:16:13,580
+Vertices that are inside both brushes,
+
+236
+00:16:13,580 --> 00:16:18,162
+vertices of the other brush that lie on one of our surfaces,
+
+237
+00:16:18,162 --> 00:16:22,945
+or intersections between the edges of the other brush with a side polygon.
+
+238
+00:16:22,945 --> 00:16:28,109
+By calculating the intersections once and reusing it for both brushes,
+
+239
+00:16:28,109 --> 00:16:31,971
+we ensure they will be identical on both brushes.
+
+240
+00:16:31,971 --> 00:16:32,992
+This prevents gaps.
+
+241
+00:16:34,046 --> 00:16:38,649
+Vertices on one brush that lie exactly on the other brush will be copied over to the other brush.
+
+242
+00:16:38,649 --> 00:16:56,862
+At this point we just have a bunch of vertices.
+
+243
+00:16:56,862 --> 00:17:02,786
+Some vertices we already know are only on one of the two brushes, like the vertices that are inside the other brush.
+
+244
+00:17:03,861 --> 00:17:07,263
+By keeping track which planes intersect with which vertex,
+
+245
+00:17:07,263 --> 00:17:09,124
+we can find all the vertices per plane.
+
+246
+00:17:09,124 --> 00:17:11,846
+And by extension, their side polygon.
+
+247
+00:17:11,846 --> 00:17:15,248
+Because as I mentioned before, each side polygon
+
+248
+00:17:15,248 --> 00:17:18,170
+has exactly one plane going through it.
+
+249
+00:17:18,170 --> 00:17:20,972
+I also mentioned that edges always have two planes
+
+250
+00:17:20,972 --> 00:17:22,073
+going through them.
+
+251
+00:17:22,073 --> 00:17:24,034
+By finding all the vertices on our plane
+
+252
+00:17:24,034 --> 00:17:27,496
+that also both intersect with another plane,
+
+253
+00:17:27,496 --> 00:17:28,277
+we find our edges.
+
+254
+00:17:28,277 --> 00:17:30,978
+Since we store our plane indices,
+
+255
+00:17:30,978 --> 00:17:32,800
+this is a matter of finding these indices.
+
+256
+00:17:33,980 --> 00:17:40,064
+Since all polygons we form are convex, each vertex will always have two edges that use it.
+
+257
+00:17:40,064 --> 00:17:44,547
+Connecting the edges by finding their common vertices allows us to create the polygons.
+
+258
+00:17:44,547 --> 00:17:49,151
+We might end up with a polygon where all vertices are going in the wrong direction,
+
+259
+00:17:49,151 --> 00:17:52,893
+in which case we just reverse the order of vertices.
+
+260
+00:17:52,893 --> 00:17:57,597
+We can determine if it's facing the wrong way by calculating the normal of the polygon
+
+261
+00:17:57,597 --> 00:18:00,539
+and comparing it with the normal of the plane the polygon is on.
+
+262
+00:18:01,635 --> 00:18:03,997
+and see if they're pointing in the same direction or not.
+
+263
+00:18:03,997 --> 00:18:11,484
+With each polygon we store which brush intersection created it.
+
+264
+00:18:11,484 --> 00:18:16,349
+You also need to store a category with each polygon you just created, which will be used
+
+265
+00:18:16,349 --> 00:18:16,749
+later on.
+
+266
+00:18:16,749 --> 00:18:22,575
+This category describes what the interior part of a polygon is, relative to the intersecting
+
+267
+00:18:22,575 --> 00:18:23,016
+brush.
+
+268
+00:18:23,016 --> 00:18:25,158
+We call this the interior category.
+
+269
+00:18:26,643 --> 00:18:31,327
+If all our vertices lie on top of a surface from the other brush, then a category must
+
+270
+00:18:31,327 --> 00:18:34,049
+be aligned or reverse aligned with it.
+
+271
+00:18:34,049 --> 00:18:35,871
+Otherwise, the category is always inside.
+
+272
+00:18:35,871 --> 00:18:41,816
+It can never be outside since this polygon represents an intersection with another brush,
+
+273
+00:18:41,816 --> 00:18:44,378
+so we already know there has to be an intersection.
+
+274
+00:18:44,378 --> 00:18:51,063
+The next stage is to find all intersection polygons that overlap, and find intersection
+
+275
+00:18:51,063 --> 00:18:54,226
+vertices between the polygons where they cross each other.
+
+276
+00:18:55,375 --> 00:18:59,858
+When you find an intersection vertex, you need to insert it into both polygons.
+
+277
+00:18:59,858 --> 00:19:05,001
+Finally, when an intersection polygon touches an edge of the side polygon, we need to ensure
+
+278
+00:19:05,001 --> 00:19:09,644
+that the vertex splits that edge on the side polygon as well.
+
+279
+00:19:09,644 --> 00:19:13,766
+Keep in mind that the edges of a side polygon are shared between two side polygons.
+
+280
+00:19:13,766 --> 00:19:18,589
+So you need to make sure the exact vertex exists on both of them.
+
+281
+00:19:21,413 --> 00:19:27,995
+By making sure that all the calculated intersections are copied to all the other brushes, we ensure
+
+282
+00:19:27,995 --> 00:19:33,456
+that these vertices are identical.
+
+283
+00:19:33,456 --> 00:19:37,877
+If you recalculated them, then the order of calculations are likely different, which gives
+
+284
+00:19:37,877 --> 00:19:40,557
+us slightly different floating point values.
+
+285
+00:19:40,557 --> 00:19:45,218
+And you probably end up with tiny gaps between polygons of different brushes.
+
+286
+00:19:45,218 --> 00:19:50,579
+As an aside, you might also want to snap the original vertices of brushes that are known
+
+287
+00:19:50,579 --> 00:19:51,199
+to intersect.
+
+288
+00:19:52,388 --> 00:19:55,151
+After this point, we have all the vertices we need.
+
+289
+00:19:55,151 --> 00:19:58,853
+We don't need to add new ones anymore.
+
+290
+00:19:58,853 --> 00:20:02,156
+Now in our next section, in order to explain categorization,
+
+291
+00:20:02,156 --> 00:20:05,939
+I need to explain how we generate the final meshes.
+
+292
+00:20:05,939 --> 00:20:07,740
+So we'll start there.
+
+293
+00:20:07,740 --> 00:20:10,742
+So in order to generate our pair brush meshes,
+
+294
+00:20:10,742 --> 00:20:12,804
+we process each brush side separately,
+
+295
+00:20:12,804 --> 00:20:15,085
+processing the side polygon together
+
+296
+00:20:15,085 --> 00:20:17,567
+with intersecting polygons that lie on it.
+
+297
+00:20:19,338 --> 00:20:23,422
+We use a triangulation algorithm that supports polygons with holes.
+
+298
+00:20:23,422 --> 00:20:27,186
+So it only creates triangles for the areas of a polygon that is not part of a hole.
+
+299
+00:20:27,186 --> 00:20:33,252
+When we use each intersection polygon, we then add it as both a hole in the side polygon,
+
+300
+00:20:33,252 --> 00:20:37,376
+but also as a new polygon itself.
+
+301
+00:20:37,376 --> 00:20:43,082
+When a new intersection polygon intersects a previously added polygon, we need to do a little bit more work.
+
+302
+00:20:44,307 --> 00:20:51,688
+If they intersect, we find the common area, which will always be convex if both intersecting polygons are convex.
+
+303
+00:20:51,688 --> 00:20:54,889
+Which they always would be if they were created by convex brushes.
+
+304
+00:20:54,889 --> 00:21:04,831
+And then, we add that common area polygon as a whole again, to both the overlapping polygons.
+
+305
+00:21:04,831 --> 00:21:09,272
+Finally, we also add this common area polygon as yet another polygon by itself.
+
+306
+00:21:12,450 --> 00:21:18,075
+So in the end, we end up with lots of convex polygons with convex holes in them.
+
+307
+00:21:18,075 --> 00:21:24,060
+We can then merge the holes at the end by combining all edges and removing all the overlapping
+
+308
+00:21:24,060 --> 00:21:25,221
+edges.
+
+309
+00:21:25,221 --> 00:21:30,145
+And when we combine the triangles from all the triangulated polygons, we end up with
+
+310
+00:21:30,145 --> 00:21:31,326
+our final brush geometry.
+
+311
+00:21:31,326 --> 00:21:36,210
+Keep in mind that all polygons are triangulated using vertex indices.
+
+312
+00:21:37,000 --> 00:21:43,645
+All the vertices we need already exist in our mesh, so we can compare vertices directly using their indices.
+
+313
+00:21:43,645 --> 00:21:48,249
+All the vertices of all the triangles will match each other perfectly.
+
+314
+00:21:48,249 --> 00:21:56,456
+How do we figure out what to do with each polygon piece, if it should be removed or not or flipped?
+
+315
+00:21:56,456 --> 00:21:59,998
+This is the heart of the algorithm and the most complicated part.
+
+316
+00:22:03,730 --> 00:22:08,812
+To be able to determine what polygon will be visible, we need to categorize each polygon piece.
+
+317
+00:22:08,812 --> 00:22:12,393
+Now imagine the final solid shape we want to create.
+
+318
+00:22:12,393 --> 00:22:16,814
+If our polygon is inside it, it will be invisible and would need to be removed.
+
+319
+00:22:16,814 --> 00:22:23,297
+If it's outside of it, it's not part of the final shape and also needs to be removed.
+
+320
+00:22:23,297 --> 00:22:26,978
+If it's aligned with it, we want to keep it.
+
+321
+00:22:26,978 --> 00:22:29,479
+But if it's reverse aligned...
+
+322
+00:22:31,179 --> 00:22:34,661
+aligned but facing in the opposite direction, we need to flip it.
+
+323
+00:22:34,661 --> 00:22:38,463
+These are the four categories we need to determine.
+
+324
+00:22:38,463 --> 00:22:45,467
+But before we get to polygons, let's start smaller.
+
+325
+00:22:45,467 --> 00:22:48,268
+How would you categorize a single vertex against a single brush?
+
+326
+00:22:50,073 --> 00:22:54,136
+We simply compare the vertex against all the planes of our brush.
+
+327
+00:22:54,136 --> 00:22:56,698
+If it's outside any of these planes, it's outside.
+
+328
+00:22:56,698 --> 00:23:00,320
+Otherwise, it's inside or aligned.
+
+329
+00:23:00,320 --> 00:23:03,903
+It can be aligned if it's near one of the planes of our brush.
+
+330
+00:23:03,903 --> 00:23:07,606
+When I say near, I mean within a certain tolerance.
+
+331
+00:23:07,606 --> 00:23:10,688
+You can't use exact values here due to floating point precision.
+
+332
+00:23:13,235 --> 00:23:18,918
+To categorize a single polygon against a brush, it's a matter of categorizing all the vertices like before.
+
+333
+00:23:18,918 --> 00:23:22,821
+If all vertices are the same category, that's a category.
+
+334
+00:23:22,821 --> 00:23:30,226
+If some vertices are aligned, but the rest is inside or outside, then the whole polygon is inside or outside.
+
+335
+00:23:32,152 --> 00:23:38,275
+If some vertices are inside and others are outside, then the polygon will be intersected by a brush.
+
+336
+00:23:38,275 --> 00:23:43,618
+But since we already found all the intersecting pieces at the beginning, we know this won't happen at this point.
+
+337
+00:23:43,618 --> 00:23:54,343
+Finally, if a polygon is aligned, then we can compare the normal of the polygon with the normal of the plane we're aligned with.
+
+338
+00:23:54,343 --> 00:23:58,105
+If they both point in the same direction, the polygon is aligned.
+
+339
+00:23:58,105 --> 00:24:00,207
+Otherwise, it's reverse aligned.
+
+340
+00:24:01,632 --> 00:24:02,653
+Now remember this image again.
+
+341
+00:24:02,653 --> 00:24:08,837
+What we want to know is what each polygon piece is to the mesh we're generating.
+
+342
+00:24:08,837 --> 00:24:14,040
+What we're essentially trying to figure out is which polygons are part of the skin of
+
+343
+00:24:14,040 --> 00:24:16,242
+the mesh we're building.
+
+344
+00:24:16,242 --> 00:24:24,247
+But before we get to how to categorize against a combination of all the brushes in your level,
+
+345
+00:24:24,247 --> 00:24:28,870
+let's explain how to categorize a polygon against two brushes and a Boolean operation.
+
+346
+00:24:30,556 --> 00:24:34,678
+Now, when we categorize against a brush, we get a category.
+
+347
+00:24:34,678 --> 00:24:36,578
+If we do this for both brushes, we
+
+348
+00:24:36,578 --> 00:24:39,760
+can look up what the output category for the polygon
+
+349
+00:24:39,760 --> 00:24:42,621
+would be for a particular Boolean operation
+
+350
+00:24:42,621 --> 00:24:45,222
+on both brushes using a table like this.
+
+351
+00:24:45,222 --> 00:24:48,503
+Keep in mind that this polygon isn't necessarily
+
+352
+00:24:48,503 --> 00:24:50,404
+part of either of the two brushes
+
+353
+00:24:50,404 --> 00:24:54,266
+we categorize against here, but we'll get to that later.
+
+354
+00:24:54,266 --> 00:24:55,867
+Now, when you look at this table.
+
+355
+00:24:58,062 --> 00:25:00,383
+If the category for either brushes is inside,
+
+356
+00:25:00,383 --> 00:25:03,424
+then our polygon is inside the combined shape
+
+357
+00:25:03,424 --> 00:25:04,244
+of both brushes.
+
+358
+00:25:04,244 --> 00:25:08,985
+So in this case, the final category is obviously inside.
+
+359
+00:25:08,985 --> 00:25:13,706
+If the polygon is aligned with both brushes, it's aligned.
+
+360
+00:25:13,706 --> 00:25:17,907
+If they're both reverse aligned, then our output category
+
+361
+00:25:17,907 --> 00:25:19,688
+is, unsurprisingly, reverse aligned.
+
+362
+00:25:19,688 --> 00:25:22,249
+In this case, both polygons are actually still
+
+363
+00:25:22,249 --> 00:25:25,929
+aligned with each other, just with both the polygons
+
+364
+00:25:25,929 --> 00:25:26,630
+flipped around.
+
+365
+00:25:28,457 --> 00:25:38,884
+If it's aligned with one brush, but reverse aligned with the other, that means that they're facing each other, and we're pretending they cancel each other out, and we just consider that to be inside.
+
+366
+00:25:38,884 --> 00:25:45,368
+You wouldn't be able to see these polygons from the outside of our final mesh, they'd always be inside its interior.
+
+367
+00:25:45,368 --> 00:25:50,491
+When either of both brushes give us the category outside, we just take the category from the other brush.
+
+368
+00:25:52,677 --> 00:25:59,359
+If both categories for both brushes are outside, then the output category is always outside,
+
+369
+00:25:59,359 --> 00:26:03,661
+since the polygon is outside the combined shape.
+
+370
+00:26:03,661 --> 00:26:06,422
+So that's our additive Boolean operation table.
+
+371
+00:26:06,422 --> 00:26:09,303
+We'll use this again later.
+
+372
+00:26:09,303 --> 00:26:12,544
+But for reference, I've added the other operation tables to the slides.
+
+373
+00:26:12,544 --> 00:26:14,205
+Here's subtractive, and here's intersecting.
+
+374
+00:26:14,205 --> 00:26:16,665
+You can look at these slides again later.
+
+375
+00:26:16,665 --> 00:26:21,887
+Now remember this slide from the beginning of the presentation.
+
+376
+00:26:23,086 --> 00:26:28,768
+This is essentially a CSG tree with each operation being a branch and the brushes being the leaves.
+
+377
+00:26:28,768 --> 00:26:32,790
+Together they define the final mesh we're generating.
+
+378
+00:26:32,790 --> 00:26:36,832
+Now here's an example CSG tree. We have a couple of brushes in blue,
+
+379
+00:26:36,832 --> 00:26:41,714
+A, B, C, D and E. We have a couple of additive and subtractive operations in gray.
+
+380
+00:26:42,974 --> 00:26:47,616
+I'm showing this as a binary tree, where every operation has exactly two children, but in
+
+381
+00:26:47,616 --> 00:26:50,677
+practice it's better to use a tree with an unbounded number of children.
+
+382
+00:26:50,677 --> 00:26:56,159
+It's relatively straightforward to work with brushes chained together in a strained line.
+
+383
+00:26:56,159 --> 00:27:00,361
+The moment you have deeper branches, things get more complicated.
+
+384
+00:27:00,361 --> 00:27:01,862
+But I'll elaborate on that later.
+
+385
+00:27:01,862 --> 00:27:09,505
+Regardless of the tree structure, we process each brush in isolation, and our brush will
+
+386
+00:27:09,505 --> 00:27:11,225
+not touch every other brush.
+
+387
+00:27:12,522 --> 00:27:15,204
+So we want to build a CSG tree per brush,
+
+388
+00:27:15,204 --> 00:27:17,725
+which would be a subset of the entire CSG tree.
+
+389
+00:27:17,725 --> 00:27:21,708
+To illustrate, let's assume that we're categorizing brush A
+
+390
+00:27:21,708 --> 00:27:23,869
+and it's only touching brush E.
+
+391
+00:27:23,869 --> 00:27:26,431
+So we flag those two nodes.
+
+392
+00:27:26,431 --> 00:27:29,573
+And we go upwards from each flagged node,
+
+393
+00:27:29,573 --> 00:27:31,094
+flagging each parent as we go
+
+394
+00:27:31,094 --> 00:27:35,196
+until we end up at the root of a CSG tree.
+
+395
+00:27:35,196 --> 00:27:39,179
+All the categories for these unflagged brushes
+
+396
+00:27:39,179 --> 00:27:40,740
+can be considered outside.
+
+397
+00:27:41,955 --> 00:27:49,418
+We don't ever need to iterate to the child nodes of the nodes that are not flagged, so we can just pretend they don't exist.
+
+398
+00:27:49,418 --> 00:27:58,061
+When we perform CHG with a node that is not intersecting with our brush, we can just safely assume that our polygon has the outside category for the sleeve or branch.
+
+399
+00:27:58,061 --> 00:28:06,104
+We can use our little operation table on two brushes, and this could be considered a simple CHG tree with two brushes and a single operation.
+
+400
+00:28:06,104 --> 00:28:08,065
+But this would be very limiting.
+
+401
+00:28:08,831 --> 00:28:14,194
+However, if multiple brushes are chained together in a single row, we can simply apply each
+
+402
+00:28:14,194 --> 00:28:19,858
+operation table on each pair of brushes, hooking up the output category of the previous operation
+
+403
+00:28:19,858 --> 00:28:23,781
+as the left category, and categorizing our polygon against the next brush.
+
+404
+00:28:23,781 --> 00:28:27,303
+We could just apply our Boolean lookup tables multiple times.
+
+405
+00:28:27,303 --> 00:28:33,367
+But instead, we're going to create a big table, which we call our routing table.
+
+406
+00:28:33,367 --> 00:28:36,889
+Here we basically insert all the operations we perform on each brush.
+
+407
+00:28:38,416 --> 00:28:40,918
+It can be considered an operation table for multiple brushes.
+
+408
+00:28:40,918 --> 00:28:47,862
+The routing table allows us to bake in our routing operations and perform optimizations
+
+409
+00:28:47,862 --> 00:28:49,944
+on the entire table.
+
+410
+00:28:49,944 --> 00:28:55,948
+It also allows us to handle more complicated CSG trees, as you will see later on.
+
+411
+00:28:55,948 --> 00:28:59,130
+In practice however, you want to use numbers instead of symbolical names.
+
+412
+00:28:59,130 --> 00:29:02,792
+So here I converted all the categories into the numbers 0 to 3.
+
+413
+00:29:03,948 --> 00:29:08,972
+If you notice, at each row, its output becomes an index into the row for the next brush.
+
+414
+00:29:08,972 --> 00:29:13,155
+This turns the routing table into a simple indexable lookup table.
+
+415
+00:29:13,155 --> 00:29:19,780
+We'll be modifying the intermediate numbers a bit later on, and the intermediate values
+
+416
+00:29:19,780 --> 00:29:23,162
+will no longer be convertible back to our categories.
+
+417
+00:29:23,162 --> 00:29:27,286
+As long as we don't modify the outputs of the last brush, we'll end up with values that
+
+418
+00:29:27,286 --> 00:29:29,447
+we can safely convert back to a category.
+
+419
+00:29:31,428 --> 00:29:36,810
+When we categorize our polygons, we store our current category on each polygon we're processing.
+
+420
+00:29:36,810 --> 00:29:43,313
+We iterate all our intersecting brushes one by one, and we look up each row using the index in the polygon index column.
+
+421
+00:29:43,313 --> 00:29:50,075
+At the same time, we determine what category a polygon has for a particular brush.
+
+422
+00:29:50,075 --> 00:29:53,296
+We use this category to find the column.
+
+423
+00:29:53,296 --> 00:29:56,598
+I'll go into more details about this part later on.
+
+424
+00:29:56,598 --> 00:29:59,759
+The value where the row and the column intersect is our output category.
+
+425
+00:30:00,959 --> 00:30:04,882
+We then store this category on our polygon and proceed to the next brush.
+
+426
+00:30:04,882 --> 00:30:11,026
+To illustrate, let's assume we have a couple of categories for each brush, which we got
+
+427
+00:30:11,026 --> 00:30:13,948
+when we categorized our polygons against their brushes.
+
+428
+00:30:13,948 --> 00:30:17,811
+In the top right corner, you can see the example categories.
+
+429
+00:30:20,088 --> 00:30:25,092
+At the beginning, our polygon index is always 0, so we start at brush A, and the first brush
+
+430
+00:30:25,092 --> 00:30:27,574
+always has a single row, which is our row in green.
+
+431
+00:30:27,574 --> 00:30:33,659
+In this example, brush A has a category first aligned, which you can see here in red.
+
+432
+00:30:33,659 --> 00:30:39,964
+We find the final category 0, which, as you can see in the conversion table on the left,
+
+433
+00:30:39,964 --> 00:30:41,505
+is the category inside.
+
+434
+00:30:41,505 --> 00:30:46,529
+This means that the polygon is inside the CG tree that our little table represents.
+
+435
+00:30:49,271 --> 00:30:54,633
+So, as I mentioned before, we're not going to use every brush in the entire CSG tree,
+
+436
+00:30:54,633 --> 00:30:59,194
+and each brush only intersects with a subset of the CSG tree.
+
+437
+00:30:59,194 --> 00:31:02,975
+We need to create a routing table for each individual brush.
+
+438
+00:31:02,975 --> 00:31:06,256
+For example, say we're making a routing table for brush B,
+
+439
+00:31:06,256 --> 00:31:09,037
+and it only intersects with brush A and brush C,
+
+440
+00:31:09,037 --> 00:31:11,478
+only those brushes would be represented in the table.
+
+441
+00:31:13,410 --> 00:31:18,412
+And again, to reiterate, when we categorize the polygons of a brush, we'll be working
+
+442
+00:31:18,412 --> 00:31:21,033
+on the polygons that belong to that brush.
+
+443
+00:31:21,033 --> 00:31:25,455
+We're determining which pieces to keep and which pieces to throw away.
+
+444
+00:31:25,455 --> 00:31:30,877
+So imagine that we've already cut up our brush into these pieces, and we process each piece
+
+445
+00:31:30,877 --> 00:31:36,779
+individually using a routing table to discover what we need to do with it.
+
+446
+00:31:36,779 --> 00:31:41,001
+So we'll be using the routing table of a particular brush on the polygons of that particular brush.
+
+447
+00:31:42,127 --> 00:31:44,887
+In this example, the ruling table belongs to brush B,
+
+448
+00:31:44,887 --> 00:31:48,648
+and when we categorize the polygons of brush B, they'll always be aligned.
+
+449
+00:31:48,648 --> 00:31:54,610
+This is simply because the polygons of a particular brush will always be aligned with itself.
+
+450
+00:31:54,610 --> 00:31:59,931
+And because of that, we already know that for every output of brush A,
+
+451
+00:31:59,931 --> 00:32:04,512
+we already know the output of brush B.
+
+452
+00:32:04,512 --> 00:32:07,593
+So notice the pattern from top to bottom, 0, 1, 0, 1.
+
+453
+00:32:09,007 --> 00:32:13,409
+We might as well rewrite the outputs of brush A to have the outputs of brush B.
+
+454
+00:32:13,409 --> 00:32:18,671
+So as you notice, the 0-1, 0-1 pattern is now there as an output for brush A,
+
+455
+00:32:18,671 --> 00:32:22,713
+and brush B has been removed.
+
+456
+00:32:22,713 --> 00:32:27,495
+Now notice that not all the inputs of brush C are referenced by brush A.
+
+457
+00:32:27,495 --> 00:32:29,856
+This means we can remove all the rows that will never be used.
+
+458
+00:32:29,856 --> 00:32:35,799
+Just so you know, sometimes when modifying tables, you'll end up with
+
+459
+00:32:35,799 --> 00:32:36,659
+indices that don't start with 0.
+
+460
+00:32:37,713 --> 00:32:42,154
+Now we'll like all numbers to start at 0 for every brush and for every row to be sequential,
+
+461
+00:32:42,154 --> 00:32:44,735
+otherwise we'd end up with holes in our table.
+
+462
+00:32:44,735 --> 00:32:47,455
+So we go back and change 1 and 3 to 0 and 1.
+
+463
+00:32:47,455 --> 00:32:54,497
+Now there is a problem here that has to do with deep branching. Let me illustrate.
+
+464
+00:32:54,497 --> 00:33:01,298
+We need to go through each of our brushes in order, building a routing table entry for each in turn.
+
+465
+00:33:01,298 --> 00:33:03,819
+Branches are not directly part of our routing table.
+
+466
+00:33:05,432 --> 00:33:09,756
+Now, say we started brush A and we get our current category.
+
+467
+00:33:09,756 --> 00:33:12,258
+Let's pick inside, for example.
+
+468
+00:33:12,258 --> 00:33:14,540
+Remember, we start its value on our polygon.
+
+469
+00:33:14,540 --> 00:33:19,565
+The next brush in our CSG tree is brush B.
+
+470
+00:33:19,565 --> 00:33:21,186
+So we find a new category here.
+
+471
+00:33:21,186 --> 00:33:22,307
+Let's use outside.
+
+472
+00:33:22,307 --> 00:33:25,070
+But we just skipped an operation
+
+473
+00:33:25,070 --> 00:33:27,091
+and we have nothing to compare against
+
+474
+00:33:27,091 --> 00:33:28,873
+since this is a leaf brush.
+
+475
+00:33:28,873 --> 00:33:32,056
+So what are we going to do with our previous category?
+
+476
+00:33:34,238 --> 00:33:36,618
+Maybe we could just overwrite it and continue.
+
+477
+00:33:36,618 --> 00:33:41,900
+So we continue, and we continue.
+
+478
+00:33:41,900 --> 00:33:43,740
+But now we reach the point where we kind of
+
+479
+00:33:43,740 --> 00:33:46,301
+needed that category that we used to have at brush A.
+
+480
+00:33:46,301 --> 00:33:47,141
+So what now?
+
+481
+00:33:47,141 --> 00:33:50,141
+The solution is that the moment we
+
+482
+00:33:50,141 --> 00:33:53,722
+determine that the next brush doesn't share the same parent,
+
+483
+00:33:53,722 --> 00:33:57,063
+we start multiple paths to brush B.
+
+484
+00:33:57,063 --> 00:33:59,244
+Every possible path from brush B back
+
+485
+00:33:59,244 --> 00:34:01,324
+to the parent operation of brush A
+
+486
+00:34:01,324 --> 00:34:04,105
+will then have to brush A category built into it.
+
+487
+00:34:05,360 --> 00:34:08,881
+And when I say multiple paths, I mean four times.
+
+488
+00:34:08,881 --> 00:34:11,022
+Once for each possible category.
+
+489
+00:34:11,022 --> 00:34:13,723
+For each branching, we multiply our paths.
+
+490
+00:34:13,723 --> 00:34:15,644
+I can hear you thinking, are you crazy?
+
+491
+00:34:15,644 --> 00:34:18,805
+If we're going to duplicate these paths,
+
+492
+00:34:18,805 --> 00:34:21,566
+then each time we have a branch like this,
+
+493
+00:34:21,566 --> 00:34:25,428
+we could triple all paths inside that branch.
+
+494
+00:34:25,428 --> 00:34:29,050
+The routing table would explode in size.
+
+495
+00:34:29,050 --> 00:34:31,151
+It's not as bad as it may first seem.
+
+496
+00:34:31,151 --> 00:34:32,071
+I'll explain.
+
+497
+00:34:36,098 --> 00:34:42,961
+We don't have a lot of screen space and to keep things practical, I'll just put up a subsection of our entire CFG tree on the right.
+
+498
+00:34:42,961 --> 00:34:46,482
+Now let's take a look at the left branch of our top additive operation.
+
+499
+00:34:46,482 --> 00:34:50,483
+We create a small routing table for it, which has just one entry.
+
+500
+00:34:50,483 --> 00:34:57,785
+And imagine we build another routing table for a right branch.
+
+501
+00:34:57,785 --> 00:35:04,787
+If we combine them, we notice that not all output values of brush A lead to a row in brush B.
+
+502
+00:35:06,608 --> 00:35:12,132
+As I mentioned before, in order to do operations between brush A and the right branch, we need
+
+503
+00:35:12,132 --> 00:35:16,334
+to encode multiple paths in our table from brush A to the right branch.
+
+504
+00:35:16,334 --> 00:35:22,658
+We need to duplicate all the output rows of brush A and the rows of the right branch.
+
+505
+00:35:22,658 --> 00:35:31,484
+Four times to be exact, once for each possible category that brush A could possibly have.
+
+506
+00:35:31,484 --> 00:35:35,426
+So we duplicate the values, and give each row a unique index.
+
+507
+00:35:37,760 --> 00:35:42,027
+And we add an offset for each output to ensure each output is unique.
+
+508
+00:35:42,027 --> 00:35:46,114
+So, in this case, we increase each output on each subsequent row by 4.
+
+509
+00:35:48,337 --> 00:35:50,518
+And we do the same for each possible path in brush C.
+
+510
+00:35:50,518 --> 00:35:53,199
+If the table contained more brushes,
+
+511
+00:35:53,199 --> 00:35:55,640
+we'd add offsets to the next duplicated brushes here.
+
+512
+00:35:55,640 --> 00:35:58,822
+But considering the brush B is the last brush,
+
+513
+00:35:58,822 --> 00:36:00,543
+we keep the values the same.
+
+514
+00:36:00,543 --> 00:36:04,984
+This ensures that the last values out of the routing table
+
+515
+00:36:04,984 --> 00:36:06,525
+will always be between zero and three,
+
+516
+00:36:06,525 --> 00:36:08,326
+can be converted back to our categories.
+
+517
+00:36:10,328 --> 00:36:16,093
+Notice now how for each output of brush A, we go to a different path to brush B, each
+
+518
+00:36:16,093 --> 00:36:18,235
+representing a different category for brush A.
+
+519
+00:36:18,235 --> 00:36:25,421
+And then for each output path of brush B, we continue taking a path to brush C that
+
+520
+00:36:25,421 --> 00:36:28,844
+has the brush A category built in.
+
+521
+00:36:28,844 --> 00:36:34,528
+Here you can see it for inside, aligned, reverse aligned, and outside.
+
+522
+00:36:37,112 --> 00:36:39,454
+Now consider the output values of our table.
+
+523
+00:36:39,454 --> 00:36:41,656
+Currently, all the output values are for this node,
+
+524
+00:36:41,656 --> 00:36:45,099
+representing the output of the second routing table
+
+525
+00:36:45,099 --> 00:36:46,460
+we combined into this table.
+
+526
+00:36:46,460 --> 00:36:51,864
+But we want them to be the output values for this node.
+
+527
+00:36:51,864 --> 00:36:54,106
+Now remember our additive lookup table?
+
+528
+00:36:54,106 --> 00:36:55,067
+We're going to use it again.
+
+529
+00:36:55,067 --> 00:37:01,292
+What we need to do is take all our built-in
+
+530
+00:37:01,292 --> 00:37:03,273
+brush A categories on the left,
+
+531
+00:37:03,273 --> 00:37:05,335
+and use that to find a column in our table.
+
+532
+00:37:06,496 --> 00:37:11,960
+Then take the output values from brush C and use those to find the row in our operation table.
+
+533
+00:37:11,960 --> 00:37:18,844
+And to make the output values of our routing table match the input of our additive operation table,
+
+534
+00:37:18,844 --> 00:37:25,368
+let's turn those categories into numbers as well, so we can more easily use them.
+
+535
+00:37:25,368 --> 00:37:30,592
+Now, when we plug in the built-in categories from brush A and the original routing table output values,
+
+536
+00:37:30,592 --> 00:37:35,775
+the operations would give us the values we need for the top node in our example.
+
+537
+00:37:38,770 --> 00:37:50,640
+But to make our routing table actually usable, we actually need to replace our values in the routing table with the output of the operation table.
+
+538
+00:37:50,640 --> 00:37:56,745
+We'll take a look at the route of brush C that would have been taken if we had the inside category for brush A.
+
+539
+00:37:56,745 --> 00:37:59,667
+Now, if you notice, every value in this column has the output of 0.
+
+540
+00:37:59,667 --> 00:38:03,970
+So we take those outputs and write them back to our routing table.
+
+541
+00:38:06,583 --> 00:38:10,306
+Now we look at the category for brush A, aligned.
+
+542
+00:38:10,306 --> 00:38:15,489
+As we take a look at the column, you notice that 0 and 1 stay the same, but 2 and 3 turn
+
+543
+00:38:15,489 --> 00:38:16,670
+into 0 and 1.
+
+544
+00:38:16,670 --> 00:38:21,313
+So in our routing table, we change the 2's into 0's and the 3's into 1's.
+
+545
+00:38:21,313 --> 00:38:23,955
+Next, it's reverse aligned.
+
+546
+00:38:23,955 --> 00:38:27,497
+Here we can see that 0 and 2 remain the same, 1 and 3 become 0 and 2.
+
+547
+00:38:27,497 --> 00:38:31,800
+We write those changes back into our routing table.
+
+548
+00:38:33,829 --> 00:38:36,271
+Finally, when we get to the outside column,
+
+549
+00:38:36,271 --> 00:38:40,913
+we can see that all the values remain the same.
+
+550
+00:38:40,913 --> 00:38:43,435
+So nothing actually changes for this part of the routing table.
+
+551
+00:38:43,435 --> 00:38:49,218
+So now the output values of our routing table
+
+552
+00:38:49,218 --> 00:38:51,880
+contain the output values for the parent operation of brush
+
+553
+00:38:51,880 --> 00:38:52,760
+A, like we wanted.
+
+554
+00:38:52,760 --> 00:38:54,861
+But we ended up with quite a big table
+
+555
+00:38:54,861 --> 00:38:56,402
+for just a couple of brushes.
+
+556
+00:38:56,402 --> 00:38:58,363
+And we can do better.
+
+557
+00:38:58,363 --> 00:38:59,864
+Now, when you look at the output rows,
+
+558
+00:38:59,864 --> 00:39:01,365
+there's actually a lot of repetition.
+
+559
+00:39:03,182 --> 00:39:08,165
+For example, look at all the rows where all the output values are 0.
+
+560
+00:39:08,165 --> 00:39:13,209
+So these outputs of brush B lead to the identical rows in the routing table section of brush C.
+
+561
+00:39:13,209 --> 00:39:21,274
+We can combine all the identical rows and go back and change the outputs in brush B to lead to just one version of this row.
+
+562
+00:39:21,274 --> 00:39:26,397
+So we find all the rows that are 0, throw away all but one.
+
+563
+00:39:27,854 --> 00:39:34,139
+Now go back to brush B to change all the duplicate outputs to the row we kept, in this case the row with index 0.
+
+564
+00:39:34,139 --> 00:39:40,064
+Next we can see that these rows are also duplicated.
+
+565
+00:39:40,064 --> 00:39:42,226
+We do the same thing for brush B again.
+
+566
+00:39:42,226 --> 00:39:46,791
+Then we find these duplicate rows, fix them up.
+
+567
+00:39:46,791 --> 00:39:52,596
+Finally we compact the row indices and fix those up in brush B as well.
+
+568
+00:39:54,540 --> 00:39:56,701
+And as you can see, after optimizing the routing table,
+
+569
+00:39:56,701 --> 00:39:57,681
+everything is a lot smaller.
+
+570
+00:39:57,681 --> 00:40:01,602
+You can do these optimizations while creating the table,
+
+571
+00:40:01,602 --> 00:40:03,663
+by just finding duplicates at insertion time.
+
+572
+00:40:03,663 --> 00:40:06,684
+Sometimes it's possible for brushes
+
+573
+00:40:06,684 --> 00:40:09,725
+to completely disappear due to these optimizations.
+
+574
+00:40:09,725 --> 00:40:12,926
+Incidentally, this routing table can be cached per brush.
+
+575
+00:40:12,926 --> 00:40:15,226
+This took me a long time to figure out,
+
+576
+00:40:15,226 --> 00:40:17,667
+but in the end, you get a nice simple table,
+
+577
+00:40:17,667 --> 00:40:20,448
+very fast, very efficient.
+
+578
+00:40:20,448 --> 00:40:22,769
+And don't worry, you can always go back to the slides
+
+579
+00:40:22,769 --> 00:40:24,069
+and go through them again.
+
+580
+00:40:24,595 --> 00:40:29,418
+There's one last thing I need to mention, that I left out to keep things hopefully a bit easier to understand.
+
+581
+00:40:29,418 --> 00:40:37,764
+If you have multiple brushes that are lined on a particular area, you'd end up with every one of those brushes keeping those polygons on that area.
+
+582
+00:40:37,764 --> 00:40:45,049
+In this slide you can see a brush with multiple surfaces overlapping, visible by the Z-finding artifacts.
+
+583
+00:40:45,049 --> 00:40:52,254
+This is because every brush will determine that its polygon area is part of the CSG tree, which is technically correct.
+
+584
+00:40:52,823 --> 00:40:58,106
+But we don't want every brush to keep the overlapping area, we only want one of these surfaces to remain.
+
+585
+00:40:58,106 --> 00:41:06,630
+What we want is that every brush in the tree overrides the previous brush and removes any overlapping polygons earlier in the tree.
+
+586
+00:41:06,630 --> 00:41:18,015
+We can easily fix this by creating a variation of all Boolean operation tables where we set all the categories in the middle section, which used to be aligned or reverse aligned, to outside.
+
+587
+00:41:19,600 --> 00:41:24,202
+We use this table instead of the original operation table after we pass the brush a
+
+588
+00:41:24,202 --> 00:41:29,245
+routing table belongs to, when iterating over the brushes while creating the routing table.
+
+589
+00:41:29,245 --> 00:41:34,568
+This changes the behavior of the operation tables to remove overlapping polygons instead
+
+590
+00:41:34,568 --> 00:41:35,908
+of keeping them.
+
+591
+00:41:35,908 --> 00:41:40,050
+This works because all polygons that have the outside category will be removed in the
+
+592
+00:41:40,050 --> 00:41:40,110
+end.
+
+593
+00:41:40,110 --> 00:41:45,293
+Keep in mind you should only use this on brushes.
+
+594
+00:41:45,293 --> 00:41:48,235
+When combining two routing tables you should use the original tables.
+
+595
+00:41:52,426 --> 00:41:57,287
+Here you can see the subtractive operation table variant, and here is the intersection
+
+596
+00:41:57,287 --> 00:41:58,168
+operation table variant.
+
+597
+00:41:58,168 --> 00:42:03,749
+You can look them up again in the slides after the presentation.
+
+598
+00:42:03,749 --> 00:42:06,170
+So finally, let's put everything together.
+
+599
+00:42:06,170 --> 00:42:13,212
+For each brush for processing, we use its own personal routing table and loop through
+
+600
+00:42:13,212 --> 00:42:14,872
+all its brushes.
+
+601
+00:42:14,872 --> 00:42:17,493
+We do this for each side polygon of the brush for processing.
+
+602
+00:42:19,125 --> 00:42:24,729
+Remember those intersection polygons and how they're all associated with a single brush?
+
+603
+00:42:24,729 --> 00:42:29,011
+When we loop through all the brushes in the CSG tree, we use the intersection polygon
+
+604
+00:42:29,011 --> 00:42:31,353
+associated with each brush and apply them one by one.
+
+605
+00:42:31,353 --> 00:42:39,678
+While we do this, we need to categorize our polygons to determine which ones need to be
+
+606
+00:42:39,678 --> 00:42:42,620
+kept and which ones need to be discarded at the end.
+
+607
+00:42:42,620 --> 00:42:46,222
+Now remember that each intersection polygon has an interior category stored with it.
+
+608
+00:42:46,820 --> 00:42:49,522
+which we determine during the creation of the intersection polygon.
+
+609
+00:42:49,522 --> 00:42:54,604
+For example, let's say this intersection polygon of brush A
+
+610
+00:42:54,604 --> 00:42:57,086
+has an interior category of reverse aligned.
+
+611
+00:42:57,086 --> 00:43:00,748
+For example, let's say this intersection polygon of brush A
+
+612
+00:43:00,748 --> 00:43:03,429
+has an interior category of reverse aligned.
+
+613
+00:43:03,429 --> 00:43:07,531
+This means that the surface of this polygon piece
+
+614
+00:43:07,531 --> 00:43:11,914
+is reverse aligned relative to the surface on brush A.
+
+615
+00:43:11,914 --> 00:43:12,674
+So when we look...
+
+616
+00:43:12,966 --> 00:43:20,610
+In our routing table at brush A, we only have one row and it intersects the reverse aligned column.
+
+617
+00:43:20,610 --> 00:43:23,232
+We then look up that the index of our polygon should be 0.
+
+618
+00:43:23,232 --> 00:43:28,795
+We then add this intersection polygon as both a hole to our side polygon and as a new polygon.
+
+619
+00:43:28,795 --> 00:43:33,258
+Everything outside the intersection polygon needs to be categorized as well.
+
+620
+00:43:33,258 --> 00:43:37,660
+So we look at the outside column in our table and we find the value 1.
+
+621
+00:43:37,660 --> 00:43:41,663
+In this case the side polygon is completely outside the intersection polygon, so we set it to 1.
+
+622
+00:43:43,750 --> 00:43:48,754
+When we add a new intersection polygon, we find it intersects with the previous intersection polygon.
+
+623
+00:43:48,754 --> 00:43:54,699
+So we find a common area between the existing polygon and the new intersection polygon from brush B.
+
+624
+00:43:54,699 --> 00:43:59,243
+We add that as a whole to both polygons and as a new polygon.
+
+625
+00:43:59,243 --> 00:44:01,345
+We also add the intersection polygon itself.
+
+626
+00:44:03,213 --> 00:44:08,958
+At this point in time, we give these two new polygons the same category as the original polygons they're on.
+
+627
+00:44:08,958 --> 00:44:14,502
+So the new common area polygon we give the value 0, and the new intersection polygon gets the value 1.
+
+628
+00:44:14,502 --> 00:44:18,786
+Let's say that the interior category is inside.
+
+629
+00:44:18,786 --> 00:44:24,010
+If we look at the area that's not overlapping, it has the value 1.
+
+630
+00:44:24,010 --> 00:44:26,992
+This gives us this row in the routing table.
+
+631
+00:44:26,992 --> 00:44:30,575
+We look up the new value in the routing table at the intersection between row and column.
+
+632
+00:44:31,941 --> 00:44:35,183
+Now do the same for the overlapping area which has the index 0.
+
+633
+00:44:35,183 --> 00:44:36,804
+We look up 3, set it.
+
+634
+00:44:36,804 --> 00:44:42,968
+The rest is outside our intersection polygon, so this includes the rest of the first polygon
+
+635
+00:44:42,968 --> 00:44:44,569
+we created and our side polygon.
+
+636
+00:44:44,569 --> 00:44:49,371
+So we look up the value for our side polygon, which is 1.
+
+637
+00:44:49,371 --> 00:44:52,393
+And we look up the value for the other polygon piece, which is 0.
+
+638
+00:44:52,393 --> 00:44:59,478
+Now if we assume the interior category for brush C is aligned, we end up with these final
+
+639
+00:44:59,478 --> 00:44:59,898
+values.
+
+640
+00:45:01,936 --> 00:45:07,238
+Converting 0 to 3 to inside aligned, reverse aligned and outside gives us this result.
+
+641
+00:45:07,238 --> 00:45:14,301
+Now remember that when a category is inside or outside, our polygons are discarded.
+
+642
+00:45:14,301 --> 00:45:17,862
+We only need to keep the polygons that are aligned or reverse aligned.
+
+643
+00:45:17,862 --> 00:45:20,483
+We flip those that are reverse aligned.
+
+644
+00:45:20,483 --> 00:45:24,685
+Keep in mind, even though holes are polygons, they are never categorized.
+
+645
+00:45:24,685 --> 00:45:26,545
+So don't throw those away.
+
+646
+00:45:26,545 --> 00:45:31,147
+The white polygons are inside or outside and will be removed.
+
+647
+00:45:32,341 --> 00:45:35,463
+This is what the surface looks like without those polygons.
+
+648
+00:45:35,463 --> 00:45:40,107
+We can also combine all the polygons that have the same category.
+
+649
+00:45:40,107 --> 00:45:42,789
+This can remove some unnecessary vertices.
+
+650
+00:45:42,789 --> 00:45:47,133
+So we combine them, and this is what it looks like.
+
+651
+00:45:47,133 --> 00:45:51,677
+Keep in mind, we only triangulate the polygons that we want to keep.
+
+652
+00:45:51,677 --> 00:45:54,579
+We should only triangulate after we merge polygons.
+
+653
+00:45:54,579 --> 00:45:58,322
+Also, reverse aligned polygons need to be flipped around.
+
+654
+00:46:00,829 --> 00:46:07,453
+All of this work leads us to this, giving us the ability to build geometry using Boolean operations in a scalable way.
+
+655
+00:46:07,453 --> 00:46:11,756
+The most important part is that we can now perform iterative updates.
+
+656
+00:46:11,756 --> 00:46:16,098
+Everything we can do per brush, we can cache per brush.
+
+657
+00:46:16,098 --> 00:46:24,843
+Since most of the work is done per brush or per brush pair, we can also easily split work across multiple cores.
+
+658
+00:46:24,843 --> 00:46:28,866
+And that's my talk. Thank you.
+

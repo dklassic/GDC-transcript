@@ -1,0 +1,2304 @@
+1
+00:00:11,678 --> 00:00:20,161
+Roblox is a platform for user generated 3D worlds, mostly games, and the physics engine is a core component of the platform's runtime.
+
+2
+00:00:25,503 --> 00:00:31,845
+This presentation will be an overview of the mathematics and implementation of the physics solver inside of the Roblox engine.
+
+3
+00:00:32,405 --> 00:00:38,347
+This is the system that computes the motion of constrained rigid bodies under the influence of forces.
+
+4
+00:00:41,010 --> 00:00:44,071
+Since the creativity of Roblox developers knows no bounds,
+
+5
+00:00:44,511 --> 00:00:46,852
+a physics engine is required to support complex,
+
+6
+00:00:47,392 --> 00:00:49,172
+sometimes very complex, mechanisms.
+
+7
+00:00:49,913 --> 00:00:54,294
+For example, we wouldn't be able to simulate this scissor lift
+
+8
+00:00:54,494 --> 00:00:56,214
+using an existing physics library.
+
+9
+00:00:57,034 --> 00:01:00,435
+This requires a more robust type of a constraint solver,
+
+10
+00:01:00,615 --> 00:01:02,456
+and this will be the topic of this talk.
+
+11
+00:01:03,716 --> 00:01:05,877
+There is another requirement for a physics library,
+
+12
+00:01:06,397 --> 00:01:08,157
+the support for distributed physics,
+
+13
+00:01:08,357 --> 00:01:09,958
+which we will not discuss here.
+
+14
+00:01:10,957 --> 00:01:14,481
+A physics engine solves an LCP, a linear complementarity
+
+15
+00:01:14,541 --> 00:01:14,882
+problem.
+
+16
+00:01:15,623 --> 00:01:17,765
+And typically, it uses an interactive solver,
+
+17
+00:01:17,785 --> 00:01:19,427
+such as the projected Gauss-Seidel.
+
+18
+00:01:21,149 --> 00:01:23,051
+Within a reasonable number of iterations,
+
+19
+00:01:23,812 --> 00:01:25,755
+the projected Gauss-Seidel is not
+
+20
+00:01:25,975 --> 00:01:27,377
+able to simulate the scissor lift,
+
+21
+00:01:27,757 --> 00:01:29,960
+leading to instabilities and explosions.
+
+22
+00:01:33,208 --> 00:01:35,849
+Our main contribution is the LDL-PGS solver.
+
+23
+00:01:36,269 --> 00:01:39,710
+It uses a direct method to invert the submatrix
+
+24
+00:01:39,730 --> 00:01:41,690
+corresponding to the equality constraints
+
+25
+00:01:42,250 --> 00:01:43,331
+and helping the PGS.
+
+26
+00:01:44,111 --> 00:01:46,052
+This leads to much better behavior
+
+27
+00:01:46,652 --> 00:01:48,112
+in the example of the scissor lift.
+
+28
+00:01:49,152 --> 00:01:50,973
+Also, it behaves much better when bodies
+
+29
+00:01:51,013 --> 00:01:52,993
+with very different masses are interacting,
+
+30
+00:01:53,594 --> 00:01:54,994
+the high mass ratio problem.
+
+31
+00:01:56,635 --> 00:01:58,735
+The LDL-PGS solver has two phases,
+
+32
+00:01:58,855 --> 00:02:01,016
+the symbolic phase and numeric phase.
+
+33
+00:02:02,030 --> 00:02:05,514
+In the symbolic phase, which runs only once per mechanism,
+
+34
+00:02:06,235 --> 00:02:10,158
+its structure is analyzed and an optimized LDL decomposition
+
+35
+00:02:10,218 --> 00:02:11,400
+program is generated.
+
+36
+00:02:12,881 --> 00:02:16,064
+And in the numeric phase, which executes every physics frame,
+
+37
+00:02:16,745 --> 00:02:19,668
+the mechanism state is updated using both the PGS
+
+38
+00:02:20,088 --> 00:02:21,870
+and the LDL decomposition program.
+
+39
+00:02:23,051 --> 00:02:24,673
+In the next section, we will quickly
+
+40
+00:02:24,733 --> 00:02:26,634
+cover the basics of a constraint solver.
+
+41
+00:02:28,558 --> 00:02:34,261
+A constraint solver deals with mechanical constraints, such as a ball in a socket or a hinge.
+
+42
+00:02:36,703 --> 00:02:43,387
+It also supports other constraints including rods, prismatic, cylindrical, angular limits, positional limits and ropes,
+
+43
+00:02:43,847 --> 00:02:47,310
+and few other constraints that don't need to have mechanical equivalents.
+
+44
+00:02:51,920 --> 00:02:53,862
+Let's define a constraint mathematically.
+
+45
+00:02:54,382 --> 00:02:59,705
+We have two or more rigid bodies, represented here by green and blue ovals, and their state
+
+46
+00:02:59,825 --> 00:03:03,247
+is described by their coordinates, positions, and orientations.
+
+47
+00:03:03,948 --> 00:03:08,470
+The orientations can be specified using either rotation matrices or quaternions.
+
+48
+00:03:09,331 --> 00:03:13,653
+Then a constraint between these bodies is a differentiable function of the coordinates
+
+49
+00:03:13,833 --> 00:03:16,335
+into a vector space of an arbitrary dimension d.
+
+50
+00:03:17,607 --> 00:03:22,892
+This vector space is called the constraint space, and its dimension is called the degree of the constraint.
+
+51
+00:03:23,813 --> 00:03:28,678
+We say that the bodies respect the constraint if the constraint function vanishes at their coordinates.
+
+52
+00:03:29,779 --> 00:03:34,964
+The function must have an additional property, it must be regular on the zero locus, that
+
+53
+00:03:35,044 --> 00:03:41,451
+is the Jacobian has full rank, or equivalently, d is the number of degrees of freedom removed
+
+54
+00:03:41,511 --> 00:03:42,311
+by the constraint.
+
+55
+00:03:43,980 --> 00:03:47,824
+How do we model a ball in a socket or a ball joint between two rigid bodies?
+
+56
+00:03:48,965 --> 00:03:52,689
+We specify pivot locations in the local space of the two bodies.
+
+57
+00:03:54,110 --> 00:03:58,895
+The constraint function is then the difference between these two pivot positions transformed into world space.
+
+58
+00:03:58,915 --> 00:04:03,260
+The constraint function vanishes when the two are in the same location.
+
+59
+00:04:04,141 --> 00:04:10,267
+It seems that there is another way to specify this constraint by using the distance function between the two pivot positions,
+
+60
+00:04:10,727 --> 00:04:14,651
+but only the first model is regular, that is the Jacobian has full rank.
+
+61
+00:04:15,772 --> 00:04:17,214
+This is how you model a hinge.
+
+62
+00:04:18,735 --> 00:04:19,816
+It's a ball in a socket,
+
+63
+00:04:20,697 --> 00:04:26,263
+together with an orthogonality relationship between a vector on one body and a plane on the other body.
+
+64
+00:04:27,124 --> 00:04:28,465
+The degree of this constraint is 5.
+
+65
+00:04:31,644 --> 00:04:37,308
+Now that we have a way of modeling constraints, we are interested in the dynamics of the rigid bodies, their motion.
+
+66
+00:04:38,349 --> 00:04:42,532
+Therefore, we need to derive the velocity relationships that the constraint imposes.
+
+67
+00:04:43,732 --> 00:04:46,895
+This is obtained by taking the derivative of the constraint function.
+
+68
+00:04:47,795 --> 00:04:54,600
+This derivative can always be formulated as a product of some matrix J times the vector of velocities.
+
+69
+00:04:56,761 --> 00:04:58,583
+The matrix is called the Jacobian of C.
+
+70
+00:05:00,767 --> 00:05:07,151
+As a result, the Jacobian is an operator that takes the body space velocities and produces the constraint space velocities.
+
+71
+00:05:08,452 --> 00:05:15,516
+Since the time derivative of a function, that's zero, is zero, constraint bodies produce no motion in the constraint space.
+
+72
+00:05:16,877 --> 00:05:22,340
+For example, here is the ball in the socket constraint and its derivative, which is the relative velocity of the two pivots.
+
+73
+00:05:23,260 --> 00:05:27,903
+Some care has to be taken in taking the derivative of orientation matrices or quaternions.
+
+74
+00:05:28,746 --> 00:05:32,249
+These are expressed in terms of cross products with angular velocities.
+
+75
+00:05:33,249 --> 00:05:35,291
+But a cross product is a linear operation
+
+76
+00:05:35,431 --> 00:05:37,613
+and can be expressed as a matrix multiplication.
+
+77
+00:05:39,114 --> 00:05:42,356
+As a result, we can gather the velocities into a vector
+
+78
+00:05:42,737 --> 00:05:44,638
+and the rest into the Jacobian matrix.
+
+79
+00:05:45,819 --> 00:05:49,882
+The Jacobian matrix has two parts corresponding to the two rigid bodies.
+
+80
+00:05:52,764 --> 00:05:54,986
+So far, we have been looking at single constraints.
+
+81
+00:05:55,537 --> 00:06:00,540
+But in practice, we want to model entire mechanisms consisting of many constraints and bodies.
+
+82
+00:06:01,601 --> 00:06:06,064
+We can stack all the constraints in the mechanism into a single function called the global constraint.
+
+83
+00:06:07,265 --> 00:06:14,729
+Taking the derivative of the global constraint, we get the global Jacobian matrix, which maps the velocities of rigid bodies in the constraint space.
+
+84
+00:06:16,550 --> 00:06:20,033
+In practice, each constraint will only affect two or three rigid bodies.
+
+85
+00:06:20,910 --> 00:06:26,131
+which means that each row of the global Jacobian has only 12 or 18 non-zero entries.
+
+86
+00:06:28,412 --> 00:06:32,433
+Here is an example of a mechanism with four bodies and four constraints.
+
+87
+00:06:33,333 --> 00:06:38,654
+And this is how the Jacobian would look like. Each block of rows corresponds to a constraint,
+
+88
+00:06:39,554 --> 00:06:45,236
+and each block of columns corresponds to a body. The most important thing to notice is that each
+
+89
+00:06:45,396 --> 00:06:50,397
+row of the Jacobian contains 12 non-zero elements. This is a sparse matrix.
+
+90
+00:06:51,559 --> 00:06:53,781
+We are now ready to describe the integration step.
+
+91
+00:06:54,221 --> 00:06:55,982
+We have the velocities at time zero,
+
+92
+00:06:56,122 --> 00:06:57,984
+and using the Euler integration step,
+
+93
+00:06:58,564 --> 00:07:01,707
+the velocities at time dt are given by this equation.
+
+94
+00:07:02,907 --> 00:07:05,249
+It involves the inverse mass matrix,
+
+95
+00:07:05,309 --> 00:07:07,971
+which is a block diagonal matrix with inverse masses
+
+96
+00:07:08,131 --> 00:07:10,653
+and inverse inertia matrices on the diagonal.
+
+97
+00:07:11,414 --> 00:07:12,995
+And the Lagrangian multipliers,
+
+98
+00:07:13,355 --> 00:07:15,377
+also called the constraint impulses.
+
+99
+00:07:16,397 --> 00:07:19,079
+This last term comes from the D'Alembert's principle.
+
+100
+00:07:20,259 --> 00:07:22,861
+It adds the internal forces of the constraints,
+
+101
+00:07:23,721 --> 00:07:25,782
+and these internal forces must be such
+
+102
+00:07:25,822 --> 00:07:29,004
+that the resulting velocities produce no motion
+
+103
+00:07:29,144 --> 00:07:30,345
+in the constraint space.
+
+104
+00:07:31,285 --> 00:07:33,847
+Moving the terms around, we get the following equation.
+
+105
+00:07:34,087 --> 00:07:36,588
+It's called the linearized constraint equation.
+
+106
+00:07:37,109 --> 00:07:38,930
+It involves the constraint matrix K,
+
+107
+00:07:38,970 --> 00:07:40,571
+which is the product of the Jacobian,
+
+108
+00:07:41,191 --> 00:07:44,133
+the inverse mass matrix, and the Jacobian transpose.
+
+109
+00:07:45,258 --> 00:07:48,380
+This matrix is symmetric and positive semi-definite,
+
+110
+00:07:48,720 --> 00:07:51,561
+which means its eigenvalues are non-negative.
+
+111
+00:07:52,322 --> 00:07:55,183
+It is either invertible or it can be made invertible
+
+112
+00:07:55,243 --> 00:07:57,664
+by adding any positive value to its diagonal.
+
+113
+00:07:58,024 --> 00:08:00,826
+This equation is valid only for equality constraints.
+
+114
+00:08:01,566 --> 00:08:04,007
+Other constraints like collisions or limits
+
+115
+00:08:04,227 --> 00:08:07,168
+lead to an LCP, which we will not cover here,
+
+116
+00:08:07,409 --> 00:08:09,770
+but the structure of the problem is very similar.
+
+117
+00:08:10,850 --> 00:08:12,731
+In the next section, we will discuss methods
+
+118
+00:08:12,811 --> 00:08:13,911
+to solve this equation.
+
+119
+00:08:15,785 --> 00:08:21,568
+Traditionally, the constraint equation, or the LCP, is solved using the projected Gauss-Seidel.
+
+120
+00:08:22,509 --> 00:08:26,951
+This algorithm makes small corrections to constraints consecutively.
+
+121
+00:08:28,352 --> 00:08:36,096
+The impulses for collisions and friction, and for inequality constraints, are processed using the projected Gauss-Seidel iterations,
+
+122
+00:08:36,976 --> 00:08:40,598
+where the equality constraints use the Gauss-Seidel iteration.
+
+123
+00:08:41,877 --> 00:08:45,920
+These iterations are repeated multiple times until the system converges.
+
+124
+00:08:46,201 --> 00:08:49,223
+Usually, games use a fixed number of iterations.
+
+125
+00:08:50,484 --> 00:08:54,927
+Our approach changes the way the equality constraints are processed inside the PGS.
+
+126
+00:08:55,848 --> 00:08:58,650
+Instead of processing these one at a time,
+
+127
+00:08:59,170 --> 00:09:04,314
+we use a direct method to invert the entire submetrics corresponding to the equality constraints.
+
+128
+00:09:05,067 --> 00:09:08,508
+This fits within the formalism of the block Gauss-Seidel,
+
+129
+00:09:08,988 --> 00:09:11,209
+and the method we use to invert the matrix
+
+130
+00:09:11,389 --> 00:09:13,850
+is called the sparse LDL decomposition.
+
+131
+00:09:16,871 --> 00:09:18,672
+But because of performance, we are not
+
+132
+00:09:18,812 --> 00:09:20,513
+able to correct the solution using
+
+133
+00:09:20,573 --> 00:09:22,414
+the entire holonomic block constraint
+
+134
+00:09:22,434 --> 00:09:23,914
+matrix every iteration.
+
+135
+00:09:25,055 --> 00:09:28,416
+Instead, we do it only in one iteration, the last one
+
+136
+00:09:28,836 --> 00:09:29,856
+or one before last.
+
+137
+00:09:31,277 --> 00:09:34,878
+A lot of iterations use normal Gauss-Seidel on the equality constraints.
+
+138
+00:09:35,719 --> 00:09:39,260
+It turns out that this is enough to have very good quality simulation.
+
+139
+00:09:40,141 --> 00:09:46,623
+And as a bonus, it allows us to compute the LDL decomposition in parallel with most of the PGS iterations.
+
+140
+00:09:47,884 --> 00:09:49,905
+Let's review the PGS in details.
+
+141
+00:09:51,165 --> 00:09:57,468
+It starts with an estimate of the solution, which can be cached as a result of the previous frame or simply the zero vector.
+
+142
+00:09:58,487 --> 00:10:01,930
+and it now starts the iterations over the rows of the constraint matrix.
+
+143
+00:10:02,951 --> 00:10:04,512
+First calculates the residual,
+
+144
+00:10:04,772 --> 00:10:06,974
+which is the measure of the error for the current row,
+
+145
+00:10:07,895 --> 00:10:10,498
+and then corrects the solution by adding the residual
+
+146
+00:10:10,538 --> 00:10:13,961
+divided by the diagonal element of the constraint matrix on the current row.
+
+147
+00:10:15,142 --> 00:10:18,165
+Optionally, it then projects the newly calculated solution
+
+148
+00:10:18,185 --> 00:10:19,626
+into the admissible domain.
+
+149
+00:10:20,647 --> 00:10:23,650
+It repeats this process for all rows multiple times.
+
+150
+00:10:25,591 --> 00:10:30,952
+The bottleneck of this algorithm is this dot product between the rho of k and lambda.
+
+151
+00:10:31,792 --> 00:10:34,013
+It has an arbitrary number of non-zero terms.
+
+152
+00:10:35,433 --> 00:10:38,834
+There is a better way to calculate the product k i times lambda.
+
+153
+00:10:39,474 --> 00:10:45,195
+Let's go back to the constraint equation and write it in terms of the Jacobian and the inverse mass matrix.
+
+154
+00:10:46,115 --> 00:10:50,976
+We can use the associativity of the matrix multiplication to isolate the Jacobian on the left side.
+
+155
+00:10:51,848 --> 00:10:53,610
+and the product of the inverse mass matrix,
+
+156
+00:10:54,070 --> 00:10:56,792
+Jacobian transpose and lambda on the right side.
+
+157
+00:10:58,053 --> 00:11:00,495
+We call the right side the vector of velocity changes,
+
+158
+00:11:01,076 --> 00:11:03,958
+delta v. It's literally the velocity changes
+
+159
+00:11:03,998 --> 00:11:04,839
+of the rigid bodies.
+
+160
+00:11:06,120 --> 00:11:07,221
+Then in the Gauss ideal,
+
+161
+00:11:07,721 --> 00:11:11,364
+we can replace Ki times lambda by Ji times delta v.
+
+162
+00:11:12,685 --> 00:11:15,968
+This product has only 12 or 18 non-zero terms
+
+163
+00:11:16,028 --> 00:11:17,309
+for practical constraints.
+
+164
+00:11:18,292 --> 00:11:21,013
+We have now an improved version of the Gauss-Seidel
+
+165
+00:11:21,053 --> 00:11:22,394
+for mechanical constraints.
+
+166
+00:11:23,014 --> 00:11:24,735
+In the physics simulation community,
+
+167
+00:11:24,956 --> 00:11:26,316
+it's called the impulse solver,
+
+168
+00:11:26,677 --> 00:11:29,178
+but in mathematics, it's the catch-match method.
+
+169
+00:11:30,839 --> 00:11:33,000
+The solution is initialized to an estimate,
+
+170
+00:11:33,180 --> 00:11:35,382
+and the vector of velocity changes is precomputed.
+
+171
+00:11:36,322 --> 00:11:38,103
+As before, we're going to iterate
+
+172
+00:11:38,143 --> 00:11:39,824
+over all rows of the matrix.
+
+173
+00:11:41,645 --> 00:11:44,087
+The correction to the solution is calculated
+
+174
+00:11:44,147 --> 00:11:46,628
+with the residual computed using the new method.
+
+175
+00:11:47,872 --> 00:11:50,074
+Optionally, the corrected solution is projected,
+
+176
+00:11:50,915 --> 00:11:52,837
+and the velocity changes are updated.
+
+177
+00:11:54,578 --> 00:11:58,362
+This new algorithm uses about 50 floating point operations
+
+178
+00:11:58,442 --> 00:12:01,024
+per row, and the constant number of operations
+
+179
+00:12:01,124 --> 00:12:02,225
+is good for an algorithm.
+
+180
+00:12:03,066 --> 00:12:05,408
+We already talked about the block Gauss-Seidel.
+
+181
+00:12:05,908 --> 00:12:08,130
+This is formalized using partitions of rows.
+
+182
+00:12:09,011 --> 00:12:11,193
+A partition is a grouping into subsets
+
+183
+00:12:11,293 --> 00:12:14,316
+where each element is included in exactly one subset.
+
+184
+00:12:15,532 --> 00:12:18,953
+A partition of rows induces a block structure on the Jacobian.
+
+185
+00:12:19,673 --> 00:12:23,855
+It's the original Jacobian, but where the rows have been permuted
+
+186
+00:12:24,395 --> 00:12:26,896
+and grouped together according to the partition.
+
+187
+00:12:27,757 --> 00:12:29,978
+The block structure on the Jacobian naturally
+
+188
+00:12:30,038 --> 00:12:32,819
+induces a block structure on the constrained matrix.
+
+189
+00:12:34,259 --> 00:12:36,580
+Note that the square blocks on the diagonal
+
+190
+00:12:36,660 --> 00:12:40,742
+are symmetric matrices, and the opposite of diagonal blocks
+
+191
+00:12:40,882 --> 00:12:42,063
+are transposed of each other.
+
+192
+00:12:43,406 --> 00:12:45,608
+We will call this using N and E.
+
+193
+00:12:46,489 --> 00:12:49,652
+N stands for node matrix and E for edge matrix.
+
+194
+00:12:50,712 --> 00:12:53,035
+We will see later this comes from graph theory.
+
+195
+00:12:53,815 --> 00:12:55,957
+The Gauss-Seidel or the impulse solver
+
+196
+00:12:55,997 --> 00:12:59,200
+can be made to work with blocks instead of individual rows.
+
+197
+00:13:00,081 --> 00:13:00,942
+Two things to note.
+
+198
+00:13:02,563 --> 00:13:04,204
+In the block impulse solver, we need
+
+199
+00:13:04,244 --> 00:13:06,166
+to compute the inverse of a square matrix,
+
+200
+00:13:06,366 --> 00:13:09,089
+ni, which might be expensive depending
+
+201
+00:13:09,129 --> 00:13:10,090
+on the size of the block.
+
+202
+00:13:11,107 --> 00:13:13,908
+Also, the block solver doesn't support projection,
+
+203
+00:13:14,068 --> 00:13:16,950
+so this can only be used with equality constraints.
+
+204
+00:13:18,750 --> 00:13:20,511
+In the block version of the impulse solver,
+
+205
+00:13:20,751 --> 00:13:22,992
+we need to evaluate the inverse of the node matrix
+
+206
+00:13:23,112 --> 00:13:23,812
+times a vector.
+
+207
+00:13:24,513 --> 00:13:26,974
+For small dimensions, this is as easy
+
+208
+00:13:27,054 --> 00:13:30,615
+as inverting a matrix using naive method like Cramer's rule.
+
+209
+00:13:31,816 --> 00:13:33,756
+For example, using the natural partition
+
+210
+00:13:33,997 --> 00:13:36,197
+coming from grouping the rows by constraints,
+
+211
+00:13:36,918 --> 00:13:39,779
+the node matrices will have dimensions up to 6 by 6.
+
+212
+00:13:42,235 --> 00:13:45,757
+and these are invertible because we assume the constraints are regular.
+
+213
+00:13:46,998 --> 00:13:48,178
+Consider this idea.
+
+214
+00:13:48,478 --> 00:13:52,340
+What if we grouped all the equality constraints together in the partition?
+
+215
+00:13:53,061 --> 00:13:56,983
+So the subset pi zero contains all the rows of the equality constraints
+
+216
+00:13:57,503 --> 00:13:59,824
+and other subsets contain individual rows.
+
+217
+00:14:01,125 --> 00:14:03,266
+N zero is then a large square matrix,
+
+218
+00:14:03,746 --> 00:14:05,767
+constraint matrix of equality constraints.
+
+219
+00:14:06,908 --> 00:14:08,569
+We denote this matrix using H.
+
+220
+00:14:09,349 --> 00:14:10,570
+H stands for holonomic.
+
+221
+00:14:12,121 --> 00:14:15,142
+We need now to evaluate the inverse of H times a vector,
+
+222
+00:14:15,542 --> 00:14:16,982
+but there are some obstacles to do that.
+
+223
+00:14:17,823 --> 00:14:19,023
+H may not be invertible.
+
+224
+00:14:19,863 --> 00:14:21,904
+This is solved by using regularization,
+
+225
+00:14:22,104 --> 00:14:24,625
+which adds compliance to the mechanical constraints
+
+226
+00:14:25,065 --> 00:14:26,465
+and makes the system invertible.
+
+227
+00:14:27,546 --> 00:14:29,126
+It may have large dimensions.
+
+228
+00:14:29,766 --> 00:14:31,847
+We deal with this by using sparse methods.
+
+229
+00:14:32,707 --> 00:14:35,248
+Still, it may have large dents of matrices,
+
+230
+00:14:35,528 --> 00:14:37,049
+where sparse methods won't help us.
+
+231
+00:14:37,969 --> 00:14:40,150
+We can increase sparsity by splitting bodies.
+
+232
+00:14:41,950 --> 00:14:43,550
+So how does regularization work?
+
+233
+00:14:44,511 --> 00:14:46,811
+H is symmetric, positive, semi-definite,
+
+234
+00:14:47,032 --> 00:14:49,412
+which means the eigenvalues are non-negative.
+
+235
+00:14:50,353 --> 00:14:53,174
+This means that adding anything positive to the diagonal
+
+236
+00:14:53,514 --> 00:14:55,154
+makes the matrix invertible.
+
+237
+00:14:56,235 --> 00:14:58,996
+Of course, adding absolute values is scale dependent,
+
+238
+00:14:59,796 --> 00:15:03,037
+and it's much better to add epsilon times the diagonal.
+
+239
+00:15:03,978 --> 00:15:05,538
+Adding such a regularization term
+
+240
+00:15:05,798 --> 00:15:07,279
+changes the mechanical system.
+
+241
+00:15:07,859 --> 00:15:09,600
+It makes the constraints compliant.
+
+242
+00:15:11,237 --> 00:15:14,880
+Traditionally, other PGS engines also use compliance
+
+243
+00:15:14,940 --> 00:15:16,361
+to stabilize the solution.
+
+244
+00:15:17,242 --> 00:15:19,644
+Using PGS on the regularized system
+
+245
+00:15:19,704 --> 00:15:23,026
+is equivalent to using PGS on the original system,
+
+246
+00:15:23,527 --> 00:15:26,689
+but damping the solutions after each raw update.
+
+247
+00:15:27,950 --> 00:15:30,772
+In bullet or ODE libraries, this term
+
+248
+00:15:30,812 --> 00:15:33,715
+is called CFM or Constraint Force Mixing.
+
+249
+00:15:36,377 --> 00:15:39,259
+Let's now look at the sparsity of constraint matrices.
+
+250
+00:15:40,141 --> 00:15:44,625
+For a mechanism like this one, which has a scissor lift on top of a platform with wheels,
+
+251
+00:15:45,265 --> 00:15:47,947
+the constraint matrix consists mostly of zeros.
+
+252
+00:15:52,311 --> 00:15:55,353
+This model has 50 constraints, mostly hinges.
+
+253
+00:15:55,954 --> 00:16:00,017
+The dimension of the matrix is 246, and its density is 12%.
+
+254
+00:16:00,157 --> 00:16:07,623
+Sparse Cholesky LDL processes this matrix in about 90,000 floating-point operations.
+
+255
+00:16:08,643 --> 00:16:11,425
+which on my machine takes about 70 microseconds.
+
+256
+00:16:12,366 --> 00:16:14,148
+So what is Cholesky decomposition?
+
+257
+00:16:15,229 --> 00:16:18,652
+It says that any symmetric positive definite matrix A
+
+258
+00:16:19,112 --> 00:16:23,736
+can be decomposed into a product L times D times L transpose,
+
+259
+00:16:24,337 --> 00:16:26,859
+where L is a lower triangular matrix
+
+260
+00:16:26,899 --> 00:16:30,322
+with ones on the diagonal, and D is a diagonal matrix.
+
+261
+00:16:32,298 --> 00:16:35,681
+This is useful because both L-inverse and D-inverse
+
+262
+00:16:35,741 --> 00:16:39,343
+can be efficiently evaluated as operators on a vector.
+
+263
+00:16:42,665 --> 00:16:46,087
+So for any vector V, A-inverse times V
+
+264
+00:16:46,187 --> 00:16:48,629
+can now be evaluated by applying the inverse
+
+265
+00:16:48,669 --> 00:16:50,170
+of the decomposition factors.
+
+266
+00:16:51,857 --> 00:16:59,639
+Computing the L inverse and its transpose times a vector can be done using a method called back substitution, which is very efficient.
+
+267
+00:17:00,179 --> 00:17:04,300
+And inverting D is trivial as it involves only inverting scalars.
+
+268
+00:17:04,320 --> 00:17:09,822
+Now suppose that A has a block structure coming from a partition of the rows.
+
+269
+00:17:11,863 --> 00:17:19,945
+And it has an LDL decomposition where D is a block diagonal and L is a lower triangular matrix with identity blocks on the diagonal.
+
+270
+00:17:20,928 --> 00:17:23,830
+And both these matrices inherit the block structure from A.
+
+271
+00:17:25,671 --> 00:17:29,374
+But why are we using a block LDL instead of simple scalar version?
+
+272
+00:17:30,094 --> 00:17:30,875
+Its performance.
+
+273
+00:17:31,475 --> 00:17:34,658
+Block decomposition is much faster than scalar decomposition.
+
+274
+00:17:35,098 --> 00:17:38,721
+A sparse block matrix requires less indexation than a scalar one.
+
+275
+00:17:39,761 --> 00:17:43,524
+Next, we will look into details of an algorithm that produces such decomposition.
+
+276
+00:17:44,898 --> 00:17:48,501
+There are at least two algorithms that produce LDL decompositions,
+
+277
+00:17:49,061 --> 00:17:51,964
+the Gaussian elimination and the Doolittle algorithm.
+
+278
+00:17:52,985 --> 00:17:56,147
+We'll use only Gaussian elimination in this presentation.
+
+279
+00:17:58,169 --> 00:18:00,651
+At the core of the block Gaussian elimination,
+
+280
+00:18:00,711 --> 00:18:03,033
+there is an operation called the Schur complement.
+
+281
+00:18:03,874 --> 00:18:05,675
+There we have a symmetric block matrix
+
+282
+00:18:06,116 --> 00:18:10,159
+where the blocks are denoted by N, E, E transpose, and S.
+
+283
+00:18:10,880 --> 00:18:13,162
+We apply the following operation to this matrix.
+
+284
+00:18:14,007 --> 00:18:19,069
+We multiply the top row by e times n inverse and subtract from the bottom row.
+
+285
+00:18:19,790 --> 00:18:24,692
+As a result, we get a matrix where the bottom left block has become zero, has been eliminated.
+
+286
+00:18:25,672 --> 00:18:35,977
+Then we multiply the first column by n inverse times e transpose and subtract from the second column, resulting in the top right block being eliminated.
+
+287
+00:18:37,632 --> 00:18:40,695
+So what we have done is to decompose the block matrix
+
+288
+00:18:40,775 --> 00:18:43,317
+as a product of a lower triangular matrix,
+
+289
+00:18:43,778 --> 00:18:47,401
+a block diagonal matrix, and an upper triangular matrix,
+
+290
+00:18:47,721 --> 00:18:49,923
+which is the transpose of the lower triangular one.
+
+291
+00:18:50,524 --> 00:18:53,787
+And so we have obtained a block LDL decomposition.
+
+292
+00:18:54,948 --> 00:18:58,511
+The algorithm that produces this block LDL decomposition
+
+293
+00:18:58,711 --> 00:19:00,573
+is the block Gaussian elimination,
+
+294
+00:19:01,033 --> 00:19:03,095
+which is just a recursive computation
+
+295
+00:19:03,135 --> 00:19:04,276
+of the Shur complement.
+
+296
+00:19:06,485 --> 00:19:07,946
+For our constraint matrix,
+
+297
+00:19:08,106 --> 00:19:10,486
+which is a symmetric matrix with a block structure,
+
+298
+00:19:11,066 --> 00:19:14,307
+we'll group blocks even further to simplify the notation.
+
+299
+00:19:15,027 --> 00:19:18,868
+We'll call this lower left column E star comma zero,
+
+300
+00:19:20,069 --> 00:19:22,509
+and the bottom right block, we'll call it S zero.
+
+301
+00:19:23,469 --> 00:19:26,490
+So we have this two-by-two block representation of the matrix.
+
+302
+00:19:27,110 --> 00:19:28,611
+And computing the Schur complement
+
+303
+00:19:28,691 --> 00:19:30,151
+produces this decomposition.
+
+304
+00:19:32,492 --> 00:19:34,692
+We now apply recursively the Schur complement.
+
+305
+00:19:35,398 --> 00:19:38,580
+Here we have a matrix that has already been partially eliminated.
+
+306
+00:19:39,320 --> 00:19:42,362
+So we already have some blocks on the top left of the diagonal,
+
+307
+00:19:42,942 --> 00:19:44,663
+and underneath and to the right,
+
+308
+00:19:44,903 --> 00:19:46,644
+the elements have already been eliminated.
+
+309
+00:19:48,185 --> 00:19:50,346
+And this is the sub-matrix we will be working on.
+
+310
+00:19:50,966 --> 00:19:54,528
+It is the SI minus 1 matrix from the previous iteration.
+
+311
+00:19:56,009 --> 00:19:59,011
+Applying the Schur complement, we get this decomposition,
+
+312
+00:19:59,571 --> 00:20:01,932
+where the matrices on the left and right
+
+313
+00:20:02,452 --> 00:20:04,353
+are called elementary matrices.
+
+314
+00:20:05,928 --> 00:20:09,411
+The algorithm underlying the Shur complement is divided in three steps.
+
+315
+00:20:10,171 --> 00:20:12,332
+Number one, invert the node matrix N.
+
+316
+00:20:13,053 --> 00:20:15,595
+Number two, compute the elementary matrix L.
+
+317
+00:20:16,155 --> 00:20:18,897
+And number three, reduce the S matrix.
+
+318
+00:20:22,299 --> 00:20:25,701
+After the last iteration, we will be left with a block diagonal matrix
+
+319
+00:20:25,841 --> 00:20:27,622
+and the lower triangular matrix L.
+
+320
+00:20:28,002 --> 00:20:31,725
+That's the product of elementary matrices in the order they were produced.
+
+321
+00:20:32,959 --> 00:20:36,500
+And these are the factors of the LDL decomposition of our matrix.
+
+322
+00:20:39,701 --> 00:20:42,582
+We can now apply the inverse of H to a vector V.
+
+323
+00:20:43,322 --> 00:20:44,843
+And this is equivalent to applying
+
+324
+00:20:44,883 --> 00:20:47,604
+the inverse of the factors of the LDL decomposition
+
+325
+00:20:48,064 --> 00:20:49,164
+in the opposite order.
+
+326
+00:20:51,085 --> 00:20:53,326
+The inverse of the matrix L can be
+
+327
+00:20:53,366 --> 00:20:56,947
+computed using its decomposition into the elementary matrices
+
+328
+00:20:57,327 --> 00:20:59,368
+that we obtained during the Gaussian elimination.
+
+329
+00:21:00,290 --> 00:21:03,453
+The inverse of each elementary matrix is simple to compute.
+
+330
+00:21:03,953 --> 00:21:06,155
+Just negate the elements below the diagonal.
+
+331
+00:21:08,117 --> 00:21:10,398
+And don't evaluate the product of these matrices.
+
+332
+00:21:10,679 --> 00:21:13,161
+Use this decomposition while applying to a vector.
+
+333
+00:21:14,682 --> 00:21:18,725
+And finally, the inverse of D is the block diagonal matrix
+
+334
+00:21:18,785 --> 00:21:22,308
+consisting of the inverses of the node matrices and I's.
+
+335
+00:21:22,949 --> 00:21:24,470
+But these have already been computed
+
+336
+00:21:24,530 --> 00:21:25,911
+during the Gaussian elimination.
+
+337
+00:21:28,306 --> 00:21:33,609
+Let's turn our attention to the constraint matrix of equality constraints, H.
+
+338
+00:21:34,770 --> 00:21:38,152
+The block structure comes from partitioning the rows by constraints.
+
+339
+00:21:40,313 --> 00:21:44,335
+So the diagonal blocks and i's correspond to individual constraints.
+
+340
+00:21:45,056 --> 00:21:49,938
+And off-diagonal blocks, eij's, correspond to the interaction between two constraints,
+
+341
+00:21:50,359 --> 00:21:51,940
+if they have a rigid body in common.
+
+342
+00:21:53,617 --> 00:21:59,342
+Usually a lot of those EIJs are zero, because not all constraints have rigid bodies in common.
+
+343
+00:22:01,004 --> 00:22:05,848
+Can we use these zeros to help us reduce the number of operations during the Gaussian elimination?
+
+344
+00:22:08,410 --> 00:22:11,193
+Yes, absolutely this is possible, and here is how.
+
+345
+00:22:11,974 --> 00:22:15,477
+We need to establish a relationship between sparse matrices and graphs.
+
+346
+00:22:16,383 --> 00:22:19,305
+translate the Gaussian elimination to a process on graphs,
+
+347
+00:22:19,966 --> 00:22:22,467
+and pack the sparse matrix data in memory
+
+348
+00:22:22,728 --> 00:22:25,810
+in such a way that it optimizes the block Gaussian elimination.
+
+349
+00:22:28,252 --> 00:22:29,933
+Let's dive into some graph theory.
+
+350
+00:22:31,194 --> 00:22:32,655
+First, we have the body graph.
+
+351
+00:22:33,356 --> 00:22:35,697
+It's the graph where the nodes are rigid bodies
+
+352
+00:22:35,858 --> 00:22:37,659
+and edges are constraints between them.
+
+353
+00:22:39,260 --> 00:22:41,762
+The dual of the body graph is the constraint graph.
+
+354
+00:22:42,525 --> 00:22:44,967
+It's also called the edge graph of the body graph,
+
+355
+00:22:45,267 --> 00:22:46,948
+because its nodes are constraints,
+
+356
+00:22:47,209 --> 00:22:49,810
+and edges are common bodies between constraints.
+
+357
+00:22:51,331 --> 00:22:53,273
+As you can imagine, the constraint graph
+
+358
+00:22:53,333 --> 00:22:55,014
+is related to the constraint matrix.
+
+359
+00:22:56,295 --> 00:22:58,176
+What this means is that nodes correspond
+
+360
+00:22:58,216 --> 00:23:00,238
+to diagonal blocks, the node matrices,
+
+361
+00:23:00,438 --> 00:23:03,400
+and edges correspond to the off-diagonal blocks, the edge
+
+362
+00:23:03,460 --> 00:23:03,920
+matrices.
+
+363
+00:23:05,081 --> 00:23:08,243
+And Gaussian elimination has an equivalent operational graph
+
+364
+00:23:08,683 --> 00:23:09,884
+called graph elimination.
+
+365
+00:23:10,304 --> 00:23:11,425
+We'll dive into this later.
+
+366
+00:23:13,144 --> 00:23:16,325
+Here's a simple example of a dune buggy with its body graph.
+
+367
+00:23:17,446 --> 00:23:19,666
+The nodes correspond to the following rigid bodies,
+
+368
+00:23:20,407 --> 00:23:21,967
+the main body, the wheels,
+
+369
+00:23:22,527 --> 00:23:24,168
+the knuckles that join the front wheels
+
+370
+00:23:24,208 --> 00:23:25,789
+to the body in the steering mechanism,
+
+371
+00:23:26,429 --> 00:23:27,489
+and the steering rack.
+
+372
+00:23:29,430 --> 00:23:31,171
+Taking the edge graph of the body graph,
+
+373
+00:23:31,651 --> 00:23:32,971
+we get the constraint graph.
+
+374
+00:23:33,351 --> 00:23:36,272
+This graph represents the structure of the constraint matrix
+
+375
+00:23:36,352 --> 00:23:38,773
+of the equality constraints in this buggy.
+
+376
+00:23:40,049 --> 00:23:43,132
+Let's turn our attention to the way the Gaussian elimination
+
+377
+00:23:43,192 --> 00:23:45,233
+translates onto the constraint graph.
+
+378
+00:23:46,234 --> 00:23:48,956
+Let's call the node ni corresponding to the node
+
+379
+00:23:48,996 --> 00:23:50,317
+matrix the pivot.
+
+380
+00:23:50,958 --> 00:23:54,541
+The basic operation of taking the sure complement at ni
+
+381
+00:23:54,661 --> 00:23:56,122
+does the following to the graph.
+
+382
+00:23:56,763 --> 00:23:59,945
+One, it adds edges between the neighbors of the pivot.
+
+383
+00:24:00,666 --> 00:24:03,288
+And two, it eliminates all edges with the pivot.
+
+384
+00:24:04,809 --> 00:24:07,992
+On this example graph, let's select node 0 as the pivot
+
+385
+00:24:08,092 --> 00:24:08,872
+and eliminate it.
+
+386
+00:24:09,685 --> 00:24:13,087
+This produces the graph where all neighbors of node 0
+
+387
+00:24:13,227 --> 00:24:17,369
+are joined by edges, and edges with node 0 are removed.
+
+388
+00:24:18,910 --> 00:24:22,071
+Note that this process creates four new edges,
+
+389
+00:24:22,371 --> 00:24:26,194
+meaning this fills in four 0 blocks in the sparse matrix
+
+390
+00:24:26,234 --> 00:24:27,394
+with non-zero values.
+
+391
+00:24:28,715 --> 00:24:29,535
+There is a better way.
+
+392
+00:24:29,815 --> 00:24:31,656
+If we permit our matrix in such a way
+
+393
+00:24:31,696 --> 00:24:34,938
+that the rows corresponding to node 1 are at the top,
+
+394
+00:24:35,659 --> 00:24:37,279
+we can eliminate node 1 instead.
+
+395
+00:24:38,315 --> 00:24:39,976
+Doing this produces this graph,
+
+396
+00:24:40,377 --> 00:24:42,378
+where no new edges have been created,
+
+397
+00:24:42,798 --> 00:24:45,180
+and therefore no zero elements of this sparse matrix
+
+398
+00:24:45,220 --> 00:24:46,040
+have been filled in.
+
+399
+00:24:46,841 --> 00:24:49,382
+This is much better than eliminating node zero.
+
+400
+00:24:52,224 --> 00:24:54,325
+So now on the resulting graph,
+
+401
+00:24:54,385 --> 00:24:56,187
+let's find another node to eliminate.
+
+402
+00:24:56,987 --> 00:24:58,248
+Let's try node zero.
+
+403
+00:24:59,189 --> 00:25:02,811
+This creates a new edge, but if we eliminate node three,
+
+404
+00:25:03,543 --> 00:25:05,364
+There will be no new edges created,
+
+405
+00:25:05,944 --> 00:25:08,446
+and the sparsity of the matrix will not increase.
+
+406
+00:25:11,027 --> 00:25:14,448
+Continuing with this algorithm, we produce an elimination order.
+
+407
+00:25:15,108 --> 00:25:16,669
+If it doesn't produce new edges,
+
+408
+00:25:16,849 --> 00:25:18,690
+it's called a perfect elimination order.
+
+409
+00:25:19,450 --> 00:25:22,011
+In this example, we have a perfect elimination order,
+
+410
+00:25:22,231 --> 00:25:23,632
+and it's 13024.
+
+411
+00:25:27,413 --> 00:25:30,175
+But not all graphs have a perfect elimination order.
+
+412
+00:25:32,196 --> 00:25:38,198
+The objective of the elimination game is to find an order that minimizes the number of new edges created.
+
+413
+00:25:39,498 --> 00:25:44,320
+This is an NP-complete problem, but there are some very good heuristics.
+
+414
+00:25:46,680 --> 00:25:53,323
+Here are two heuristics. The first one, called minimum degree algorithm, is a very popular method as it is very fast.
+
+415
+00:25:54,243 --> 00:26:00,085
+But it generates mediocre ordering. It's mostly used for very large problems with millions of nodes.
+
+416
+00:26:02,117 --> 00:26:07,601
+The second one, minimum edge creation algorithm, is more expensive but in general produces
+
+417
+00:26:07,681 --> 00:26:08,642
+much better ordering.
+
+418
+00:26:09,682 --> 00:26:14,646
+This is our invention and is more appropriate for medium-sized problems where the graph
+
+419
+00:26:14,686 --> 00:26:16,448
+does not exceed hundreds of nodes.
+
+420
+00:26:18,049 --> 00:26:22,632
+Also, we can afford running a more expensive algorithm because we only need to compute
+
+421
+00:26:22,672 --> 00:26:26,836
+this once, per mechanism, and cache the results to reuse every frame.
+
+422
+00:26:29,376 --> 00:26:32,117
+The minimum edge creation algorithm is very simple.
+
+423
+00:26:32,678 --> 00:26:34,739
+At each step, it eliminates the pivot
+
+424
+00:26:35,259 --> 00:26:37,500
+that will create the minimum number of new edges.
+
+425
+00:26:37,840 --> 00:26:39,321
+That is the pivot whose neighbors
+
+426
+00:26:39,681 --> 00:26:41,862
+have the smallest number of missing connections
+
+427
+00:26:41,922 --> 00:26:42,722
+between themselves.
+
+428
+00:26:43,903 --> 00:26:45,864
+It does require an expensive search step,
+
+429
+00:26:46,224 --> 00:26:49,445
+but it is affordable on graphs of few hundreds of nodes.
+
+430
+00:26:52,547 --> 00:26:55,468
+By the end, the graph elimination creates two lists.
+
+431
+00:26:56,879 --> 00:26:59,461
+an ordered sequence of nodes, the pivot sequence,
+
+432
+00:27:00,782 --> 00:27:03,363
+and for each pivot, a sequence of eliminated edges,
+
+433
+00:27:03,824 --> 00:27:04,844
+the edge sequences.
+
+434
+00:27:06,325 --> 00:27:08,227
+The elements of the edge sequences
+
+435
+00:27:08,287 --> 00:27:09,768
+should be in the pivot order.
+
+436
+00:27:13,831 --> 00:27:16,092
+Before proceeding, let's enjoy this animation
+
+437
+00:27:16,152 --> 00:27:18,894
+of the elimination of the scissor lift constraint graph.
+
+438
+00:27:24,841 --> 00:27:28,724
+With a graph elimination in hands, let's go back to our sparse matrix.
+
+439
+00:27:29,885 --> 00:27:34,148
+Since it is symmetric, we only store the blocks on and below the diagonal.
+
+440
+00:27:35,569 --> 00:27:39,432
+The node matrices on the diagonal are in the pivot sequence order,
+
+441
+00:27:39,972 --> 00:27:42,594
+and the edge matrices appear below the diagonal,
+
+442
+00:27:42,995 --> 00:27:44,576
+also in the edge sequence order.
+
+443
+00:27:46,257 --> 00:27:50,480
+The light blue blocks are those that were not present in the original matrix,
+
+444
+00:27:50,961 --> 00:27:52,762
+but were filled in by the elimination.
+
+445
+00:27:53,653 --> 00:27:58,536
+These are initially zero, but will acquire non-zero values during the process of decomposition.
+
+446
+00:28:00,517 --> 00:28:08,021
+The colored blocks represent all blocks that we'll need for Gaussian elimination, and we can pack these contiguously in memory.
+
+447
+00:28:09,381 --> 00:28:15,645
+We store the blocks in column major order in memory, but we store the elements of each block in row major order.
+
+448
+00:28:16,365 --> 00:28:19,687
+This memory layout is very important for efficient processing.
+
+449
+00:28:23,667 --> 00:28:27,791
+Now let's look in details at the step of Gaussian elimination on the sparse matrix.
+
+450
+00:28:30,393 --> 00:28:36,598
+We have the pivot matrix that we LDL decompose in place using dense LDL,
+
+451
+00:28:36,778 --> 00:28:39,040
+which is always faster than using the Cramer's rule.
+
+452
+00:28:41,402 --> 00:28:44,525
+We compute the L matrices by multiplying the edge matrices
+
+453
+00:28:44,585 --> 00:28:47,928
+below the pivot matrix by N zero inverse.
+
+454
+00:28:48,769 --> 00:28:51,331
+We store the L matrices in a temporary buffer.
+
+455
+00:28:53,617 --> 00:28:55,659
+This process can be done very efficiently.
+
+456
+00:28:56,539 --> 00:28:58,701
+The way the edge matrices are packed in memory,
+
+457
+00:28:59,321 --> 00:29:01,703
+they can be interpreted as one block matrix.
+
+458
+00:29:02,303 --> 00:29:04,384
+And multiplying by the inverse of the pivot,
+
+459
+00:29:05,005 --> 00:29:07,426
+we don't need to keep track of the block structure.
+
+460
+00:29:08,527 --> 00:29:09,307
+Next, we reduce.
+
+461
+00:29:09,608 --> 00:29:11,829
+This is the most expensive part of the process,
+
+462
+00:29:12,209 --> 00:29:14,491
+as it costs proportionally to the square of the height
+
+463
+00:29:14,691 --> 00:29:15,411
+of the edge column.
+
+464
+00:29:16,380 --> 00:29:20,682
+Again, we don't need to keep track of the block structure of both E and L matrices,
+
+465
+00:29:21,243 --> 00:29:25,765
+but we do need to have an indexation of the target location in S0.
+
+466
+00:29:27,306 --> 00:29:33,188
+Then finally, we copy the L matrices from the temporary buffer over the age matrices that we
+
+467
+00:29:33,228 --> 00:29:42,393
+will no longer use. And we repeat this process with N1. LDL decompose N1, compute L matrices,
+
+468
+00:29:43,293 --> 00:29:43,673
+reduce,
+
+469
+00:29:44,657 --> 00:29:46,577
+and replace E with L matrices.
+
+470
+00:29:49,178 --> 00:29:51,318
+After repeating this process on all the pivots,
+
+471
+00:29:51,858 --> 00:29:54,399
+we are left with the block LDL decomposition,
+
+472
+00:29:54,999 --> 00:29:57,619
+with the L matrices replacing the edge matrices,
+
+473
+00:29:58,119 --> 00:30:00,940
+and the D matrices replacing the node matrices.
+
+474
+00:30:01,960 --> 00:30:05,701
+And these node matrices are already LDL decomposed,
+
+475
+00:30:06,261 --> 00:30:08,482
+so it's easy to compute their inverse operator.
+
+476
+00:30:09,682 --> 00:30:11,722
+We have one key ingredient still missing,
+
+477
+00:30:12,182 --> 00:30:14,003
+the indexation of the reduction step.
+
+478
+00:30:16,510 --> 00:30:21,414
+The results of the reduction step, which consists of multiplying the edge matrices with the L matrices,
+
+479
+00:30:22,015 --> 00:30:24,697
+are being scattered over the rest of the sparse matrix.
+
+480
+00:30:25,117 --> 00:30:26,798
+The scattering needs to be indexed.
+
+481
+00:30:28,399 --> 00:30:33,684
+This indexation is pre-computed for pairs of indices into rows of E and L,
+
+482
+00:30:34,344 --> 00:30:38,227
+and it is called the reduction scattering indexation, RSI.
+
+483
+00:30:38,988 --> 00:30:44,732
+It can use either pointers or indices if both node and edge matrices live in the same workspace.
+
+484
+00:30:46,531 --> 00:30:57,736
+This array can become quite large and using indices rather than pointers is better, because it requires less memory, 4 or 2 bytes versus 8 bytes for pointers on 64-bit CPUs.
+
+485
+00:31:00,638 --> 00:31:05,100
+So why is the performance of the block LDL better than the regular LDL?
+
+486
+00:31:06,120 --> 00:31:13,564
+Let D be the width of an edge column, which is the degree of the corresponding constraint or the pivot, and H be its height.
+
+487
+00:31:15,890 --> 00:31:18,271
+We assume that H is bigger than D,
+
+488
+00:31:18,871 --> 00:31:21,732
+which is true most of the time for complex mechanisms.
+
+489
+00:31:24,113 --> 00:31:26,453
+Then we estimate the number of operations
+
+490
+00:31:26,994 --> 00:31:28,954
+for the three phases of the Shur complement.
+
+491
+00:31:30,715 --> 00:31:32,415
+And we estimate the memory access.
+
+492
+00:31:34,396 --> 00:31:35,696
+These are the dominant terms.
+
+493
+00:31:37,597 --> 00:31:40,918
+Now, modern processors are good at floating point operations
+
+494
+00:31:41,598 --> 00:31:43,498
+but are bad at memory access.
+
+495
+00:31:44,486 --> 00:31:47,968
+And if we compute the operation count over the memory access,
+
+496
+00:31:48,268 --> 00:31:48,909
+we get d.
+
+497
+00:31:50,930 --> 00:31:54,112
+As a consequence, the best, most efficient results
+
+498
+00:31:54,172 --> 00:31:56,033
+are obtained with larger d as long
+
+499
+00:31:56,473 --> 00:31:57,834
+as it stays smaller than h.
+
+500
+00:32:03,097 --> 00:32:05,919
+Let's look at the implementation of the reduction step, which
+
+501
+00:32:05,979 --> 00:32:07,400
+represents about 70% of the processing time.
+
+502
+00:32:09,812 --> 00:32:10,632
+It's fairly simple.
+
+503
+00:32:11,133 --> 00:32:14,234
+We loop over the row indices of both matrices
+
+504
+00:32:14,814 --> 00:32:16,214
+and compute the dot products.
+
+505
+00:32:17,675 --> 00:32:20,375
+The result is subtracted from the locations indexed
+
+506
+00:32:20,415 --> 00:32:21,416
+by the RSI.
+
+507
+00:32:23,737 --> 00:32:25,757
+Note that the degree parameter, which
+
+508
+00:32:25,797 --> 00:32:27,438
+is the degree of the pivot constraint,
+
+509
+00:32:27,778 --> 00:32:29,378
+is passed as a template argument.
+
+510
+00:32:30,819 --> 00:32:33,400
+This allows unrolling the dot product underlying
+
+511
+00:32:33,440 --> 00:32:37,141
+the matrix multiplication, which has very large impact
+
+512
+00:32:37,181 --> 00:32:37,801
+on performance.
+
+513
+00:32:41,112 --> 00:32:44,114
+Now here is the implementation of a single pivot elimination.
+
+514
+00:32:44,554 --> 00:32:45,494
+We have the three steps.
+
+515
+00:32:46,375 --> 00:32:48,496
+The LDD decomposition of the node matrix,
+
+516
+00:32:48,696 --> 00:32:50,397
+which takes about 5% of the time.
+
+517
+00:32:51,357 --> 00:32:55,139
+The computation of L, which takes about 25% of time
+
+518
+00:32:55,399 --> 00:32:57,480
+and should also be on roll over the degree.
+
+519
+00:32:58,921 --> 00:32:59,901
+And the reduction step.
+
+520
+00:33:02,243 --> 00:33:03,943
+And here is how you invoke this function,
+
+521
+00:33:04,164 --> 00:33:06,185
+by using a sweet statement on the degree
+
+522
+00:33:06,505 --> 00:33:07,625
+or dimension of the pivot.
+
+523
+00:33:09,246 --> 00:33:17,792
+The switch should handle all degrees, although those up to 6 are the most common, and should be allowed to enroll their internal computations for performance.
+
+524
+00:33:20,573 --> 00:33:26,177
+The last topic we need to cover is about large dense submatrices where sparse methods can't help.
+
+525
+00:33:27,378 --> 00:33:34,002
+Let's look at this example of a tracked vehicle. This model has three components, the main body and the two tracks.
+
+526
+00:33:37,424 --> 00:33:41,085
+The track consists of 40 plates connected with hinge constraints.
+
+527
+00:33:41,925 --> 00:33:46,507
+The constraint matrix has dimension 200 with 7.5% density.
+
+528
+00:33:47,327 --> 00:33:50,148
+Its non-zero elements are mostly very close to the diagonal.
+
+529
+00:33:50,828 --> 00:33:53,509
+Such a system is easily decomposed using LDL.
+
+530
+00:33:54,729 --> 00:33:58,991
+Sparse LDL processes this matrix in 43,000 operations.
+
+531
+00:33:59,851 --> 00:34:01,851
+In fact, it has linear complexity
+
+532
+00:34:02,172 --> 00:34:04,032
+in the number of constraints in the track.
+
+533
+00:34:06,692 --> 00:34:10,233
+On the other hand, the body of the vehicle has a totally different constraint matrix.
+
+534
+00:34:11,094 --> 00:34:14,656
+It has only 20 constraints, which are mostly hinges, and its dimension is 88.
+
+535
+00:34:15,916 --> 00:34:18,758
+But the density of the constraint matrix is 100%.
+
+536
+00:34:19,518 --> 00:34:22,380
+It takes 250,000 operations to decompose.
+
+537
+00:34:22,980 --> 00:34:25,682
+The complexity here is n³ in the number of wheels.
+
+538
+00:34:26,662 --> 00:34:30,084
+This is a problem to which we have a solution called body shattering.
+
+539
+00:34:34,914 --> 00:34:42,237
+Body shattering will transform the system into a system of higher dimension, 142, but with much lower density of 17%.
+
+540
+00:34:42,518 --> 00:34:47,720
+The LDL can decompose this in only 35,000 operations.
+
+541
+00:34:48,420 --> 00:34:51,882
+It turns out that this number of operations is linear in number of wheels.
+
+542
+00:34:52,402 --> 00:34:55,503
+We went from n-cube complexity to linear complexity.
+
+543
+00:34:57,825 --> 00:35:00,886
+And this is how the constraint matrix looks like after shattering.
+
+544
+00:35:04,111 --> 00:35:09,252
+So dense submatrices appear where we have a rigid body with many constraints, like the
+
+545
+00:35:09,292 --> 00:35:10,112
+body of the tank.
+
+546
+00:35:11,633 --> 00:35:14,273
+Here we introduce a method called body shattering.
+
+547
+00:35:15,354 --> 00:35:19,815
+It finds bodies with many constraints where the sum of the degrees should be more than
+
+548
+00:35:20,995 --> 00:35:26,556
+20, splits the rigid body into smaller shards, joins these shards using rigid joints and
+
+549
+00:35:26,697 --> 00:35:29,277
+equally distributes the constraints over these shards.
+
+550
+00:35:33,072 --> 00:35:37,756
+Suppose this is the body graph of a mechanism with a central body overloaded with constraints,
+
+551
+00:35:38,536 --> 00:35:40,458
+and this is the corresponding constraint graph.
+
+552
+00:35:41,038 --> 00:35:45,382
+We can see that it is a complete graph. The associated sparse matrix is dense.
+
+553
+00:35:46,743 --> 00:35:53,589
+We get this rigid body graph by shattering the central body into three pieces and joining them using rigid joints.
+
+554
+00:35:54,716 --> 00:36:03,522
+The corresponding constraint graph has more nodes, but less edges, and constraint metrics is sparser and more efficient to LDL decompose.
+
+555
+00:36:08,065 --> 00:36:13,970
+Since we're now near the conclusion of this talk, let's put all the ingredients of the LDL-PGS solver together.
+
+556
+00:36:15,219 --> 00:36:21,004
+For every mechanism, we have two phases, the symbolic phase that needs to be executed only once,
+
+557
+00:36:21,824 --> 00:36:24,647
+and the numeric phase that runs every physics frame update.
+
+558
+00:36:25,948 --> 00:36:29,251
+The symbolic phase takes as an input the structure of the mechanism,
+
+559
+00:36:29,691 --> 00:36:32,353
+which is the connectivity data between bodies and constraints,
+
+560
+00:36:32,693 --> 00:36:36,336
+and produces the elimination sequence, or DLDL program.
+
+561
+00:36:38,102 --> 00:36:40,942
+The numeric phase takes the current state of the mechanism
+
+562
+00:36:41,302 --> 00:36:43,583
+and executes the PGS solver in parallel
+
+563
+00:36:43,823 --> 00:36:46,344
+with the LDL decomposition of the constraint matrix.
+
+564
+00:36:47,144 --> 00:36:48,764
+Then after joining the two threads,
+
+565
+00:36:49,284 --> 00:36:51,665
+executes one step of the block Gauss-Seidel
+
+566
+00:36:51,765 --> 00:36:53,765
+using the LDL decomposed matrix
+
+567
+00:36:54,106 --> 00:36:55,926
+to correct the constraint impulses.
+
+568
+00:36:58,547 --> 00:37:00,867
+Here's a profile capture of a solver update.
+
+569
+00:37:01,367 --> 00:37:03,588
+We can see the PGS solver running here,
+
+570
+00:37:04,948 --> 00:37:05,528
+and in parallel,
+
+571
+00:37:06,430 --> 00:37:09,475
+DL-DL decomposition of the holonomic constraint matrix.
+
+572
+00:37:10,917 --> 00:37:12,560
+Finally, the decomposed matrix is
+
+573
+00:37:12,600 --> 00:37:13,942
+applied to the impulses here.
+
+574
+00:37:17,447 --> 00:37:17,867
+This is it.
+
+575
+00:37:18,148 --> 00:37:20,571
+I hope this talk will help you build a great physics engine.
+
+576
+00:37:21,172 --> 00:37:21,833
+Thanks for watching.
+

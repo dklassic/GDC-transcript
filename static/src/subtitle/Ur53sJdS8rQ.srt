@@ -1,0 +1,4008 @@
+1
+00:00:05,762 --> 00:00:07,564
+Hi, and welcome to Zen of Streaming,
+
+2
+00:00:07,945 --> 00:00:09,266
+Building and Loading the Ghost of Tsushima.
+
+3
+00:00:10,228 --> 00:00:11,209
+So I'm Adrian Bentley,
+
+4
+00:00:11,229 --> 00:00:12,972
+I'm the coding team lead at Sucker Punch Productions.
+
+5
+00:00:13,332 --> 00:00:14,894
+I've been working there 17 years,
+
+6
+00:00:15,575 --> 00:00:17,678
+and I've started on Sly 3,
+
+7
+00:00:17,778 --> 00:00:19,280
+worked all the way through Infamous series,
+
+8
+00:00:19,500 --> 00:00:22,124
+and most recently published Ghost of Tsushima,
+
+9
+00:00:22,324 --> 00:00:23,426
+which is what we're gonna talk about today.
+
+10
+00:00:24,489 --> 00:00:29,052
+So first we'll talk about some initial sketching process, which I'm going to call napkin math,
+
+11
+00:00:29,532 --> 00:00:32,415
+and then talking about some of the tools and optimization stuff we relied on,
+
+12
+00:00:32,435 --> 00:00:35,897
+a rendering overview, a deeper dive into our fine-grained streaming system,
+
+13
+00:00:36,378 --> 00:00:38,940
+and a little bit of tips on loading and kind of a conclusion.
+
+14
+00:00:40,001 --> 00:00:40,141
+So
+
+15
+00:00:41,205 --> 00:00:45,068
+I also encourage you to check out some other GEC talks I'm going to reference in this presentation.
+
+16
+00:00:45,668 --> 00:00:48,950
+There's Bill Rowe's presentation on particle and cloth simulation,
+
+17
+00:00:50,351 --> 00:00:55,775
+used to sort of keep our world pretty lively. Matt P is going to give a presentation about
+
+18
+00:00:56,135 --> 00:00:59,658
+samurai landscapes, the tools and procedural systems we use to build the game.
+
+19
+00:01:01,160 --> 00:01:03,963
+Eric W is going to give a presentation about procedural grass,
+
+20
+00:01:03,983 --> 00:01:07,025
+which is a really big part of the mood and the look of the game.
+
+21
+00:01:07,506 --> 00:01:10,248
+And then later this year, Jasmine's going to give a presentation at SIGGRAPH
+
+22
+00:01:10,448 --> 00:01:11,409
+on lighting and rendering.
+
+23
+00:01:12,930 --> 00:01:16,213
+So here's a video, just for context, to show you what Ghost is like.
+
+24
+00:01:16,233 --> 00:01:23,880
+I swore to protect this island with my own life.
+
+25
+00:01:23,980 --> 00:01:27,143
+Never once betraying my code.
+
+26
+00:01:33,243 --> 00:01:33,326
+day.
+
+27
+00:02:16,778 --> 00:02:23,279
+Fun stuff. Alright, so let's talk about the key technology we used starting early. It's
+
+28
+00:02:23,319 --> 00:02:29,000
+napkins. So where do we start? Let's go back to shipping a superhero based game called
+
+29
+00:02:29,040 --> 00:02:35,141
+Second Son in 2014. And we basically built this whole game as a dense urban environment.
+
+30
+00:02:35,161 --> 00:02:39,302
+It's our version of Seattle. And with fixed times of day, which we leveraged a bunch,
+
+31
+00:02:39,922 --> 00:02:43,823
+and lots of jumping around and climbing over things and zooming around the city. It's pretty
+
+32
+00:02:44,657 --> 00:02:52,842
+It's pretty different from what we're doing now, but I did a presentation on some engine tech for Second Sun several years ago, and I'll recap a few bits here for context.
+
+33
+00:02:53,802 --> 00:02:59,826
+So we had about 100 meter tiles, about 250 of them used to make up the world in Second Sun.
+
+34
+00:02:59,846 --> 00:03:06,811
+And there was a lot of proper use, but less overall than you might think for some of the larger stuff like ground and buildings and big, big structures.
+
+35
+00:03:06,851 --> 00:03:08,151
+Obviously, the Space Needle is one of those.
+
+36
+00:03:09,917 --> 00:03:14,041
+So one of the techniques we use to kind of ship the game reliably is we basically have fixed budgets.
+
+37
+00:03:14,641 --> 00:03:20,386
+We have an assembly system that our build tools do where they take small assets and pack them up
+
+38
+00:03:20,426 --> 00:03:25,450
+into what we call packs. And in Infamous, this included textures. It was super simple and it
+
+39
+00:03:25,490 --> 00:03:30,093
+guaranteed we fit in disk and memory and it also allowed artists to make trade-offs and fix problems
+
+40
+00:03:30,133 --> 00:03:33,276
+themselves in the run-up to ship.
+
+41
+00:03:34,174 --> 00:03:35,156
+So this worked great.
+
+42
+00:03:35,797 --> 00:03:37,399
+Here's a breakdown for the disc for Second Son,
+
+43
+00:03:37,439 --> 00:03:39,122
+which barely fit on a one-layer Blu-ray.
+
+44
+00:03:39,723 --> 00:03:41,305
+There's definitely some duplication in there
+
+45
+00:03:41,365 --> 00:03:42,427
+in terms of texture assets,
+
+46
+00:03:42,487 --> 00:03:44,510
+but it mostly was pretty good
+
+47
+00:03:44,530 --> 00:03:45,972
+because we had this core asset pack
+
+48
+00:03:46,333 --> 00:03:49,077
+that we would put stuff in there to reduce duplication.
+
+49
+00:03:49,557 --> 00:03:51,139
+to reference everywhere effectively.
+
+50
+00:03:51,159 --> 00:03:53,280
+And this took a bit of artist management,
+
+51
+00:03:53,400 --> 00:03:54,541
+but it wasn't too, too bad.
+
+52
+00:03:55,822 --> 00:03:58,744
+The tiles were themselves were about 72 megabytes total.
+
+53
+00:03:58,804 --> 00:04:00,706
+Most of the time you were running around
+
+54
+00:04:00,746 --> 00:04:03,748
+and only streaming in the smaller chunks of 22 megs
+
+55
+00:04:04,388 --> 00:04:07,210
+and such, and then you'd get the higher res 48 meg chunks
+
+56
+00:04:07,671 --> 00:04:08,771
+of texture, high res textures,
+
+57
+00:04:08,872 --> 00:04:12,014
+when you got to the sort of nearest four of these tiles.
+
+58
+00:04:12,034 --> 00:04:13,655
+And we had 16 or so loaded at a time, so.
+
+59
+00:04:15,309 --> 00:04:16,610
+But how does that compare to our new game?
+
+60
+00:04:16,750 --> 00:04:18,591
+So Tsushima is a very different place.
+
+61
+00:04:19,232 --> 00:04:20,713
+It has an expansive organic areas
+
+62
+00:04:20,753 --> 00:04:21,974
+with minimal artificial lighting.
+
+63
+00:04:22,674 --> 00:04:24,275
+It has a totally different style,
+
+64
+00:04:24,315 --> 00:04:26,497
+lots of trees, bushes, and long sight lines.
+
+65
+00:04:28,118 --> 00:04:28,918
+And what about the size?
+
+66
+00:04:29,199 --> 00:04:31,080
+Here's actual Seattle versus Tsushima Island.
+
+67
+00:04:31,560 --> 00:04:34,142
+It's clearly bigger, 708 square kilometers versus 214.
+
+68
+00:04:35,703 --> 00:04:39,685
+And if you look at, there was concerns that the 708
+
+69
+00:04:40,285 --> 00:04:41,386
+was just too, too big.
+
+70
+00:04:41,606 --> 00:04:43,066
+You get bored riding a horse across it.
+
+71
+00:04:43,086 --> 00:04:45,808
+So we got smaller, about 64 square kilometers,
+
+72
+00:04:46,248 --> 00:04:48,169
+still about 20 times seconds sun's area.
+
+73
+00:04:48,729 --> 00:04:49,429
+So let's do the math.
+
+74
+00:04:50,430 --> 00:04:55,032
+6,400 tiles, 720 megs, 72 megs is 460 gigabytes,
+
+75
+00:04:55,292 --> 00:04:56,393
+which is clearly way too much.
+
+76
+00:04:57,493 --> 00:04:59,474
+And if you say half a disc or so,
+
+77
+00:04:59,834 --> 00:05:01,035
+that's about four megs a tile.
+
+78
+00:05:01,095 --> 00:05:03,136
+It's really not a lot of space, especially for textures.
+
+79
+00:05:03,616 --> 00:05:04,576
+And so we have a bunch of work to do.
+
+80
+00:05:05,317 --> 00:05:12,041
+And I mean, it's smaller on disk means that you won't necessarily have to worry about read speeds as much, but it's still a big concern.
+
+81
+00:05:12,381 --> 00:05:15,463
+But to figure out how much work, let's look at the density we sketched out.
+
+82
+00:05:16,619 --> 00:05:20,602
+We guessed something like 2,500 trees per 100 meter tile,
+
+83
+00:05:21,242 --> 00:05:23,744
+10,000 maybe medium-sized boulders and other things, bushes,
+
+84
+00:05:24,144 --> 00:05:27,106
+and whatnot, and potentially more small stuff, especially if you're talking about
+
+85
+00:05:27,186 --> 00:05:31,169
+grass tufts or flowers or things like that. So that's one
+
+86
+00:05:31,209 --> 00:05:33,230
+every one to two meters, and if you multiply that out
+
+87
+00:05:33,510 --> 00:05:36,973
+by the current instance sizes we had, it would hit about 12 megabytes
+
+88
+00:05:37,273 --> 00:05:39,855
+per tile, which is clearly more than four, and thus way too big.
+
+89
+00:05:42,144 --> 00:05:45,325
+And so here's some early estimates for what we needed to do to make this work for a giant world.
+
+90
+00:05:45,365 --> 00:05:49,287
+Some of these are pretty big and obviously and we had a long road ahead of us.
+
+91
+00:05:50,208 --> 00:05:53,590
+So basically what this says is that very few of the constraints
+
+92
+00:05:54,330 --> 00:05:57,252
+will actually, we used the last decade, will actually continue to work.
+
+93
+00:05:57,912 --> 00:06:01,874
+Basically all of these were no-goes except for the pack aggregation
+
+94
+00:06:02,395 --> 00:06:05,756
+and some of the building structure reuse that we used in Infamous.
+
+95
+00:06:07,686 --> 00:06:09,348
+we needed to do tech to match the vision.
+
+96
+00:06:09,768 --> 00:06:11,930
+In addition, we also needed to avoid
+
+97
+00:06:11,950 --> 00:06:13,511
+drastically increasing our team size.
+
+98
+00:06:13,591 --> 00:06:16,493
+So we had to emphasize scale basically everywhere.
+
+99
+00:06:17,014 --> 00:06:19,075
+We did defer some decisions on texture thinking
+
+100
+00:06:19,115 --> 00:06:22,217
+and that multiple cores could potentially solve problems
+
+101
+00:06:22,237 --> 00:06:24,599
+that we had, but I kind of had an inkling
+
+102
+00:06:24,619 --> 00:06:25,600
+that fine-grained texture streaming
+
+103
+00:06:25,620 --> 00:06:26,581
+would be important in the future,
+
+104
+00:06:27,021 --> 00:06:28,062
+if not this project, the next.
+
+105
+00:06:28,222 --> 00:06:30,804
+So we'll talk about that, how that went in a little bit.
+
+106
+00:06:31,681 --> 00:06:32,341
+So where do we land?
+
+107
+00:06:33,122 --> 00:06:35,062
+Effectively, we had a bunch of content,
+
+108
+00:06:35,122 --> 00:06:37,243
+but not a ridiculous amount because we're hyper-focused
+
+109
+00:06:37,283 --> 00:06:38,724
+on construction efficiency and reuse.
+
+110
+00:06:39,984 --> 00:06:42,385
+And that lands around 700 gigabytes
+
+111
+00:06:42,485 --> 00:06:44,406
+and half a million files synced for most people.
+
+112
+00:06:45,046 --> 00:06:46,647
+Some people would have more if they were working
+
+113
+00:06:46,767 --> 00:06:48,767
+on like facial blending technology
+
+114
+00:06:48,907 --> 00:06:51,488
+or high-res textures for certain domains
+
+115
+00:06:51,588 --> 00:06:52,729
+could have a bunch more space.
+
+116
+00:06:53,549 --> 00:06:55,110
+But most of this isn't changing daily.
+
+117
+00:06:55,170 --> 00:06:56,970
+And so it wasn't a huge, huge problem.
+
+118
+00:06:57,130 --> 00:06:58,991
+Got a little bit harder toward the end of the project,
+
+119
+00:06:59,031 --> 00:06:59,972
+especially with work from home.
+
+120
+00:07:01,509 --> 00:07:03,270
+And here's the stats for the final disc.
+
+121
+00:07:03,610 --> 00:07:05,992
+Most things grew, especially textures and dialogue.
+
+122
+00:07:06,292 --> 00:07:08,614
+Terrain was clearly new, but we basically had compacted
+
+123
+00:07:08,654 --> 00:07:09,614
+so much of the other game data
+
+124
+00:07:09,654 --> 00:07:11,596
+that this was all much smaller than it used to be.
+
+125
+00:07:12,757 --> 00:07:13,897
+We ended up fitting comfortably
+
+126
+00:07:13,978 --> 00:07:15,539
+on a two-layer Blu-ray after compression.
+
+127
+00:07:16,760 --> 00:07:19,301
+So for memory, we had one gigabyte of texture space
+
+128
+00:07:19,421 --> 00:07:22,103
+to load into, a significantly smaller footprint
+
+129
+00:07:22,123 --> 00:07:25,746
+for streamed meshes, up to 1.6 gigabytes of packs,
+
+130
+00:07:26,346 --> 00:07:27,567
+and the rest went to render targets.
+
+131
+00:07:27,647 --> 00:07:30,870
+Slot heaps and other general heaps were the remainder.
+
+132
+00:07:32,570 --> 00:07:36,372
+So talking about performance, our frame is structured fairly similar to Second Son.
+
+133
+00:07:36,832 --> 00:07:44,455
+We had an extra half a core and extra five low priority job threads.
+
+134
+00:07:45,155 --> 00:07:50,017
+And the phases of the game were pretty similar with update and solve and render all sort of
+
+135
+00:07:50,077 --> 00:07:54,819
+sequenced the way they were before. The main changes we did were a lot more threading and
+
+136
+00:07:54,839 --> 00:07:58,860
+a lot more async GPU compute. And that's the big thing that I think helped us a ton.
+
+137
+00:08:00,236 --> 00:08:02,880
+So here's an example frame, and this is about as tight as you can get.
+
+138
+00:08:02,940 --> 00:08:05,443
+You can see sort of how packed the little blue bars are at the top.
+
+139
+00:08:06,765 --> 00:08:10,309
+The main thread and such in the CPU code sort of is running,
+
+140
+00:08:10,350 --> 00:08:13,193
+but then there's also a whole bunch of background stuff you can see at the bottom
+
+141
+00:08:13,253 --> 00:08:16,818
+that are overlapping with the CPU getting interrupted and coming back to fill holes.
+
+142
+00:08:17,806 --> 00:08:20,427
+So here's zooming in on the main thread and high priority jobs.
+
+143
+00:08:20,447 --> 00:08:21,768
+You'll see AI at the beginning,
+
+144
+00:08:21,808 --> 00:08:22,908
+it's what we call update,
+
+145
+00:08:23,369 --> 00:08:24,629
+solve in the middle where it does
+
+146
+00:08:24,669 --> 00:08:26,370
+animation jobs and physics and such,
+
+147
+00:08:26,910 --> 00:08:28,191
+and then rendering at the end.
+
+148
+00:08:28,291 --> 00:08:30,772
+This scene is particularly render-heavy since it's inside of
+
+149
+00:08:30,812 --> 00:08:33,293
+a city with lots of NPCs and combat and such.
+
+150
+00:08:34,334 --> 00:08:35,394
+So here's a GPU frame.
+
+151
+00:08:35,414 --> 00:08:37,775
+There's a lot of standard stuff here.
+
+152
+00:08:37,815 --> 00:08:39,436
+We did a bunch of async compute,
+
+153
+00:08:39,456 --> 00:08:40,676
+which you can see circled at the bottom,
+
+154
+00:08:41,457 --> 00:08:42,757
+and there's a whole bunch of
+
+155
+00:08:42,817 --> 00:08:44,098
+extra deferred passes and
+
+156
+00:08:44,158 --> 00:08:46,279
+optimizations we had done throughout that process.
+
+157
+00:08:47,830 --> 00:08:49,931
+And here's some file I O since we're talking about loading.
+
+158
+00:08:50,812 --> 00:08:52,332
+Basically, as you run around the game,
+
+159
+00:08:52,392 --> 00:08:54,174
+we're constantly churning texture reads.
+
+160
+00:08:54,774 --> 00:08:57,015
+This is a little noisier than it is normally.
+
+161
+00:08:57,035 --> 00:08:58,656
+I guess not noisier, but it's,
+
+162
+00:08:59,237 --> 00:09:01,798
+the spaces in between are not going to be quite as big
+
+163
+00:09:01,838 --> 00:09:02,899
+because this is a dev scenario.
+
+164
+00:09:02,959 --> 00:09:04,199
+And so file opens are slower,
+
+165
+00:09:04,940 --> 00:09:06,581
+but the actual read speeds are probably slower
+
+166
+00:09:06,601 --> 00:09:07,762
+on the target hardware.
+
+167
+00:09:07,802 --> 00:09:09,603
+So there's, this is a similar
+
+168
+00:09:09,623 --> 00:09:10,743
+to what you'd actually see in the game.
+
+169
+00:09:12,779 --> 00:09:17,484
+So I'm sure this is a common experience, but we shipped Ghost working from home for the last five months of the process.
+
+170
+00:09:18,285 --> 00:09:18,785
+It's pretty rough.
+
+171
+00:09:19,786 --> 00:09:24,732
+But during the panic transition, we kind of moved VPN and some other bandwidth hogs to AWS
+
+172
+00:09:24,792 --> 00:09:28,796
+to avoid our office network being a super tight bottleneck.
+
+173
+00:09:29,477 --> 00:09:31,758
+And while there was a bunch of difficulties,
+
+174
+00:09:31,858 --> 00:09:33,199
+we benefited from a couple of things.
+
+175
+00:09:33,279 --> 00:09:35,240
+So an efficient build system that we have
+
+176
+00:09:35,301 --> 00:09:37,282
+is basically not reliant on distribution.
+
+177
+00:09:37,322 --> 00:09:38,603
+It does caching and some other things,
+
+178
+00:09:38,623 --> 00:09:41,244
+which we were able to kind of massage around a bit
+
+179
+00:09:41,344 --> 00:09:43,606
+to work from a home environment better.
+
+180
+00:09:44,346 --> 00:09:45,887
+And it also helps that we have a decent idea
+
+181
+00:09:45,907 --> 00:09:48,409
+of where we were taking the game in the finishing process.
+
+182
+00:09:49,690 --> 00:09:51,090
+So it worked out okay,
+
+183
+00:09:51,231 --> 00:09:54,112
+but definitely wouldn't want to do it again.
+
+184
+00:09:54,132 --> 00:09:56,254
+So building Tsushima, effectively,
+
+185
+00:09:56,274 --> 00:09:57,615
+let's talk about how we got there.
+
+186
+00:09:58,893 --> 00:10:03,315
+So one of the things we, the newest things we had to deal with was terrain.
+
+187
+00:10:03,455 --> 00:10:06,056
+And so our first strategy was to leverage what we knew and try building larger
+
+188
+00:10:06,096 --> 00:10:06,876
+worlds in Maya.
+
+189
+00:10:07,216 --> 00:10:10,157
+We did a bunch of tools work with terrain stamping and procedural placement,
+
+190
+00:10:10,177 --> 00:10:11,358
+and this worked okay initially,
+
+191
+00:10:11,778 --> 00:10:14,659
+but eventually it had performance and reliability problems at the scale that we
+
+192
+00:10:14,699 --> 00:10:14,959
+needed.
+
+193
+00:10:15,479 --> 00:10:18,660
+And we also didn't get enough context with buildings and props and trees and
+
+194
+00:10:18,740 --> 00:10:22,321
+in-game lighting and lots of stuff you need if you want it to be texturing or
+
+195
+00:10:22,482 --> 00:10:25,402
+massaging things or moving things around. Um, it's,
+
+196
+00:10:25,503 --> 00:10:27,903
+it's difficult to do if you can't get everything in context.
+
+197
+00:10:28,884 --> 00:10:30,984
+So we would switch to the sort of the other direction,
+
+198
+00:10:31,004 --> 00:10:32,705
+which is an in-engine editor,
+
+199
+00:10:33,786 --> 00:10:35,806
+where we would do painting and procedural systems
+
+200
+00:10:35,826 --> 00:10:36,607
+to flush out the world.
+
+201
+00:10:36,647 --> 00:10:38,227
+This is similar to a lot of other stuff,
+
+202
+00:10:38,267 --> 00:10:39,308
+but it took a lot of work.
+
+203
+00:10:39,448 --> 00:10:41,029
+And maybe somewhat differently,
+
+204
+00:10:41,089 --> 00:10:43,650
+we actually leveraged the GPU really heavily for this work,
+
+205
+00:10:44,450 --> 00:10:46,411
+trying to make it as super responsive as possible.
+
+206
+00:10:46,511 --> 00:10:50,032
+So things like, if you'd paint the ground,
+
+207
+00:10:50,092 --> 00:10:54,514
+it would sort of auto regrow the trees around you and stuff.
+
+208
+00:10:54,554 --> 00:10:57,015
+It sort of gave you roughly instant feedback,
+
+209
+00:10:57,215 --> 00:10:57,996
+which was pretty useful.
+
+210
+00:10:59,076 --> 00:11:01,457
+All the GPU compute stuff and virtual texturing
+
+211
+00:11:01,497 --> 00:11:03,177
+was all aiming for a low memory footprint
+
+212
+00:11:03,277 --> 00:11:06,998
+and low CPU and improved GPU performance as well.
+
+213
+00:11:07,779 --> 00:11:10,079
+But also it was intended to provide good support
+
+214
+00:11:10,119 --> 00:11:12,040
+to the procedural tools for placing stuff.
+
+215
+00:11:12,060 --> 00:11:14,140
+So you could pretty efficiently fill out records to say,
+
+216
+00:11:14,200 --> 00:11:15,241
+here's where the new trees go.
+
+217
+00:11:15,841 --> 00:11:17,641
+And it would work really quickly.
+
+218
+00:11:19,103 --> 00:11:23,005
+So if you want to know more about any of these bits, you should go check out Matt P's Samurai
+
+219
+00:11:23,045 --> 00:11:26,886
+Landscapes GDC talk. He'll be talking about all the procedural stuff and a bunch of GPU
+
+220
+00:11:26,946 --> 00:11:32,448
+optimizations and things, including the GPU culling. So let's talk about how we split up
+
+221
+00:11:32,488 --> 00:11:36,669
+the world. Here's an EBUG display without our procedural growth of our 200 meter tiles. And
+
+222
+00:11:36,749 --> 00:11:41,210
+yes, that's JIN in the lower right. And yes, it's quite barren because all the procedural
+
+223
+00:11:41,230 --> 00:11:45,011
+growth is a huge chunk of what we actually have in the world.
+
+224
+00:11:46,097 --> 00:11:48,118
+So 200 meter tiles, why that size?
+
+225
+00:11:48,518 --> 00:11:53,040
+It produced fewer files and less duplication waste in the, uh, in the
+
+226
+00:11:53,120 --> 00:11:54,461
+sort of the scale that we were looking at.
+
+227
+00:11:55,041 --> 00:11:59,703
+And we did end up adding about up to about 2.5 megabytes of terrain related
+
+228
+00:11:59,743 --> 00:12:03,784
+stuff, um, lots of texturing for, for texturing stuff, but also things for
+
+229
+00:12:03,824 --> 00:12:07,626
+metadata, for placing grass and controlling water flow and things like that.
+
+230
+00:12:09,534 --> 00:12:14,157
+So here's a picture of our seven level quad tree, which we use to manage the streaming process for this stuff.
+
+231
+00:12:14,978 --> 00:12:21,062
+The leaf level you'll see in green there is a three by three grid of tiles that you have at the finest detail level.
+
+232
+00:12:21,563 --> 00:12:25,906
+And it gives you about 200 meters guaranteed sight lines for content.
+
+233
+00:12:27,384 --> 00:12:30,887
+So the first set of optimizations we went for was the obvious ones.
+
+234
+00:12:30,927 --> 00:12:33,989
+We store one copy of the height map and then after we read it in,
+
+235
+00:12:34,009 --> 00:12:35,450
+we make it visible to CPU physics,
+
+236
+00:12:35,830 --> 00:12:38,993
+kind of using it directly rather than trying to construct a BSP or some other
+
+237
+00:12:39,173 --> 00:12:39,933
+crazy structure from it.
+
+238
+00:12:41,622 --> 00:12:45,425
+We also forwarded a bunch of this data to AI and sound effects, so grass depth, for example,
+
+239
+00:12:45,745 --> 00:12:49,347
+you want to be able to know for awareness, guys can see you in the grass.
+
+240
+00:12:50,128 --> 00:12:56,532
+And one of the other cool things we had done was taking our virtual texture worth of material
+
+241
+00:12:56,872 --> 00:13:01,615
+IDs and forwarding that to the CPU. So you can get a centimeter level or so precision on
+
+242
+00:13:01,635 --> 00:13:06,258
+if you stepped on the ground, hey, is it on in a puddle? Do I need to create a mud splash and
+
+243
+00:13:06,598 --> 00:13:10,480
+have that work? And that was pretty neat. It gave us a lot of really good detail.
+
+244
+00:13:11,654 --> 00:13:14,236
+Another thing to keep an eye on, that we had to keep an eye on,
+
+245
+00:13:14,276 --> 00:13:16,398
+I should say, was at 8 kilometers,
+
+246
+00:13:16,438 --> 00:13:17,979
+you do start running into precision problems
+
+247
+00:13:18,019 --> 00:13:18,840
+working in world space.
+
+248
+00:13:18,960 --> 00:13:20,721
+We really didn't need to do anything drastic in the end,
+
+249
+00:13:20,741 --> 00:13:23,384
+just lots of little fixes, liberally applying
+
+250
+00:13:23,464 --> 00:13:24,945
+the general maxim of you subtract
+
+251
+00:13:24,965 --> 00:13:28,288
+before you multiply for dealing with inverses of matrices
+
+252
+00:13:28,308 --> 00:13:28,828
+and things like that.
+
+253
+00:13:30,796 --> 00:13:37,023
+So one of the techniques we use pretty heavily when trying to optimize is compile time data merging.
+
+254
+00:13:37,463 --> 00:13:42,949
+And so effectively you take something that's a big expensive full-fledged object with scriptability
+
+255
+00:13:42,990 --> 00:13:45,172
+and various other things and you make a lower level version of it.
+
+256
+00:13:45,833 --> 00:13:51,778
+and you allow that version of it to merge and instance itself in a really compact way.
+
+257
+00:13:51,878 --> 00:13:57,022
+So Geometry, for example, normally does this in something like six byte records,
+
+258
+00:13:57,122 --> 00:14:00,765
+but that's per LOD per shader. I'll talk more about how we optimize that later.
+
+259
+00:14:00,805 --> 00:14:06,390
+But basically, that instancing process is what allows us to kind of make things really compact.
+
+260
+00:14:07,331 --> 00:14:09,493
+And we do this for building VB.
+
+261
+00:14:10,552 --> 00:14:12,976
+and sort of renderable occlusions, data structures,
+
+262
+00:14:13,457 --> 00:14:15,801
+and for arrays of cloth, obstacles, parkour splines,
+
+263
+00:14:15,862 --> 00:14:16,783
+breakables, et cetera.
+
+264
+00:14:17,404 --> 00:14:20,089
+And so that allows you to do a bunch
+
+265
+00:14:20,450 --> 00:14:21,993
+of interesting stuff there.
+
+266
+00:14:22,622 --> 00:14:28,045
+We switched away from some of our partial offline rebakes for impostors and infamous.
+
+267
+00:14:28,305 --> 00:14:34,348
+Basically, we had this problem where you'd have the geometry update up to date one place,
+
+268
+00:14:34,408 --> 00:14:38,190
+and then the baked texture would be sort of in a different spot, and they'd get a little bit
+
+269
+00:14:38,230 --> 00:14:41,871
+scrambled. And having that out of sync was really annoying. And so we basically just merge everything
+
+270
+00:14:41,911 --> 00:14:46,733
+right now, just straight up as part of the build system to try and keep everything up to date
+
+271
+00:14:46,753 --> 00:14:47,374
+throughout development.
+
+272
+00:14:49,967 --> 00:14:52,448
+Index ranges are one of the techniques we use to help keep
+
+273
+00:14:52,488 --> 00:14:54,869
+overlap low. I mentioned everything's in these big arrays,
+
+274
+00:14:54,929 --> 00:14:58,190
+right? So oftentimes the arrays are small enough that you can
+
+275
+00:14:58,230 --> 00:15:01,471
+refer to a set of things with four bytes, so two byte, two
+
+276
+00:15:01,491 --> 00:15:05,533
+byte, mega max. And to do this, you basically can sort by
+
+277
+00:15:05,593 --> 00:15:09,234
+parent chain, and so that basically puts things in an order
+
+278
+00:15:09,274 --> 00:15:11,655
+where if you refer to a node higher up in the tree of
+
+279
+00:15:11,855 --> 00:15:14,816
+instancing tree, you can say, hey, take all the geometry or
+
+280
+00:15:14,836 --> 00:15:16,157
+all the physics below me and.
+
+281
+00:15:17,377 --> 00:15:19,298
+treat that as a min and a max.
+
+282
+00:15:19,798 --> 00:15:21,579
+And then you can add remove it when something breaks,
+
+283
+00:15:21,619 --> 00:15:23,620
+for example, and it works pretty well.
+
+284
+00:15:25,741 --> 00:15:27,342
+So if you need a subset of content,
+
+285
+00:15:27,502 --> 00:15:29,923
+that's another thing that is kind of optimization
+
+286
+00:15:29,983 --> 00:15:30,443
+for merging.
+
+287
+00:15:31,323 --> 00:15:33,564
+Obviously, if you're merging tens of thousands of files
+
+288
+00:15:33,804 --> 00:15:35,205
+for the FAR LODs, for example,
+
+289
+00:15:35,645 --> 00:15:36,826
+you want to memoize the file
+
+290
+00:15:36,846 --> 00:15:39,327
+so you don't like have to reread them millions of times.
+
+291
+00:15:39,887 --> 00:15:41,108
+And so, but...
+
+292
+00:15:41,748 --> 00:15:44,029
+if you sort of merge everything into one big tree,
+
+293
+00:15:44,410 --> 00:15:47,051
+you'd end up with cases where there was just lots and lots
+
+294
+00:15:47,091 --> 00:15:50,793
+of little bits of content that didn't have anything in them
+
+295
+00:15:50,853 --> 00:15:52,474
+that was far LOD relevant.
+
+296
+00:15:52,534 --> 00:15:55,916
+And so we just, it was the overhead built up a lot.
+
+297
+00:15:55,936 --> 00:15:59,398
+And so what we changed to do was to filter as you merge.
+
+298
+00:15:59,418 --> 00:16:01,300
+And that basically means that you're doing it once
+
+299
+00:16:01,340 --> 00:16:03,341
+instead of 10,000 times kind of thing.
+
+300
+00:16:03,521 --> 00:16:04,922
+So that was super effective.
+
+301
+00:16:04,982 --> 00:16:06,503
+It brought some of our merging times down
+
+302
+00:16:06,543 --> 00:16:08,604
+from five minutes to 30 seconds in one case.
+
+303
+00:16:08,624 --> 00:16:10,565
+And we've brought it down farther since then.
+
+304
+00:16:10,645 --> 00:16:10,765
+But.
+
+305
+00:16:11,501 --> 00:16:11,981
+That's pretty good.
+
+306
+00:16:13,282 --> 00:16:16,243
+So here's an overhead view of some of the far growth
+
+307
+00:16:16,443 --> 00:16:18,324
+with a merged enemy audio map on the right.
+
+308
+00:16:18,524 --> 00:16:20,265
+So just an example of the kinds of things
+
+309
+00:16:20,285 --> 00:16:21,445
+we'll merge up to the world level.
+
+310
+00:16:23,246 --> 00:16:25,847
+Obviously the camera is not a sort of a view
+
+311
+00:16:25,867 --> 00:16:27,007
+you would normally see in the game.
+
+312
+00:16:27,047 --> 00:16:28,508
+And so we didn't really optimize for that.
+
+313
+00:16:28,588 --> 00:16:30,969
+The tree, the sort of card based trees
+
+314
+00:16:31,049 --> 00:16:33,950
+are really optimized for sort of long horizontal views,
+
+315
+00:16:33,970 --> 00:16:36,631
+which is primarily what we would have in Ghost.
+
+316
+00:16:39,236 --> 00:16:43,538
+So talking about packs, these are our kind of aggregate files,
+
+317
+00:16:43,878 --> 00:16:47,059
+and basically all of the things we load that aren't textures
+
+318
+00:16:47,219 --> 00:16:50,601
+and a couple other types of things are basically this format.
+
+319
+00:16:51,041 --> 00:16:54,963
+And so the idea here is you have a header and a table of contents,
+
+320
+00:16:55,083 --> 00:16:56,163
+and those are cached.
+
+321
+00:16:56,784 --> 00:17:00,328
+the first read them only once. And after that you basically have a couple reads
+
+322
+00:17:00,688 --> 00:17:04,752
+and then you can get to you can you can get to sort of usable data.
+
+323
+00:17:05,373 --> 00:17:08,857
+So it's built for the memory format that it's going to show up in
+
+324
+00:17:09,297 --> 00:17:12,601
+and it's got all its pointers references in a sort of a compact
+
+325
+00:17:12,921 --> 00:17:16,505
+way of figuring out where everything goes and ready to get
+
+326
+00:17:16,725 --> 00:17:17,726
+be ready to go really quickly.
+
+327
+00:17:18,747 --> 00:17:18,908
+So.
+
+328
+00:17:19,860 --> 00:17:27,323
+And the other thing we do here is we leverage virtual memory to avoid fragmentation. We used to use sort of fixed size pages, but that was kind of annoying for some for a variety of reasons.
+
+329
+00:17:28,584 --> 00:17:32,185
+And the fragmentation problem just goes away with virtual memory, which is, and it's great.
+
+330
+00:17:32,762 --> 00:17:35,644
+So, and we do subdivide reads for better deadline scheduling
+
+331
+00:17:35,664 --> 00:17:36,705
+or other content like audio.
+
+332
+00:17:36,725 --> 00:17:39,167
+And we have something like 1,700 terrain tiles
+
+333
+00:17:39,207 --> 00:17:40,207
+and a thousand other packs,
+
+334
+00:17:40,347 --> 00:17:42,789
+mostly missions and regions to make up the whole game.
+
+335
+00:17:42,849 --> 00:17:44,330
+So we don't have a ton of these.
+
+336
+00:17:44,370 --> 00:17:45,931
+They're sort of the merging process.
+
+337
+00:17:46,712 --> 00:17:48,313
+We have multiple tiers of that.
+
+338
+00:17:48,353 --> 00:17:50,414
+And the last linking step to build these packs
+
+339
+00:17:50,855 --> 00:17:52,676
+kind of simplifies the game down
+
+340
+00:17:52,736 --> 00:17:55,438
+into a relatively tight structure.
+
+341
+00:17:56,888 --> 00:17:58,729
+So in terms of spatially streaming,
+
+342
+00:17:59,590 --> 00:18:01,330
+one strategy to keep terrain tiles small
+
+343
+00:18:01,370 --> 00:18:03,291
+was to take the sparse complex data
+
+344
+00:18:03,331 --> 00:18:05,692
+and put it into sort of co-located region packs
+
+345
+00:18:06,032 --> 00:18:06,833
+with larger budgets.
+
+346
+00:18:07,153 --> 00:18:08,793
+So here you can see a zoomed out view
+
+347
+00:18:09,294 --> 00:18:10,354
+of a bunch of different regions,
+
+348
+00:18:10,374 --> 00:18:13,235
+a big city, a few medium villages,
+
+349
+00:18:13,755 --> 00:18:15,076
+and a bunch of small landmarks.
+
+350
+00:18:16,196 --> 00:18:18,197
+Authoring bounding volumes for these
+
+351
+00:18:18,277 --> 00:18:19,658
+is kind of how you get that shape.
+
+352
+00:18:20,118 --> 00:18:23,019
+And it allows us to know what sections of terrain tiles
+
+353
+00:18:23,419 --> 00:18:24,920
+those regions can overlap.
+
+354
+00:18:25,240 --> 00:18:25,540
+So that we.
+
+355
+00:18:26,157 --> 00:18:31,979
+which ones to load correctly and also know which ones are, we have all the physics loaded
+
+356
+00:18:32,039 --> 00:18:35,039
+in order to do simulations and pathing and stuff accurately.
+
+357
+00:18:37,380 --> 00:18:38,460
+So what about missions?
+
+358
+00:18:38,640 --> 00:18:40,001
+We have spatially streamed those as well.
+
+359
+00:18:40,601 --> 00:18:42,441
+Most of them do, but some of them don't.
+
+360
+00:18:42,661 --> 00:18:46,802
+And it's not always easy to do that for some cases where you have like, I'm going to follow
+
+361
+00:18:46,822 --> 00:18:49,663
+this guy across the world for this silver path mission and such.
+
+362
+00:18:51,384 --> 00:18:53,204
+So it's not a complete given.
+
+363
+00:18:53,892 --> 00:18:57,875
+We've used TaskRast for a long time and we did the same thing for this game.
+
+364
+00:18:58,315 --> 00:19:02,217
+And this time we built bigger components that were kind of more meaty
+
+365
+00:19:02,498 --> 00:19:05,279
+and had a lot more built in behavior for designers to use.
+
+366
+00:19:05,900 --> 00:19:10,463
+And this basically allowed us to have less programmer help
+
+367
+00:19:10,583 --> 00:19:12,164
+needed to accomplish their goals.
+
+368
+00:19:12,344 --> 00:19:15,726
+And they made a ton of content and got pretty far with that.
+
+369
+00:19:16,579 --> 00:19:19,961
+We did this all in game, which is critical for some things like
+
+370
+00:19:20,521 --> 00:19:24,604
+snapping to physics and debugging visualizations and things like that.
+
+371
+00:19:25,044 --> 00:19:28,246
+And all, you know, as I mentioned in my last presentation, all our dev UI is
+
+372
+00:19:28,306 --> 00:19:32,148
+remotable. So here's an example of our super useful history debugging applied
+
+373
+00:19:32,168 --> 00:19:35,269
+to animation. So you can scrub back and forth and get a bunch of debugging info
+
+374
+00:19:35,289 --> 00:19:38,331
+about what's going on under the hood. You can see the ground estimate of
+
+375
+00:19:38,371 --> 00:19:40,532
+the landing sort of updating as it goes.
+
+376
+00:19:41,767 --> 00:19:46,633
+And we applied this sort of concept to animation, missions, AI, conversations, a whole bunch of stuff.
+
+377
+00:19:47,314 --> 00:19:57,647
+And it's super useful to be able to have a ton of context and detail when you're trying to work out what's going on with something and try and finesse and polish things and such.
+
+378
+00:20:00,080 --> 00:20:05,466
+uh missions at scale it's kind of a problem we we realized kind of part way through that because of
+
+379
+00:20:05,526 --> 00:20:09,431
+all the large-scale changes people were making moving terrain up and down and around changing
+
+380
+00:20:09,471 --> 00:20:15,798
+the growth a lot you could end up with breakages and we did all the time and then it ended up
+
+381
+00:20:16,363 --> 00:20:17,524
+of being a major problem.
+
+382
+00:20:17,984 --> 00:20:20,245
+So the way we combated that was basically
+
+383
+00:20:20,365 --> 00:20:21,526
+to do stuff at compile time.
+
+384
+00:20:21,586 --> 00:20:22,907
+So validation and fix up.
+
+385
+00:20:24,088 --> 00:20:26,549
+The main fix up model we used was terrain snapping.
+
+386
+00:20:26,609 --> 00:20:28,930
+So things wouldn't drift out of sync with the terrain.
+
+387
+00:20:29,070 --> 00:20:31,212
+They would update if they were procedurally placed and such,
+
+388
+00:20:31,312 --> 00:20:35,734
+but basically at compile time, you load the height map
+
+389
+00:20:35,774 --> 00:20:37,155
+and then look up the correct location
+
+390
+00:20:37,195 --> 00:20:39,256
+and adjust the height of where things were
+
+391
+00:20:39,617 --> 00:20:41,057
+to sort of keep things in sync.
+
+392
+00:20:41,097 --> 00:20:41,678
+And that really helped.
+
+393
+00:20:44,169 --> 00:20:46,551
+Other things like validation of object references.
+
+394
+00:20:46,611 --> 00:20:49,493
+So when a mission wants to open a door in a city,
+
+395
+00:20:49,513 --> 00:20:53,397
+it makes sure that an artist can't move that door
+
+396
+00:20:53,457 --> 00:20:56,239
+into a spot or delete it or something like that
+
+397
+00:20:56,259 --> 00:20:57,660
+so that the mission can't find it anymore.
+
+398
+00:20:58,141 --> 00:21:01,063
+And sort of hardening that relationship helped a lot
+
+399
+00:21:01,123 --> 00:21:03,485
+in keeping things, making sure people are aware
+
+400
+00:21:03,685 --> 00:21:04,866
+of the changes they're making,
+
+401
+00:21:04,906 --> 00:21:06,348
+what side effects they're having and such.
+
+402
+00:21:07,481 --> 00:21:10,322
+So another important thing to mention is respawning.
+
+403
+00:21:10,742 --> 00:21:15,484
+And so one of the things that players that we do is we respawn players
+
+404
+00:21:15,644 --> 00:21:18,125
+to the closest safe breadcrumb or the nearest respawn point
+
+405
+00:21:18,165 --> 00:21:19,086
+as they approach content.
+
+406
+00:21:19,606 --> 00:21:21,387
+In addition to being good for player understanding,
+
+407
+00:21:21,747 --> 00:21:24,508
+this really helps load time since you're closer to the same content
+
+408
+00:21:24,548 --> 00:21:25,268
+when you respawn.
+
+409
+00:21:25,689 --> 00:21:28,790
+And you'll see as he's running forward here, the little green dots
+
+410
+00:21:28,850 --> 00:21:31,171
+are moving around as you get closer to them and such.
+
+411
+00:21:31,571 --> 00:21:33,832
+And that's the that's the breadcrumb. And.
+
+412
+00:21:34,956 --> 00:21:38,899
+When he falls down, he sort of stands back up at that particular location.
+
+413
+00:21:40,621 --> 00:21:42,283
+So let's talk about CPU performance a bit.
+
+414
+00:21:43,384 --> 00:21:45,466
+While streaming is best because things don't exist,
+
+415
+00:21:45,546 --> 00:21:50,471
+and that's sort of the best state of being for stuff to exist, for stuff to work in,
+
+416
+00:21:51,432 --> 00:21:53,574
+you can also have lots of static sleeping objects.
+
+417
+00:21:54,054 --> 00:21:57,117
+And we handle that with something what I'm going to call a static distance heap.
+
+418
+00:21:58,164 --> 00:22:00,665
+And so this is effectively a way of computing travel,
+
+419
+00:22:01,405 --> 00:22:03,506
+comparing total travel distance against a heap of items.
+
+420
+00:22:03,706 --> 00:22:06,547
+And it gives us an amortized constant time update
+
+421
+00:22:06,707 --> 00:22:08,547
+of a single moving reference point versus all that stuff.
+
+422
+00:22:08,607 --> 00:22:12,148
+So in this debug display, green is a awake object
+
+423
+00:22:12,449 --> 00:22:14,489
+and red pings mean we've made a distance check.
+
+424
+00:22:14,509 --> 00:22:16,850
+And you'll notice we're only doing a couple of those
+
+425
+00:22:17,010 --> 00:22:17,490
+every frame.
+
+426
+00:22:18,730 --> 00:22:21,431
+And when you're near a boundary, that little circle,
+
+427
+00:22:21,871 --> 00:22:24,212
+the updates are happening a lot more frequently.
+
+428
+00:22:25,487 --> 00:22:32,729
+And so this is pretty efficient, and it basically gives us better performance over time than
+
+429
+00:22:33,029 --> 00:22:39,011
+something like re-computing every 10 meters, or even than raw SIMD could do.
+
+430
+00:22:39,591 --> 00:22:43,552
+So for example, we spent about 12 microseconds updating hundreds and hundreds of volumes
+
+431
+00:22:43,612 --> 00:22:47,253
+against the hero. And before that, before we applied this,
+
+432
+00:22:47,593 --> 00:22:51,395
+naive sphere checks were costing us sort of over 300 microseconds and such.
+
+433
+00:22:52,825 --> 00:22:53,926
+So here's some condensed pseudocode.
+
+434
+00:22:53,966 --> 00:22:56,426
+Effectively, you have a heap based on travel distance,
+
+435
+00:22:56,466 --> 00:22:59,647
+as I mentioned, and you recheck the closest object
+
+436
+00:23:00,087 --> 00:23:01,547
+and updating their location in the heap.
+
+437
+00:23:01,587 --> 00:23:04,468
+So your current travel distance plus how far it is
+
+438
+00:23:04,508 --> 00:23:07,388
+to the boundary is the next time that object can wake up,
+
+439
+00:23:07,608 --> 00:23:08,389
+for example.
+
+440
+00:23:08,429 --> 00:23:11,329
+So as you reach that threshold, you might wake them up
+
+441
+00:23:11,789 --> 00:23:13,350
+or you might not, you might sort of put them back in.
+
+442
+00:23:13,370 --> 00:23:16,050
+And we also include a rebase operation
+
+443
+00:23:16,070 --> 00:23:17,210
+to keep the precision good.
+
+444
+00:23:17,270 --> 00:23:19,071
+Every 100 meters, we just subtract 100 meters
+
+445
+00:23:19,111 --> 00:23:19,731
+off of everybody.
+
+446
+00:23:21,206 --> 00:23:32,151
+And the sign distance function here also allows you to sort of say, hey, if you're really far inside the boundary, you know, you're awake and going to be awake for a while, we don't have to check the distance to that object as often either.
+
+447
+00:23:33,051 --> 00:23:41,955
+And so for efficiency, the items have backward back indices to allow for quick removal from heap and active lists and things like that. So this is super useful.
+
+448
+00:23:41,975 --> 00:23:49,118
+It doesn't work for all use cases, obviously, if you have a lot of moving objects or constant camera cuts and teleportation, it would reduce its effectiveness.
+
+449
+00:23:50,185 --> 00:23:53,067
+and you'd want to use things like BVHs or something in those cases.
+
+450
+00:23:54,648 --> 00:24:01,131
+But really this applies to a ton of cases that we find are useful.
+
+451
+00:24:01,511 --> 00:24:04,492
+And it basically has become kind of a magic bullet for us.
+
+452
+00:24:05,613 --> 00:24:07,494
+So let's talk about tasty, tasty baked goods.
+
+453
+00:24:08,834 --> 00:24:12,356
+So I mentioned doing things at compile time is really useful,
+
+454
+00:24:12,416 --> 00:24:14,837
+and it's great, but there are situations where that doesn't work.
+
+455
+00:24:15,505 --> 00:24:19,867
+So for example, if the dependencies are really hard, that can be a really big time suck because
+
+456
+00:24:20,327 --> 00:24:23,988
+people are constantly rebuilding. If you kind of have to say, well, if anything changes, let's
+
+457
+00:24:24,028 --> 00:24:30,090
+rebuild. Or if it generates a ton of data or the input is really huge, sometimes it's, it's, or
+
+458
+00:24:30,130 --> 00:24:34,512
+even if it's just really expensive to do and it happens often enough, sometimes those are bad
+
+459
+00:24:34,552 --> 00:24:40,714
+ideas. So we basically took some of the sort of small data output, but large sort of expensive
+
+460
+00:24:40,754 --> 00:24:42,755
+inputs cases, and we would.
+
+461
+00:24:44,135 --> 00:24:46,176
+For example, growth and blends, we would do this sort of thing.
+
+462
+00:24:46,196 --> 00:24:50,398
+And we did it on a form of PS4s, 10 PS4 dev kits.
+
+463
+00:24:51,218 --> 00:24:53,819
+And this worked pretty well, but, you know,
+
+464
+00:24:54,679 --> 00:24:56,140
+there's definitely some quirks involved.
+
+465
+00:24:56,780 --> 00:24:57,800
+So what about the big stuff, though?
+
+466
+00:24:57,820 --> 00:25:01,482
+We don't want to have a ton of big, big data on disk,
+
+467
+00:25:01,562 --> 00:25:03,963
+because disk is one of the things we're optimizing for, right?
+
+468
+00:25:03,983 --> 00:25:05,263
+So pathing is one of those things.
+
+469
+00:25:06,143 --> 00:25:08,905
+In Second Son, we manually authored all our path meshes,
+
+470
+00:25:09,325 --> 00:25:10,225
+and it was really error-prone.
+
+471
+00:25:10,945 --> 00:25:12,908
+change the environment and missions would just be broken.
+
+472
+00:25:13,448 --> 00:25:15,090
+And at ghost scale, it would never work.
+
+473
+00:25:15,130 --> 00:25:15,711
+There's no way.
+
+474
+00:25:16,192 --> 00:25:19,236
+And so we did a bunch of work to automate this system
+
+475
+00:25:19,536 --> 00:25:23,461
+for the most part, and basically projected into
+
+476
+00:25:23,541 --> 00:25:25,583
+and then automatically generate pathing information
+
+477
+00:25:25,824 --> 00:25:27,666
+on a 20 centimeter grid, mostly for terrain,
+
+478
+00:25:27,686 --> 00:25:28,507
+but for other stuff as well.
+
+479
+00:25:29,870 --> 00:25:33,212
+So when a subgrid wakes up, that's one of those like partial tiles there.
+
+480
+00:25:33,232 --> 00:25:37,254
+We would cast hundreds of thousands of rays against the terrain and physics.
+
+481
+00:25:37,314 --> 00:25:38,434
+But these are all vertical rays.
+
+482
+00:25:38,575 --> 00:25:41,256
+Then we kind of coalesce a bunch of the calculations
+
+483
+00:25:41,356 --> 00:25:43,457
+so we don't spend a huge amount of time on them.
+
+484
+00:25:43,977 --> 00:25:47,859
+And then we deflate and build connectivity to sort of get you
+
+485
+00:25:47,879 --> 00:25:51,561
+the right sort of player shape cut out and offsets from the walls
+
+486
+00:25:51,601 --> 00:25:52,181
+and things like that.
+
+487
+00:25:52,641 --> 00:25:55,943
+And to see quick checks to say, hey, can I make it over there and whatnot?
+
+488
+00:25:56,583 --> 00:25:58,184
+And so that that's kind of.
+
+489
+00:25:59,014 --> 00:26:02,735
+the general model there. And buildings would generate grids as well from custom meshes and
+
+490
+00:26:02,775 --> 00:26:07,317
+link up with terrain. And basically we ended up using Hierarchical A-Star with authored portals
+
+491
+00:26:07,357 --> 00:26:11,139
+like ladders. You can see kind of a little reference to there. And some automatically
+
+492
+00:26:11,179 --> 00:26:15,100
+generated portals like gap jumps, for example. In this case, if you want to go to the porch,
+
+493
+00:26:15,260 --> 00:26:19,762
+from the porch to the awning there, you'd run inside and climb up the ladder and jump out the
+
+494
+00:26:19,802 --> 00:26:25,384
+window. And so all of this calculation is amortized in the background jobs over time.
+
+495
+00:26:25,745 --> 00:26:27,625
+And so it's not going to block time critically.
+
+496
+00:26:32,823 --> 00:26:33,964
+Generally, it worked pretty well.
+
+497
+00:26:34,284 --> 00:26:36,765
+In the end, this saved us basically all of our pathing data
+
+498
+00:26:37,386 --> 00:26:38,706
+that we thought we were gonna have to deal with.
+
+499
+00:26:39,647 --> 00:26:42,429
+Made testing much easier since it's all live while editing.
+
+500
+00:26:42,769 --> 00:26:44,570
+So if you're moving rocks around, everything's up to date.
+
+501
+00:26:44,850 --> 00:26:45,251
+Super great.
+
+502
+00:26:46,551 --> 00:26:48,933
+So we shipped a multiplayer mode called Legends.
+
+503
+00:26:49,013 --> 00:26:50,394
+It was fun, it was super successful,
+
+504
+00:26:50,694 --> 00:26:51,915
+but I would like to note that networking
+
+505
+00:26:52,015 --> 00:26:53,376
+in the streaming world is very hard.
+
+506
+00:26:53,956 --> 00:26:55,537
+I don't have enough time to go into details,
+
+507
+00:26:55,577 --> 00:26:56,998
+so let me just say the generation numbers,
+
+508
+00:26:57,038 --> 00:26:58,639
+migration, and packet loading, oh my.
+
+509
+00:27:01,448 --> 00:27:04,769
+So let's talk about an overview of our rendering approach.
+
+510
+00:27:05,910 --> 00:27:07,851
+So in Second Son, everything was a mesh.
+
+511
+00:27:07,931 --> 00:27:10,512
+And we used large blockers and static time of day
+
+512
+00:27:10,572 --> 00:27:11,873
+to solid effect.
+
+513
+00:27:11,893 --> 00:27:13,454
+I mentioned dynamic BSP.
+
+514
+00:27:13,474 --> 00:27:16,695
+That was all large buildings that were mostly closed
+
+515
+00:27:16,715 --> 00:27:17,896
+that we could drop down.
+
+516
+00:27:19,704 --> 00:27:23,847
+convex objects to kind of build edges out of and occlude things on the CPU.
+
+517
+00:27:24,427 --> 00:27:27,369
+It's pretty cool, but it totally doesn't work in the new environment
+
+518
+00:27:27,430 --> 00:27:31,392
+because in Ghost we have paper-thin walls, quite literally in some cases, like paper doors.
+
+519
+00:27:32,653 --> 00:27:35,235
+And we have interiors, so things aren't solid anymore.
+
+520
+00:27:35,715 --> 00:27:40,718
+And there's pinpoint holes with slats and things and windows and vegetation everywhere.
+
+521
+00:27:40,779 --> 00:27:42,320
+It's very different from a city environment.
+
+522
+00:27:43,723 --> 00:27:45,926
+So we ended up with some obvious optimizations.
+
+523
+00:27:47,027 --> 00:27:50,752
+Z equals is a really good one for vegetation, for example.
+
+524
+00:27:52,114 --> 00:27:54,357
+And some, you know, some obvious stuff, hype map stuff.
+
+525
+00:27:54,697 --> 00:27:56,159
+We leaned a lot on GPU occlusion.
+
+526
+00:27:56,199 --> 00:27:57,140
+I'll talk about a tiny bit.
+
+527
+00:27:58,141 --> 00:28:00,064
+And the real time time of day was another big wrench.
+
+528
+00:28:00,224 --> 00:28:01,005
+I'll cover a little later.
+
+529
+00:28:01,025 --> 00:28:01,065
+So.
+
+530
+00:28:02,785 --> 00:28:05,267
+For height maps, we used a fairly simple approach,
+
+531
+00:28:05,307 --> 00:28:07,469
+kind of based on the terrain rendering of frostbite article
+
+532
+00:28:07,569 --> 00:28:09,630
+I referenced down below.
+
+533
+00:28:09,650 --> 00:28:13,673
+It uses basically sort of neighbor index buffers
+
+534
+00:28:13,953 --> 00:28:15,794
+and then make sure everything is only one,
+
+535
+00:28:16,394 --> 00:28:19,216
+one sort of power of two resolution
+
+536
+00:28:19,256 --> 00:28:20,938
+away from their neighbors.
+
+537
+00:28:21,438 --> 00:28:23,059
+And we just sort of populate everything.
+
+538
+00:28:23,798 --> 00:28:26,198
+We also did, I mentioned, perversal texturing,
+
+539
+00:28:26,218 --> 00:28:28,219
+and that's sort of the more interesting aspect of this,
+
+540
+00:28:28,879 --> 00:28:31,860
+and helped with amortizing expensive blending up
+
+541
+00:28:32,140 --> 00:28:34,760
+calculations and tons and tons of decals
+
+542
+00:28:35,461 --> 00:28:37,041
+to allow us to build the world
+
+543
+00:28:37,281 --> 00:28:39,101
+kind of partially out of decals.
+
+544
+00:28:39,121 --> 00:28:41,362
+So like all the roads are made for just placing down
+
+545
+00:28:41,542 --> 00:28:44,002
+chunks of decals into the terrain.
+
+546
+00:28:44,703 --> 00:28:46,943
+And you'll see, you can look at Matt P's talk
+
+547
+00:28:47,083 --> 00:28:47,943
+for more details there.
+
+548
+00:28:49,097 --> 00:28:51,399
+So, GPU compute is one of the major things
+
+549
+00:28:51,459 --> 00:28:52,521
+I wanted to talk about a little bit.
+
+550
+00:28:52,821 --> 00:28:54,142
+It's not, I'm not gonna talk about the implementation,
+
+551
+00:28:54,202 --> 00:28:55,684
+that's gonna be another MatP thing,
+
+552
+00:28:56,145 --> 00:28:57,967
+but I'm gonna talk about the memory implications.
+
+553
+00:28:58,027 --> 00:29:00,530
+So, the occlusion calling we did,
+
+554
+00:29:00,830 --> 00:29:04,234
+initially was, it's all last frame sort of based,
+
+555
+00:29:04,774 --> 00:29:06,376
+and, which is not my favorite thing,
+
+556
+00:29:06,436 --> 00:29:07,858
+but we mostly got it all fixed up.
+
+557
+00:29:08,507 --> 00:29:12,889
+But its main target was really minimizing our memory footprint.
+
+558
+00:29:13,009 --> 00:29:15,330
+So it's less flexible, but it's much more space efficient.
+
+559
+00:29:16,030 --> 00:29:16,971
+You can see here the structure.
+
+560
+00:29:17,011 --> 00:29:19,632
+It's about 24 bytes of instances.
+
+561
+00:29:20,312 --> 00:29:22,253
+We have a larger version for more accurate stuff
+
+562
+00:29:22,293 --> 00:29:24,814
+where you need to match the rotation on building walls,
+
+563
+00:29:24,874 --> 00:29:25,394
+for example.
+
+564
+00:29:27,035 --> 00:29:28,055
+Our tile count could fit.
+
+565
+00:29:28,701 --> 00:29:32,563
+that we estimated before could fit about one third of a meg instead of 12.
+
+566
+00:29:33,643 --> 00:29:39,306
+And all far LOD geometry in the world merged up into the every tree or medium-sized boulder or
+
+567
+00:29:39,346 --> 00:29:46,329
+larger thing took a total of 10 megabytes for this sort of structure, which is pretty great
+
+568
+00:29:46,589 --> 00:29:50,431
+compared to what we had before. So the GPU is great at handling occlusion culling efficiently.
+
+569
+00:29:50,471 --> 00:29:53,552
+Although we had to jump through some hoops to get all the way there, we ended up throwing
+
+570
+00:29:53,572 --> 00:29:54,733
+the terrain triangles at it as well.
+
+571
+00:29:57,536 --> 00:30:01,241
+And this was really, really powerful to get a ton of stuff on the screen.
+
+572
+00:30:01,341 --> 00:30:04,125
+So you can see Matt P's talk for more implementation details.
+
+573
+00:30:04,605 --> 00:30:06,668
+We have some 4LOD stochastic stuff, which is pretty cool.
+
+574
+00:30:07,574 --> 00:30:13,598
+One of the things that we added was to support a lot of the diversity that they ended up needing for
+
+575
+00:30:15,179 --> 00:30:19,722
+characters and for biomes was shader swapping. We had this before, but we've really sort of
+
+576
+00:30:19,782 --> 00:30:24,445
+amplified it a bunch by building kind of systems to do this at a very low level, basically for free
+
+577
+00:30:24,485 --> 00:30:30,429
+in the runtime, and for authoring tools to basically use inheritance to kind of only
+
+578
+00:30:30,469 --> 00:30:34,372
+override certain things so that they could keep things in sync pretty well. And this includes...
+
+579
+00:30:34,452 --> 00:30:38,533
+support for GPU-culled assets, they would do bucketing in order to kind of have the
+
+580
+00:30:38,573 --> 00:30:44,534
+right set of swaps available for a particular SIMD array of GPU-culled assets.
+
+581
+00:30:44,754 --> 00:30:45,795
+So this worked really well.
+
+582
+00:30:46,735 --> 00:30:48,435
+Grass is another really big thing for the game.
+
+583
+00:30:49,176 --> 00:30:52,457
+We do this fully procedurally because there's no way we could store it all, but it's kind
+
+584
+00:30:52,477 --> 00:30:53,877
+of baked into the terrain structure.
+
+585
+00:30:53,897 --> 00:30:56,378
+A lot of it's based on GPU compute.
+
+586
+00:30:56,598 --> 00:31:00,019
+It also leverages the culling code I talked about for other stuff.
+
+587
+00:31:02,052 --> 00:31:04,492
+the pampas grass and spider lilies and things like that,
+
+588
+00:31:05,072 --> 00:31:06,473
+and it was instrumental in kind of building
+
+589
+00:31:06,493 --> 00:31:10,574
+this nice mood atmosphere that kind of would give you
+
+590
+00:31:10,614 --> 00:31:12,354
+a lot of the wind and character interaction
+
+591
+00:31:12,574 --> 00:31:13,555
+and feel of the game.
+
+592
+00:31:14,835 --> 00:31:16,135
+So for more details on that,
+
+593
+00:31:16,175 --> 00:31:17,816
+see Eric's talk on the grass and ghost
+
+594
+00:31:18,156 --> 00:31:19,476
+in the advances section session.
+
+595
+00:31:20,317 --> 00:31:24,658
+So we pushed the GPU computer further by basically,
+
+596
+00:31:25,878 --> 00:31:28,099
+adding extra inputs to our particle system.
+
+597
+00:31:28,119 --> 00:31:30,120
+So particles were a big deal and infamous.
+
+598
+00:31:30,140 --> 00:31:31,181
+We had superpowers everywhere,
+
+599
+00:31:31,601 --> 00:31:33,782
+lots of dynamic, crazy stuff.
+
+600
+00:31:33,802 --> 00:31:35,523
+You could dynamically go through the environment
+
+601
+00:31:35,563 --> 00:31:36,304
+up and over things.
+
+602
+00:31:37,264 --> 00:31:38,385
+In this game, we don't have any of that,
+
+603
+00:31:38,425 --> 00:31:39,806
+but we do have lots and lots of leaves
+
+604
+00:31:39,966 --> 00:31:41,127
+and lots and lots of nature.
+
+605
+00:31:41,407 --> 00:31:43,328
+And so once we started using wind
+
+606
+00:31:43,348 --> 00:31:44,428
+as a core gameplay feature,
+
+607
+00:31:44,448 --> 00:31:45,769
+that really unlocked the ability
+
+608
+00:31:45,829 --> 00:31:48,090
+to do cool stuff with our systems.
+
+609
+00:31:48,731 --> 00:31:50,092
+And so we added a bunch of things there,
+
+610
+00:31:50,692 --> 00:31:52,113
+like terrain and water access and whatnot.
+
+611
+00:31:52,943 --> 00:31:54,464
+And that made it really, really useful.
+
+612
+00:31:55,164 --> 00:31:58,865
+We also, in order to keep things alive and moving,
+
+613
+00:31:59,105 --> 00:32:02,046
+you really had to have a ton of simulation on NPCs.
+
+614
+00:32:02,086 --> 00:32:04,246
+So GPU cloth is one of the things we did.
+
+615
+00:32:04,286 --> 00:32:06,507
+We took our system and made it way, way, way, way better.
+
+616
+00:32:07,607 --> 00:32:09,727
+And we have a bunch of tricks we use to kind of keep it cheap
+
+617
+00:32:09,767 --> 00:32:11,528
+so we don't have to do tons and tons of iterations
+
+618
+00:32:12,948 --> 00:32:15,849
+and constraints and layering and a bunch of others.
+
+619
+00:32:15,929 --> 00:32:16,969
+I was shocked how much.
+
+620
+00:32:17,649 --> 00:32:18,290
+we got out of this.
+
+621
+00:32:18,951 --> 00:32:21,334
+So, you should totally ask Bill
+
+622
+00:32:21,814 --> 00:32:23,917
+when you look at his presentation about the horse reins.
+
+623
+00:32:24,537 --> 00:32:27,801
+And so, you'll wanna go visit his for details
+
+624
+00:32:27,861 --> 00:32:29,804
+on a lot of the tricks we used and, you know,
+
+625
+00:32:30,064 --> 00:32:30,585
+techniques there.
+
+626
+00:32:32,249 --> 00:32:38,613
+So time of day, in Infamous it was fixed and we optimized around it heavily, but in Ghost for 20
+
+627
+00:32:38,894 --> 00:32:43,137
+times the size there's no way we can make this work. We could compress it in such and that might
+
+628
+00:32:43,177 --> 00:32:47,660
+work, but then you know you have many times a day to worry about and you'd have to interpolate and
+
+629
+00:32:47,680 --> 00:32:50,643
+some games do that, but it's really just too big for us to be able to deal with.
+
+630
+00:32:51,143 --> 00:32:55,286
+And so instead, what we do is we do relighting, effectively.
+
+631
+00:32:55,306 --> 00:32:59,628
+And really, you want to be able to have the time of day change
+
+632
+00:33:00,009 --> 00:33:03,371
+as you ride through the environment, because it can take a long time to go from place to place.
+
+633
+00:33:03,391 --> 00:33:04,471
+It gives you different moods.
+
+634
+00:33:05,212 --> 00:33:10,235
+And at night, it makes more sense to be able to do stealth attacks and things like that,
+
+635
+00:33:10,675 --> 00:33:11,436
+as a gameplay opportunity.
+
+636
+00:33:11,796 --> 00:33:13,617
+So it's really a key part of the game.
+
+637
+00:33:14,330 --> 00:33:20,073
+And so effectively, I mentioned we kind of relight data,
+
+638
+00:33:20,613 --> 00:33:23,734
+and then we bake, store, cache some far shadow maps and such,
+
+639
+00:33:23,774 --> 00:33:25,395
+and all of the far distance stuff you're seeing
+
+640
+00:33:25,455 --> 00:33:27,916
+is just lit geometry like we normally would do.
+
+641
+00:33:28,336 --> 00:33:30,757
+Maybe it doesn't have quite as much specular response
+
+642
+00:33:30,797 --> 00:33:32,078
+in some cases and things like that,
+
+643
+00:33:32,138 --> 00:33:35,739
+but it's generally pretty thorough that way.
+
+644
+00:33:36,670 --> 00:33:38,832
+And it goes off pretty far.
+
+645
+00:33:38,872 --> 00:33:41,193
+Like we don't render trees all the way to the end of the island.
+
+646
+00:33:41,233 --> 00:33:44,436
+There's some stochastic LODing going on, but it works pretty well.
+
+647
+00:33:45,397 --> 00:33:48,199
+So I'm just relighting.
+
+648
+00:33:48,739 --> 00:33:51,461
+We do that with our 16 nearest cube maps.
+
+649
+00:33:52,062 --> 00:33:53,783
+They do some self-shadowing stuff, which is kind of cool.
+
+650
+00:33:54,344 --> 00:33:57,546
+We also do our classic TET mesh visibility that we have.
+
+651
+00:33:58,287 --> 00:34:01,710
+And we have a sort of a coarser terrain based
+
+652
+00:34:04,128 --> 00:34:09,994
+far-distance lighting that we use for non-cities and sort of the whole world
+
+653
+00:34:10,054 --> 00:34:15,040
+basically at a time. And a lot of this stuff is is pretty simple it's like
+
+654
+00:34:15,140 --> 00:34:19,285
+using a sky visibility and with some bounce sort of compression approach.
+
+655
+00:34:19,926 --> 00:34:21,807
+and it can be represented pretty small,
+
+656
+00:34:21,847 --> 00:34:25,129
+so like 44 megabytes for all of the terrain probes in the world.
+
+657
+00:34:25,889 --> 00:34:27,250
+We relight those, as I mentioned,
+
+658
+00:34:27,270 --> 00:34:29,051
+in Async Compute to really make that work.
+
+659
+00:34:29,672 --> 00:34:31,773
+I did mention the Cubemaps.
+
+660
+00:34:32,493 --> 00:34:33,814
+I would highly recommend you check out
+
+661
+00:34:33,934 --> 00:34:39,297
+the Runtime BC6 Compressor that Christophe has here at this link.
+
+662
+00:34:39,337 --> 00:34:41,239
+It was super great for helping with
+
+663
+00:34:41,279 --> 00:34:44,961
+cache performance and memory overhead.
+
+664
+00:34:45,281 --> 00:34:47,863
+But it saved us a couple of megabytes of memory.
+
+665
+00:34:48,737 --> 00:34:51,480
+So here's a shot of our tet mesh at like a Mongol roadblock.
+
+666
+00:34:51,540 --> 00:34:53,922
+You can see it's populated sort of in and around the stuff.
+
+667
+00:34:56,545 --> 00:35:00,389
+And here's a shot of the coarse terrain probes we stored at various heights above the terrain.
+
+668
+00:35:00,469 --> 00:35:06,536
+So there's like three layers and gives you kind of a sort of a soft version of data.
+
+669
+00:35:06,616 --> 00:35:09,819
+If you're in the middle of a forest, it'll be darker and more green, things like that.
+
+670
+00:35:12,038 --> 00:35:15,042
+So there's a lot of other things to account for, though, in Ghost.
+
+671
+00:35:15,382 --> 00:35:17,705
+So one of the things I mentioned before was thin walls.
+
+672
+00:35:18,466 --> 00:35:19,407
+Those are a big challenge.
+
+673
+00:35:19,427 --> 00:35:22,671
+We have the sort of interior mask approach that we use for those.
+
+674
+00:35:23,131 --> 00:35:25,394
+And the atmosphere of the game is a pretty big part of it.
+
+675
+00:35:25,494 --> 00:35:29,419
+So real time clouds and volumetric fog, those are pretty, pretty key.
+
+676
+00:35:29,859 --> 00:35:32,482
+We have a scattering aligned color space kind of.
+
+677
+00:35:33,083 --> 00:35:38,926
+technique that we use there. And almost all of this code is running in async compute to try and keep it nice and
+
+678
+00:35:39,187 --> 00:35:43,129
+amortized and so it doesn't actually slow the game down too much.
+
+679
+00:35:43,149 --> 00:35:48,252
+If you want to hear more about the details here, you should definitely check out Jasmine's SIGGRAPH talk later this year.
+
+680
+00:35:49,973 --> 00:36:04,727
+So we did a ton more optimization screen space shadows of the most S's allowed us to drop small shadow geometry from from their shadow passes. And that's not just the tiny, tiny stuff like sub pixel like we would drop before this is really medium sized things like
+
+681
+00:36:05,288 --> 00:36:10,809
+you know a two-foot bush for example and that that helped a ton thanks to Ben Studio for
+
+682
+00:36:10,949 --> 00:36:16,951
+for some help there. We use PGO to change shader scheduling around and really make the async
+
+683
+00:36:16,991 --> 00:36:22,352
+compute overlap really nicely and a lot of other sort of standard approaches like
+
+684
+00:36:22,392 --> 00:36:26,234
+scalarizing and branching in certain cases to make sure that we have better register
+
+685
+00:36:26,354 --> 00:36:28,074
+use and things like that and a lot of different shaders.
+
+686
+00:36:29,796 --> 00:36:31,918
+Generally though, it was a big team effort.
+
+687
+00:36:32,539 --> 00:36:33,880
+When we shipped our E3 demo,
+
+688
+00:36:34,220 --> 00:36:35,961
+we were reasonably over performance,
+
+689
+00:36:36,322 --> 00:36:37,282
+and it was a problem.
+
+690
+00:36:37,302 --> 00:36:39,064
+We hadn't done all the LOD work we needed to,
+
+691
+00:36:39,144 --> 00:36:42,166
+or really kind of the optimizations on occlusion
+
+692
+00:36:42,246 --> 00:36:45,309
+or shadows for trees at a far distance, things like that.
+
+693
+00:36:45,949 --> 00:36:48,151
+And so, you know, over time,
+
+694
+00:36:48,191 --> 00:36:49,813
+we definitely invested a ton of time
+
+695
+00:36:49,833 --> 00:36:52,054
+into making things go faster,
+
+696
+00:36:52,475 --> 00:36:53,616
+and the artists really stepped up
+
+697
+00:36:53,696 --> 00:36:56,678
+and did a ton of work to really solidify the game.
+
+698
+00:36:57,339 --> 00:36:59,162
+And by the end of the ship, it was pretty solid.
+
+699
+00:36:59,964 --> 00:37:01,586
+So it was a good team effort there.
+
+700
+00:37:02,940 --> 00:37:04,962
+So doubling down on Second Son's photo mode,
+
+701
+00:37:05,042 --> 00:37:06,263
+that was actually a big part
+
+702
+00:37:06,703 --> 00:37:07,884
+that we thought was super successful
+
+703
+00:37:08,684 --> 00:37:09,745
+when we released Second Son.
+
+704
+00:37:10,345 --> 00:37:13,607
+And we decided to sort of do the same kind of thing again.
+
+705
+00:37:13,647 --> 00:37:15,369
+You have a dedicated button for it,
+
+706
+00:37:15,849 --> 00:37:19,311
+and we added animation to the world,
+
+707
+00:37:19,371 --> 00:37:20,592
+which is kind of interesting,
+
+708
+00:37:20,612 --> 00:37:21,813
+a little different than most other games.
+
+709
+00:37:22,173 --> 00:37:23,954
+So basically at any point in the game,
+
+710
+00:37:23,994 --> 00:37:25,275
+you can pause what you're doing,
+
+711
+00:37:25,355 --> 00:37:26,576
+including in middle of combat,
+
+712
+00:37:27,016 --> 00:37:28,597
+and take a video of what's going on in the scene,
+
+713
+00:37:28,617 --> 00:37:29,278
+sort of the mood.
+
+714
+00:37:29,858 --> 00:37:34,940
+with particles going by and wind changing and cloth moving in the breeze and such.
+
+715
+00:37:34,960 --> 00:37:39,141
+And it's really amazing to see what users can do if you have a beautiful game and give them fun tools to play with.
+
+716
+00:37:40,682 --> 00:37:41,642
+This is super great.
+
+717
+00:37:43,463 --> 00:37:45,803
+So let's talk a little bit more in detail about texture streaming.
+
+718
+00:37:46,324 --> 00:37:47,564
+So we started a bit optimistic.
+
+719
+00:37:49,325 --> 00:37:51,105
+We thought we could handle it maybe with Core.
+
+720
+00:37:51,185 --> 00:37:56,347
+I started a sort of a future-looking experiment for texture streaming sort of on a fine-grained level.
+
+721
+00:37:57,180 --> 00:38:02,103
+And it turned out that it really wasn't that, you know, future looking.
+
+722
+00:38:02,123 --> 00:38:08,087
+E3 2018, we basically started getting blocked by problems running out of memory on dev kits even.
+
+723
+00:38:08,607 --> 00:38:12,610
+And that was a huge issue, so we ended up making a panic switch to this new system
+
+724
+00:38:13,110 --> 00:38:17,994
+without any of the other tech that we really needed to make it work for real, like prefetching and such.
+
+725
+00:38:18,834 --> 00:38:21,196
+Which was super exciting because we had a lot of cutscenes in that demo,
+
+726
+00:38:21,576 --> 00:38:24,918
+and to deal with the prefetching there, I had to sort of throw it all together last minute.
+
+727
+00:38:25,723 --> 00:38:29,326
+So the system itself is basically the similar to a lot of other studios.
+
+728
+00:38:29,366 --> 00:38:32,268
+I imagine it's got defragmentation of a, of a big heap.
+
+729
+00:38:33,426 --> 00:38:39,989
+And it's optimized maybe a little bit differently than some things to sort of have a giant manifest of data.
+
+730
+00:38:40,309 --> 00:38:44,010
+So textures don't have to go through multiple reads, a single read per texture.
+
+731
+00:38:44,730 --> 00:38:48,292
+And we load that manifest at boot time to kind of keep things super, super simple.
+
+732
+00:38:48,532 --> 00:38:50,812
+And it includes lower level LODs.
+
+733
+00:38:51,213 --> 00:38:56,314
+So you can basically draw everything at a blurry distance, like you can see an example here.
+
+734
+00:38:57,335 --> 00:39:02,816
+In this example, we're basically jumping about 200 meters away, and you can see the terrain loading
+
+735
+00:39:02,836 --> 00:39:06,997
+in the background, the grass popping in and such, and it takes like three seconds or so to load the
+
+736
+00:39:07,057 --> 00:39:13,159
+more important stuff up front in the camera and get it to the point where it's hard to see any
+
+737
+00:39:13,199 --> 00:39:17,840
+other changes happening as we kind of load the more prefetching and more other textures we think
+
+738
+00:39:17,920 --> 00:39:22,842
+might be relevant. And you can see the defragmentation happening at the bottom. We move
+
+739
+00:39:22,882 --> 00:39:25,242
+about 25 megs a frame, and we end up issuing
+
+740
+00:39:28,097 --> 00:39:31,945
+asynchronously. And again, this is sort of a dev scenario, so it's probably a little
+
+741
+00:39:31,965 --> 00:39:35,632
+bit faster than in shipping hardware, but you could sort of see what it might look like.
+
+742
+00:39:37,011 --> 00:39:42,672
+Um, and so I mentioned the manifest at boot. It's a single file that's kind of collected from all the texture data.
+
+743
+00:39:42,692 --> 00:39:47,793
+Um, the idea there is that, is that you basically have a representation all the time.
+
+744
+00:39:48,153 --> 00:39:54,395
+And there's this one file which is collected, um, and it's, so the whole system is sort of much simpler because of that.
+
+745
+00:39:54,455 --> 00:39:57,195
+You don't have to rebuild packs when textures change at all.
+
+746
+00:39:57,315 --> 00:40:00,256
+They just are in the manifest if, if they're there and that's it.
+
+747
+00:40:00,356 --> 00:40:01,196
+Manifest is rebuilt.
+
+748
+00:40:01,736 --> 00:40:04,437
+only ends up reading the textures that have changed
+
+749
+00:40:04,477 --> 00:40:05,797
+because they can look at the MD5s and say,
+
+750
+00:40:05,837 --> 00:40:06,998
+hey, this isn't actually different.
+
+751
+00:40:07,018 --> 00:40:08,798
+I'm just going to skip this one and keep what I've got.
+
+752
+00:40:10,579 --> 00:40:11,699
+The textures themselves are
+
+753
+00:40:11,759 --> 00:40:14,000
+this header plus metadata which ends up in the manifest,
+
+754
+00:40:14,040 --> 00:40:16,421
+but also the runtime MIPS
+
+755
+00:40:16,501 --> 00:40:19,022
+exactly in the layout that we need it in.
+
+756
+00:40:19,062 --> 00:40:21,363
+You can basically do a single read and then you're done.
+
+757
+00:40:22,343 --> 00:40:23,803
+No fix up at all and you're there.
+
+758
+00:40:26,163 --> 00:40:30,084
+And so in order to do this work, we basically had to do it in sort of a threaded way.
+
+759
+00:40:30,624 --> 00:40:36,226
+And the kind of, to do it in the background, you really want to have safe data to access.
+
+760
+00:40:36,266 --> 00:40:41,627
+And so we basically did this copy operation to let the threads party on it with no worries
+
+761
+00:40:41,667 --> 00:40:43,928
+about if something was adding or removing stuff from that list.
+
+762
+00:40:45,488 --> 00:40:49,810
+And after a couple of layers of optimization,
+
+763
+00:40:50,731 --> 00:40:54,713
+you basically want to modify or set it up so that objects when they change,
+
+764
+00:40:54,813 --> 00:40:59,056
+because most objects aren't changing, can poke their data into this big array.
+
+765
+00:40:59,476 --> 00:41:02,738
+And it becomes kind of the copy ends up becoming really literally like almost a
+
+766
+00:41:02,778 --> 00:41:05,140
+memcpy. There are some exceptional cases where if you find an,
+
+767
+00:41:05,760 --> 00:41:07,602
+like a character that has changed costumes,
+
+768
+00:41:07,942 --> 00:41:11,124
+you need to recompact the SIMD data for the geometry.
+
+769
+00:41:11,144 --> 00:41:13,906
+So you have a minimal set in that case, but for the most part,
+
+770
+00:41:14,246 --> 00:41:18,089
+it's just memcpy. And at that point, the overhead becomes a big problem.
+
+771
+00:41:18,149 --> 00:41:19,690
+So for example, we found that.
+
+772
+00:41:20,662 --> 00:41:27,246
+that running copies from multiple threads is actually a bad idea. Copying less than 16k from
+
+773
+00:41:27,446 --> 00:41:33,090
+threads is a bad idea. Atomic increments are a really bad idea because they just,
+
+774
+00:41:33,430 --> 00:41:38,273
+the overhead adds up. And so your profiler is really your friend when working on this stuff.
+
+775
+00:41:38,654 --> 00:41:43,057
+So let's look at the profiler. So here's what the streaming code looks like. These are all,
+
+776
+00:41:43,397 --> 00:41:46,359
+these are mostly background threads. You'll see the half millisecond down there of the copy
+
+777
+00:41:46,399 --> 00:41:48,180
+operations that are going on. And then.
+
+778
+00:41:49,732 --> 00:41:52,896
+we go wide to measure distance per shader effectively,
+
+779
+00:41:53,336 --> 00:41:55,419
+and then we sort of multiplex the shaders together
+
+780
+00:41:55,459 --> 00:41:58,302
+and say, you know, hey, what's the scale on each texture?
+
+781
+00:41:59,003 --> 00:42:01,566
+And then keep track of the top 16, bottom 16,
+
+782
+00:42:02,047 --> 00:42:05,691
+things like that to read or to throw away
+
+783
+00:42:05,731 --> 00:42:07,393
+if we're gonna make space for new textures.
+
+784
+00:42:08,884 --> 00:42:13,391
+So here's the pseudocode. It's a structure of arrays, sort of SIMD-friendly approach.
+
+785
+00:42:14,133 --> 00:42:18,660
+We find the triangle area and the desired texture size with some fixed point precision
+
+786
+00:42:18,680 --> 00:42:23,427
+so the UVA scale can work pretty well. We end up...
+
+787
+00:42:24,288 --> 00:42:26,330
+keeping the top 16 I mentioned by screen size.
+
+788
+00:42:26,410 --> 00:42:29,552
+And so the idea there is that if you have something up front
+
+789
+00:42:29,692 --> 00:42:32,794
+or getting close to up front that needs a higher MIP,
+
+790
+00:42:32,814 --> 00:42:33,794
+you really want it to show up.
+
+791
+00:42:33,814 --> 00:42:35,615
+So you don't like it doesn't show up
+
+792
+00:42:35,675 --> 00:42:37,837
+and it's really blurry in front of your face.
+
+793
+00:42:38,497 --> 00:42:39,938
+And the 70 is kind of fun.
+
+794
+00:42:39,958 --> 00:42:42,720
+I had fun writing this and I found like a cheap,
+
+795
+00:42:43,000 --> 00:42:46,642
+cheap ceiling of a log is like a integer ad kind of thing
+
+796
+00:42:47,042 --> 00:42:48,223
+and a round operation.
+
+797
+00:42:48,243 --> 00:42:49,024
+It's pretty, it's pretty cool.
+
+798
+00:42:50,204 --> 00:42:50,344
+So.
+
+799
+00:42:51,325 --> 00:42:53,166
+There are some tricky cases though for texture streaming.
+
+800
+00:42:53,626 --> 00:42:56,709
+I'm sure there's lots more, but the two that popped out for me were
+
+801
+00:42:57,389 --> 00:43:01,993
+particle atlases. So we had this way of drawing all our particles in a single draw call
+
+802
+00:43:02,533 --> 00:43:06,616
+and it had an atlas and that sort of didn't work very well. We ended up having multiple atlases
+
+803
+00:43:06,636 --> 00:43:11,019
+because of texture size and it turned out to be just as efficient to switch it to a bindless model
+
+804
+00:43:11,039 --> 00:43:15,102
+where you can just sort of scalarize based on texture index and you're good to go.
+
+805
+00:43:16,569 --> 00:43:23,616
+Virtual texturing was also kind of weird where in some rare situations you would be moving around and a decal hadn't loaded yet.
+
+806
+00:43:23,736 --> 00:43:26,818
+And so it was sort of a blurry version of the ground.
+
+807
+00:43:27,299 --> 00:43:34,946
+In order to keep that from sticking around forever, we basically added this round-robin update that would eventually catch up to things.
+
+808
+00:43:35,586 --> 00:43:37,488
+It's not perfect, but it works.
+
+809
+00:43:38,612 --> 00:43:44,897
+So one of the two big things that's hard in texture streaming, in my opinion, are the UV heuristics.
+
+810
+00:43:44,977 --> 00:43:50,903
+Now UVs are really complicated. We ended up trying, the goal was to really get it down to
+
+811
+00:43:50,943 --> 00:43:54,106
+a single 16-bit integer so that we can kind of...
+
+812
+00:43:54,746 --> 00:43:57,668
+so that we can have SIMD kind of operate on tons of these things at once.
+
+813
+00:43:58,509 --> 00:44:02,591
+And we tried a bunch of heuristics to bake it down to this, and it was pretty tricky.
+
+814
+00:44:02,932 --> 00:44:06,334
+We ended up landing on a log bucketing approach, where you basically take the
+
+815
+00:44:06,714 --> 00:44:10,256
+size of the texture that you're measuring, you take the log of that,
+
+816
+00:44:10,637 --> 00:44:12,978
+and you put it in a bucket based on that log, and then...
+
+817
+00:44:14,029 --> 00:44:17,250
+And then you add up the area of triangles in that particular bucket.
+
+818
+00:44:17,330 --> 00:44:20,531
+And then when you're trying to figure out, hey, what's the actual,
+
+819
+00:44:20,591 --> 00:44:23,472
+and you kind of do maximums and averages on the actual texture size
+
+820
+00:44:23,492 --> 00:44:24,713
+to figure out what the worst one is.
+
+821
+00:44:25,393 --> 00:44:29,654
+And then you kind of say, hey, take the area as you go up these sort of buckets.
+
+822
+00:44:30,395 --> 00:44:35,216
+And once you hit half of the mesh, you kind of know the general
+
+823
+00:44:36,016 --> 00:44:36,436
+you kind of.
+
+824
+00:44:37,401 --> 00:44:41,745
+texture usage for at least half of the mesh and then 80% is where we sort of really draw the line
+
+825
+00:44:41,765 --> 00:44:46,850
+and say hey you basically if you have a really tiny thing that's trying to amp the texture up
+
+826
+00:44:46,870 --> 00:44:53,836
+to like four times the size just just ignore it so but it also helps you hide avoid things where
+
+827
+00:44:53,996 --> 00:44:58,661
+you get to generate uvs from something like a log generator that happens to be inside of a
+
+828
+00:45:00,678 --> 00:45:07,742
+a big log that's on a beach for example, and that avoids those sorts of situations killing you for
+
+829
+00:45:07,902 --> 00:45:13,425
+texture bandwidth or texture size. Bucketing was slightly faster than sorting. You could
+
+830
+00:45:13,445 --> 00:45:14,485
+probably do the same thing with sorting.
+
+831
+00:45:15,370 --> 00:45:20,916
+So this worked well enough to ship, but there's still some weird cases that this sort of 1D approach doesn't really handle like counter UV stretching.
+
+832
+00:45:20,956 --> 00:45:29,245
+If you kind of stretch one direction and then stretch it back up in the in the UV scale and shader, it gets confused in some of those sorts of situations.
+
+833
+00:45:29,345 --> 00:45:33,430
+So there's still some some work to do here next time.
+
+834
+00:45:34,759 --> 00:45:36,060
+So I mentioned we have a one gig budget.
+
+835
+00:45:36,420 --> 00:45:37,561
+What do you do if you're over budget?
+
+836
+00:45:37,961 --> 00:45:40,822
+We use a simple penalty scheme where effectively
+
+837
+00:45:41,262 --> 00:45:43,824
+every frame we sort of penalize it more and more globally
+
+838
+00:45:44,244 --> 00:45:46,205
+until you get to a point where all the textures
+
+839
+00:45:46,225 --> 00:45:47,225
+you're asking for will fit.
+
+840
+00:45:47,726 --> 00:45:49,787
+And then once you've finished reading all the stuff you need
+
+841
+00:45:50,027 --> 00:45:53,048
+at that level, we'll try a sort of less penalty
+
+842
+00:45:53,128 --> 00:45:54,789
+until you get to the point where, you know,
+
+843
+00:45:55,150 --> 00:45:59,472
+you're stabilized in the level you wanna ask for.
+
+844
+00:45:59,492 --> 00:45:59,532
+So.
+
+845
+00:46:03,504 --> 00:46:08,468
+This system worked pretty well, but it required a lot of debugging and so we added some debugging
+
+846
+00:46:08,488 --> 00:46:14,472
+tools to help artists sort of diagnose problems. You can see an example of that here with the
+
+847
+00:46:14,532 --> 00:46:19,595
+bounding boxes for these little spikes surrounding the Mongol war camp.
+
+848
+00:46:20,752 --> 00:46:25,616
+And you can basically see the debugging setup where we can filter on texture name or shader name,
+
+849
+00:46:26,036 --> 00:46:31,500
+or you can look for textures by badness. That's like sort of a low screen area versus a high
+
+850
+00:46:31,540 --> 00:46:36,464
+resolution requested. And that was pretty useful in order to see, hey, what the heck is this?
+
+851
+00:46:36,604 --> 00:46:43,149
+Why is this taking up so much texture space? Or, you know, where is this one 2k map coming from?
+
+852
+00:46:43,289 --> 00:46:46,292
+Oh, it's that log way over on that beach. Things like that.
+
+853
+00:46:47,426 --> 00:46:53,549
+So one of the other things that's really critical to handle correctly is pre-fetching. So pre-fetching
+
+854
+00:46:53,609 --> 00:46:58,032
+is super important if you want to avoid Halo 2 style cutscene pops where you look at the face
+
+855
+00:46:58,272 --> 00:47:04,195
+and the face gets a normal map and it's like those drive me nuts. So every camera cut or
+
+856
+00:47:04,556 --> 00:47:08,298
+character coming into existence needs a bit of foreknowledge to really get the right data. And
+
+857
+00:47:08,318 --> 00:47:11,700
+there's no magic bullet here it's just a bunch of work plumbing to make sure that you've got
+
+858
+00:47:11,720 --> 00:47:15,001
+the camera cuts available you know what cutscenes you might be starting and
+
+859
+00:47:15,502 --> 00:47:19,627
+making sure that the rigging knows you know how far ahead of time you might need them because
+
+860
+00:47:19,647 --> 00:47:25,355
+you can't just load all of them all at once. And even then like you run into situations where
+
+861
+00:47:26,265 --> 00:47:31,709
+you don't want to load more than 1k map for most of the time, even in a lot of cutscenes, 1k is totally fine.
+
+862
+00:47:32,129 --> 00:47:38,473
+But if you're going to be doing a super close, close up on somebody's face, that becomes a case where you really need to load more.
+
+863
+00:47:38,853 --> 00:47:45,998
+And so we clamped basically a 1k most of the time and then would unlock it for photo mode and for some cutscenes to get those close up shots looking really good.
+
+864
+00:47:48,108 --> 00:47:52,350
+So, bounding boxes add up a lot.
+
+865
+00:47:52,430 --> 00:47:55,030
+So we mentioned sort of the 24 byte instances.
+
+866
+00:47:55,090 --> 00:47:56,131
+Those are pretty efficient, right?
+
+867
+00:47:56,531 --> 00:47:57,951
+Well, if you need a bounding box
+
+868
+00:47:57,971 --> 00:48:00,732
+for every piece of geometry per shader, per LOD,
+
+869
+00:48:00,772 --> 00:48:02,892
+for each one of those instances,
+
+870
+00:48:02,912 --> 00:48:04,413
+it sort of negates the whole thing.
+
+871
+00:48:04,833 --> 00:48:09,074
+And so instead, what we do is we basically bucket on a grid,
+
+872
+00:48:09,094 --> 00:48:11,374
+and this is to avoid some of the more N-squaredness
+
+873
+00:48:11,434 --> 00:48:14,395
+of the next phase where we will bottom up merge bounding boxes
+
+874
+00:48:14,595 --> 00:48:16,936
+in order to get a smaller number of these things.
+
+875
+00:48:17,850 --> 00:48:22,612
+And we do this until we hit something like a square root of the number of the of items that we're worried about.
+
+876
+00:48:23,933 --> 00:48:26,715
+And that we apply that to growth to kind of minimize that overhead.
+
+877
+00:48:26,735 --> 00:48:32,258
+I think it's something like 10% bigger than the 24 megabyte cost for most for most purposes.
+
+878
+00:48:33,098 --> 00:48:38,101
+For terrain, something like the texture, ground textures and the grass information.
+
+879
+00:48:38,641 --> 00:48:42,423
+We did something simpler and we just split the tile up into 16 chunks and stored one.
+
+880
+00:48:43,376 --> 00:48:44,957
+one per each of those things.
+
+881
+00:48:45,838 --> 00:48:48,340
+And we do have a sort of scales of terrain,
+
+882
+00:48:48,380 --> 00:48:51,262
+so the larger terrain have coarser texels.
+
+883
+00:48:51,943 --> 00:48:53,724
+And to avoid those trying to say,
+
+884
+00:48:53,744 --> 00:48:55,926
+I just really have really giant bounding boxes and such,
+
+885
+00:48:55,966 --> 00:48:57,347
+we have a minimum camera distance
+
+886
+00:48:57,367 --> 00:48:59,028
+that we clamp a lot of that stuff to,
+
+887
+00:48:59,048 --> 00:48:59,429
+to make sure.
+
+888
+00:48:59,449 --> 00:49:01,470
+A similar thing that we use for tree imposters,
+
+889
+00:49:01,670 --> 00:49:04,453
+because you aren't gonna get any closer to a tree.
+
+890
+00:49:05,379 --> 00:49:10,643
+imposter than say 120 meters because at that point we'll switch to the actual tree, right?
+
+891
+00:49:11,143 --> 00:49:14,766
+And so there's there's a bunch of clamping that we can do in order to optimize those situations.
+
+892
+00:49:16,787 --> 00:49:21,351
+So we did end up applying this to mesh streaming as well. Characters were getting tight with all
+
+893
+00:49:21,371 --> 00:49:25,053
+the flavors they wanted to add and environment was over core and it was it was pretty tight
+
+894
+00:49:25,373 --> 00:49:28,756
+on a lot of those situations. So adding meshes into the mix like textures.
+
+895
+00:49:29,707 --> 00:49:32,769
+works really well as well. It's a very squishable problem just like textures
+
+896
+00:49:33,409 --> 00:49:36,612
+and unlock the constraints for how many characters we could have in a
+
+897
+00:49:36,652 --> 00:49:39,714
+particular mission or things like that. We just stopped worrying about that for
+
+898
+00:49:39,734 --> 00:49:40,095
+the most part.
+
+899
+00:49:41,551 --> 00:49:44,952
+All the measurement and over budget logic is running is similar and running at the same time.
+
+900
+00:49:45,012 --> 00:49:47,112
+So it's actually relatively cheap performance wise.
+
+901
+00:49:47,792 --> 00:49:49,693
+The main complication is our stipple based loading.
+
+902
+00:49:49,713 --> 00:49:57,194
+LOD fading is kind of doesn't really it's hard to make that understand the loading process as well.
+
+903
+00:49:57,274 --> 00:50:08,716
+So we needed to add sort of promote a bunch of that information about what mesh groups are relevant for particular log branches into the into the sort of the visibility and the proxy.
+
+904
+00:50:09,036 --> 00:50:10,677
+The GPU calling code in order to make it.
+
+905
+00:50:11,197 --> 00:50:13,299
+so that it knew what to do and how to say,
+
+906
+00:50:13,359 --> 00:50:14,540
+oh, actually, that doesn't exist.
+
+907
+00:50:14,560 --> 00:50:16,141
+I'm just going to always draw this side and such.
+
+908
+00:50:16,862 --> 00:50:17,763
+And don't worry about stippling.
+
+909
+00:50:18,604 --> 00:50:20,806
+I'll use virtual memory for this, like we do with packs.
+
+910
+00:50:20,826 --> 00:50:21,807
+And this worked much better
+
+911
+00:50:22,267 --> 00:50:23,708
+than the defragmentation system,
+
+912
+00:50:23,909 --> 00:50:24,689
+was way simpler.
+
+913
+00:50:25,030 --> 00:50:27,572
+You can kind of instantly reclaim memory and reallocate it.
+
+914
+00:50:28,413 --> 00:50:29,113
+There's some, you know,
+
+915
+00:50:29,133 --> 00:50:30,715
+there's definitely a CPU cost to doing so,
+
+916
+00:50:30,795 --> 00:50:32,637
+but it's much simpler,
+
+917
+00:50:32,657 --> 00:50:35,239
+and we're going to use this going forward in the future
+
+918
+00:50:35,279 --> 00:50:36,380
+for textures and for everything else.
+
+919
+00:50:37,567 --> 00:50:42,310
+So here's the structure for mapping LOD ranges to memory offsets. I mentioned before the textures
+
+920
+00:50:42,350 --> 00:50:47,573
+are a single read. Same deal for LOD ranges. It's just, you know, the vertex streams in chunks that
+
+921
+00:50:47,613 --> 00:50:53,516
+kind of you need for, you know, LOD 5 through 2. Great. Take that chunk. We use a compressed
+
+922
+00:50:53,556 --> 00:50:57,839
+distance byte for all LOD distances just because this is a really easy way to get at this stuff.
+
+923
+00:50:59,117 --> 00:51:02,260
+So conclusions and some interesting things about loading.
+
+924
+00:51:02,480 --> 00:51:03,921
+Our cold boot times are pretty good.
+
+925
+00:51:04,502 --> 00:51:08,425
+They're not amazing, but they're okay at about 44 seconds or so.
+
+926
+00:51:08,445 --> 00:51:12,369
+But the fast travel and death reload times were fast enough that users and press actually noticed.
+
+927
+00:51:13,290 --> 00:51:16,012
+It was kind of weird for us because we've been living with it for so long,
+
+928
+00:51:16,153 --> 00:51:21,578
+and it is a thing we tend to focus on, but it was nice to see people really appreciate it.
+
+929
+00:51:22,310 --> 00:51:25,512
+And oddly, we ended up needing to slow down our death reloads
+
+930
+00:51:25,592 --> 00:51:28,194
+because users could start seeing loading tips
+
+931
+00:51:28,214 --> 00:51:29,515
+and then they would go away immediately.
+
+932
+00:51:29,555 --> 00:51:30,836
+And that was just too weird.
+
+933
+00:51:30,896 --> 00:51:32,897
+So we kept them up for a minimum amount of time
+
+934
+00:51:32,917 --> 00:51:34,278
+in order to make it so they're readable.
+
+935
+00:51:34,899 --> 00:51:37,240
+And we actually currently load as fast as on PS4
+
+936
+00:51:37,280 --> 00:51:38,901
+as we do on PS5 in BC mode.
+
+937
+00:51:38,921 --> 00:51:40,703
+And that was actually due to an unfortunate typo
+
+938
+00:51:40,723 --> 00:51:41,443
+we found kind of late.
+
+939
+00:51:41,603 --> 00:51:43,505
+And we're hoping to fix that in a future patch, but we'll see.
+
+940
+00:51:44,952 --> 00:51:48,333
+So the spirit of matching tech to vision,
+
+941
+00:51:49,833 --> 00:51:51,414
+the vision of the game actually really helped
+
+942
+00:51:51,854 --> 00:51:53,914
+to kind of smooth a lot of the stuff out.
+
+943
+00:51:53,934 --> 00:51:57,035
+One of the touchstones when building the game
+
+944
+00:51:57,095 --> 00:51:59,136
+was we wanted to reduce the noise
+
+945
+00:51:59,536 --> 00:52:02,797
+and make sure that the game had,
+
+946
+00:52:03,357 --> 00:52:05,817
+you could basically be calm in it and relax.
+
+947
+00:52:06,417 --> 00:52:07,658
+And we have a lot of variety,
+
+948
+00:52:07,678 --> 00:52:09,558
+but it's a little bit more spread out
+
+949
+00:52:09,638 --> 00:52:10,458
+than it was in Infamous.
+
+950
+00:52:11,302 --> 00:52:14,991
+So that helped a bunch. The design also helped with the breadcrumb responding I mentioned,
+
+951
+00:52:15,192 --> 00:52:19,423
+responding in the same place. It helps intuition and also reload times.
+
+952
+00:52:20,502 --> 00:52:23,302
+So one of the, probably the main trick we pulled
+
+953
+00:52:23,762 --> 00:52:26,883
+was to reduce textures by about three quarters during warps.
+
+954
+00:52:26,943 --> 00:52:28,563
+So if you're going to an area,
+
+955
+00:52:28,703 --> 00:52:31,884
+our kind of conservative estimate says you want this,
+
+956
+00:52:32,284 --> 00:52:34,525
+just throw away like three quarters of that
+
+957
+00:52:35,685 --> 00:52:37,425
+and it should be mostly fine.
+
+958
+00:52:38,165 --> 00:52:39,666
+This does mean there are some cases
+
+959
+00:52:39,706 --> 00:52:41,066
+where you can't do this like cut scenes.
+
+960
+00:52:41,086 --> 00:52:42,206
+So if you're going across the world
+
+961
+00:52:42,266 --> 00:52:44,847
+to a different set of characters with a different cut scene,
+
+962
+00:52:45,847 --> 00:52:47,507
+that warp sort of warp will be slower.
+
+963
+00:52:47,527 --> 00:52:49,268
+I mean, we have a couple of cases of that in the game,
+
+964
+00:52:49,288 --> 00:52:49,868
+but not very many.
+
+965
+00:52:51,173 --> 00:52:56,922
+So the general techniques for doing this are to you really want to minimize reads per file.
+
+966
+00:52:57,363 --> 00:53:00,668
+So you aggregate lots of small files into big chunks of things.
+
+967
+00:53:02,378 --> 00:53:05,799
+And as I mentioned, we do this with like literally pointer patch and you're good to go
+
+968
+00:53:06,519 --> 00:53:13,200
+with PAC data. You want to sort of do lots of optimization and kind of flattening and
+
+969
+00:53:13,480 --> 00:53:18,741
+simplification into low levels data structures during asset compilation, which means you need
+
+970
+00:53:18,761 --> 00:53:22,622
+relatively smart build tools that don't need to rebuild when that piece of that file didn't
+
+971
+00:53:22,662 --> 00:53:26,703
+actually change that you really need to look at. And you need to keep them fast so iteration
+
+972
+00:53:26,743 --> 00:53:29,203
+doesn't slow down too much and things like that.
+
+973
+00:53:30,641 --> 00:53:33,145
+And we obviously need to spend a bunch of time optimizing.
+
+974
+00:53:33,185 --> 00:53:33,886
+That's the other thing.
+
+975
+00:53:33,906 --> 00:53:36,430
+And we leaned on GPU compute really heavily
+
+976
+00:53:36,550 --> 00:53:37,792
+and obviously we pulled a few tricks,
+
+977
+00:53:37,892 --> 00:53:40,797
+but that's kind of the general approach
+
+978
+00:53:40,837 --> 00:53:41,698
+we used for this game.
+
+979
+00:53:43,277 --> 00:53:47,217
+So in the future, we'd like to obviously extend what we've been working on here
+
+980
+00:53:48,498 --> 00:53:54,659
+and work on sort of do more virtual memory tricks and the like. The GPU compute was really effective
+
+981
+00:53:55,059 --> 00:53:59,760
+so we're going to double down on that probably going forward. Fine-grained streaming was also
+
+982
+00:53:59,780 --> 00:54:03,481
+really effective and so we're going to need to see how we can make something like animations
+
+983
+00:54:03,541 --> 00:54:06,801
+or sounds squishy enough to really make that efficient.
+
+984
+00:54:08,921 --> 00:54:12,482
+And obviously there's lots of other work to do, solving some of our quirky things like
+
+985
+00:54:12,662 --> 00:54:16,764
+complex UVs or tools work and build time work, lots of stuff to do.
+
+986
+00:54:17,984 --> 00:54:22,825
+So I'd like to thank everybody. I was not certainly the only person working on this stuff.
+
+987
+00:54:22,845 --> 00:54:25,746
+There's lots of programmers that did a bunch of this work in this presentation.
+
+988
+00:54:26,727 --> 00:54:28,387
+So thanks to everybody then there.
+
+989
+00:54:28,787 --> 00:54:32,228
+And thanks to the art team and everyone else for helping to ship a really great game.
+
+990
+00:54:33,730 --> 00:54:36,812
+And so if you'd like to work on things like this, we are hiring.
+
+991
+00:54:36,892 --> 00:54:40,575
+We're looking for programmers of a variety of positions and junior and senior are welcome.
+
+992
+00:54:40,615 --> 00:54:41,455
+So please check us out.
+
+993
+00:54:43,877 --> 00:54:46,919
+And here is a fun extra if you would like to see it.
+
+994
+00:54:47,579 --> 00:54:49,020
+Every game has retargeting problems.
+
+995
+00:54:49,701 --> 00:54:51,282
+This is just a weird one.
+
+996
+00:54:51,302 --> 00:54:57,046
+I don't know how Jin's horse got assigned to be his opponent in a duel, but he did.
+
+997
+00:54:57,066 --> 00:54:58,607
+There you go.
+
+998
+00:55:19,405 --> 00:55:21,866
+And there's some networking sort of stuff.
+
+999
+00:55:21,926 --> 00:55:28,189
+We had this cool virus that happened while we were shipping, after shipping actually.
+
+1000
+00:55:28,409 --> 00:55:31,030
+We had to sort of patch the game to sort of eliminate it.
+
+1001
+00:55:31,070 --> 00:55:32,611
+So anyway, thanks for watching.
+
+1002
+00:55:33,051 --> 00:55:33,251
+Cheers.
+

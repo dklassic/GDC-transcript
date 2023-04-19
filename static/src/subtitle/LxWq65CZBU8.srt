@@ -1,0 +1,4480 @@
+1
+00:00:05,958 --> 00:00:09,580
+Good morning and welcome to Marvel's Spider-Man and AI
+
+2
+00:00:09,580 --> 00:00:10,141
+Postmortem.
+
+3
+00:00:10,141 --> 00:00:12,362
+My name is Adam Newnchester, and I'm
+
+4
+00:00:12,362 --> 00:00:15,344
+one of the lead gameplay programmers at Insomniac Games.
+
+5
+00:00:15,344 --> 00:00:17,926
+Over the past 11 years, I've been
+
+6
+00:00:17,926 --> 00:00:20,387
+fortunate to work on eight great games at Insomniac.
+
+7
+00:00:20,387 --> 00:00:23,249
+And for the majority of these, I've been an AI programmer.
+
+8
+00:00:24,186 --> 00:00:28,588
+On Marvel's Spider-Man, I led the team of gameplay programmers that developed combat.
+
+9
+00:00:28,588 --> 00:00:30,369
+Let's take a quick look.
+
+10
+00:00:30,369 --> 00:00:32,911
+My team worked on both stealth and melee combat.
+
+11
+00:00:32,911 --> 00:00:36,333
+We helped create Spider-Man's combat moves and all of his gadgets.
+
+12
+00:00:36,333 --> 00:00:38,714
+We also worked on the enemies and bosses,
+
+13
+00:00:38,714 --> 00:00:42,556
+and I'd like to take this opportunity to tell you about some of the biggest changes and challenges
+
+14
+00:00:42,556 --> 00:00:46,558
+that we encountered on the AI side developing this game.
+
+15
+00:00:47,960 --> 00:00:50,862
+So let me give you a quick preview of the topics I'm going to discuss today.
+
+16
+00:00:50,862 --> 00:00:57,567
+I'll start with some high-level trends related to how we author behaviors and build AI characters.
+
+17
+00:00:57,567 --> 00:01:01,230
+Then I'll move into how we use synced animations to get a Marvel feel in a game.
+
+18
+00:01:01,230 --> 00:01:08,035
+From there, I'll give an overview of a few core problems and how we iterated on them with our combat.
+
+19
+00:01:08,455 --> 00:01:13,338
+After that, we'll look at some procedural animation techniques that we developed specifically for Spider-Man.
+
+20
+00:01:13,338 --> 00:01:19,221
+And then finally, time permitting, I'll briefly discuss a few of the places where I feel we fell short.
+
+21
+00:01:20,268 --> 00:01:25,772
+So let's begin with a high-level trend that occurred over the course of development that
+
+22
+00:01:25,772 --> 00:01:30,715
+I expect to continue, and that is less use of complex behavior trees and more use of
+
+23
+00:01:30,715 --> 00:01:33,337
+data-driven hierarchical finite state machines.
+
+24
+00:01:33,337 --> 00:01:37,780
+This happened for several reasons, but the largest was simply that Marvel's Spider-Man
+
+25
+00:01:37,780 --> 00:01:41,102
+was the largest game that Insomniac Games has made to date.
+
+26
+00:01:41,682 --> 00:01:45,444
+Spider-Man has five major factions and a few minor ones.
+
+27
+00:01:45,444 --> 00:01:48,646
+We've also got eight archetypes that are common to all the factions,
+
+28
+00:01:48,646 --> 00:01:53,189
+and the majority of these archetypes have variations per faction.
+
+29
+00:01:53,189 --> 00:01:57,672
+There are also several faction-exclusive types and 11 boss fights.
+
+30
+00:01:58,336 --> 00:02:01,761
+This all meant that we had to create 64 AI classes,
+
+31
+00:02:01,761 --> 00:02:04,705
+and the majority of these had to have some unique attacks,
+
+32
+00:02:04,705 --> 00:02:07,129
+reactions, or other behaviors.
+
+33
+00:02:07,129 --> 00:02:10,133
+We also had to do this with a slightly smaller gameplay team
+
+34
+00:02:10,133 --> 00:02:12,997
+than our last big game, Sunset Overdrive,
+
+35
+00:02:12,997 --> 00:02:15,000
+in which we only made 19 classes.
+
+36
+00:02:16,773 --> 00:02:21,597
+Let me begin by briefly describing how we organize our AI behavior at Insomniac.
+
+37
+00:02:21,597 --> 00:02:25,660
+We have our own proprietary engine and the vast majority of our code is written in C++.
+
+38
+00:02:25,660 --> 00:02:30,464
+This is the general architecture that's been in use since about 2012.
+
+39
+00:02:30,464 --> 00:02:34,848
+From here on, I'm going to also use the term AI and bots interchangeably.
+
+40
+00:02:34,848 --> 00:02:39,892
+At the top level, we have a behavior tree, and that decides on a behavior to run.
+
+41
+00:02:40,820 --> 00:02:47,607
+Behaviors can have an arbitrary number of sub-behaviors, but eventually a behavior will instantiate a state.
+
+42
+00:02:47,607 --> 00:02:53,354
+These are our leaf nodes and they control animation, motion, and perform other player-facing actions.
+
+43
+00:02:54,691 --> 00:02:57,032
+When we first implemented behavior trees into our Engine,
+
+44
+00:02:57,032 --> 00:02:59,693
+a lot of them tended to have a structure like this.
+
+45
+00:02:59,693 --> 00:03:01,654
+This is one corner of the behavior tree
+
+46
+00:03:01,654 --> 00:03:03,815
+that drove the behavior of ranged enemies
+
+47
+00:03:03,815 --> 00:03:05,756
+in Sunset Overdrive.
+
+48
+00:03:05,756 --> 00:03:09,658
+This simple subtree uses 34 discrete nodes,
+
+49
+00:03:09,658 --> 00:03:12,059
+and many of them just map to a simple AI state,
+
+50
+00:03:12,059 --> 00:03:13,840
+such as playing an animation,
+
+51
+00:03:13,840 --> 00:03:16,502
+shuffling around, meleeing, or aiming.
+
+52
+00:03:16,502 --> 00:03:19,183
+The parameters for the state were largely configured
+
+53
+00:03:19,183 --> 00:03:21,444
+by the behavior tree and passed through a behavior
+
+54
+00:03:21,444 --> 00:03:23,845
+that only instantiated a single state.
+
+55
+00:03:24,285 --> 00:03:26,487
+In order for our AI to function as desired,
+
+56
+00:03:26,487 --> 00:03:29,068
+things tended to get really complicated.
+
+57
+00:03:29,068 --> 00:03:31,509
+Nodes often had to utilize numerous kinds
+
+58
+00:03:31,509 --> 00:03:32,990
+of callback functions.
+
+59
+00:03:32,990 --> 00:03:35,491
+For example, let's look at a simple node
+
+60
+00:03:35,491 --> 00:03:38,433
+that is trying to use a state to aim at a target
+
+61
+00:03:38,433 --> 00:03:39,233
+over a railing.
+
+62
+00:03:39,233 --> 00:03:42,515
+That node will need to be able to decide if it has to run,
+
+63
+00:03:42,515 --> 00:03:44,116
+so we have a callback for that.
+
+64
+00:03:44,116 --> 00:03:47,718
+The bot state that we're using doesn't ever end,
+
+65
+00:03:47,718 --> 00:03:49,739
+so the tree needs to decide if that state
+
+66
+00:03:49,739 --> 00:03:52,220
+should continue to run, so we add another callback.
+
+67
+00:03:53,342 --> 00:03:54,823
+The state we're using also doesn't,
+
+68
+00:03:54,823 --> 00:03:58,885
+or the behavior tree nodes shouldn't change state
+
+69
+00:03:58,885 --> 00:04:00,025
+until they are entered,
+
+70
+00:04:00,025 --> 00:04:01,926
+so since we need to notify another system
+
+71
+00:04:01,926 --> 00:04:05,207
+when we start aiming over a railing, we add a callback.
+
+72
+00:04:05,207 --> 00:04:09,149
+The state that we're using doesn't do any weapon management,
+
+73
+00:04:09,149 --> 00:04:12,210
+so we have a callback to do all of that from the tree,
+
+74
+00:04:12,210 --> 00:04:13,991
+and we need to notify that same system
+
+75
+00:04:13,991 --> 00:04:15,552
+when we're done using the railing,
+
+76
+00:04:15,552 --> 00:04:17,573
+so we add a fifth callback.
+
+77
+00:04:20,230 --> 00:04:22,172
+Furthermore, in order to get the correct node
+
+78
+00:04:22,172 --> 00:04:23,694
+to activate at the correct time,
+
+79
+00:04:23,694 --> 00:04:26,536
+we often needed to consider how a node's parents
+
+80
+00:04:26,536 --> 00:04:28,798
+selected which of its children to run.
+
+81
+00:04:28,798 --> 00:04:31,641
+We call that the group policy, and there are three types.
+
+82
+00:04:31,641 --> 00:04:34,023
+The order of the children could be a priority ranking,
+
+83
+00:04:34,023 --> 00:04:36,025
+or the order could be a sequence
+
+84
+00:04:36,025 --> 00:04:38,327
+with each node running one after the other,
+
+85
+00:04:38,327 --> 00:04:40,229
+or the node whose decider callback
+
+86
+00:04:40,229 --> 00:04:42,471
+returns the highest value would be the one to run.
+
+87
+00:04:43,492 --> 00:04:45,072
+And if your behavior tree implementation
+
+88
+00:04:45,072 --> 00:04:47,834
+is anything like ours, you have plenty of decorators
+
+89
+00:04:47,834 --> 00:04:51,055
+and flags and other confusing options.
+
+90
+00:04:51,055 --> 00:04:52,916
+All of this led to trees that worked,
+
+91
+00:04:52,916 --> 00:04:56,558
+but were complicated and difficult to debug when they broke.
+
+92
+00:04:56,558 --> 00:04:59,279
+Furthermore, one of the advantages to behavior trees
+
+93
+00:04:59,279 --> 00:05:01,540
+is that the trees are supposed to be composable
+
+94
+00:05:01,540 --> 00:05:04,181
+and nodes should be reusable.
+
+95
+00:05:04,181 --> 00:05:07,303
+We found the opposite to be true when the tree is complicated.
+
+96
+00:05:07,303 --> 00:05:10,044
+We often needed to think about how both a node's siblings
+
+97
+00:05:10,044 --> 00:05:11,565
+and its ancestors functioned.
+
+98
+00:05:12,482 --> 00:05:19,647
+For Marvel's Spider-Man, we recognized that we could not have unique behavior trees or even sub-trees for each of the 50-plus bot classes.
+
+99
+00:05:19,647 --> 00:05:24,090
+We gradually started moving towards trees that were smaller and more straightforward,
+
+100
+00:05:24,090 --> 00:05:30,534
+with behaviors that contained a lot of the complexity and logic that was previously entangled in the callback functions.
+
+101
+00:05:30,534 --> 00:05:34,136
+This meant that we could share structure and behaviors.
+
+102
+00:05:34,136 --> 00:05:38,619
+Nearly all of our standard enemies use exactly the same behavior tree and set of behaviors.
+
+103
+00:05:39,500 --> 00:05:44,629
+As a quick example, we have a single node in our behavior tree that handles all of melee combat.
+
+104
+00:05:44,629 --> 00:05:47,614
+And while the previous subtree that I showed you still exists,
+
+105
+00:05:47,614 --> 00:05:51,160
+the most complicated chunk of transition logic was moved into a behavior.
+
+106
+00:05:52,303 --> 00:05:54,064
+So what do we do instead?
+
+107
+00:05:54,064 --> 00:05:56,184
+As our behaviors became more robust,
+
+108
+00:05:56,184 --> 00:05:58,365
+we began to data drive more of them.
+
+109
+00:05:58,365 --> 00:06:00,665
+I want to discuss two of these examples.
+
+110
+00:06:00,665 --> 00:06:03,126
+The first is a simple behavior that is used
+
+111
+00:06:03,126 --> 00:06:05,966
+when designers need explicit control over bots.
+
+112
+00:06:05,966 --> 00:06:08,067
+The second is more complicated
+
+113
+00:06:08,067 --> 00:06:09,927
+and is used for the majority of our combat.
+
+114
+00:06:09,927 --> 00:06:13,928
+Both of these behaviors take a piece of polymorphic data
+
+115
+00:06:13,928 --> 00:06:14,908
+configured in our editor
+
+116
+00:06:14,908 --> 00:06:17,409
+and transform it into a state or sub behavior.
+
+117
+00:06:17,869 --> 00:06:23,369
+They do this while encapsulating a large portion of the complicated logic inherent to action game AI.
+
+118
+00:06:24,903 --> 00:06:27,423
+So rather than have a bunch of behavior tree nodes
+
+119
+00:06:27,423 --> 00:06:29,264
+that respond to designer scripting,
+
+120
+00:06:29,264 --> 00:06:31,744
+we made a more data-driven solution.
+
+121
+00:06:31,744 --> 00:06:33,965
+Let's take a look at the high-level architecture.
+
+122
+00:06:33,965 --> 00:06:36,405
+Script will begin by creating what we call a bot command,
+
+123
+00:06:36,405 --> 00:06:40,166
+and these commands go into a bot command queue.
+
+124
+00:06:40,166 --> 00:06:43,147
+When the queue exists, the behavior tree has a node
+
+125
+00:06:43,147 --> 00:06:45,608
+which instantiates behavior scripted.
+
+126
+00:06:45,608 --> 00:06:48,988
+This behavior pulls commands one at a time out of the queue
+
+127
+00:06:48,988 --> 00:06:52,129
+and uses them to create sub-behaviors or states.
+
+128
+00:06:52,349 --> 00:06:55,630
+Let's take a look at the individual components starting with our command queue.
+
+129
+00:06:55,630 --> 00:07:02,493
+All it really does is provide storage for designer commands that a bot is going to execute,
+
+130
+00:07:02,493 --> 00:07:05,574
+and a simple interface for accessing them.
+
+131
+00:07:05,574 --> 00:07:07,815
+Next, I want to touch on the bot commands themselves.
+
+132
+00:07:09,005 --> 00:07:12,427
+The base command itself is really just an interface.
+
+133
+00:07:12,427 --> 00:07:14,509
+An actual command will use this method
+
+134
+00:07:14,509 --> 00:07:17,031
+to start whatever behavior or state it needs to
+
+135
+00:07:17,031 --> 00:07:19,773
+and attach it to the provided parent behavior.
+
+136
+00:07:19,773 --> 00:07:21,514
+And here's an implementation of that method
+
+137
+00:07:21,514 --> 00:07:22,815
+in a PlayAnim command.
+
+138
+00:07:22,815 --> 00:07:26,738
+It sets up some data for a PlayAnim state
+
+139
+00:07:26,738 --> 00:07:30,240
+and then requests that state to be added
+
+140
+00:07:30,240 --> 00:07:32,022
+to the provided behavior.
+
+141
+00:07:32,022 --> 00:07:34,444
+All bot commands follow this format.
+
+142
+00:07:34,444 --> 00:07:37,246
+They're created by script and added to the bot command queue.
+
+143
+00:07:38,302 --> 00:07:39,903
+Finally, let's take a quick look
+
+144
+00:07:39,903 --> 00:07:42,144
+at behavior scripted itself.
+
+145
+00:07:42,144 --> 00:07:45,346
+If a bot command queue exists and has any commands in it,
+
+146
+00:07:45,346 --> 00:07:48,008
+the behavior tree will instantiate this behavior.
+
+147
+00:07:48,008 --> 00:07:50,569
+It has an update function, a consume next command function,
+
+148
+00:07:50,569 --> 00:07:53,011
+and a handle to access the command queue.
+
+149
+00:07:53,011 --> 00:07:55,413
+The behavior update is simple.
+
+150
+00:07:55,413 --> 00:07:57,374
+If the current command is done,
+
+151
+00:07:57,374 --> 00:08:00,016
+we pop it from the queue and try to consume the next one.
+
+152
+00:08:00,828 --> 00:08:04,029
+The consumeNextCommand function is also straightforward.
+
+153
+00:08:04,029 --> 00:08:07,971
+It gets the command queue, checks to see if it has a command.
+
+154
+00:08:07,971 --> 00:08:09,951
+If there is no command, we're done.
+
+155
+00:08:09,951 --> 00:08:12,492
+But if there is one, then we tell that command to start
+
+156
+00:08:12,492 --> 00:08:14,773
+and attach ourselves as the parent behavior.
+
+157
+00:08:14,773 --> 00:08:16,814
+When the command is done, the previous update function
+
+158
+00:08:16,814 --> 00:08:18,615
+will just call this function again
+
+159
+00:08:18,615 --> 00:08:21,376
+and will continue executing commands.
+
+160
+00:08:21,376 --> 00:08:24,317
+Here's what issuing commands looks like from script.
+
+161
+00:08:24,317 --> 00:08:26,018
+We first request control of a bot
+
+162
+00:08:26,018 --> 00:08:27,938
+and tell them to go to a position,
+
+163
+00:08:27,938 --> 00:08:29,679
+face their target, and play an animation.
+
+164
+00:08:31,145 --> 00:08:32,567
+And here's what things look like in game.
+
+165
+00:08:32,567 --> 00:08:34,811
+You can see the bot command queue here.
+
+166
+00:08:34,811 --> 00:08:37,074
+You can see the bot move to a position,
+
+167
+00:08:37,074 --> 00:08:38,236
+then face the player,
+
+168
+00:08:38,236 --> 00:08:40,560
+and then finally play the provided action.
+
+169
+00:08:44,142 --> 00:08:47,104
+Some of you may be wondering, why don't we data drive more?
+
+170
+00:08:47,104 --> 00:08:48,866
+And this is an example of why.
+
+171
+00:08:48,866 --> 00:08:51,548
+There are many times when an AI should not immediately
+
+172
+00:08:51,548 --> 00:08:53,489
+respond to requests for script control.
+
+173
+00:08:53,489 --> 00:08:55,251
+They could be jumping through the air.
+
+174
+00:08:55,251 --> 00:08:57,993
+They could be in a cinematic, playing a hit react animation,
+
+175
+00:08:57,993 --> 00:08:59,314
+or any number of other things.
+
+176
+00:08:59,314 --> 00:09:02,717
+Our goal is to data drive the interesting, player-facing
+
+177
+00:09:02,717 --> 00:09:05,559
+problems, but also handle the difficult, squirrely,
+
+178
+00:09:05,559 --> 00:09:07,681
+and bug-prone parts reliably in code.
+
+179
+00:09:08,502 --> 00:09:11,264
+So let me talk about a place where things can get squirrely.
+
+180
+00:09:11,264 --> 00:09:14,266
+Melee combat in Marvel's Spider-Man is data-driven,
+
+181
+00:09:14,266 --> 00:09:16,268
+and I want to first give you another overview
+
+182
+00:09:16,268 --> 00:09:17,589
+of the architecture of this system
+
+183
+00:09:17,589 --> 00:09:19,950
+before we dive into some of the details.
+
+184
+00:09:19,950 --> 00:09:21,612
+Let's look at the data first.
+
+185
+00:09:21,612 --> 00:09:24,854
+At the top level, each bot has a combo config.
+
+186
+00:09:24,854 --> 00:09:28,577
+That combo config contains a list of combo entries.
+
+187
+00:09:28,577 --> 00:09:30,738
+Each combo entry contains one or more
+
+188
+00:09:30,738 --> 00:09:33,701
+combo move containers, and each of these
+
+189
+00:09:33,701 --> 00:09:35,882
+contains a single combo move base,
+
+190
+00:09:35,882 --> 00:09:37,503
+and this is the polymorphic data.
+
+191
+00:09:38,654 --> 00:09:42,476
+All of this data is owned by a component called bot combos.
+
+192
+00:09:42,476 --> 00:09:45,137
+On the behavior side, we have our behavior tree,
+
+193
+00:09:45,137 --> 00:09:48,419
+which can instantiate, for example, behavior melee.
+
+194
+00:09:48,419 --> 00:09:51,300
+When it is time to attack, this behavior will pass data
+
+195
+00:09:51,300 --> 00:09:54,441
+from bot combos into a behavior use combo,
+
+196
+00:09:54,441 --> 00:09:56,722
+which will then use that data
+
+197
+00:09:56,722 --> 00:09:58,363
+to start a sub-behavior or state.
+
+198
+00:09:59,269 --> 00:10:01,651
+Let's start looking at the bottom of the data.
+
+199
+00:10:01,651 --> 00:10:04,553
+For the next several slides, I will be showing examples
+
+200
+00:10:04,553 --> 00:10:07,195
+of structs written in a proprietary C++-like
+
+201
+00:10:07,195 --> 00:10:09,557
+data definition language.
+
+202
+00:10:09,557 --> 00:10:10,918
+I'll mark any usage of it with DDL.
+
+203
+00:10:10,918 --> 00:10:15,661
+All attack actions in combat will ultimately
+
+204
+00:10:15,661 --> 00:10:19,644
+derive from a bot combo move base.
+
+205
+00:10:21,453 --> 00:10:26,916
+These structs can represent all of the static data needed to execute, for example, a melee attack.
+
+206
+00:10:26,916 --> 00:10:32,839
+This combo move has an animation to play, as well as some data describing the timing for the attack.
+
+207
+00:10:32,839 --> 00:10:35,540
+It could also represent throwing a projectile.
+
+208
+00:10:35,540 --> 00:10:40,183
+This struct has data for the projectile asset to throw, what animation to use,
+
+209
+00:10:40,183 --> 00:10:43,764
+where on the bot the shot should spawn, and some additional timing data.
+
+210
+00:10:44,650 --> 00:10:52,801
+The point is that each of these derived types contain all of the static data needed to start either a behavior or a state to perform the desired attack.
+
+211
+00:10:52,801 --> 00:10:56,666
+That is to say that these contain the static data to make these.
+
+212
+00:10:56,666 --> 00:11:01,593
+Let's move one level up the data hierarchy and talk about the move container.
+
+213
+00:11:03,078 --> 00:11:05,641
+Here's the definition for bot combo move container.
+
+214
+00:11:05,641 --> 00:11:08,985
+You can see the combo move here at the bottom,
+
+215
+00:11:08,985 --> 00:11:10,306
+but this struct contains other data.
+
+216
+00:11:10,306 --> 00:11:12,388
+That data is parameters for defining
+
+217
+00:11:12,388 --> 00:11:15,292
+how to prepare to execute the move.
+
+218
+00:11:15,292 --> 00:11:17,715
+These are things like, does the bot need line of sight
+
+219
+00:11:17,715 --> 00:11:19,877
+with their target to perform the attack?
+
+220
+00:11:19,877 --> 00:11:21,799
+Does the bot need to be on screen?
+
+221
+00:11:21,799 --> 00:11:23,601
+Or how close does the bot need to be?
+
+222
+00:11:24,285 --> 00:11:27,628
+In other words, this, the combo move container,
+
+223
+00:11:27,628 --> 00:11:29,530
+contains not only the combo move,
+
+224
+00:11:29,530 --> 00:11:31,612
+but also has data that drives the behavior
+
+225
+00:11:31,612 --> 00:11:34,074
+of this behavior use combo.
+
+226
+00:11:34,074 --> 00:11:35,054
+So let's briefly look at it.
+
+227
+00:11:35,054 --> 00:11:37,857
+It's really just a state machine.
+
+228
+00:11:37,857 --> 00:11:39,618
+It can choose to wait to perform an attack,
+
+229
+00:11:39,618 --> 00:11:42,721
+it can go to its target, it can perform a combo move,
+
+230
+00:11:42,721 --> 00:11:43,862
+and at some point it will end.
+
+231
+00:11:44,867 --> 00:11:47,271
+It has its own functions for determining what state
+
+232
+00:11:47,271 --> 00:11:50,076
+it should be in based on the data in the move container.
+
+233
+00:11:50,076 --> 00:11:52,180
+And it also does things for us like setting
+
+234
+00:11:52,180 --> 00:11:55,026
+hit react immunities while the attack is active
+
+235
+00:11:55,026 --> 00:11:57,170
+or starting cool downs at the correct time.
+
+236
+00:11:58,313 --> 00:12:01,815
+However, the relevant code happens once behavior use combo
+
+237
+00:12:01,815 --> 00:12:04,057
+has determined that it is in position
+
+238
+00:12:04,057 --> 00:12:05,738
+and ready to execute an attack.
+
+239
+00:12:05,738 --> 00:12:07,680
+It calls a transition combo function.
+
+240
+00:12:07,680 --> 00:12:09,581
+This function takes the move container
+
+241
+00:12:09,581 --> 00:12:12,703
+and then retrieves some metadata in the container
+
+242
+00:12:12,703 --> 00:12:15,525
+about the type of combo move that it contains.
+
+243
+00:12:15,525 --> 00:12:17,807
+If it's a melee move, we prep some state data
+
+244
+00:12:17,807 --> 00:12:19,828
+and start a melee attack.
+
+245
+00:12:19,828 --> 00:12:24,331
+Or if it's a throw projectile move,
+
+246
+00:12:24,331 --> 00:12:26,233
+we prep some different state data
+
+247
+00:12:26,233 --> 00:12:28,054
+and start a throw projectile state.
+
+248
+00:12:29,380 --> 00:12:31,600
+In the full version of this function,
+
+249
+00:12:31,600 --> 00:12:34,921
+this if else cascades for the other 37 combo move types
+
+250
+00:12:34,921 --> 00:12:36,241
+that we have.
+
+251
+00:12:36,241 --> 00:12:38,162
+There might be a little bit of cleanup work
+
+252
+00:12:38,162 --> 00:12:38,962
+for us to do here.
+
+253
+00:12:38,962 --> 00:12:43,103
+So we've discussed the bottom half of this diagram,
+
+254
+00:12:43,103 --> 00:12:45,003
+so next we're going to look at the actual
+
+255
+00:12:45,003 --> 00:12:47,284
+combo entries themselves.
+
+256
+00:12:47,284 --> 00:12:50,204
+Because behavior use combo may want to perform
+
+257
+00:12:50,204 --> 00:12:52,245
+more than one move in a sequence,
+
+258
+00:12:52,245 --> 00:12:54,845
+the combo entry contains a list of them.
+
+259
+00:12:55,680 --> 00:12:57,022
+to execute one after the other.
+
+260
+00:12:57,022 --> 00:12:59,244
+It also contains all of the data
+
+261
+00:12:59,244 --> 00:13:02,407
+for determining when a combo is valid.
+
+262
+00:13:02,407 --> 00:13:04,849
+For example, a cool down for how often it can be used,
+
+263
+00:13:04,849 --> 00:13:06,691
+a waiting value to be used
+
+264
+00:13:06,691 --> 00:13:09,273
+when selecting between valid combos,
+
+265
+00:13:09,273 --> 00:13:11,416
+a pair of distances that define the range
+
+266
+00:13:11,416 --> 00:13:14,278
+at which a combo is valid,
+
+267
+00:13:14,278 --> 00:13:18,843
+as well as a list of other arbitrary data-driven conditions.
+
+268
+00:13:19,867 --> 00:13:22,331
+The final piece of the data is the combo config.
+
+269
+00:13:22,331 --> 00:13:25,958
+And this is just a simple struct that contains a list of combos.
+
+270
+00:13:25,958 --> 00:13:29,665
+Every single one of our AI classes has a unique one of these.
+
+271
+00:13:30,987 --> 00:13:35,192
+I want to briefly touch on the owner of all of this data, bot combos.
+
+272
+00:13:35,192 --> 00:13:40,418
+It is responsible for not only owning the combo config, but also for selecting the best
+
+273
+00:13:40,418 --> 00:13:43,442
+combo to use from that config versus a provided target.
+
+274
+00:13:43,442 --> 00:13:48,408
+It will use all of the data contained in the combo entries to make a list of valid combos
+
+275
+00:13:48,408 --> 00:13:50,350
+and return one based on their weights.
+
+276
+00:13:51,773 --> 00:13:55,736
+Finally, we'll briefly take a look at an example user
+
+277
+00:13:55,736 --> 00:13:58,818
+of behavior use combo, behavior melee.
+
+278
+00:13:58,818 --> 00:14:00,180
+It's a fairly standard state machine
+
+279
+00:14:00,180 --> 00:14:02,361
+that has a bunch of states that it handles
+
+280
+00:14:02,361 --> 00:14:04,503
+transitioning between in code.
+
+281
+00:14:04,503 --> 00:14:05,924
+One of them is using a combo.
+
+282
+00:14:05,924 --> 00:14:07,725
+If it's the bots turn to attack
+
+283
+00:14:07,725 --> 00:14:10,808
+and bot combos has a valid combo entry,
+
+284
+00:14:10,808 --> 00:14:13,310
+this behavior will just start using,
+
+285
+00:14:13,310 --> 00:14:15,752
+this behavior will start behavior use combo.
+
+286
+00:14:16,917 --> 00:14:18,940
+Here's a brief look at combos in action.
+
+287
+00:14:18,940 --> 00:14:20,702
+There's some debug display up here.
+
+288
+00:14:20,702 --> 00:14:24,127
+This character has five combos and active will be drawn
+
+289
+00:14:24,127 --> 00:14:27,331
+next to each of the combos that he is currently using.
+
+290
+00:14:27,331 --> 00:14:29,615
+Each of these uses different states
+
+291
+00:14:29,615 --> 00:14:32,459
+whose static parameters are configured entirely in data.
+
+292
+00:14:41,163 --> 00:14:46,285
+So that's a high level review of how we data drove two large sections of our AI, melee
+
+293
+00:14:46,285 --> 00:14:48,266
+combat and script control.
+
+294
+00:14:48,266 --> 00:14:53,709
+We had two other significant behaviors that were data driven, one for handling hit reacts
+
+295
+00:14:53,709 --> 00:14:57,991
+and another for responding to incoming attacks by blocking, dodging, counterattacking, etc.
+
+296
+00:14:57,991 --> 00:15:02,753
+We felt we got a lot of mileage out of working in this paradigm for three main reasons.
+
+297
+00:15:03,530 --> 00:15:06,070
+The first is that new moves are easy to add,
+
+298
+00:15:06,070 --> 00:15:09,271
+since you didn't need to change complex transition logic.
+
+299
+00:15:09,271 --> 00:15:11,712
+The second is that we were able to loosely couple
+
+300
+00:15:11,712 --> 00:15:13,052
+our states with data.
+
+301
+00:15:13,052 --> 00:15:15,853
+That is a single bot combo move could potentially map
+
+302
+00:15:15,853 --> 00:15:18,953
+to multiple states, or multiple moves could map
+
+303
+00:15:18,953 --> 00:15:20,954
+to the same state if it was appropriate.
+
+304
+00:15:20,954 --> 00:15:24,154
+And third, this allowed us to pick and choose
+
+305
+00:15:24,154 --> 00:15:25,815
+what data was presented to the designer
+
+306
+00:15:25,815 --> 00:15:27,955
+and then handle the messy logic and code.
+
+307
+00:15:29,952 --> 00:15:33,214
+Working this way allowed us to make a large number of classes
+
+308
+00:15:33,214 --> 00:15:35,175
+who only differed in data.
+
+309
+00:15:35,175 --> 00:15:39,298
+That said, there are some definite disadvantages
+
+310
+00:15:39,298 --> 00:15:40,258
+with our current approach.
+
+311
+00:15:41,606 --> 00:15:44,247
+Most of these behaviors organically grew into this pattern,
+
+312
+00:15:44,247 --> 00:15:46,649
+so parts of them can be a little bit of a mess.
+
+313
+00:15:46,649 --> 00:15:49,510
+You saw an example of this with the giant list of if-elses
+
+314
+00:15:49,510 --> 00:15:50,511
+in our melee example.
+
+315
+00:15:50,511 --> 00:15:54,273
+But the real big problem we had for us was that
+
+316
+00:15:54,273 --> 00:15:56,834
+our tools only allowed us to express the data
+
+317
+00:15:56,834 --> 00:15:59,116
+in a properties panel, and let me briefly show you
+
+318
+00:15:59,116 --> 00:16:00,456
+why this is such a problem.
+
+319
+00:16:00,456 --> 00:16:03,718
+Here's the data definition for
+
+320
+00:16:03,718 --> 00:16:07,180
+the heavy enemies three-hit combo.
+
+321
+00:16:07,180 --> 00:16:10,042
+First, we have all of the data for how he can select
+
+322
+00:16:10,042 --> 00:16:10,862
+to use the move.
+
+323
+00:16:12,160 --> 00:16:17,823
+Then we have all of the data for how BehaviorUseCombo will prepare to execute the move.
+
+324
+00:16:17,823 --> 00:16:21,745
+Then we have a bunch of data that every single attack needs so that it can properly register
+
+325
+00:16:21,745 --> 00:16:22,645
+with SpiderSense.
+
+326
+00:16:23,895 --> 00:16:27,336
+Then we have the actual data for the melee attack itself.
+
+327
+00:16:27,336 --> 00:16:30,377
+However, remember that I said this was a three hit combo?
+
+328
+00:16:30,377 --> 00:16:32,919
+All of this data is repeated twice more.
+
+329
+00:16:32,919 --> 00:16:35,200
+And it eventually looks like this.
+
+330
+00:16:35,200 --> 00:16:38,141
+This character also has four more combos,
+
+331
+00:16:38,141 --> 00:16:39,862
+a shockwave, a grapple, a throw,
+
+332
+00:16:39,862 --> 00:16:41,302
+and another multi-hit combo.
+
+333
+00:16:41,302 --> 00:16:44,343
+So yeah, the amount of data needed to be configured
+
+334
+00:16:44,343 --> 00:16:47,485
+made the system intimidating and difficult to understand.
+
+335
+00:16:47,485 --> 00:16:49,986
+Improving on this is one of our next big goals.
+
+336
+00:16:52,292 --> 00:16:56,909
+So let's move on to a section where I can finally start showing a bunch of screenshots and videos.
+
+337
+00:16:56,909 --> 00:16:57,953
+Synced animations.
+
+338
+00:16:59,302 --> 00:17:01,162
+Our creative director gave the team a goal
+
+339
+00:17:01,162 --> 00:17:03,882
+that he wanted Spider-Man to have a comic book movie feel.
+
+340
+00:17:03,882 --> 00:17:06,483
+Early on in development, we decided that we wanted
+
+341
+00:17:06,483 --> 00:17:08,943
+a high degree of fidelity in our combat animations
+
+342
+00:17:08,943 --> 00:17:10,124
+and reactions.
+
+343
+00:17:10,124 --> 00:17:12,944
+In order to do this, we determined that we would need
+
+344
+00:17:12,944 --> 00:17:15,065
+to have a system that allowed us to play back
+
+345
+00:17:15,065 --> 00:17:17,785
+those animations of Spider-Man and his foes interacting.
+
+346
+00:17:17,785 --> 00:17:21,786
+Our system at its root has the concept of a host,
+
+347
+00:17:21,786 --> 00:17:23,546
+usually Spider-Man, the attacker,
+
+348
+00:17:23,546 --> 00:17:25,267
+and a guest, usually his victim.
+
+349
+00:17:26,258 --> 00:17:29,621
+The whole thing hinges on something we call a sync joint.
+
+350
+00:17:29,621 --> 00:17:32,663
+It's shown as the white debug sphere in this video.
+
+351
+00:17:32,663 --> 00:17:37,166
+The sync joint is a joint on the host
+
+352
+00:17:37,166 --> 00:17:39,248
+which has a position and orientation
+
+353
+00:17:39,248 --> 00:17:41,229
+that will match that of the guests
+
+354
+00:17:41,229 --> 00:17:44,091
+when the animations are played back in sync.
+
+355
+00:17:44,091 --> 00:17:46,953
+We use joint on the attacker because this allows Spider-Man
+
+356
+00:17:46,953 --> 00:17:48,935
+to perform a synced attack versus a character
+
+357
+00:17:48,935 --> 00:17:50,816
+that hasn't yet played a synced react.
+
+358
+00:17:52,846 --> 00:17:55,007
+In this video, you can see both the current position
+
+359
+00:17:55,007 --> 00:17:57,148
+of the sink joint drawn in front of Spider-Man,
+
+360
+00:17:57,148 --> 00:17:59,289
+as well as the sink joint's target position
+
+361
+00:17:59,289 --> 00:18:00,810
+drawn on the enemy.
+
+362
+00:18:00,810 --> 00:18:02,851
+As the time of impact draws near,
+
+363
+00:18:02,851 --> 00:18:04,871
+you can see Spider-Man blend into position
+
+364
+00:18:04,871 --> 00:18:05,832
+to hit his target.
+
+365
+00:18:05,832 --> 00:18:07,833
+Spider-Man doesn't know if his victim
+
+366
+00:18:07,833 --> 00:18:10,134
+will play the corresponding sink reaction,
+
+367
+00:18:10,134 --> 00:18:13,815
+or if he will block, dodge, or play some non-sink reaction.
+
+368
+00:18:13,815 --> 00:18:16,057
+We actually support several different options
+
+369
+00:18:16,057 --> 00:18:18,278
+for how Spider-Man accomplishes this blending.
+
+370
+00:18:18,278 --> 00:18:20,038
+These can be selected independently
+
+371
+00:18:20,038 --> 00:18:21,319
+for rotation and translation.
+
+372
+00:18:22,908 --> 00:18:27,432
+The most common case for lining up orientation is called host to guest or center line.
+
+373
+00:18:27,432 --> 00:18:32,396
+In this case, both the host and the guest rotate to face each other along a line drawn
+
+374
+00:18:32,396 --> 00:18:34,177
+between them.
+
+375
+00:18:34,177 --> 00:18:38,561
+We also have support for only using the host orientation or only using the guests.
+
+376
+00:18:38,561 --> 00:18:41,103
+Neither of these modes are actually used in the shipping game.
+
+377
+00:18:42,719 --> 00:18:46,621
+The other kind of rotation alignment we use is what we call an external anchor.
+
+378
+00:18:46,621 --> 00:18:51,183
+This is when another piece of code sets the target orientation for the system.
+
+379
+00:18:51,183 --> 00:18:55,725
+In this video, when you see debug draw on screen, both characters are rotating towards
+
+380
+00:18:55,725 --> 00:18:58,106
+the external actor orientation.
+
+381
+00:18:58,106 --> 00:19:03,468
+We use this here because the player is able to push in any direction on the movement stick
+
+382
+00:19:03,468 --> 00:19:07,450
+while executing this kick throw and the enemy will be thrown in that direction.
+
+383
+00:19:08,030 --> 00:19:11,911
+So that is, the direction is set as the sync animation system's
+
+384
+00:19:11,911 --> 00:19:14,032
+rotational alignment target.
+
+385
+00:19:14,032 --> 00:19:18,253
+For translation alignment, we have two common options.
+
+386
+00:19:18,253 --> 00:19:21,314
+The first is when the guest moves into position.
+
+387
+00:19:21,314 --> 00:19:23,395
+This is called host as anchor, and it
+
+388
+00:19:23,395 --> 00:19:25,215
+is used in situations like this where
+
+389
+00:19:25,215 --> 00:19:27,116
+Spider-Man is unable to move.
+
+390
+00:19:27,116 --> 00:19:29,637
+You'll be able to see the sync joint here on Spider-Man,
+
+391
+00:19:29,637 --> 00:19:31,937
+and then you can notice the enemy move to it.
+
+392
+00:19:36,618 --> 00:19:40,602
+The other kind of alignment is when Spider-Man performs all of the translation himself.
+
+393
+00:19:40,602 --> 00:19:45,267
+This is called guest as anchor and is the translation alignment technique for the vast
+
+394
+00:19:45,267 --> 00:19:50,353
+majority of attacks since Spider-Man is the one moving into position.
+
+395
+00:19:50,353 --> 00:19:55,619
+There is an external anchor option for translational alignment similar to rotation, however, it
+
+396
+00:19:55,619 --> 00:19:57,481
+isn't actually used in the shipping game.
+
+397
+00:19:59,790 --> 00:20:02,372
+A problem that frequently came up for us
+
+398
+00:20:02,372 --> 00:20:03,993
+was that the attacker and the victim
+
+399
+00:20:03,993 --> 00:20:05,213
+could be at heights different
+
+400
+00:20:05,213 --> 00:20:06,954
+from how they were animated or mocapped.
+
+401
+00:20:06,954 --> 00:20:10,696
+We have a few strategies for how we handle this.
+
+402
+00:20:10,696 --> 00:20:15,038
+All synced attacks have an annotated sync point
+
+403
+00:20:15,038 --> 00:20:15,979
+and a release point.
+
+404
+00:20:15,979 --> 00:20:19,120
+For stealth takedowns and combat finishers
+
+405
+00:20:19,120 --> 00:20:20,761
+that use animated cameras,
+
+406
+00:20:20,761 --> 00:20:23,243
+we can hide floating characters by pulling the camera in
+
+407
+00:20:23,243 --> 00:20:25,604
+before we reach the sync point
+
+408
+00:20:25,604 --> 00:20:27,465
+and waiting until after the release point
+
+409
+00:20:27,465 --> 00:20:28,365
+to push it back out.
+
+410
+00:20:30,725 --> 00:20:33,266
+In other cases, we can make use of webbing
+
+411
+00:20:33,266 --> 00:20:34,707
+to handle the fact that the characters
+
+412
+00:20:34,707 --> 00:20:36,387
+aren't at matching heights.
+
+413
+00:20:36,387 --> 00:20:38,688
+In this case, the webs are animated
+
+414
+00:20:38,688 --> 00:20:41,589
+and then we procedurally alter them joint by joint
+
+415
+00:20:41,589 --> 00:20:44,790
+so that they match where their final transforms would be
+
+416
+00:20:44,790 --> 00:20:46,931
+if our sync joint was properly aligned.
+
+417
+00:20:51,518 --> 00:20:53,820
+Another thing that helps with certain situations
+
+418
+00:20:53,820 --> 00:20:56,122
+is that our character movement system remains active.
+
+419
+00:20:56,122 --> 00:20:58,944
+If one member of the synced animation
+
+420
+00:20:58,944 --> 00:21:00,425
+begins to collide with something,
+
+421
+00:21:00,425 --> 00:21:02,767
+they can pass the translation they failed to move
+
+422
+00:21:02,767 --> 00:21:04,688
+over to the other participant.
+
+423
+00:21:04,688 --> 00:21:06,990
+In this case, Spider-Man begins to hit the step,
+
+424
+00:21:06,990 --> 00:21:09,271
+is unable to fully align with his target,
+
+425
+00:21:09,271 --> 00:21:12,414
+and when this happens, the enemy then applies
+
+426
+00:21:12,414 --> 00:21:15,056
+the reverse of that and slides backwards,
+
+427
+00:21:15,056 --> 00:21:16,337
+and the two manage to sync up.
+
+428
+00:21:18,009 --> 00:21:20,131
+However, we can't always fix things up,
+
+429
+00:21:20,131 --> 00:21:22,834
+and in many cases, we just deal with things being off.
+
+430
+00:21:22,834 --> 00:21:27,359
+This is what happens for most regular melee attacks
+
+431
+00:21:27,359 --> 00:21:28,721
+as well as a few finishers.
+
+432
+00:21:32,862 --> 00:21:36,808
+Enemies can use the system to play synced attack animations versus Spider-Man as well.
+
+433
+00:21:36,808 --> 00:21:41,014
+However, we found that the synced alignment options usually felt unfair.
+
+434
+00:21:41,014 --> 00:21:45,760
+The more common use of synced attacks was for an enemy to use a non-synced attack and
+
+435
+00:21:45,760 --> 00:21:49,686
+then if it connected to immediately start a synced reaction animation.
+
+436
+00:21:52,816 --> 00:21:55,537
+There are two big drawbacks to our synced animation system.
+
+437
+00:21:55,537 --> 00:21:58,418
+The first is that it only supports two characters,
+
+438
+00:21:58,418 --> 00:21:59,398
+a host and a guest.
+
+439
+00:21:59,398 --> 00:22:01,219
+One of the most requested features
+
+440
+00:22:01,219 --> 00:22:03,640
+towards the end of development was finishers
+
+441
+00:22:03,640 --> 00:22:05,020
+that allowed Spider-Man to take down
+
+442
+00:22:05,020 --> 00:22:06,581
+multiple foes at the same time.
+
+443
+00:22:07,979 --> 00:22:12,644
+I do want to point out a more general drawback to using synced animations is that it quickly
+
+444
+00:22:12,644 --> 00:22:17,870
+becomes very time consuming to add new attacks or skeletons to your game.
+
+445
+00:22:17,870 --> 00:22:23,236
+You usually have to make an attack animation and a react animation for every victim skeleton.
+
+446
+00:22:23,236 --> 00:22:27,981
+How we make use of the sync joint allows us to mitigate this if we want to, but fidelity
+
+447
+00:22:27,981 --> 00:22:28,521
+will suffer.
+
+448
+00:22:30,413 --> 00:22:33,995
+We had a goal of combat for Spider-Man that was fast, fluid, and dynamic.
+
+449
+00:22:33,995 --> 00:22:38,778
+On the combat team, we frequently talked about play style, flow, and improvisation
+
+450
+00:22:38,778 --> 00:22:41,120
+as being very important things to us.
+
+451
+00:22:41,120 --> 00:22:44,642
+Having enemies that felt dangerous but gave the player opportunities to flow
+
+452
+00:22:44,642 --> 00:22:47,043
+was going to be the linchpin to our combat.
+
+453
+00:22:47,043 --> 00:22:51,345
+The topics I'm going to discuss today are probably very familiar to many of you.
+
+454
+00:22:51,345 --> 00:22:54,747
+However, as programmers, we often want to create a system,
+
+455
+00:22:54,747 --> 00:22:57,489
+verify that it's working as designed, and then move on.
+
+456
+00:22:57,489 --> 00:22:59,790
+And this is not how you make good games.
+
+457
+00:23:00,190 --> 00:23:02,651
+I want to share with you some examples of the iterations
+
+458
+00:23:02,651 --> 00:23:06,513
+we went through to get our combat fundamentals right.
+
+459
+00:23:06,513 --> 00:23:09,415
+We needed to manage attacks and mitigate cheap hits,
+
+460
+00:23:09,415 --> 00:23:10,895
+or else the game was gonna turn into this.
+
+461
+00:23:10,895 --> 00:23:19,799
+We have two combat managers that control when ranged
+
+462
+00:23:19,799 --> 00:23:21,620
+and melee enemies are able to attack,
+
+463
+00:23:21,620 --> 00:23:24,862
+and they occasionally coordinate with each other,
+
+464
+00:23:24,862 --> 00:23:26,823
+but they mostly operate independently.
+
+465
+00:23:28,450 --> 00:23:31,276
+You'll hear me say the word job a lot in this section.
+
+466
+00:23:31,276 --> 00:23:33,440
+In this case, the job is just a token
+
+467
+00:23:33,440 --> 00:23:35,585
+that allows a bot to attack Spider-Man.
+
+468
+00:23:36,357 --> 00:23:38,837
+Our manager for Melee started out simple.
+
+469
+00:23:38,837 --> 00:23:40,897
+We wanted there to be one attack job
+
+470
+00:23:40,897 --> 00:23:42,798
+unless the player had recently dodged
+
+471
+00:23:42,798 --> 00:23:45,918
+and then we wanted to give him a quick break to fight back.
+
+472
+00:23:45,918 --> 00:23:47,339
+We had a simple scheme,
+
+473
+00:23:47,339 --> 00:23:50,499
+deciding which bot received the attack job.
+
+474
+00:23:50,499 --> 00:23:52,659
+We calculated a priority that was the sum
+
+475
+00:23:52,659 --> 00:23:56,820
+of the time the bot had spent waiting for a job,
+
+476
+00:23:56,820 --> 00:24:00,641
+plus how close that bot was to his ideal attack range,
+
+477
+00:24:00,641 --> 00:24:04,022
+plus a bonus value for high-priority mini-boss-style enemies.
+
+478
+00:24:05,173 --> 00:24:06,813
+Here's what that system looks like in action.
+
+479
+00:24:06,813 --> 00:24:08,734
+There's a blue line drawn from the enemy
+
+480
+00:24:08,734 --> 00:24:10,534
+who has the attack job to Spider-Man.
+
+481
+00:24:10,534 --> 00:24:13,795
+In the top left corner, you can see an idle timer.
+
+482
+00:24:13,795 --> 00:24:16,835
+When I dodge, that timer becomes non-zero.
+
+483
+00:24:16,835 --> 00:24:19,436
+This gives me a momentary chance to attack.
+
+484
+00:24:19,436 --> 00:24:20,536
+This works all right,
+
+485
+00:24:20,536 --> 00:24:22,016
+but there are still a number of issues.
+
+486
+00:24:22,016 --> 00:24:24,577
+The first is that I don't get attacked
+
+487
+00:24:24,577 --> 00:24:26,877
+nearly as aggressively as the timer says I should.
+
+488
+00:24:26,877 --> 00:24:27,377
+Here's why.
+
+489
+00:24:27,377 --> 00:24:31,478
+The enemy that has been given the attack job
+
+490
+00:24:31,478 --> 00:24:33,858
+is too far away to quickly execute it.
+
+491
+00:24:35,014 --> 00:24:39,922
+Now I do want to emphasize that players weren't actually doing this, but due to Spider-Man's
+
+492
+00:24:39,922 --> 00:24:44,469
+agility, this kind of situation could arise naturally as they bounced back and forth between
+
+493
+00:24:44,469 --> 00:24:45,070
+enemies.
+
+494
+00:24:46,466 --> 00:24:48,186
+we implemented two solutions.
+
+495
+00:24:48,186 --> 00:24:50,387
+The first was that if there was a bot
+
+496
+00:24:50,387 --> 00:24:52,327
+that could immediately start an attack
+
+497
+00:24:52,327 --> 00:24:55,048
+and a bot who had been chasing their target for too long,
+
+498
+00:24:55,048 --> 00:24:57,148
+we'd allow the job to be stolen
+
+499
+00:24:57,148 --> 00:24:58,748
+by the bot who was ready to attack.
+
+500
+00:24:58,748 --> 00:25:01,429
+The second thing we added was the ability
+
+501
+00:25:01,429 --> 00:25:04,329
+for the manager to occasionally create an attack job
+
+502
+00:25:04,329 --> 00:25:06,330
+if the player stood too close to a bot
+
+503
+00:25:06,330 --> 00:25:07,510
+for more than a split second.
+
+504
+00:25:07,510 --> 00:25:09,790
+Here's what it looks like with those features enabled.
+
+505
+00:25:09,790 --> 00:25:13,091
+You'll see that as I run past enemies,
+
+506
+00:25:13,091 --> 00:25:14,791
+the blue line shifts to me.
+
+507
+00:25:15,805 --> 00:25:18,967
+shifts to a nearby enemy and they quickly try to attack me.
+
+508
+00:25:18,967 --> 00:25:22,188
+The two concepts of job stealing and proximity attacks
+
+509
+00:25:22,188 --> 00:25:23,769
+were critical for addressing times
+
+510
+00:25:23,769 --> 00:25:26,450
+when our combat would suddenly feel dead.
+
+511
+00:25:26,450 --> 00:25:30,691
+Then we noticed that things started to feel
+
+512
+00:25:30,691 --> 00:25:33,472
+too predictable in protracted encounters.
+
+513
+00:25:33,472 --> 00:25:35,073
+So we added an intensity meter.
+
+514
+00:25:35,073 --> 00:25:37,314
+This meter fills as the enemies attack
+
+515
+00:25:37,314 --> 00:25:39,055
+and is spent by the manager to either
+
+516
+00:25:39,055 --> 00:25:41,656
+simultaneously give out a few attack jobs
+
+517
+00:25:41,656 --> 00:25:43,456
+or rapidly give them out in sequence.
+
+518
+00:25:44,921 --> 00:25:46,082
+Here's what that looks like in action.
+
+519
+00:25:46,082 --> 00:25:48,944
+You can see the current intensity value here,
+
+520
+00:25:48,944 --> 00:25:51,606
+and below that you can see how much we need to accrue
+
+521
+00:25:51,606 --> 00:25:55,409
+in order to perform the next special attack.
+
+522
+00:25:55,409 --> 00:25:59,412
+You can see up here what the next special attack type is,
+
+523
+00:25:59,412 --> 00:26:02,855
+and then you can see the jobs as they are
+
+524
+00:26:02,855 --> 00:26:03,956
+given out down here.
+
+525
+00:26:03,956 --> 00:26:12,243
+So let's talk about ranged combat.
+
+526
+00:26:12,243 --> 00:26:13,384
+It also started out simple.
+
+527
+00:26:14,092 --> 00:26:15,833
+There was going to be a cool down window
+
+528
+00:26:15,833 --> 00:26:17,454
+where no shooters could receive attack jobs,
+
+529
+00:26:17,454 --> 00:26:19,255
+followed by an attack window
+
+530
+00:26:19,255 --> 00:26:21,577
+where shooters could receive attack jobs.
+
+531
+00:26:21,577 --> 00:26:23,419
+During the attack window,
+
+532
+00:26:23,419 --> 00:26:26,541
+we had a maximum number of simultaneous attack jobs,
+
+533
+00:26:26,541 --> 00:26:29,023
+and there was a delay that prevented the manager
+
+534
+00:26:29,023 --> 00:26:30,844
+from giving out jobs too rapidly.
+
+535
+00:26:31,967 --> 00:26:32,648
+Here's what that looks like.
+
+536
+00:26:32,648 --> 00:26:36,170
+Up at the top, you can see the manager switch back and forth
+
+537
+00:26:36,170 --> 00:26:37,191
+between cool down and active.
+
+538
+00:26:37,191 --> 00:26:40,113
+And then you can see the status of the jobs here.
+
+539
+00:26:40,113 --> 00:26:42,395
+For this case, I've restricted the manager
+
+540
+00:26:42,395 --> 00:26:44,216
+from giving out more than one job.
+
+541
+00:26:44,216 --> 00:26:47,098
+This kept things from being completely crazy,
+
+542
+00:26:47,098 --> 00:26:49,220
+but there are still a lot of places
+
+543
+00:26:49,220 --> 00:26:50,361
+where things felt unfair.
+
+544
+00:26:50,361 --> 00:26:52,902
+And the biggest was being shot from off screen.
+
+545
+00:26:54,279 --> 00:26:56,820
+So we started by saying we're gonna prioritize
+
+546
+00:26:56,820 --> 00:26:59,380
+giving jobs only to on-screen bots as we can.
+
+547
+00:26:59,380 --> 00:27:01,120
+You can see that in action here.
+
+548
+00:27:01,120 --> 00:27:04,521
+You'll notice that as enemies leave the edge of the screen,
+
+549
+00:27:04,521 --> 00:27:07,122
+that they stop being selected as attackers.
+
+550
+00:27:07,122 --> 00:27:12,883
+However, there were still times
+
+551
+00:27:12,883 --> 00:27:15,443
+when all valid shooters were off-screen.
+
+552
+00:27:15,443 --> 00:27:17,504
+So we made enemies take longer to fire
+
+553
+00:27:17,504 --> 00:27:18,644
+when they are off-screen.
+
+554
+00:27:22,003 --> 00:27:23,703
+This gives the player more time to notice
+
+555
+00:27:23,703 --> 00:27:24,663
+the spider sense warning.
+
+556
+00:27:24,663 --> 00:27:27,984
+In this video, you can see that when enemies are off screen,
+
+557
+00:27:27,984 --> 00:27:29,425
+it lasts for 1.5 seconds.
+
+558
+00:27:29,425 --> 00:27:31,845
+When they are on screen,
+
+559
+00:27:31,845 --> 00:27:33,646
+the warning only lasts for 0.75 seconds.
+
+560
+00:27:33,646 --> 00:27:37,366
+By now, things were starting to feel decent
+
+561
+00:27:37,366 --> 00:27:40,367
+when fighting only shooter enemies,
+
+562
+00:27:40,367 --> 00:27:41,947
+but things could still be overwhelming
+
+563
+00:27:41,947 --> 00:27:45,768
+when enemies that used melee were present.
+
+564
+00:27:45,768 --> 00:27:48,389
+So, we allowed design to specify
+
+565
+00:27:48,389 --> 00:27:51,370
+an entirely new set of values if melee enemies were present.
+
+566
+00:27:52,642 --> 00:27:57,056
+If you look here, you can see that not only is the active time slightly shorter, but the
+
+567
+00:27:57,056 --> 00:27:58,862
+cool down period is nearly doubled.
+
+568
+00:28:01,180 --> 00:28:05,203
+This felt pretty good, until the players started using air combat.
+
+569
+00:28:05,203 --> 00:28:09,846
+Then with the slower timing values, it felt like enemies became unresponsive for nearly
+
+570
+00:28:09,846 --> 00:28:10,627
+five seconds at a time.
+
+571
+00:28:10,627 --> 00:28:15,730
+We tried disabling the second set of values when the player was in the air, but players
+
+572
+00:28:15,730 --> 00:28:20,213
+then felt like they were being punished for using air combat, which was not what we wanted.
+
+573
+00:28:20,213 --> 00:28:23,095
+So we added something that we called air aggression.
+
+574
+00:28:24,080 --> 00:28:25,561
+Here it is in action.
+
+575
+00:28:25,561 --> 00:28:29,204
+Once the player performs enough actions in the air,
+
+576
+00:28:29,204 --> 00:28:31,446
+you can see the air aggression chance change from 0 to 0.5.
+
+577
+00:28:31,446 --> 00:28:33,428
+This means that for each additional action
+
+578
+00:28:33,428 --> 00:28:35,330
+the player performs while in the air,
+
+579
+00:28:35,330 --> 00:28:38,233
+there is a 50% chance that the manager will immediately
+
+580
+00:28:38,233 --> 00:28:39,193
+exit cooldown.
+
+581
+00:28:39,193 --> 00:28:43,057
+When that happens, you'll see air aggression active here.
+
+582
+00:28:49,438 --> 00:28:53,282
+Even after all of this iteration, players still felt that there were times when being
+
+583
+00:28:53,282 --> 00:28:55,643
+attacked was cheap.
+
+584
+00:28:55,643 --> 00:28:56,684
+So we made a list.
+
+585
+00:28:56,684 --> 00:29:01,488
+Performing any action from this list would cause the managers to cancel all attack jobs
+
+586
+00:29:01,488 --> 00:29:03,690
+that hadn't actually started the attack.
+
+587
+00:29:04,538 --> 00:29:06,759
+Web throwing an environmental interactable.
+
+588
+00:29:06,759 --> 00:29:08,080
+Web striking a new target.
+
+589
+00:29:08,080 --> 00:29:10,501
+Using an air launcher on a target.
+
+590
+00:29:10,501 --> 00:29:11,782
+Dodging an attack.
+
+591
+00:29:11,782 --> 00:29:13,503
+Perfect dodging an attack.
+
+592
+00:29:13,503 --> 00:29:14,763
+Using a finisher.
+
+593
+00:29:14,763 --> 00:29:16,404
+Jumping off an enemy.
+
+594
+00:29:16,404 --> 00:29:17,584
+Jumping.
+
+595
+00:29:17,584 --> 00:29:18,725
+Landing.
+
+596
+00:29:18,725 --> 00:29:19,305
+Being hit.
+
+597
+00:29:19,305 --> 00:29:23,867
+And so in all of these cases, we cancel incoming attacks.
+
+598
+00:29:23,867 --> 00:29:26,869
+Unless you abuse the action repeatedly,
+
+599
+00:29:26,869 --> 00:29:29,010
+and then we'd allow the attack jobs to persist.
+
+600
+00:29:30,914 --> 00:29:33,356
+unless that action was a dodge, in which case
+
+601
+00:29:33,356 --> 00:29:37,699
+we'd still cancel the jobs, unless it was a boss fight,
+
+602
+00:29:37,699 --> 00:29:39,921
+and then the jobs wouldn't be canceled.
+
+603
+00:29:39,921 --> 00:29:40,642
+And that still wasn't enough.
+
+604
+00:29:40,642 --> 00:29:43,844
+Players still felt that there were times
+
+605
+00:29:43,844 --> 00:29:46,746
+that enemies would knock Spider-Man out of an attack
+
+606
+00:29:46,746 --> 00:29:47,647
+in a way that felt cheap.
+
+607
+00:29:47,647 --> 00:29:50,529
+This is the specific case that was
+
+608
+00:29:50,529 --> 00:29:52,191
+causing a lot of frustration.
+
+609
+00:29:52,191 --> 00:29:54,873
+Players would properly identify an attacking enemy,
+
+610
+00:29:54,873 --> 00:29:57,435
+and then they'd try to attack that enemy to interrupt them.
+
+611
+00:29:57,435 --> 00:29:59,576
+But because of animation timing, they'd get hit.
+
+612
+00:30:00,706 --> 00:30:02,766
+We created a system we called Beat to the Punch,
+
+613
+00:30:02,766 --> 00:30:05,927
+which guarantees that Spider-Man will win these interactions.
+
+614
+00:30:05,927 --> 00:30:08,268
+When the red sphere is visible, the system is active.
+
+615
+00:30:08,268 --> 00:30:11,248
+Beat to the Punch activates as Spider-Man's attacks
+
+616
+00:30:11,248 --> 00:30:13,069
+get close to the impact frame.
+
+617
+00:30:13,069 --> 00:30:15,469
+While active, we examine each incoming attack
+
+618
+00:30:15,469 --> 00:30:18,530
+and see if Spider-Man's attack would force a reaction.
+
+619
+00:30:18,530 --> 00:30:20,970
+If it would, then Spider-Man is granted immunity
+
+620
+00:30:20,970 --> 00:30:22,251
+from that enemy's attack
+
+621
+00:30:22,251 --> 00:30:25,311
+until he's past his own impact frame.
+
+622
+00:30:25,311 --> 00:30:26,391
+You can see it in action here.
+
+623
+00:30:27,584 --> 00:30:31,390
+And as you can see, the system will ensure that in cases where Spider-Man and an enemy
+
+624
+00:30:31,390 --> 00:30:35,216
+are attacking each other at the same time, Spider-Man beats the enemy to the punch.
+
+625
+00:30:35,216 --> 00:30:39,703
+This simple system was the last thing that we needed to clear up the vast majority of
+
+626
+00:30:39,703 --> 00:30:41,886
+our remaining complaints about cheap hits.
+
+627
+00:30:44,205 --> 00:30:46,307
+So let's move on to every AI programmer's
+
+628
+00:30:46,307 --> 00:30:49,290
+other favorite problem, positioning.
+
+629
+00:30:49,290 --> 00:30:51,353
+We've made a lot of shooters at Insomniac
+
+630
+00:30:51,353 --> 00:30:53,775
+and how our AI decided where they would move to
+
+631
+00:30:53,775 --> 00:30:56,117
+was based on the needs of that genre.
+
+632
+00:30:56,117 --> 00:30:58,380
+We annotated positions for bots to fight from
+
+633
+00:30:58,380 --> 00:31:01,242
+using fire points and we marked large pieces of occlusion
+
+634
+00:31:01,242 --> 00:31:02,664
+by wrapping them in volumes.
+
+635
+00:31:02,924 --> 00:31:08,132
+This allowed our ranged enemies to take up positions in cover or at places that are interesting.
+
+636
+00:31:08,132 --> 00:31:13,821
+Furthermore, melee enemies in a shooter typically just try to get close to the player and attack as often as possible,
+
+637
+00:31:13,821 --> 00:31:17,307
+and managing the horde and the space is part of the gameplay.
+
+638
+00:31:18,377 --> 00:31:23,304
+In Spider-Man, we wanted the player to fight a large crowd of enemies, but we didn't want
+
+639
+00:31:23,304 --> 00:31:25,927
+them to feel like they were continuously being mobbed.
+
+640
+00:31:25,927 --> 00:31:30,153
+Nor did we want to limit our combat just to large arenas.
+
+641
+00:31:30,153 --> 00:31:34,338
+We also wanted the more interesting AI classes to be in position to attack more.
+
+642
+00:31:34,338 --> 00:31:36,661
+And we needed to do all of this while looking good.
+
+643
+00:31:37,811 --> 00:31:40,293
+We started by using a fight circle like this.
+
+644
+00:31:40,293 --> 00:31:43,436
+We divide the area around the player into wedges,
+
+645
+00:31:43,436 --> 00:31:45,859
+and then we'd repeat with more wedges
+
+646
+00:31:45,859 --> 00:31:47,360
+for additional rings as needed.
+
+647
+00:31:47,360 --> 00:31:50,944
+We'd do some nav tests to see that each wedge is on nav,
+
+648
+00:31:50,944 --> 00:31:52,385
+and then we'd assign each enemy
+
+649
+00:31:52,385 --> 00:31:53,786
+to the wedge he was closest to.
+
+650
+00:31:55,186 --> 00:31:57,587
+This didn't work for two main reasons.
+
+651
+00:31:57,587 --> 00:32:00,568
+The first is easily visible in this video.
+
+652
+00:32:00,568 --> 00:32:01,968
+Simply moving around the space
+
+653
+00:32:01,968 --> 00:32:03,889
+could easily cause the wedges to become invalid.
+
+654
+00:32:03,889 --> 00:32:06,450
+This led to enemies frequently repositioning
+
+655
+00:32:06,450 --> 00:32:09,071
+when there wasn't a clear reason to the player
+
+656
+00:32:09,071 --> 00:32:10,211
+why they should do so.
+
+657
+00:32:10,211 --> 00:32:12,052
+The other reason why this failed
+
+658
+00:32:12,052 --> 00:32:15,973
+was because it tended to look very robotic and choreographed.
+
+659
+00:32:15,973 --> 00:32:18,094
+We tried adding in some random variation,
+
+660
+00:32:18,094 --> 00:32:19,855
+but we were never able to get it to feel good.
+
+661
+00:32:19,855 --> 00:32:22,756
+I'm gonna quickly diagram our solution.
+
+662
+00:32:24,278 --> 00:32:28,663
+Let's say we have an enemy standing here, who is engaged with Spider-Man standing here.
+
+663
+00:32:28,663 --> 00:32:33,368
+Then suppose there are some enemies here, and let's pretend like each bot and Spider-Man
+
+664
+00:32:33,368 --> 00:32:37,192
+have kind of a little circle around them that is their personal space.
+
+665
+00:32:37,192 --> 00:32:39,274
+We call these bot reservations.
+
+666
+00:32:39,274 --> 00:32:42,577
+Finally, the edges of navmesh are here.
+
+667
+00:32:42,577 --> 00:32:46,301
+Our goal is to find the best position for our bot to stand that is outside of all this
+
+668
+00:32:46,301 --> 00:32:46,681
+red.
+
+669
+00:32:47,620 --> 00:32:52,244
+We did this with a simple algorithm for finding local minima, a gradient descent hill climber.
+
+670
+00:32:52,244 --> 00:32:58,309
+This algorithm will iteratively follow the gradient of steepest descent in order to minimize an energy function.
+
+671
+00:32:58,309 --> 00:33:04,654
+In our case, energy will increase as we move towards the center of the circle and as we move off of navmesh.
+
+672
+00:33:04,654 --> 00:33:06,476
+It will be zero everywhere else.
+
+673
+00:33:07,217 --> 00:33:09,922
+Another way to look at this is that we will iteratively
+
+674
+00:33:09,922 --> 00:33:12,566
+push points that lie in one of the circles
+
+675
+00:33:12,566 --> 00:33:15,311
+radially out of the circles, like so,
+
+676
+00:33:15,311 --> 00:33:17,535
+and those points that are off nav
+
+677
+00:33:17,535 --> 00:33:19,699
+will be pushed back towards nav, like so.
+
+678
+00:33:21,207 --> 00:33:25,689
+In our game, each of our bots will actually feed five positions through the hill climber.
+
+679
+00:33:25,689 --> 00:33:31,751
+His current position, and then based on a line from the bot to his target and an ideal
+
+680
+00:33:31,751 --> 00:33:36,293
+distance we can compute a position in front and a position behind the target.
+
+681
+00:33:36,293 --> 00:33:40,935
+Then a line segment perpendicular to the first segment is used to select a position to the
+
+682
+00:33:40,935 --> 00:33:42,475
+left and a position to the right.
+
+683
+00:33:43,729 --> 00:33:45,770
+Here's how the hill climber would modify these positions.
+
+684
+00:33:45,770 --> 00:33:49,152
+For the one at the bot's current position,
+
+685
+00:33:49,152 --> 00:33:51,414
+it will do nothing but already outside of the circles
+
+686
+00:33:51,414 --> 00:33:53,315
+and inside NavMesh.
+
+687
+00:33:53,315 --> 00:33:57,117
+For the two lower points, they each lay in a circle,
+
+688
+00:33:57,117 --> 00:33:59,418
+so we'll just push them radially out of the circle.
+
+689
+00:33:59,418 --> 00:34:01,820
+For the point on the far right,
+
+690
+00:34:01,820 --> 00:34:05,302
+we'll push it back towards NavMesh, like so.
+
+691
+00:34:06,592 --> 00:34:11,315
+The last point lies between two circles. We'll try to simultaneously push it out of both
+
+692
+00:34:11,315 --> 00:34:15,477
+by adding these two vectors together to get this. However, because that won't work,
+
+693
+00:34:15,477 --> 00:34:18,659
+we'll need to iterate a couple times and get to our final position.
+
+694
+00:34:19,958 --> 00:34:22,539
+So at the end we wind up with five potential positions
+
+695
+00:34:22,539 --> 00:34:23,960
+for an enemy to choose between.
+
+696
+00:34:23,960 --> 00:34:26,181
+And here's what that looks like in game.
+
+697
+00:34:26,181 --> 00:34:27,921
+This video is showing the results
+
+698
+00:34:27,921 --> 00:34:29,262
+of this enemy's hill climber.
+
+699
+00:34:29,262 --> 00:34:31,363
+Our bot reservations are shown in red,
+
+700
+00:34:31,363 --> 00:34:33,323
+and the results of the hill climber
+
+701
+00:34:33,323 --> 00:34:35,664
+are shown as trails of little blue spheres.
+
+702
+00:34:35,664 --> 00:34:36,785
+We capped the number of iterations
+
+703
+00:34:36,785 --> 00:34:38,245
+the hill climber can perform at 30.
+
+704
+00:34:38,245 --> 00:34:42,667
+We did try using more complicated algorithms
+
+705
+00:34:42,667 --> 00:34:45,968
+like simulated annealing, but we didn't find them
+
+706
+00:34:45,968 --> 00:34:47,588
+to be of any qualitative benefit.
+
+707
+00:34:49,632 --> 00:34:51,673
+Once we've generated those five positions,
+
+708
+00:34:51,673 --> 00:34:53,774
+the hill climber creates a score for each
+
+709
+00:34:53,774 --> 00:34:56,194
+based on the distance to our current position
+
+710
+00:34:56,194 --> 00:34:58,055
+and the distance to our target.
+
+711
+00:34:58,055 --> 00:35:00,196
+We then apply additional penalties
+
+712
+00:35:00,196 --> 00:35:02,857
+if that point is too close to the target,
+
+713
+00:35:02,857 --> 00:35:04,477
+too far from the target,
+
+714
+00:35:04,477 --> 00:35:06,438
+or if moving there from our current position
+
+715
+00:35:06,438 --> 00:35:09,519
+would likely cause us to cross too close to our target.
+
+716
+00:35:09,519 --> 00:35:11,660
+We then pick the position with the smallest score.
+
+717
+00:35:12,877 --> 00:35:15,258
+This worked pretty well for small to medium sized encounters.
+
+718
+00:35:15,258 --> 00:35:18,121
+However, in large encounters, we noticed that standard melee enemies
+
+719
+00:35:18,121 --> 00:35:20,903
+could prevent the more interesting classes
+
+720
+00:35:20,903 --> 00:35:23,805
+from being able to get close to the player.
+
+721
+00:35:23,805 --> 00:35:28,349
+This was particularly evident if those classes appeared in a backup wave.
+
+722
+00:35:28,349 --> 00:35:31,211
+So we partially resurrected the concept of a fight circle.
+
+723
+00:35:31,211 --> 00:35:35,115
+However, this time, instead of giving out positions, we handed out distances.
+
+724
+00:35:35,115 --> 00:35:38,718
+These distances are used to compute the initial positions
+
+725
+00:35:38,718 --> 00:35:40,159
+that were fed into the hill climber.
+
+726
+00:35:40,719 --> 00:35:45,025
+This lets us bias those more important enemies without blowing up the algorithm.
+
+727
+00:35:45,025 --> 00:35:47,048
+In our game, there's just two rings.
+
+728
+00:35:47,048 --> 00:35:50,753
+An inner, high-priority ring in which about six guys can stand,
+
+729
+00:35:50,753 --> 00:35:53,617
+and an outer, low-priority ring where everyone else gets assigned.
+
+730
+00:35:55,070 --> 00:35:58,151
+In frantic combat though, we still had issues
+
+731
+00:35:58,151 --> 00:36:00,952
+with enemies repositioning when it felt unnatural.
+
+732
+00:36:00,952 --> 00:36:03,232
+So we added a final check at the behavior level.
+
+733
+00:36:03,232 --> 00:36:06,493
+First, we'd check that we aren't already too close
+
+734
+00:36:06,493 --> 00:36:07,953
+to our new position.
+
+735
+00:36:07,953 --> 00:36:11,094
+If that check succeeded, we'd compute the distance
+
+736
+00:36:11,094 --> 00:36:14,174
+to our ideal attack position, then compute the distance
+
+737
+00:36:14,174 --> 00:36:16,095
+between the new position and the attack position.
+
+738
+00:36:16,095 --> 00:36:19,395
+Subtracting these values tells us how much repositioning
+
+739
+00:36:19,395 --> 00:36:21,876
+will improve our current situation.
+
+740
+00:36:23,190 --> 00:36:25,453
+Based on if we would be moving forward or backwards,
+
+741
+00:36:25,453 --> 00:36:27,474
+we compare that value with different thresholds
+
+742
+00:36:27,474 --> 00:36:29,617
+to determine if we should move.
+
+743
+00:36:29,617 --> 00:36:31,058
+Those threshold values change over time
+
+744
+00:36:31,058 --> 00:36:34,741
+so that a character who has been stationary for a long time
+
+745
+00:36:34,741 --> 00:36:36,723
+is more likely to move.
+
+746
+00:36:37,953 --> 00:36:40,695
+We also have a similar scheme for deciding if an AI should
+
+747
+00:36:40,695 --> 00:36:44,058
+update their weight position while in motion.
+
+748
+00:36:44,058 --> 00:36:46,460
+We compute the distance to our current position.
+
+749
+00:36:46,460 --> 00:36:49,402
+We compute the distance to our new position.
+
+750
+00:36:49,402 --> 00:36:53,005
+We then compute the distance from our current to our new.
+
+751
+00:36:53,005 --> 00:36:55,727
+And all of these must be larger than a threshold value
+
+752
+00:36:55,727 --> 00:36:58,769
+in order for us to update the destination.
+
+753
+00:36:58,769 --> 00:37:02,892
+Let's move on to a few uses of procedural animation
+
+754
+00:37:02,892 --> 00:37:03,973
+in Marvel's Spider-Man.
+
+755
+00:37:05,898 --> 00:37:09,101
+We wanted Spider-Man to be able to use his webs
+
+756
+00:37:09,101 --> 00:37:10,822
+to stick guys to surfaces.
+
+757
+00:37:10,822 --> 00:37:13,745
+Unfortunately, we have a lot of uneven and weird surfaces,
+
+758
+00:37:13,745 --> 00:37:18,169
+and the AI may be in an unexpected pose because of Ragdoll.
+
+759
+00:37:18,169 --> 00:37:20,652
+We couldn't just naively spawn a model or a decal.
+
+760
+00:37:20,652 --> 00:37:23,554
+Everything starts with the game
+
+761
+00:37:23,554 --> 00:37:26,237
+generating an ideal world space orientation,
+
+762
+00:37:26,237 --> 00:37:29,400
+and then passing that into something we call a web blanket.
+
+763
+00:37:30,374 --> 00:37:32,415
+The blanket itself is a model of a web
+
+764
+00:37:32,415 --> 00:37:34,156
+with a six by six lattice of joints.
+
+765
+00:37:34,156 --> 00:37:38,479
+You can see it here fully extended and locked in place.
+
+766
+00:37:38,479 --> 00:37:41,220
+When spawned, the blanket will project rays
+
+767
+00:37:41,220 --> 00:37:42,981
+from a position above the initial position
+
+768
+00:37:42,981 --> 00:37:48,365
+through the position of each joint on the model
+
+769
+00:37:48,365 --> 00:37:51,706
+if the model was naively placed at the initial position.
+
+770
+00:37:52,261 --> 00:37:55,324
+Where that ray hits is where the joint will be attached.
+
+771
+00:37:55,324 --> 00:37:57,446
+In this video, the raycasts are shown in orange.
+
+772
+00:37:57,446 --> 00:38:00,969
+If you look closely, you can see that the blanket
+
+773
+00:38:00,969 --> 00:38:04,353
+is compact when it's first spawned,
+
+774
+00:38:04,353 --> 00:38:06,455
+and then each of the joints interpolates
+
+775
+00:38:06,455 --> 00:38:09,157
+into the position found by its corresponding raycast.
+
+776
+00:38:12,385 --> 00:38:17,049
+If a raycast doesn't hit anything, we rotate that ray towards the blanket's initial point.
+
+777
+00:38:17,049 --> 00:38:22,373
+This will usually cause the blanket to wrap around whatever it is attaching to.
+
+778
+00:38:22,373 --> 00:38:27,517
+Additionally, joints are allowed to re-scan for a period of time before they lock in place.
+
+779
+00:38:27,517 --> 00:38:32,881
+This allows the blanket to adapt to a settling ragdoll or animating character without bunching
+
+780
+00:38:32,881 --> 00:38:33,501
+up on itself.
+
+781
+00:38:36,820 --> 00:38:39,421
+We have another case where we allow joints to rescan,
+
+782
+00:38:39,421 --> 00:38:41,522
+and that is if the thing they are attached to
+
+783
+00:38:41,522 --> 00:38:44,143
+moves too far from the blanket's initial position.
+
+784
+00:38:44,143 --> 00:38:46,244
+This prevents the blanket from being
+
+785
+00:38:46,244 --> 00:38:48,085
+stretched across the entire level
+
+786
+00:38:48,085 --> 00:38:49,365
+as the door is torn off here.
+
+787
+00:38:52,126 --> 00:38:56,310
+We planned to have several enemies able to use whip style weapons versus Spider-Man.
+
+788
+00:38:56,310 --> 00:39:02,055
+Unfortunately, we found that a regular cloth sim didn't give us the results we wanted.
+
+789
+00:39:02,055 --> 00:39:08,121
+We also couldn't just animate the whips because we needed to be able to reuse animations from other classes.
+
+790
+00:39:08,121 --> 00:39:13,306
+This was especially important for locomotion and hit react animations because they're so numerous.
+
+791
+00:39:13,306 --> 00:39:17,210
+We needed a procedural solution that could be fully animation controlled when necessary.
+
+792
+00:39:19,100 --> 00:39:20,740
+The whips are part of the base model
+
+793
+00:39:20,740 --> 00:39:23,081
+and they look like this in any animation
+
+794
+00:39:23,081 --> 00:39:25,342
+in which they haven't actually been animated.
+
+795
+00:39:25,342 --> 00:39:29,943
+When the sim is fully engaged, things look like this.
+
+796
+00:39:29,943 --> 00:39:31,463
+For each joint in the chain,
+
+797
+00:39:31,463 --> 00:39:33,864
+we will track its position from frame to frame
+
+798
+00:39:33,864 --> 00:39:37,045
+and then we'll naively apply the host motion
+
+799
+00:39:37,045 --> 00:39:38,385
+to each of those joints.
+
+800
+00:39:38,385 --> 00:39:41,626
+Then we begin to apply constraints.
+
+801
+00:39:41,626 --> 00:39:44,067
+We apply a distance constraint to correct for this.
+
+802
+00:39:45,057 --> 00:39:50,586
+The constraint uses a 0 to 1 stiffness parameter and is performed in two passes, forwards down
+
+803
+00:39:50,586 --> 00:39:52,349
+the chain and then backwards up it.
+
+804
+00:39:52,349 --> 00:39:55,273
+We perform half of the error correction on each pass.
+
+805
+00:39:57,679 --> 00:40:00,741
+Without a curvature constraint, the chain falls through Tombstone's hand,
+
+806
+00:40:00,741 --> 00:40:04,243
+even though the chain's root is oriented horizontally.
+
+807
+00:40:04,243 --> 00:40:08,045
+The first pass keeps each child joint aligned with its parent.
+
+808
+00:40:08,045 --> 00:40:13,009
+The second curvature pass constrains each joint to both its parent and its child.
+
+809
+00:40:13,009 --> 00:40:15,170
+This prevents kinks in the chain.
+
+810
+00:40:15,170 --> 00:40:21,073
+The curvature pass was extremely important for making sure that the simmed joints
+
+811
+00:40:21,073 --> 00:40:23,915
+blended smoothly out of the animated ones.
+
+812
+00:40:23,915 --> 00:40:25,936
+Here you can see Tombstone walking normally.
+
+813
+00:40:28,091 --> 00:40:30,212
+We apply a gravity constraint to keep the chain
+
+814
+00:40:30,212 --> 00:40:33,674
+from floating, and we apply a ground constraint
+
+815
+00:40:33,674 --> 00:40:36,515
+to keep it from sinking through the floor like it is here.
+
+816
+00:40:36,515 --> 00:40:38,796
+This character, or this constraint,
+
+817
+00:40:38,796 --> 00:40:40,997
+uses the normal of the ground that the character
+
+818
+00:40:40,997 --> 00:40:44,019
+is standing on, which we assume just defines a flat plane.
+
+819
+00:40:44,019 --> 00:40:48,361
+The final constraint ensures that each of the joints
+
+820
+00:40:48,361 --> 00:40:50,902
+is outside of the character's move capsule.
+
+821
+00:40:50,902 --> 00:40:54,263
+Without it, you can see the whip clipping through his legs.
+
+822
+00:40:55,867 --> 00:40:57,969
+But with it, you can see that the chain
+
+823
+00:40:57,969 --> 00:41:02,073
+will move around his body.
+
+824
+00:41:02,073 --> 00:41:04,355
+The actual order that we apply constraints is
+
+825
+00:41:04,355 --> 00:41:07,459
+gravity, then curvature, then movePill,
+
+826
+00:41:07,459 --> 00:41:09,100
+then distance, then ground.
+
+827
+00:41:09,100 --> 00:41:13,364
+Then we iterate over all of those up to eight times
+
+828
+00:41:13,364 --> 00:41:16,187
+depending on how close the character is to the camera.
+
+829
+00:41:17,693 --> 00:41:21,696
+For controlling if the chain is driven by animation or the sim, we start by assuming
+
+830
+00:41:21,696 --> 00:41:23,398
+that it is always simulated.
+
+831
+00:41:23,398 --> 00:41:29,643
+Then we place events on animation clips when the chain is supposed to transition to being
+
+832
+00:41:29,643 --> 00:41:33,026
+animated and then again when it transitions back to being simmed.
+
+833
+00:41:33,026 --> 00:41:36,089
+These events just contain a blend speed.
+
+834
+00:41:36,089 --> 00:41:40,693
+That speed is used to change a 0 to 1 value that represents what percent of the chain
+
+835
+00:41:40,693 --> 00:41:41,774
+is simmed.
+
+836
+00:41:41,774 --> 00:41:44,356
+No joint is ever driven by both sim and animation.
+
+837
+00:41:45,405 --> 00:41:47,626
+We had planned to give a lot more control to animation,
+
+838
+00:41:47,626 --> 00:41:49,847
+but we found that we got very good results with just this,
+
+839
+00:41:49,847 --> 00:41:51,367
+and that more wasn't necessary.
+
+840
+00:41:51,367 --> 00:41:55,089
+One of our main goals for this enemy class
+
+841
+00:41:55,089 --> 00:41:57,189
+was to either hold Spider-Man in place
+
+842
+00:41:57,189 --> 00:41:58,590
+or pull him out of the air.
+
+843
+00:41:58,590 --> 00:42:02,191
+Therefore, we needed to be able to blend the whip during his
+
+844
+00:42:02,191 --> 00:42:05,993
+attack animations to arbitrary world space positions
+
+845
+00:42:05,993 --> 00:42:07,013
+and have them look good.
+
+846
+00:42:08,467 --> 00:42:11,289
+For each joint in the whip, we compute where it would be
+
+847
+00:42:11,289 --> 00:42:13,972
+if the enemy was perfectly aligned with their target.
+
+848
+00:42:13,972 --> 00:42:17,315
+The difference between these two positions is the error.
+
+849
+00:42:17,315 --> 00:42:19,537
+We then apply a portion of that error
+
+850
+00:42:19,537 --> 00:42:21,579
+to take the animated joint
+
+851
+00:42:21,579 --> 00:42:23,721
+to its procedurally aligned position.
+
+852
+00:42:23,721 --> 00:42:28,885
+The portion of that error we apply increases linearly
+
+853
+00:42:28,885 --> 00:42:31,087
+as we move down the chain.
+
+854
+00:42:31,087 --> 00:42:32,749
+And here's what that looks like in action.
+
+855
+00:42:40,874 --> 00:42:43,936
+This procedural alignment is controlled with four events.
+
+856
+00:42:43,936 --> 00:42:47,037
+We start blending on, finish blending on,
+
+857
+00:42:47,037 --> 00:42:49,478
+we start blending off, and we finish blending off.
+
+858
+00:42:49,478 --> 00:42:54,341
+For the last section, I'd like to briefly talk about
+
+859
+00:42:54,341 --> 00:42:58,063
+some of the things that gave us a lot of trouble.
+
+860
+00:42:58,063 --> 00:43:00,184
+We didn't have a lot of time to spend on developing tech
+
+861
+00:43:00,184 --> 00:43:02,185
+for flying enemies, and this really hurt us
+
+862
+00:43:02,185 --> 00:43:04,866
+when it came time to develop the Sable Jetpack Troopers
+
+863
+00:43:04,866 --> 00:43:07,367
+and our two flying bosses, Electro and Vulture.
+
+864
+00:43:08,694 --> 00:43:11,457
+We wound up having the jetpack troopers just hover over nav.
+
+865
+00:43:11,457 --> 00:43:14,501
+We then gave them the ability to go off nav
+
+866
+00:43:14,501 --> 00:43:16,904
+if they could see their destination.
+
+867
+00:43:16,904 --> 00:43:19,107
+While off nav, they kept a list of points
+
+868
+00:43:19,107 --> 00:43:21,950
+that would allow them to breadcrumb their way back.
+
+869
+00:43:21,950 --> 00:43:23,452
+However, even with both of these,
+
+870
+00:43:23,452 --> 00:43:25,415
+there are still times when you can see them
+
+871
+00:43:25,415 --> 00:43:27,257
+steering around stuff at ground level.
+
+872
+00:43:28,538 --> 00:43:30,899
+And here's an example of how that happened.
+
+873
+00:43:30,899 --> 00:43:32,879
+This jetpacker wants to go to Spider-Man.
+
+874
+00:43:32,879 --> 00:43:35,340
+The red capsule indicates the physics query
+
+875
+00:43:35,340 --> 00:43:38,420
+he performed to see if he could fly directly to him.
+
+876
+00:43:38,420 --> 00:43:40,381
+However, because it clips the wall,
+
+877
+00:43:40,381 --> 00:43:42,301
+he's gonna have to follow this path,
+
+878
+00:43:42,301 --> 00:43:45,382
+this blue path along the ground until he,
+
+879
+00:43:45,382 --> 00:43:47,982
+around the fence until he can actually see Spider-Man.
+
+880
+00:43:47,982 --> 00:43:48,343
+Oops.
+
+881
+00:43:54,605 --> 00:43:58,187
+For our flying boss enemies, Electro and Vulture,
+
+882
+00:43:58,187 --> 00:44:00,128
+they used a collection of volumes
+
+883
+00:44:00,128 --> 00:44:01,489
+that were linked by splines.
+
+884
+00:44:01,489 --> 00:44:05,331
+Inside the volumes, the characters could move freely
+
+885
+00:44:05,331 --> 00:44:06,612
+and they could use the splines
+
+886
+00:44:06,612 --> 00:44:08,593
+to transfer between the volumes.
+
+887
+00:44:08,593 --> 00:44:11,315
+However, all of these had to be hand-authored
+
+888
+00:44:11,315 --> 00:44:13,876
+so it was not a usable solution for the whole game.
+
+889
+00:44:13,876 --> 00:44:16,718
+Both of these solutions got our game shipped,
+
+890
+00:44:16,718 --> 00:44:18,839
+but I hope you can see why they're far from ideal.
+
+891
+00:44:21,567 --> 00:44:23,548
+We had one mission that had a lot of combat
+
+892
+00:44:23,548 --> 00:44:24,949
+on top of a moving truck,
+
+893
+00:44:24,949 --> 00:44:27,830
+and it was a never-ending source of pain.
+
+894
+00:44:27,830 --> 00:44:29,710
+Our nav mesh currently can't move,
+
+895
+00:44:29,710 --> 00:44:32,331
+and so we had to make the space as simple as possible
+
+896
+00:44:32,331 --> 00:44:35,193
+so that Botch could reliably straight line to Spider-Man.
+
+897
+00:44:35,193 --> 00:44:39,794
+Additionally, many states and components
+
+898
+00:44:39,794 --> 00:44:41,475
+did their calculations in world space,
+
+899
+00:44:41,475 --> 00:44:44,136
+and this would cause bugs when positions
+
+900
+00:44:44,136 --> 00:44:46,417
+wouldn't line up from frame to frame.
+
+901
+00:44:47,807 --> 00:44:50,347
+Furthermore, our engine does not support attachment
+
+902
+00:44:50,347 --> 00:44:52,267
+as well as something like Unity or Unreal,
+
+903
+00:44:52,267 --> 00:44:55,948
+and so we had to use specific components
+
+904
+00:44:55,948 --> 00:44:58,829
+to manually update all of the attached entities.
+
+905
+00:44:58,829 --> 00:45:03,830
+The final problem we had was with enemies or the player
+
+906
+00:45:03,830 --> 00:45:05,710
+that got thrown off the truck
+
+907
+00:45:05,710 --> 00:45:08,571
+being shoved through geometry by the truck
+
+908
+00:45:08,571 --> 00:45:10,411
+if they were standing next to it.
+
+909
+00:45:10,411 --> 00:45:13,532
+We solved this by placing kill volumes
+
+910
+00:45:13,532 --> 00:45:15,252
+along the side of the truck as it moves.
+
+911
+00:45:17,227 --> 00:45:20,151
+NavMesh was another challenge that we underestimated.
+
+912
+00:45:20,151 --> 00:45:22,313
+We did get some new features for this project,
+
+913
+00:45:22,313 --> 00:45:25,777
+such as the ability to perform dynamic cutouts from Nav,
+
+914
+00:45:25,777 --> 00:45:28,080
+and this was instrumental in getting part cards
+
+915
+00:45:28,080 --> 00:45:29,983
+and many crimes functional.
+
+916
+00:45:29,983 --> 00:45:32,085
+However, there was a creative push
+
+917
+00:45:32,085 --> 00:45:34,928
+to change Manhattan with the story.
+
+918
+00:45:35,529 --> 00:45:37,410
+As things got worse for Spider-Man,
+
+919
+00:45:37,410 --> 00:45:39,511
+we wanted to reflect that in the world.
+
+920
+00:45:39,511 --> 00:45:41,572
+Sable International would set up checkpoints,
+
+921
+00:45:41,572 --> 00:45:44,213
+prisoners, escaped prisoners would erect bases
+
+922
+00:45:44,213 --> 00:45:46,174
+across the island, and garbage and debris
+
+923
+00:45:46,174 --> 00:45:50,116
+would begin to pile up as things went from bad to worse.
+
+924
+00:45:50,116 --> 00:45:53,338
+Our nav mesh is built and loaded on a per tile basis.
+
+925
+00:45:53,338 --> 00:45:56,039
+We did not have the time to rework this
+
+926
+00:45:56,039 --> 00:45:57,680
+because we would have needed the ability
+
+927
+00:45:57,680 --> 00:46:00,721
+to load different meshes based on various game state,
+
+928
+00:46:00,721 --> 00:46:02,322
+and we'd need the ability to express
+
+929
+00:46:02,322 --> 00:46:04,463
+all of that state at build time.
+
+930
+00:46:05,499 --> 00:46:07,761
+We evaluated generating navmesh at runtime,
+
+931
+00:46:07,761 --> 00:46:10,442
+but we found the CPU performance to be a non-starter.
+
+932
+00:46:10,442 --> 00:46:16,426
+Our solution was to generate nav in its most complicated state
+
+933
+00:46:16,426 --> 00:46:18,948
+and then try and just disable parts of it from script.
+
+934
+00:46:18,948 --> 00:46:21,009
+Here's an example space.
+
+935
+00:46:21,009 --> 00:46:22,710
+This is what it looks like during Act 1
+
+936
+00:46:22,710 --> 00:46:23,831
+when things are normal.
+
+937
+00:46:23,831 --> 00:46:27,233
+You can see patches of navmesh floating in the air.
+
+938
+00:46:27,233 --> 00:46:29,175
+And the yellow patches you can see
+
+939
+00:46:29,175 --> 00:46:30,696
+are places where the designer is going
+
+940
+00:46:30,696 --> 00:46:32,977
+to try and toggle the mesh on and off from script.
+
+941
+00:46:34,700 --> 00:46:37,222
+You'll also be able to see holes cut in the mesh
+
+942
+00:46:37,222 --> 00:46:39,724
+by objects that will be present in Act 3,
+
+943
+00:46:39,724 --> 00:46:41,725
+but are not currently present now.
+
+944
+00:46:41,725 --> 00:46:45,588
+And here's what it looks like in Act 3
+
+945
+00:46:45,588 --> 00:46:49,250
+once the base is actually active.
+
+946
+00:46:49,250 --> 00:46:54,093
+While this scheme worked well enough for us
+
+947
+00:46:54,093 --> 00:46:56,635
+to make the base, it was oftentimes buggy enough
+
+948
+00:46:56,635 --> 00:46:59,637
+that we had to remove crimes or other open world activities
+
+949
+00:46:59,637 --> 00:47:02,299
+from happening in a space like this during Act 1 and 2.
+
+950
+00:47:05,953 --> 00:47:08,154
+I'm sure it's a big surprise to most of you,
+
+951
+00:47:08,154 --> 00:47:10,155
+but we actually had performance problems
+
+952
+00:47:10,155 --> 00:47:12,277
+running all of our complex AI in an open world.
+
+953
+00:47:12,277 --> 00:47:15,238
+We ultimately had a limit of around 30 enemies
+
+954
+00:47:15,238 --> 00:47:18,520
+active and engaged once you factored in
+
+955
+00:47:18,520 --> 00:47:21,262
+Spider-Man traffic and all the pedestrians.
+
+956
+00:47:22,382 --> 00:47:26,665
+We typically saw two large reasons for this.
+
+957
+00:47:26,665 --> 00:47:27,426
+The first is physics.
+
+958
+00:47:27,426 --> 00:47:30,888
+Here's a typical frame where things have gotten bad.
+
+959
+00:47:30,888 --> 00:47:33,691
+And I'm gonna highlight the parts of the frame
+
+960
+00:47:33,691 --> 00:47:35,812
+where physics creeps up as the bot count rises.
+
+961
+00:47:35,812 --> 00:47:37,073
+Here it is on the main thread,
+
+962
+00:47:37,073 --> 00:47:39,996
+and then here it is on two of our four worker threads.
+
+963
+00:47:39,996 --> 00:47:42,978
+It's many, many milliseconds spread out over all the cores.
+
+964
+00:47:42,978 --> 00:47:45,560
+And while it isn't all directly resulting from bots,
+
+965
+00:47:45,560 --> 00:47:48,442
+it does grow proportionally as the bot count rises.
+
+966
+00:47:49,433 --> 00:47:54,298
+The other thing is that a lot of our core AI logic still runs on the main thread.
+
+967
+00:47:54,298 --> 00:47:57,140
+Here's a capture of our main thread during a normal frame.
+
+968
+00:47:57,140 --> 00:47:59,843
+The highlighted sections are bot-specific logic,
+
+969
+00:47:59,843 --> 00:48:03,486
+and they are consuming well over 4 milliseconds of time.
+
+970
+00:48:03,486 --> 00:48:07,669
+There's even more time when you consider that neither the character move system
+
+971
+00:48:07,669 --> 00:48:09,871
+nor the animation system are included here.
+
+972
+00:48:12,316 --> 00:48:14,938
+All right, I hope that you've learned a few things today
+
+973
+00:48:14,938 --> 00:48:18,041
+and I'd like to leave you with a few high-level thoughts.
+
+974
+00:48:18,041 --> 00:48:19,422
+The first is that iteration is king.
+
+975
+00:48:19,422 --> 00:48:23,005
+I hope it's obvious, but it took quite a few tries
+
+976
+00:48:23,005 --> 00:48:25,187
+to get the things that you've seen in this presentation
+
+977
+00:48:25,187 --> 00:48:26,087
+to where they are now.
+
+978
+00:48:26,087 --> 00:48:29,010
+We almost never got things right on the first try
+
+979
+00:48:29,010 --> 00:48:31,912
+and that was okay because we kept pushing.
+
+980
+00:48:33,750 --> 00:48:38,093
+With Marvel's Spider-Man, we had to pivot from making shooters to making character action
+
+981
+00:48:38,093 --> 00:48:38,653
+games.
+
+982
+00:48:38,653 --> 00:48:42,855
+When your problem fundamentally changes like that, you need a fundamental change in your
+
+983
+00:48:42,855 --> 00:48:43,456
+solutions.
+
+984
+00:48:43,456 --> 00:48:48,078
+I know it sounds obvious when I say it like that, but it's actually harder than it sounds.
+
+985
+00:48:48,078 --> 00:48:53,701
+In just this talk, we've seen how this affected behavior authoring, positioning, and combat
+
+986
+00:48:53,701 --> 00:48:54,242
+management.
+
+987
+00:48:54,242 --> 00:48:55,642
+And there were many, many others.
+
+988
+00:48:56,523 --> 00:48:58,705
+Finally, focus on your game's core.
+
+989
+00:48:58,705 --> 00:49:03,829
+I believe that Marvel's Spider-Man was a success because everybody mentions how the game makes
+
+990
+00:49:03,829 --> 00:49:05,070
+you feel like Spider-Man.
+
+991
+00:49:05,070 --> 00:49:06,671
+And this wasn't an accident.
+
+992
+00:49:06,671 --> 00:49:09,854
+This happened because we took the time to get our fundamentals right.
+
+993
+00:49:09,854 --> 00:49:14,958
+Be these player controls, attack pacing, enemy hit reacts, or just the feel of using your
+
+994
+00:49:14,958 --> 00:49:15,998
+web shooters.
+
+995
+00:49:15,998 --> 00:49:19,001
+You'll get the best game when you focus on your core first.
+
+996
+00:49:20,430 --> 00:49:22,951
+Real quick, I'd like to thank a few people
+
+997
+00:49:22,951 --> 00:49:25,113
+that helped me put this presentation together,
+
+998
+00:49:25,113 --> 00:49:28,795
+Alicia Lidecker, Andrew Richter, Brad Fitzgerald,
+
+999
+00:49:28,795 --> 00:49:33,038
+David Kim, Ilan Ruskin, Seth England, Sean McCabe,
+
+1000
+00:49:33,038 --> 00:49:35,060
+as well as a very big thank you to everyone
+
+1001
+00:49:35,060 --> 00:49:38,782
+at Insomniac Games, Marvel, and Sony.
+
+1002
+00:49:38,782 --> 00:49:41,524
+I'd like to remind you all to please fill out
+
+1003
+00:49:41,524 --> 00:49:44,726
+your speaker evaluations and thank you for listening.
+
+1004
+00:49:44,726 --> 00:49:46,067
+And if there are any questions,
+
+1005
+00:49:46,067 --> 00:49:48,148
+I think we've got two mics set up here.
+
+1006
+00:50:01,210 --> 00:50:05,113
+Hi, this game was ridiculously awesome, so good work on that.
+
+1007
+00:50:05,113 --> 00:50:06,094
+Thank you very much.
+
+1008
+00:50:06,094 --> 00:50:10,697
+And so one thing I'm struggling with a lot in my game,
+
+1009
+00:50:10,697 --> 00:50:13,379
+and I'm one of the people who like to torture myself
+
+1010
+00:50:13,379 --> 00:50:15,281
+and played it on hard mode the first time.
+
+1011
+00:50:15,281 --> 00:50:18,223
+So what sort of parameters do you
+
+1012
+00:50:18,223 --> 00:50:21,685
+have to change the difficulty level in hard and normal mode?
+
+1013
+00:50:23,750 --> 00:50:33,277
+So if you remember, I pointed, we had the whole section on timings, that all of those timings can be changed per difficulty level, per faction, and per act of the story.
+
+1014
+00:50:33,277 --> 00:50:40,483
+So the rate at which enemies attack, the amount of time that the game gives you in between successful dodges, all of that changes.
+
+1015
+00:50:40,483 --> 00:50:45,127
+Additionally, we would usually go through on a per enemy to enemy...
+
+1016
+00:50:45,607 --> 00:50:49,089
+basis and identify one or two parameters
+
+1017
+00:50:49,089 --> 00:50:52,332
+that we could tune to make things much more difficult.
+
+1018
+00:50:52,332 --> 00:50:55,534
+An example of this would be ranged enemies
+
+1019
+00:50:55,534 --> 00:50:58,916
+tend to fire in like a five to seven round burst.
+
+1020
+00:50:58,916 --> 00:51:01,257
+And on easy, they will deliberately miss
+
+1021
+00:51:01,257 --> 00:51:03,579
+with like the first six of those.
+
+1022
+00:51:03,579 --> 00:51:05,660
+And then on hard, they'll only deliberately miss
+
+1023
+00:51:05,660 --> 00:51:06,901
+with the first two or three.
+
+1024
+00:51:06,901 --> 00:51:10,743
+So it kind of further requires the player
+
+1025
+00:51:10,743 --> 00:51:11,924
+to react a little bit faster.
+
+1026
+00:51:11,924 --> 00:51:13,805
+Cool, thanks.
+
+1027
+00:51:13,805 --> 00:51:14,506
+You're welcome.
+
+1028
+00:51:16,057 --> 00:51:18,159
+Hi, great presentation.
+
+1029
+00:51:18,159 --> 00:51:19,880
+Thank you.
+
+1030
+00:51:19,880 --> 00:51:23,322
+So, during when you're playing the game,
+
+1031
+00:51:23,322 --> 00:51:26,964
+there are different factions that come across each other.
+
+1032
+00:51:26,964 --> 00:51:30,006
+So, how is the AI set up for that?
+
+1033
+00:51:30,006 --> 00:51:33,889
+And how do different factions react when Spiderman jumps into play?
+
+1034
+00:51:33,889 --> 00:51:34,129
+So...
+
+1035
+00:51:36,847 --> 00:51:40,210
+We have a kind of aggro-based targeting solution
+
+1036
+00:51:40,210 --> 00:51:43,833
+for how enemies choose which targets to attack.
+
+1037
+00:51:43,833 --> 00:51:46,535
+Like, usually in a multi-faction fight,
+
+1038
+00:51:46,535 --> 00:51:49,377
+one set of enemies is aware of the other set of enemies
+
+1039
+00:51:49,377 --> 00:51:51,118
+as potential targets and Spider-Man.
+
+1040
+00:51:51,118 --> 00:51:55,102
+And then there are rules based on how close Spider-Man is
+
+1041
+00:51:55,102 --> 00:51:57,944
+to the target versus how close other targets are
+
+1042
+00:51:57,944 --> 00:52:01,266
+that cause what we call a proximity aggro amount
+
+1043
+00:52:01,266 --> 00:52:02,427
+to increase.
+
+1044
+00:52:02,427 --> 00:52:03,248
+And then every time...
+
+1045
+00:52:04,548 --> 00:52:07,109
+those enemies take damage from another target,
+
+1046
+00:52:07,109 --> 00:52:09,990
+that also adds additional aggro on top of that.
+
+1047
+00:52:09,990 --> 00:52:14,311
+And whoever has the highest aggro is a bot's target.
+
+1048
+00:52:14,311 --> 00:52:14,451
+Thanks.
+
+1049
+00:52:14,451 --> 00:52:15,291
+You're welcome.
+
+1050
+00:52:15,291 --> 00:52:15,571
+Hi.
+
+1051
+00:52:15,571 --> 00:52:15,811
+Hello.
+
+1052
+00:52:15,811 --> 00:52:24,133
+So what exactly was the moment when you guys realized
+
+1053
+00:52:24,133 --> 00:52:28,074
+that the system you had for Sunset Overdrive
+
+1054
+00:52:28,074 --> 00:52:30,775
+and Ratcheting Flank and such wasn't going to work?
+
+1055
+00:52:33,247 --> 00:52:37,328
+It was probably about a year and a half into production
+
+1056
+00:52:37,328 --> 00:52:38,889
+as we were finishing pre-production
+
+1057
+00:52:38,889 --> 00:52:42,591
+and looked at how many enemy classes we had made
+
+1058
+00:52:42,591 --> 00:52:45,252
+and how many enemy classes we still needed to make.
+
+1059
+00:52:45,252 --> 00:52:49,434
+We were like, well, we've made about four.
+
+1060
+00:52:49,434 --> 00:52:53,115
+We've got somewhere in the realm of 60 to go.
+
+1061
+00:52:53,115 --> 00:52:55,476
+We need to pick up the pace.
+
+1062
+00:52:55,476 --> 00:52:56,657
+Thank you.
+
+1063
+00:52:56,657 --> 00:52:57,477
+You're welcome.
+
+1064
+00:52:58,988 --> 00:52:59,849
+Hi.
+
+1065
+00:52:59,849 --> 00:53:02,791
+Similar to her question, how do you
+
+1066
+00:53:02,791 --> 00:53:06,294
+know when you need to design a more complex system?
+
+1067
+00:53:06,294 --> 00:53:10,217
+You were talking a lot about the model and data architecture
+
+1068
+00:53:10,217 --> 00:53:11,318
+that you guys had created.
+
+1069
+00:53:11,318 --> 00:53:13,380
+And how do you know that you needed
+
+1070
+00:53:13,380 --> 00:53:15,882
+to iterate from the previous one and get to there?
+
+1071
+00:53:15,882 --> 00:53:17,703
+And then how do you know when you got there
+
+1072
+00:53:17,703 --> 00:53:20,125
+that that would be good enough to not
+
+1073
+00:53:20,125 --> 00:53:24,329
+need to iterate further to even potentially better architecture?
+
+1074
+00:53:25,826 --> 00:53:27,427
+Honestly, trial and error.
+
+1075
+00:53:27,427 --> 00:53:30,469
+It kind of happened because we would be getting feedback
+
+1076
+00:53:30,469 --> 00:53:33,812
+from our design team about, hey, we want to be able to do x, y,
+
+1077
+00:53:33,812 --> 00:53:34,712
+and z.
+
+1078
+00:53:34,712 --> 00:53:37,834
+And they would constantly come back
+
+1079
+00:53:37,834 --> 00:53:40,316
+to us wanting to say things like, hey,
+
+1080
+00:53:40,316 --> 00:53:42,137
+can you move this attack from this character
+
+1081
+00:53:42,137 --> 00:53:42,958
+to this other character?
+
+1082
+00:53:42,958 --> 00:53:45,280
+Or can we have them play this animation instead?
+
+1083
+00:53:45,280 --> 00:53:48,682
+Or can they select between all of these things?
+
+1084
+00:53:48,682 --> 00:53:50,703
+And just looking at, OK, the kind of requests
+
+1085
+00:53:50,703 --> 00:53:52,104
+that we're getting are this.
+
+1086
+00:53:52,837 --> 00:53:57,517
+Therefore, we could figure out a way to do all of that in data
+
+1087
+00:53:57,517 --> 00:54:00,738
+so it's as quick as possible to do the iteration that they're
+
+1088
+00:54:00,738 --> 00:54:01,258
+asking us to do.
+
+1089
+00:54:01,258 --> 00:54:05,499
+And when we got to the point that, OK, we're actually
+
+1090
+00:54:05,499 --> 00:54:08,040
+able to handle 75%, 80% of the stuff
+
+1091
+00:54:08,040 --> 00:54:13,641
+that design is asking us for, that's around where we stopped.
+
+1092
+00:54:13,641 --> 00:54:15,481
+Thank you.
+
+1093
+00:54:15,481 --> 00:54:17,561
+How are we on time?
+
+1094
+00:54:20,379 --> 00:54:22,180
+Hi, really awesome talk, thank you.
+
+1095
+00:54:22,180 --> 00:54:22,740
+Thank you.
+
+1096
+00:54:22,740 --> 00:54:25,981
+I'm wondering what would you say is the difference
+
+1097
+00:54:25,981 --> 00:54:30,003
+between like those systemic enemies in the world
+
+1098
+00:54:30,003 --> 00:54:34,484
+and between them and the boss fights that you guys made?
+
+1099
+00:54:34,484 --> 00:54:36,925
+It's like, are the boss fights are mainly
+
+1100
+00:54:36,925 --> 00:54:40,867
+like heavily scripted, authored, or like a mix?
+
+1101
+00:54:40,867 --> 00:54:45,948
+The boss fights still use the kind of combo systems
+
+1102
+00:54:45,948 --> 00:54:47,269
+that we have.
+
+1103
+00:54:48,862 --> 00:54:53,446
+They typically have, so we had 39 combo moves
+
+1104
+00:54:53,446 --> 00:54:56,569
+and probably about half of those are for regular combat
+
+1105
+00:54:56,569 --> 00:54:59,552
+and the other half are boss-specific attacks.
+
+1106
+00:54:59,552 --> 00:55:03,236
+And bosses usually had their own engaged behaviors.
+
+1107
+00:55:03,236 --> 00:55:05,858
+So we talked about behavior melee,
+
+1108
+00:55:05,858 --> 00:55:07,640
+which is what the normal enemies use.
+
+1109
+00:55:07,640 --> 00:55:09,162
+Most of the bosses would have their own
+
+1110
+00:55:11,024 --> 00:55:15,526
+engaged behavior, like Rhino had his own and Scorpion had his own, which kind of described
+
+1111
+00:55:15,526 --> 00:55:21,030
+how they would move about the environment, but then whenever they got into position to use an
+
+1112
+00:55:21,030 --> 00:55:27,934
+attack, they would reuse the kind of combo stuff that was driven by a designer to say,
+
+1113
+00:55:27,934 --> 00:55:32,997
+you know, do a charge or throw something or jump to another position. Thank you. You're welcome.
+
+1114
+00:55:34,964 --> 00:55:36,885
+How do you divide the work between your designers
+
+1115
+00:55:36,885 --> 00:55:38,145
+and your programmers?
+
+1116
+00:55:38,145 --> 00:55:40,346
+Do the designers work in behavior trees
+
+1117
+00:55:40,346 --> 00:55:43,908
+or in the finite state machines or just in data?
+
+1118
+00:55:43,908 --> 00:55:44,908
+They just work with data.
+
+1119
+00:55:44,908 --> 00:55:48,310
+Our designers don't work with behavior trees
+
+1120
+00:55:48,310 --> 00:55:49,430
+or finite state machines.
+

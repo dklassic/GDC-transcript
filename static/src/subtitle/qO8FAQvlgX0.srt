@@ -1,0 +1,2068 @@
+1
+00:00:06,050 --> 00:00:07,071
+Because I don't have... Oh.
+
+2
+00:00:07,811 --> 00:00:08,432
+Is it ready to go?
+
+3
+00:00:09,352 --> 00:00:10,173
+All right. Hi.
+
+4
+00:00:11,014 --> 00:00:13,496
+Uh, thanks for sticking by to the end.
+
+5
+00:00:14,016 --> 00:00:15,798
+So my name is Manny Koh.
+
+6
+00:00:15,878 --> 00:00:18,940
+I work for Activision in the Essential Technology Group.
+
+7
+00:00:19,761 --> 00:00:25,205
+So today, um, this topic I'm gonna talk about
+
+8
+00:00:25,285 --> 00:00:28,008
+is how to generate random number in a parallel program,
+
+9
+00:00:28,088 --> 00:00:30,910
+like multi-threaded program or on the GPU.
+
+10
+00:00:31,671 --> 00:00:35,334
+So I'm gonna start with a very, uh, quick...
+
+11
+00:00:36,278 --> 00:00:41,140
+overview of some of the more standard serial
+
+12
+00:00:41,421 --> 00:00:43,802
+or random number generator methods,
+
+13
+00:00:45,983 --> 00:00:48,704
+just to give it some context and so that we can,
+
+14
+00:00:49,185 --> 00:00:50,806
+before we can go to the really the heart
+
+15
+00:00:50,846 --> 00:00:51,946
+of what I want to talk about,
+
+16
+00:00:51,966 --> 00:00:53,727
+which is to generate parallel random numbers.
+
+17
+00:00:55,228 --> 00:00:57,569
+Maybe it didn't sound like it's a topic
+
+18
+00:00:57,589 --> 00:00:58,790
+that's even worth talking about,
+
+19
+00:00:58,890 --> 00:01:00,191
+because you say, what's the problem?
+
+20
+00:01:00,231 --> 00:01:01,531
+Just start a bunch of threads and...
+
+21
+00:01:02,574 --> 00:01:05,692
+give each of them a separate seat and just call it a day.
+
+22
+00:01:07,154 --> 00:01:10,975
+We can try that, but maybe your application will be okay with it, but there will be some
+
+23
+00:01:11,035 --> 00:01:12,756
+application that might not be okay.
+
+24
+00:01:12,836 --> 00:01:16,457
+And I will show you, I won't be able to show you the application, but I will show you some
+
+25
+00:01:16,517 --> 00:01:21,918
+picture when a bad random, parallel random number generator is used, some of the interesting
+
+26
+00:01:21,958 --> 00:01:23,358
+picture that you're going to get.
+
+27
+00:01:25,099 --> 00:01:31,200
+Some of the, and the parallel random number generator will introduce funny terms like
+
+28
+00:01:31,240 --> 00:01:33,081
+leapfrogging and splitting.
+
+29
+00:01:34,561 --> 00:01:35,702
+But it's just a, yeah.
+
+30
+00:01:36,253 --> 00:01:37,674
+The concept is actually very simple,
+
+31
+00:01:38,514 --> 00:01:40,534
+but one of the main takeaway, I hope,
+
+32
+00:01:40,595 --> 00:01:43,495
+is to introduce a very simple type of, uh...
+
+33
+00:01:45,156 --> 00:01:46,196
+random number generation
+
+34
+00:01:46,216 --> 00:01:47,936
+that's based on a cryptographic hash
+
+35
+00:01:48,296 --> 00:01:49,537
+that's very simple to implement,
+
+36
+00:01:50,057 --> 00:01:52,217
+that literally can be implemented in five lines of code
+
+37
+00:01:53,438 --> 00:01:54,718
+and has good properties,
+
+38
+00:01:54,778 --> 00:01:56,558
+and is very, very parallel-friendly.
+
+39
+00:01:57,699 --> 00:01:58,759
+So, um...
+
+40
+00:02:00,119 --> 00:02:02,380
+what we would like a random number generator to have
+
+41
+00:02:02,440 --> 00:02:03,940
+is that if you want the world,
+
+42
+00:02:04,000 --> 00:02:05,280
+is that we should be really...
+
+43
+00:02:06,567 --> 00:02:09,774
+like have no correlation, no discernible pattern.
+
+44
+00:02:12,281 --> 00:02:16,582
+The number two desirable is actually very hard to achieve.
+
+45
+00:02:16,602 --> 00:02:20,063
+It's that we would like the program result to be the same,
+
+46
+00:02:20,803 --> 00:02:23,504
+no matter how many threads or core you actually are running.
+
+47
+00:02:23,664 --> 00:02:27,225
+Because, well, first is to just to make your,
+
+48
+00:02:27,545 --> 00:02:28,806
+you have to run some simulation,
+
+49
+00:02:28,846 --> 00:02:31,107
+like a terrain or poly noise.
+
+50
+00:02:31,327 --> 00:02:33,227
+You don't want your different customer
+
+51
+00:02:33,247 --> 00:02:36,188
+to get different kind of results.
+
+52
+00:02:36,428 --> 00:02:37,608
+It would be weird, right?
+
+53
+00:02:38,249 --> 00:02:39,549
+But also for your own sanity.
+
+54
+00:02:40,064 --> 00:02:42,285
+if your artist and you have a different number of cores,
+
+55
+00:02:42,325 --> 00:02:43,246
+you get different results.
+
+56
+00:02:43,286 --> 00:02:43,927
+It's not so good.
+
+57
+00:02:44,207 --> 00:02:47,369
+So even just achieving that is not that easy already.
+
+58
+00:02:48,330 --> 00:02:50,972
+And of course, we want it to be fast, easy to write,
+
+59
+00:02:51,072 --> 00:02:54,094
+and doesn't take any storage, and whatever.
+
+60
+00:02:55,115 --> 00:02:57,657
+But we would like all of them.
+
+61
+00:02:57,777 --> 00:02:59,399
+And we couldn't give up on any one of them.
+
+62
+00:02:59,439 --> 00:03:03,522
+But hopefully, I'll show some range of options.
+
+63
+00:03:05,543 --> 00:03:08,746
+Typically, people in doing scientific computing,
+
+64
+00:03:09,386 --> 00:03:12,649
+They evaluate random numbers a lot more than we do.
+
+65
+00:03:12,809 --> 00:03:14,931
+But we don't need to work as hard as they do,
+
+66
+00:03:14,991 --> 00:03:17,733
+but it's good to know how they measure goodness
+
+67
+00:03:18,334 --> 00:03:20,576
+so that when you're making your own,
+
+68
+00:03:20,816 --> 00:03:22,558
+at least run some of the tests
+
+69
+00:03:23,418 --> 00:03:24,900
+to make sure it's not completely messed up.
+
+70
+00:03:25,508 --> 00:03:30,289
+So I'm not going to talk a lot about it, but just to tell you, introduce that these are the usual tests.
+
+71
+00:03:31,169 --> 00:03:40,532
+And even Knuth Volume 2 is still kind of old, but it's still a very good reference to talk about the semi-numerical algorithms.
+
+72
+00:03:41,252 --> 00:03:43,373
+It's sort of where I got started on this problem.
+
+73
+00:03:44,373 --> 00:03:52,235
+And so one of the ways to evaluate is to look at the power spectrum, but since not all of us have done...
+
+74
+00:03:52,947 --> 00:03:55,690
+Fourier theory and all that stuff.
+
+75
+00:03:55,710 --> 00:03:58,553
+So I just want to briefly mention that you can just use
+
+76
+00:03:58,613 --> 00:04:01,636
+MATLAB or some off-the-shelf thing, computer power
+
+77
+00:04:01,656 --> 00:04:02,837
+spectrum, or your random number.
+
+78
+00:04:03,398 --> 00:04:05,921
+And it should look like the right two slides, if you look
+
+79
+00:04:05,961 --> 00:04:08,704
+at the mean and variance of your random number.
+
+80
+00:04:09,144 --> 00:04:12,508
+Basically, what you're looking for is that you don't want any
+
+81
+00:04:12,988 --> 00:04:14,370
+particular orientation.
+
+82
+00:04:15,111 --> 00:04:17,613
+or any particular frequency
+
+83
+00:04:17,673 --> 00:04:20,475
+to be more dominant than others.
+
+84
+00:04:20,796 --> 00:04:22,437
+So you want a very flat mean
+
+85
+00:04:23,098 --> 00:04:26,421
+and relatively, you know, small standard deviation
+
+86
+00:04:27,041 --> 00:04:28,563
+across different frequency bands.
+
+87
+00:04:30,024 --> 00:04:31,545
+Not easy to achieve, actually, but...
+
+88
+00:04:32,106 --> 00:04:34,708
+The most commonly used random number generator
+
+89
+00:04:34,768 --> 00:04:36,370
+is used in linear congruent method.
+
+90
+00:04:36,410 --> 00:04:37,370
+It's just a fancy term.
+
+91
+00:04:37,791 --> 00:04:39,552
+If you look at the actual code or math,
+
+92
+00:04:39,592 --> 00:04:40,613
+it's actually very simple.
+
+93
+00:04:41,627 --> 00:04:45,970
+It's just a magic constant, A, times your seed,
+
+94
+00:04:46,590 --> 00:04:48,251
+and then you add another magic constant,
+
+95
+00:04:48,371 --> 00:04:49,391
+and then you do modular.
+
+96
+00:04:50,512 --> 00:04:53,394
+Now, most runtime libraries cheat,
+
+97
+00:04:53,854 --> 00:04:55,875
+and some of them don't include C,
+
+98
+00:04:56,935 --> 00:04:58,076
+or they pick bad ones.
+
+99
+00:04:59,117 --> 00:05:02,158
+And the one most common cheat, it happens on the M,
+
+100
+00:05:02,759 --> 00:05:04,860
+because M, modular M, is a divide.
+
+101
+00:05:05,784 --> 00:05:07,925
+And you know, you know device is expensive.
+
+102
+00:05:08,405 --> 00:05:15,166
+So a lot of time, we're seeing people use a modulo, like a
+
+103
+00:05:15,206 --> 00:05:19,187
+mask, by using masking, which is power two, which kind of
+
+104
+00:05:19,227 --> 00:05:22,228
+works, except we'll show that that actually can be really,
+
+105
+00:05:22,268 --> 00:05:22,708
+really bad.
+
+106
+00:05:23,628 --> 00:05:28,929
+So just make sure you remember, try to avoid using
+
+107
+00:05:29,149 --> 00:05:30,249
+M to be power two.
+
+108
+00:05:30,989 --> 00:05:31,730
+We all would try.
+
+109
+00:05:32,692 --> 00:05:35,714
+Hopefully, I'll offer some alternative.
+
+110
+00:05:36,695 --> 00:05:40,178
+And if you really must use a linear congruo,
+
+111
+00:05:40,198 --> 00:05:43,660
+then one of the old papers called Park and Miller
+
+112
+00:05:44,161 --> 00:05:46,062
+gave you some recipe of...
+
+113
+00:05:46,563 --> 00:05:48,364
+I forgot to include C, but...
+
+114
+00:05:50,145 --> 00:05:52,087
+if you just Google Park and Miller,
+
+115
+00:05:52,147 --> 00:05:54,809
+you will see what a couple of good choices are.
+
+116
+00:05:55,530 --> 00:05:58,973
+And the one interesting thing for me personally
+
+117
+00:05:59,033 --> 00:06:00,794
+is that that M looks kind of...
+
+118
+00:06:01,298 --> 00:06:08,184
+I don't know if anyone recognizes what that M is, but it happens to be 2 to the power
+
+119
+00:06:08,224 --> 00:06:08,524
+31 minus 1.
+
+120
+00:06:09,585 --> 00:06:10,686
+And that is a prime.
+
+121
+00:06:12,928 --> 00:06:15,951
+You don't expect a number like that to be a prime, and yet it is.
+
+122
+00:06:16,840 --> 00:06:19,561
+And you want it to be a prime for your modulo
+
+123
+00:06:19,581 --> 00:06:22,722
+for the reason that you get the maximum period out
+
+124
+00:06:22,742 --> 00:06:23,562
+of your random number.
+
+125
+00:06:23,622 --> 00:06:27,823
+Because that means that your A and C and your C
+
+126
+00:06:28,423 --> 00:06:32,084
+are not going to be divisible easily by your modulo number.
+
+127
+00:06:34,445 --> 00:06:36,305
+But that's all for now.
+
+128
+00:06:37,145 --> 00:06:40,346
+Usually, your C runtime use some variant of this.
+
+129
+00:06:40,446 --> 00:06:42,186
+But usually use, I would call it,
+
+130
+00:06:42,246 --> 00:06:43,787
+a slightly worse version of this.
+
+131
+00:06:46,439 --> 00:06:49,762
+Just don't use it. Always use your own. That would be my advice.
+
+132
+00:06:50,603 --> 00:06:54,968
+Um, that's another common class of, uh, random number generator is called—
+
+133
+00:06:55,268 --> 00:06:55,829
+Oh, sorry.
+
+134
+00:06:56,510 --> 00:07:00,194
+Um, linear congruent is that it's simple. I mean, it's very easy to write.
+
+135
+00:07:00,934 --> 00:07:02,476
+And you only have a single word of state.
+
+136
+00:07:02,496 --> 00:07:07,382
+You need to just store the—the current, uh, uh, the last, uh, random number.
+
+137
+00:07:08,761 --> 00:07:11,503
+But the problem is that the period of the random number
+
+138
+00:07:11,563 --> 00:07:12,363
+is relatively short.
+
+139
+00:07:12,883 --> 00:07:16,065
+Even if you use all the perfect magic numbers, at most
+
+140
+00:07:16,085 --> 00:07:22,889
+your period is equal to M. And if you use the cheap M, the
+
+141
+00:07:22,929 --> 00:07:24,410
+lower bits will be highly correlated.
+
+142
+00:07:25,270 --> 00:07:27,272
+So this is the most extreme version.
+
+143
+00:07:27,392 --> 00:07:28,332
+Of course, you don't do that.
+
+144
+00:07:28,412 --> 00:07:30,593
+But you can see how bad it is.
+
+145
+00:07:30,914 --> 00:07:30,994
+It's 1717.
+
+146
+00:07:35,272 --> 00:07:37,452
+But this is a sidebar.
+
+147
+00:07:37,532 --> 00:07:41,633
+But for a Mersenneau prime, which is 2 to the power of 31,
+
+148
+00:07:42,013 --> 00:07:49,496
+which is a prime that is one off from a power of 2, that's
+
+149
+00:07:49,556 --> 00:07:51,996
+actually a more efficient way to compute modulo by a
+
+150
+00:07:52,076 --> 00:07:54,237
+Mersenneau prime.
+
+151
+00:07:54,877 --> 00:07:56,658
+It's that two lines of code.
+
+152
+00:07:56,818 --> 00:07:59,778
+It's probably not well known, but it can come in handy.
+
+153
+00:08:01,020 --> 00:08:02,601
+but I'm not going to dwell on that too much.
+
+154
+00:08:03,302 --> 00:08:05,884
+So the second major class of random number
+
+155
+00:08:05,964 --> 00:08:07,545
+is called a lacted Fibonacci.
+
+156
+00:08:09,466 --> 00:08:11,348
+It's related to some Fibonacci sequence,
+
+157
+00:08:11,388 --> 00:08:13,009
+but exactly how it, I don't even know.
+
+158
+00:08:13,870 --> 00:08:14,991
+But I'm sure it is.
+
+159
+00:08:15,531 --> 00:08:17,192
+But what you need to do is, the key
+
+160
+00:08:17,313 --> 00:08:22,236
+is to concentrate on the P and the Q.
+
+161
+00:08:23,718 --> 00:08:26,840
+You're basically looking back at either
+
+162
+00:08:27,913 --> 00:08:32,223
+you're multiplying or combining using modular or
+
+163
+00:08:33,206 --> 00:08:35,772
+two previous random numbers that you have emitted yourself.
+
+164
+00:08:36,901 --> 00:08:42,743
+So basically, you store, you know, you have a circular buffer, and you store away, uh,
+
+165
+00:08:42,863 --> 00:08:49,325
+you store the previous, uh, the larger of the P and Q, and then you reach back by having
+
+166
+00:08:49,345 --> 00:08:54,886
+like a two sliding cursor, and you, uh, do, but the math is very simple.
+
+167
+00:08:54,966 --> 00:08:57,607
+That's the beauty of that, of like the Fibonacci generator.
+
+168
+00:08:58,888 --> 00:09:03,849
+Uh, it's, uh, it's, it's like a single operation, and...
+
+169
+00:09:04,611 --> 00:09:09,495
+The beauty of that is that you can actually use power to module and still retain reasonably
+
+170
+00:09:09,575 --> 00:09:10,235
+okay quality.
+
+171
+00:09:11,556 --> 00:09:21,024
+So if you use the multiply operator to combine the star up here, it's not a set multiply.
+
+172
+00:09:21,604 --> 00:09:24,427
+It can be, sorry, I should use a different symbol.
+
+173
+00:09:24,907 --> 00:09:30,271
+It can be minus, it can be a multiply, and it can be an XOR.
+
+174
+00:09:32,785 --> 00:09:36,127
+So I, I, there's some error in the slide, so I apologize for that.
+
+175
+00:09:36,888 --> 00:09:45,594
+But the most interesting ones are usually relies on either addition or multiplication.
+
+176
+00:09:45,834 --> 00:09:50,537
+So those are the, the ALFG is additive lactate Fibonacci.
+
+177
+00:09:50,758 --> 00:09:52,759
+So that's the, that's the equation.
+
+178
+00:09:53,540 --> 00:10:00,244
+So it uses the, a add to combine the, the previ, the P, lactate P and Q.
+
+179
+00:10:00,845 --> 00:10:02,386
+And modulo by power two.
+
+180
+00:10:03,215 --> 00:10:05,035
+but multiply will give you better quality.
+
+181
+00:10:05,095 --> 00:10:08,296
+So the period of an electric Fibonacci generator
+
+182
+00:10:08,356 --> 00:10:12,038
+is much, much bigger than a linear congrual.
+
+183
+00:10:12,178 --> 00:10:16,779
+It's just roughly, linear congrual was roughly
+
+184
+00:10:16,939 --> 00:10:17,820
+2 to the power m.
+
+185
+00:10:18,780 --> 00:10:22,041
+So think of that, this is like a 2 to the power of p,
+
+186
+00:10:22,121 --> 00:10:24,702
+which can be like 18, for example,
+
+187
+00:10:25,402 --> 00:10:29,364
+to another 2 to the power, you know, let's say it's 12.
+
+188
+00:10:30,575 --> 00:10:35,397
+So it's a very big, the period is just a lot longer.
+
+189
+00:10:36,878 --> 00:10:41,340
+So it's power tool mod, relatively efficient, much
+
+190
+00:10:41,420 --> 00:10:44,421
+longer period, and you can work directly in floats.
+
+191
+00:10:45,181 --> 00:10:47,722
+Leaning congrual, usually you have to work in integer and
+
+192
+00:10:47,742 --> 00:10:48,742
+then convert it to float.
+
+193
+00:10:49,123 --> 00:10:51,604
+And that's not very modern pipeline friendly, because
+
+194
+00:10:51,624 --> 00:10:54,485
+they kind of store the floating point pipe, and so
+
+195
+00:10:54,505 --> 00:10:55,045
+on and so forth.
+
+196
+00:10:55,085 --> 00:10:55,945
+And it's higher quality.
+
+197
+00:10:57,270 --> 00:11:08,374
+And later on, we would see that the edited version of the
+
+198
+00:11:08,454 --> 00:11:11,134
+letter Fibonacci can actually skip ahead.
+
+199
+00:11:11,194 --> 00:11:13,935
+So this is sort of like, right now, we don't know why we need
+
+200
+00:11:13,955 --> 00:11:16,596
+to skip ahead, but for now, just keep that in mind.
+
+201
+00:11:18,036 --> 00:11:22,198
+So the bad thing of letter Fibonacci generator is that we
+
+202
+00:11:22,238 --> 00:11:23,198
+have to store state.
+
+203
+00:11:24,738 --> 00:11:26,619
+And then it's also purely sequential.
+
+204
+00:11:27,211 --> 00:11:33,836
+So, meaning that until you generate the previous P or Q number, you cannot generate the next number.
+
+205
+00:11:35,198 --> 00:11:37,740
+And the multiplicative version of that, you cannot jump ahead.
+
+206
+00:11:40,682 --> 00:11:45,866
+For people in scientific computing, or even in high quality rendering, like offline rendering,
+
+207
+00:11:46,407 --> 00:11:49,309
+the gold standard is called the Mersenne or Triste.
+
+208
+00:11:50,530 --> 00:11:52,392
+If you look at the spectrum, it's very nice.
+
+209
+00:11:52,712 --> 00:11:54,333
+This is what you want to see.
+
+210
+00:11:54,653 --> 00:11:56,735
+It's like white noise. No pattern.
+
+211
+00:11:58,195 --> 00:12:01,119
+But if you look at the code that implements it, you won't like it.
+
+212
+00:12:01,360 --> 00:12:04,484
+It has a huge table and also has to store a lot of state.
+
+213
+00:12:06,767 --> 00:12:08,289
+But it's very high quality.
+
+214
+00:12:08,929 --> 00:12:09,750
+So if you want...
+
+215
+00:12:10,191 --> 00:12:14,917
+So what I do in my ray tracer is that I always have this around so that...
+
+216
+00:12:15,892 --> 00:12:18,753
+and I have a virtual, like, I random,
+
+217
+00:12:19,294 --> 00:12:21,495
+I could just switch to MT.
+
+218
+00:12:21,975 --> 00:12:24,396
+If I have some weird bug, I would just say,
+
+219
+00:12:24,476 --> 00:12:25,476
+oh, I'm gonna try MT.
+
+220
+00:12:25,817 --> 00:12:27,117
+And if that bug goes away,
+
+221
+00:12:27,697 --> 00:12:29,318
+I will look at my random number generator.
+
+222
+00:12:29,858 --> 00:12:31,979
+But, so it is sort of like the gold standard,
+
+223
+00:12:32,560 --> 00:12:35,681
+but, you know, well, if you look at the code,
+
+224
+00:12:35,701 --> 00:12:38,802
+it's lots of flops and it's hard,
+
+225
+00:12:38,862 --> 00:12:40,403
+but not impossible to leapfrog.
+
+226
+00:12:40,563 --> 00:12:43,024
+It requires some fancy matrix factorization,
+
+227
+00:12:43,064 --> 00:12:44,165
+which I don't even want to get into.
+
+228
+00:12:45,449 --> 00:12:46,550
+Very limited parallelism.
+
+229
+00:12:46,690 --> 00:12:51,274
+So it's very high quality, but even in offline rendering,
+
+230
+00:12:51,314 --> 00:12:54,216
+people try to not use MT when they can get away with it.
+
+231
+00:12:54,997 --> 00:12:58,339
+So this is the basic overview of serial code.
+
+232
+00:12:59,040 --> 00:13:04,524
+So again, why do we want to generate random
+
+233
+00:13:04,644 --> 00:13:05,445
+numbers in parallel?
+
+234
+00:13:05,485 --> 00:13:09,588
+Well, modern computers, as you know, we hit the limit on what
+
+235
+00:13:09,608 --> 00:13:12,430
+a single computer can do, as well as on the GPU.
+
+236
+00:13:13,847 --> 00:13:15,688
+So for a parallel random number generator,
+
+237
+00:13:17,308 --> 00:13:19,549
+we want to maintain the original
+
+238
+00:13:20,289 --> 00:13:22,230
+serial random number generators' quality
+
+239
+00:13:22,490 --> 00:13:24,250
+using those set of tests, for example.
+
+240
+00:13:25,411 --> 00:13:27,291
+And the number two is that we want
+
+241
+00:13:27,571 --> 00:13:29,112
+the same simulation result
+
+242
+00:13:29,572 --> 00:13:30,952
+regardless of the number of cores.
+
+243
+00:13:31,812 --> 00:13:33,013
+And we would like to have
+
+244
+00:13:33,213 --> 00:13:35,473
+minimum state or no state, if possible.
+
+245
+00:13:36,293 --> 00:13:38,674
+And we want the different streams
+
+246
+00:13:38,714 --> 00:13:40,715
+to have minimum correlation with each other.
+
+247
+00:13:42,124 --> 00:13:45,988
+So one of the pretty old techniques from scientific computing
+
+248
+00:13:46,448 --> 00:13:50,192
+to construct a parallel random number generator out of a serial one
+
+249
+00:13:50,853 --> 00:13:54,197
+is to use two linear congruent generators
+
+250
+00:13:55,318 --> 00:13:56,700
+and with just a different A,
+
+251
+00:13:57,621 --> 00:14:00,083
+the multiplier, they use the multiplier in the seeds.
+
+252
+00:14:01,165 --> 00:14:01,465
+And, uh...
+
+253
+00:14:02,660 --> 00:14:09,664
+What this picture is showing is that you use your first generator L to generate a bunch
+
+254
+00:14:09,684 --> 00:14:14,706
+of initial states for, and think of that each of them will run into its own thread or process,
+
+255
+00:14:15,627 --> 00:14:24,431
+and then the R generator would take that, take over, and then the good thing of this
+
+256
+00:14:24,491 --> 00:14:28,333
+approach is that you don't need to know how many generators you need, for example.
+
+257
+00:14:29,306 --> 00:14:31,328
+you might have to make some runtime decision
+
+258
+00:14:31,368 --> 00:14:32,809
+that you make some computation
+
+259
+00:14:32,869 --> 00:14:34,972
+before you decide whether you need to...
+
+260
+00:14:35,932 --> 00:14:38,034
+need another set of general numbers.
+
+261
+00:14:39,156 --> 00:14:41,238
+And if that's the case,
+
+262
+00:14:41,898 --> 00:14:44,200
+you can always spawn more...
+
+263
+00:14:45,301 --> 00:14:48,244
+you can spawn a new instance of the R.
+
+264
+00:14:48,925 --> 00:14:49,566
+Oops. Oops.
+
+265
+00:14:50,627 --> 00:14:50,887
+Sorry.
+
+266
+00:14:52,108 --> 00:14:53,109
+I touched the...
+
+267
+00:14:55,003 --> 00:15:02,049
+You can always spawn another instance of R using another iteration of L.
+
+268
+00:15:03,290 --> 00:15:05,931
+So there are specializations of the random tree.
+
+269
+00:15:06,112 --> 00:15:07,252
+One is called leapfrogging.
+
+270
+00:15:07,913 --> 00:15:11,776
+So leapfrogging is the interest, important to concentrate on this picture.
+
+271
+00:15:12,756 --> 00:15:15,899
+Like each of this is, imagine it's running its own thread.
+
+272
+00:15:16,850 --> 00:15:21,595
+But if you look at it in the time in adjacent horizontally,
+
+273
+00:15:22,335 --> 00:15:25,958
+the three threads, if you put them together, these three
+
+274
+00:15:26,018 --> 00:15:29,041
+numbers would have been generated by what would have
+
+275
+00:15:29,081 --> 00:15:31,183
+been the original single threaded code.
+
+276
+00:15:31,703 --> 00:15:34,946
+So you get nice reproducible results out of that.
+
+277
+00:15:35,767 --> 00:15:42,032
+And with leapfrogging, you need to know the number of cores.
+
+278
+00:15:43,231 --> 00:15:45,113
+So that's a limitation.
+
+279
+00:15:45,393 --> 00:15:48,716
+So that means you have to fix your number of cores ahead of time.
+
+280
+00:15:48,756 --> 00:15:52,139
+So let's say you want to support a maximum of eight cores.
+
+281
+00:15:52,639 --> 00:15:54,461
+If you have four cores, you start A through S.
+
+282
+00:15:54,661 --> 00:15:56,342
+Then this algorithm would work.
+
+283
+00:16:00,754 --> 00:16:07,076
+And this is just to show the actual initialization conditions for the...
+
+284
+00:16:07,656 --> 00:16:11,798
+So if you look at the first line, it really just is a linear congruent generator.
+
+285
+00:16:12,598 --> 00:16:14,579
+A times the previous...
+
+286
+00:16:14,899 --> 00:16:16,579
+Here I say L, but before it was X.
+
+287
+00:16:17,587 --> 00:16:19,548
+K, which is the previous one,
+
+288
+00:16:19,988 --> 00:16:21,809
+and then I actually dropped the C here
+
+289
+00:16:21,869 --> 00:16:23,370
+just to simplify things.
+
+290
+00:16:24,030 --> 00:16:25,851
+And then the key is look at the R.
+
+291
+00:16:26,331 --> 00:16:27,952
+R is the disk part.
+
+292
+00:16:28,092 --> 00:16:30,053
+It's A to the power N,
+
+293
+00:16:30,654 --> 00:16:34,276
+which is the number of separate sequence or core you need.
+
+294
+00:16:34,936 --> 00:16:37,998
+So if you use this particular combination,
+
+295
+00:16:38,518 --> 00:16:45,023
+the, the, the, the, the, each R's individual subsequence
+
+296
+00:16:45,363 --> 00:16:47,525
+when contained together would have been the same
+
+297
+00:16:47,645 --> 00:16:49,086
+as the original serial code.
+
+298
+00:16:49,466 --> 00:16:50,387
+So it's sort of elegant.
+
+299
+00:16:51,588 --> 00:16:54,230
+But the problem is that you need to know how many cores
+
+300
+00:16:54,330 --> 00:16:56,012
+or degree of parallelism up front.
+
+301
+00:16:56,952 --> 00:16:59,955
+Which, you know, sometimes we have, we couldn't,
+
+302
+00:17:00,515 --> 00:17:02,397
+we might have to live with that, but.
+
+303
+00:17:03,317 --> 00:17:05,519
+So this is just to reiterate what the,
+
+304
+00:17:07,715 --> 00:17:10,558
+what, yeah, visually, what you're getting, yeah.
+
+305
+00:17:11,178 --> 00:17:13,040
+The final sequence is the same as the serial code.
+
+306
+00:17:14,222 --> 00:17:15,963
+And each sequence does not overlap.
+
+307
+00:17:17,265 --> 00:17:19,687
+So, this is the good of the serial code.
+
+308
+00:17:20,892 --> 00:17:25,855
+But you get the same sequence, but the choice of your random number generator is limited.
+
+309
+00:17:26,015 --> 00:17:32,838
+So let's say we mentioned that the multiplicative linear vector Fibonacci has very high quality
+
+310
+00:17:32,858 --> 00:17:36,419
+and long period, but there's no way to express it in the leapfrog form.
+
+311
+00:17:41,570 --> 00:17:45,132
+The bad thing is that the A to the power P,
+
+312
+00:17:45,332 --> 00:17:47,453
+or A to the power N, sorry, I changed notation,
+
+313
+00:17:48,253 --> 00:17:51,815
+doesn't have the same original qualities
+
+314
+00:17:52,355 --> 00:17:55,497
+of the, as if you generate it all using A.
+
+315
+00:17:57,898 --> 00:18:00,979
+All the subsequence concatenate together
+
+316
+00:18:01,999 --> 00:18:03,520
+would produce original simulation,
+
+317
+00:18:03,680 --> 00:18:07,062
+but what's your, but equally important is that
+
+318
+00:18:07,442 --> 00:18:10,643
+each threads, random number, should have good qualities.
+
+319
+00:18:12,064 --> 00:18:19,851
+And so if you're skipping ahead, the quality of a fixed sample
+
+320
+00:18:19,991 --> 00:18:24,795
+of the original sequence, you're losing the original.
+
+321
+00:18:24,815 --> 00:18:27,998
+Think of it that you're doing another modulo using a small
+
+322
+00:18:28,038 --> 00:18:32,442
+power tool, because unless you are the old PS3 in which you
+
+323
+00:18:32,662 --> 00:18:38,867
+have seven or six cores, but almost everywhere else you get
+
+324
+00:18:38,888 --> 00:18:39,468
+power tool.
+
+325
+00:18:41,124 --> 00:18:45,446
+because someone took away one core or Xbox 3,
+
+326
+00:18:45,806 --> 00:18:46,686
+Xbox, yeah, right.
+
+327
+00:18:47,087 --> 00:18:50,448
+But the Power 2 is going to stare you in the face
+
+328
+00:18:50,628 --> 00:18:52,309
+unless you artificially take away one
+
+329
+00:18:52,489 --> 00:18:53,709
+or add one virtual one.
+
+330
+00:18:54,469 --> 00:18:58,031
+But so it's not without its problems,
+
+331
+00:18:58,271 --> 00:19:00,952
+but the biggest one for me is this last one.
+
+332
+00:19:04,122 --> 00:19:08,427
+linear congruent generated period is already not very long, 2 to the power of 31 at the best,
+
+333
+00:19:09,088 --> 00:19:14,895
+and you shorten it by a factor of n. So very quickly, with modern computer, with GPU,
+
+334
+00:19:14,935 --> 00:19:18,259
+you're going to chew through your random number in no time at all.
+
+335
+00:19:19,060 --> 00:19:21,603
+Just think about that. That's not very much random numbers.
+
+336
+00:19:24,433 --> 00:19:27,954
+And if I'm running with one teraflops on my GPU,
+
+337
+00:19:28,054 --> 00:19:29,475
+I can just chill through it very quickly.
+
+338
+00:19:29,535 --> 00:19:32,916
+So another thing is just called sequence splitting.
+
+339
+00:19:33,436 --> 00:19:35,077
+This doesn't solve the period problem,
+
+340
+00:19:35,177 --> 00:19:40,359
+but the quality of each subsequence
+
+341
+00:19:40,759 --> 00:19:47,842
+is actually better, because you are getting the same sequence
+
+342
+00:19:48,142 --> 00:19:48,863
+for each thread.
+
+343
+00:19:50,183 --> 00:19:51,444
+The problem is that the
+
+344
+00:19:53,771 --> 00:19:55,492
+Same thing, your period will get shorter.
+
+345
+00:19:56,352 --> 00:20:00,954
+And this one, we need to know this other thing.
+
+346
+00:20:01,755 --> 00:20:05,236
+We need to know the number of values to know where to split.
+
+347
+00:20:06,177 --> 00:20:08,438
+So if you know up front, you only need three numbers per
+
+348
+00:20:08,478 --> 00:20:10,399
+thread, you can skip ahead three.
+
+349
+00:20:11,199 --> 00:20:14,120
+Or if you know you need 512, you can skip ahead 512.
+
+350
+00:20:14,541 --> 00:20:16,482
+But we don't always know that.
+
+351
+00:20:16,742 --> 00:20:18,743
+So it's a technique that can.
+
+352
+00:20:19,458 --> 00:20:23,001
+And to actually program it, if you use linear and congrual,
+
+353
+00:20:23,201 --> 00:20:24,042
+it's relatively easy.
+
+354
+00:20:24,442 --> 00:20:26,684
+You just kind of flip the, you just move the,
+
+355
+00:20:26,924 --> 00:20:28,425
+it's just basically reversing the row,
+
+356
+00:20:29,006 --> 00:20:31,367
+using the A to the power N on the L,
+
+357
+00:20:31,668 --> 00:20:32,648
+which is on the right.
+
+358
+00:20:32,708 --> 00:20:34,070
+So it's very easy to code.
+
+359
+00:20:37,112 --> 00:20:41,536
+So both leapfrogging and sequence splitting,
+
+360
+00:20:41,556 --> 00:20:44,017
+it only guarantee that they don't overlap,
+
+361
+00:20:44,038 --> 00:20:47,440
+but it doesn't talk about, the quality is actually.
+
+362
+00:20:48,055 --> 00:20:49,555
+usually you compromise on the quality.
+
+363
+00:20:50,315 --> 00:20:52,116
+And both of them are not invariant
+
+364
+00:20:52,136 --> 00:20:53,236
+to the degree of parallelism.
+
+365
+00:20:53,956 --> 00:20:56,077
+And I don't know about you guys,
+
+366
+00:20:56,117 --> 00:20:58,738
+but for me, if the serial code and the parallel code
+
+367
+00:20:58,758 --> 00:20:59,898
+don't produce the same result,
+
+368
+00:21:00,298 --> 00:21:01,479
+and different run of the parallel code
+
+369
+00:21:01,499 --> 00:21:02,539
+don't produce the same result,
+
+370
+00:21:02,679 --> 00:21:03,959
+it's usually a very bad day.
+
+371
+00:21:05,740 --> 00:21:11,542
+So, lactate Fibonacci, live-frogging is actually possible,
+
+372
+00:21:12,802 --> 00:21:13,282
+except not
+
+373
+00:21:17,296 --> 00:21:20,239
+So that's why I introduced the electric Fibonacci is that,
+
+374
+00:21:20,399 --> 00:21:21,741
+because it has much longer period,
+
+375
+00:21:22,421 --> 00:21:23,602
+the M can be power two,
+
+376
+00:21:24,643 --> 00:21:29,328
+and as long as you use the addition operator.
+
+377
+00:21:31,370 --> 00:21:31,911
+But still,
+
+378
+00:21:35,886 --> 00:21:42,910
+The problem is that we have to store a lot of states for vector Fibonacci, right?
+
+379
+00:21:43,410 --> 00:21:46,052
+Basically, you have to store the larger of the P and the Q.
+
+380
+00:21:46,972 --> 00:21:51,075
+And it's not very GPU friendly when you have to store that much state.
+
+381
+00:21:51,935 --> 00:21:59,500
+So, but for running the simulation on the CPU side, it is an option.
+
+382
+00:22:00,510 --> 00:22:06,994
+So, I'm mostly going to focus the rest of the talk on using a completely different way to attack the problem.
+
+383
+00:22:07,154 --> 00:22:13,299
+It's that we look at the—we try to look at random number generation as a cryptographic hashing problem.
+
+384
+00:22:14,720 --> 00:22:20,383
+Um, one of the most commonly used one is MD5, but it's very expensive to compute.
+
+385
+00:22:20,584 --> 00:22:20,724
+Okay.
+
+386
+00:22:22,971 --> 00:22:26,173
+And so I'm going to introduce a really, really simple one.
+
+387
+00:22:26,333 --> 00:22:27,193
+It's called TEA.
+
+388
+00:22:27,313 --> 00:22:30,695
+And TEA is short for Tiny Encryption Algorithm.
+
+389
+00:22:30,775 --> 00:22:33,376
+It's literally tiny, five lines of code.
+
+390
+00:22:35,877 --> 00:22:41,820
+So the core idea of this is that you feed some kind of
+
+391
+00:22:41,860 --> 00:22:45,882
+linear, bland RAM to each thread.
+
+392
+00:22:45,982 --> 00:22:50,604
+So just some kind of linear, so it could be a thread ID or
+
+393
+00:22:50,884 --> 00:22:51,224
+whatever.
+
+394
+00:22:54,060 --> 00:22:56,541
+and it could be just your some other vertex.
+
+395
+00:22:56,601 --> 00:22:58,161
+You can encode it in your vertex data,
+
+396
+00:22:58,982 --> 00:23:01,762
+and you take each of those,
+
+397
+00:23:02,362 --> 00:23:04,583
+you take the linear ramp
+
+398
+00:23:04,683 --> 00:23:06,644
+and you run it through your cryptographic hash.
+
+399
+00:23:08,364 --> 00:23:11,245
+And so that means all,
+
+400
+00:23:11,265 --> 00:23:13,586
+there's no dependency on each other
+
+401
+00:23:13,686 --> 00:23:15,546
+and there's no dependency on previous state.
+
+402
+00:23:15,906 --> 00:23:17,647
+The only dependency is input
+
+403
+00:23:18,247 --> 00:23:19,587
+and then you will produce an output.
+
+404
+00:23:19,827 --> 00:23:20,988
+So it's completely deterministic.
+
+405
+00:23:22,022 --> 00:23:24,305
+And the quality of that is not too bad.
+
+406
+00:23:24,565 --> 00:23:27,968
+It's actually almost like MT, medicine neutral.
+
+407
+00:23:29,830 --> 00:23:31,171
+It's pretty decent.
+
+408
+00:23:33,914 --> 00:23:39,099
+So the TEA uses a network that is almost the standard
+
+409
+00:23:39,119 --> 00:23:41,302
+building block in almost all modern cryptographic
+
+410
+00:23:41,402 --> 00:23:41,802
+algorithms.
+
+411
+00:23:42,543 --> 00:23:45,226
+It's called a Feistel Coder.
+
+412
+00:23:46,761 --> 00:23:51,484
+The key, the interesting structure of that is that it's very elegant, actually.
+
+413
+00:23:52,185 --> 00:23:53,246
+It's... Oops.
+
+414
+00:23:53,766 --> 00:23:55,967
+Uh... Oh. Sorry. Just keep on...
+
+415
+00:23:57,569 --> 00:23:57,649
+Oh.
+
+416
+00:24:00,791 --> 00:24:00,971
+Um...
+
+417
+00:24:03,433 --> 00:24:05,874
+It's... The input is split into two halves.
+
+418
+00:24:06,335 --> 00:24:09,116
+L... into L0, the left and right halves.
+
+419
+00:24:10,383 --> 00:24:15,765
+And then the key, there's a key, 128-bit key
+
+420
+00:24:16,165 --> 00:24:21,527
+that is split into four chunks, like 32-bit chunks.
+
+421
+00:24:22,427 --> 00:24:25,548
+And then you feed the left and the right
+
+422
+00:24:25,568 --> 00:24:29,369
+and the key into this magic thing called the F,
+
+423
+00:24:29,529 --> 00:24:32,770
+which is the Feistel shifter or the encoder.
+
+424
+00:24:34,251 --> 00:24:37,412
+And then you feed the output back together with the,
+
+425
+00:24:38,072 --> 00:24:40,753
+the input again and you mix it again.
+
+426
+00:24:41,073 --> 00:24:42,554
+So you're basically just mixing bits.
+
+427
+00:24:43,135 --> 00:24:45,656
+But the way it's mixing it is they're mixing in a very
+
+428
+00:24:46,116 --> 00:24:46,837
+careful way.
+
+429
+00:24:47,177 --> 00:24:52,680
+And also, it uses the two halves of the input to affect
+
+430
+00:24:52,740 --> 00:24:57,223
+each other to speed up how fast what is called the
+
+431
+00:24:57,303 --> 00:24:58,863
+avalanche effect has been achieved.
+
+432
+00:24:59,304 --> 00:25:02,886
+The avalanche effect is that a single bit change.
+
+433
+00:25:03,961 --> 00:25:06,903
+would propagate and affect all the rest of the bit of the word.
+
+434
+00:25:07,223 --> 00:25:11,627
+And that allows you to hide where your bit change has occurred.
+
+435
+00:25:12,547 --> 00:25:16,831
+And that's really what the cryptographic hashes try to do.
+
+436
+00:25:17,691 --> 00:25:18,712
+So, now I'm...
+
+437
+00:25:19,112 --> 00:25:19,973
+But I'm not trying to...
+
+438
+00:25:20,213 --> 00:25:21,814
+But this is not trying to do cryptography,
+
+439
+00:25:22,335 --> 00:25:25,817
+but the same characteristic of the fact that you can achieve avalanche quickly
+
+440
+00:25:26,177 --> 00:25:29,240
+allows us to produce a cheap random number generation.
+
+441
+00:25:29,260 --> 00:25:29,460
+Thanks.
+
+442
+00:25:30,180 --> 00:25:32,282
+So, this is the program.
+
+443
+00:25:33,900 --> 00:25:38,723
+So, uh, the, the, the, this is the 128-bit key.
+
+444
+00:25:38,843 --> 00:25:39,944
+Just use it. No.
+
+445
+00:25:40,785 --> 00:25:42,566
+And then, uh, and then there's a delta.
+
+446
+00:25:42,866 --> 00:25:44,387
+You just keep adding it each every round.
+
+447
+00:25:44,907 --> 00:25:46,428
+This is the Feistel shifter,
+
+448
+00:25:46,628 --> 00:25:47,789
+which is corresponding to the...
+
+449
+00:25:49,750 --> 00:25:53,813
+the L and the, and the, uh, the L and the R.
+
+450
+00:25:55,254 --> 00:25:57,195
+So, and then, uh,
+
+451
+00:25:57,855 --> 00:25:59,696
+the key is to control number of rounds.
+
+452
+00:26:00,684 --> 00:26:02,525
+Uh, for-for the theory,
+
+453
+00:26:02,825 --> 00:26:04,766
+you say that your minimum needs eight rounds,
+
+454
+00:26:04,986 --> 00:26:06,447
+or in six rounds,
+
+455
+00:26:06,748 --> 00:26:08,229
+it would be able to mix all the input.
+
+456
+00:26:08,469 --> 00:26:10,910
+And you-with eight rounds, you get okay.
+
+457
+00:26:10,970 --> 00:26:12,651
+But 16 rounds, you get very good results.
+
+458
+00:26:12,731 --> 00:26:13,692
+So that's just a takeaway.
+
+459
+00:26:14,012 --> 00:26:15,213
+You can experiment with it yourself.
+
+460
+00:26:15,513 --> 00:26:17,474
+Don't-but don't try anything less than four.
+
+461
+00:26:19,336 --> 00:26:20,897
+The-the comment is that delta
+
+462
+00:26:20,917 --> 00:26:22,257
+has happened to be the golden ratio,
+
+463
+00:26:22,338 --> 00:26:24,239
+but, you know, uh, it's just-
+
+464
+00:26:24,859 --> 00:26:26,160
+just a bit of, uh, trivia.
+
+465
+00:26:27,419 --> 00:26:31,621
+And this is some of the applications that you can use.
+
+466
+00:26:31,942 --> 00:26:35,764
+Continuous terrain to drive so that you have an infinite
+
+467
+00:26:35,804 --> 00:26:38,285
+world, or you can use it to drive some kind of texture
+
+468
+00:26:38,305 --> 00:26:40,306
+synthesis, or Perlin noise.
+
+469
+00:26:41,627 --> 00:26:43,407
+But also, any kind.
+
+470
+00:26:43,748 --> 00:26:49,130
+But actually, screen space sampling, area light source,
+
+471
+00:26:49,411 --> 00:26:51,232
+all can use this algorithm.
+
+472
+00:26:52,214 --> 00:26:54,934
+One good package to use, at least as a reference,
+
+473
+00:26:55,214 --> 00:26:57,855
+is to look at this, try to download this package.
+
+474
+00:26:58,535 --> 00:27:00,335
+And if you're going to do your own, at least run,
+
+475
+00:27:00,415 --> 00:27:02,436
+compare your result with this, Mance.
+
+476
+00:27:02,956 --> 00:27:03,536
+It's very good.
+
+477
+00:27:05,017 --> 00:27:06,417
+And this is a reference.
+
+478
+00:27:07,117 --> 00:27:10,498
+And the takeaway, I hope, is that look beyond linear
+
+479
+00:27:10,518 --> 00:27:11,478
+congruent generator.
+
+480
+00:27:13,889 --> 00:27:18,373
+additive lactate Fibonacci is worth a look except for the state, but I would say
+
+481
+00:27:19,114 --> 00:27:23,558
+try to use TEA and it might be might be useful. Yeah, thanks.
+
+482
+00:27:31,545 --> 00:27:35,969
+No questions? Oh, please.
+
+483
+00:27:41,885 --> 00:27:46,708
+like the CUDA engine right now for libraries?
+
+484
+00:27:46,728 --> 00:27:47,189
+Do you want that?
+
+485
+00:27:47,209 --> 00:27:47,569
+Uh, the CUDA one.
+
+486
+00:27:47,589 --> 00:27:48,710
+Actually, I don't know how the CUDA library works.
+
+487
+00:27:48,730 --> 00:27:49,790
+So CUDA just provides a file of communication
+
+488
+00:27:49,810 --> 00:27:50,671
+of common algorithms.
+
+489
+00:27:50,691 --> 00:27:51,871
+Like, I believe there is the same cluster of algorithms
+
+490
+00:27:51,891 --> 00:27:54,133
+if you do use CUDA.
+
+491
+00:27:54,773 --> 00:27:54,853
+Yeah.
+
+492
+00:27:54,873 --> 00:27:57,775
+And there's four approaches.
+
+493
+00:27:57,795 --> 00:27:58,696
+There's CUDA-GPU-RAM-NMR, which has properties
+
+494
+00:27:58,716 --> 00:28:01,097
+that probably don't talk about here,
+
+495
+00:28:02,378 --> 00:28:05,780
+but it does a file of a CPU
+
+496
+00:28:05,800 --> 00:28:08,842
+and pushes data back to the GPU.
+
+497
+00:28:11,197 --> 00:28:13,837
+That is always... you're computing on the GPU...
+
+498
+00:28:13,937 --> 00:28:15,518
+wait, computing on the CPU and push on the GPU?
+
+499
+00:28:15,538 --> 00:28:15,718
+-... ... ... ... ... ... ... ... ... ... ... ...
+
+500
+00:28:39,813 --> 00:28:45,197
+Each of that is a, first of all, if you have any adaptive algorithm, the GPU will have
+
+501
+00:28:45,217 --> 00:28:50,382
+to now inform the CPU code how much random number I need, and then if you have even more
+
+502
+00:28:50,442 --> 00:28:56,206
+fancy algorithm that, like even the example that motivated the CUDA talk about why you
+
+503
+00:28:56,226 --> 00:28:57,588
+need dynamic kernel invocation.
+
+504
+00:28:58,208 --> 00:29:02,872
+If you have any kind of adaptive simulation in which some locally you want to do very fine,
+
+505
+00:29:03,312 --> 00:29:08,557
+high quality and fine meshing for your let's say fluid and other part you want coarse,
+
+506
+00:29:08,857 --> 00:29:11,940
+that means some of the grid will need only a few numbers, some of the grid will need like
+
+507
+00:29:12,320 --> 00:29:14,802
+a lot and that would be very hard to for
+
+508
+00:29:15,443 --> 00:29:19,406
+a CPU, GPU to share that load.
+
+509
+00:29:19,486 --> 00:29:21,728
+So I would say that would be a secondary...
+
+510
+00:29:22,489 --> 00:29:24,450
+That will only be good if you have existing
+
+511
+00:29:25,231 --> 00:29:27,553
+hyper-scientific computing application
+
+512
+00:29:27,613 --> 00:29:31,376
+that you have to produce exactly the same bits as...
+
+513
+00:29:31,637 --> 00:29:34,279
+Otherwise, you couldn't pass your government certification test.
+
+514
+00:29:34,299 --> 00:29:35,720
+Then you probably have to use that approach.
+
+515
+00:29:36,081 --> 00:29:38,042
+Otherwise, I wouldn't... I probably wouldn't use it that way.
+
+516
+00:29:38,863 --> 00:29:39,283
+Yeah, sure.
+
+517
+00:29:41,005 --> 00:29:41,225
+Thanks.
+

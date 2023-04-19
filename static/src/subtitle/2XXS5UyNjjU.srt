@@ -1,0 +1,1904 @@
+1
+00:00:06,032 --> 00:00:11,193
+OK, so let's get started.
+
+2
+00:00:11,193 --> 00:00:13,634
+Welcome.
+
+3
+00:00:13,634 --> 00:00:16,975
+It's not changing.
+
+4
+00:00:16,975 --> 00:00:19,056
+OK, there we go.
+
+5
+00:00:19,056 --> 00:00:20,396
+Welcome.
+
+6
+00:00:20,396 --> 00:00:22,537
+My name is Lasse.
+
+7
+00:00:22,537 --> 00:00:25,458
+I'm a senior programmer at Playdead Games.
+
+8
+00:00:27,153 --> 00:00:30,955
+Some of you may be familiar with the previous title published by the company.
+
+9
+00:00:30,955 --> 00:00:34,377
+It's called Limbo.
+
+10
+00:00:34,377 --> 00:00:36,719
+Today I'm going to talk about tempo reproduction,
+
+11
+00:00:36,719 --> 00:00:40,041
+anti-aliasing in our upcoming game, Insight.
+
+12
+00:00:42,512 --> 00:00:45,494
+a little bit of background before we get started.
+
+13
+00:00:45,494 --> 00:00:48,215
+Inside is a side-scrolling game.
+
+14
+00:00:48,215 --> 00:00:50,876
+It's a mix between puzzle-solving,
+
+15
+00:00:50,876 --> 00:00:55,099
+platforming, exploitation.
+
+16
+00:00:55,099 --> 00:00:57,420
+And inside, we have lots of geometric detail.
+
+17
+00:00:57,420 --> 00:01:02,402
+And we have many interleaved layers of transparency.
+
+18
+00:01:02,402 --> 00:01:06,164
+Our camera is always slightly moving.
+
+19
+00:01:06,164 --> 00:01:09,706
+So if we don't have any sort of temporal stabilization,
+
+20
+00:01:09,706 --> 00:01:12,227
+then we get lots of crawling.
+
+21
+00:01:13,835 --> 00:01:21,703
+We wanted to have really clean and stable images for this game.
+
+22
+00:01:21,703 --> 00:01:24,025
+And in early 2014, we began looking
+
+23
+00:01:24,025 --> 00:01:26,347
+into temporal anti-aliasing.
+
+24
+00:01:26,347 --> 00:01:29,790
+And I whipped up a quick first implementation
+
+25
+00:01:29,790 --> 00:01:33,093
+of this based on what was available on the internet
+
+26
+00:01:33,093 --> 00:01:33,874
+and in my own head.
+
+27
+00:01:33,874 --> 00:01:37,557
+And it quickly became our primary anti-aliasing solution
+
+28
+00:01:37,557 --> 00:01:38,198
+during production.
+
+29
+00:01:40,180 --> 00:01:44,103
+So, what is temporal antialiasing?
+
+30
+00:01:44,103 --> 00:01:46,264
+Maybe not everyone is familiar with this term.
+
+31
+00:01:46,264 --> 00:01:49,547
+It's a spatial temporal post-processing technique.
+
+32
+00:01:49,547 --> 00:01:52,468
+What does that mean?
+
+33
+00:01:52,468 --> 00:01:57,252
+It means that it uses a spatial relationship
+
+34
+00:01:57,252 --> 00:02:00,474
+between fragments in multiple frames
+
+35
+00:02:00,474 --> 00:02:04,536
+to make a correlation and use some information
+
+36
+00:02:04,536 --> 00:02:06,638
+from the past time to refine the...
+
+37
+00:02:07,315 --> 00:02:10,457
+fragments that we have just rendered in the current
+
+38
+00:02:10,457 --> 00:02:11,738
+rasterization pass.
+
+39
+00:02:11,738 --> 00:02:16,700
+It's inserted in the post-process chain as a pass.
+
+40
+00:02:16,700 --> 00:02:21,783
+We do it after opaque transparency and pretty much
+
+41
+00:02:21,783 --> 00:02:26,005
+everything except the last distortion effects.
+
+42
+00:02:26,005 --> 00:02:27,566
+And it's a feedback loop.
+
+43
+00:02:27,566 --> 00:02:31,027
+It reads from a history buffer, and it writes to the
+
+44
+00:02:31,027 --> 00:02:34,049
+same history buffer in a double-buffered fashion.
+
+45
+00:02:34,826 --> 00:02:38,028
+With temporal anti-aliasing, sub-pixel information
+
+46
+00:02:38,028 --> 00:02:40,489
+is recovered over time, which is really
+
+47
+00:02:40,489 --> 00:02:42,050
+nice for having stable images.
+
+48
+00:02:42,050 --> 00:02:44,712
+Here's what it looks like.
+
+49
+00:02:44,712 --> 00:02:50,555
+On the left, we have a raw output
+
+50
+00:02:50,555 --> 00:02:52,156
+from the engine with no AA.
+
+51
+00:02:52,156 --> 00:02:56,778
+And on the right, we have our temporal solution in action.
+
+52
+00:02:58,018 --> 00:03:04,760
+And notice that we have the edges of the fence
+
+53
+00:03:04,760 --> 00:03:08,701
+here can cross pixel boundaries without just jumping across them
+
+54
+00:03:08,701 --> 00:03:10,822
+in one go.
+
+55
+00:03:10,822 --> 00:03:12,022
+It's a stable output.
+
+56
+00:03:12,022 --> 00:03:12,602
+Here's another example.
+
+57
+00:03:12,602 --> 00:03:17,064
+Here it's interesting to note that the noise
+
+58
+00:03:17,064 --> 00:03:22,545
+from a sparsely sampled directional occlusion
+
+59
+00:03:22,545 --> 00:03:25,186
+is sort of vacuumed by the temporal solution
+
+60
+00:03:25,186 --> 00:03:26,066
+that we are employing.
+
+61
+00:03:27,152 --> 00:03:31,717
+creating a much smoother image on the right.
+
+62
+00:03:31,717 --> 00:03:34,300
+Another example here was the Boren sensor,
+
+63
+00:03:34,300 --> 00:03:40,386
+and it's, yeah, I think the results are obvious.
+
+64
+00:03:42,843 --> 00:03:50,704
+So I'm going to go through every step of the technique and I want to start with some basic intuition.
+
+65
+00:03:50,704 --> 00:03:56,185
+So let's forget about pixels for a moment and think about cameras between frames.
+
+66
+00:03:56,185 --> 00:04:06,467
+And if we have some surface in space and we have a camera looking at a local region, like a local surface region,
+
+67
+00:04:06,467 --> 00:04:12,588
+and then we have another camera in the past that's also looking at this region, but from a slightly different perspective,
+
+68
+00:04:13,370 --> 00:04:17,131
+then we are having, then with rasterization,
+
+69
+00:04:17,131 --> 00:04:19,272
+we obtain some slightly different information
+
+70
+00:04:19,272 --> 00:04:22,453
+about this local region on a surface.
+
+71
+00:04:22,453 --> 00:04:25,294
+So in a sense, rasterization,
+
+72
+00:04:25,294 --> 00:04:27,194
+it has these unpleasant artifacts,
+
+73
+00:04:27,194 --> 00:04:28,615
+so like aliasing artifacts,
+
+74
+00:04:28,615 --> 00:04:32,096
+but these could also just be viewed as a variation.
+
+75
+00:04:32,096 --> 00:04:35,837
+And if we can make the correlation and step back in time,
+
+76
+00:04:35,837 --> 00:04:38,818
+then we can use this variation to refine the current frame.
+
+77
+00:04:41,472 --> 00:04:45,173
+So to step back in time, we want to make a correlation
+
+78
+00:04:45,173 --> 00:04:46,854
+between current frame fragments
+
+79
+00:04:46,854 --> 00:04:48,735
+and fragments in previous frames.
+
+80
+00:04:48,735 --> 00:04:53,157
+And we can do this spatially with a reprojection.
+
+81
+00:04:53,157 --> 00:04:56,138
+And reprojection is a known technique.
+
+82
+00:04:56,138 --> 00:04:58,099
+It relies on depth buffer information,
+
+83
+00:04:58,099 --> 00:05:02,081
+so it's limited to the closest written fragment.
+
+84
+00:05:02,081 --> 00:05:03,342
+But it's not always possible.
+
+85
+00:05:03,342 --> 00:05:05,123
+Sometimes the data just isn't there.
+
+86
+00:05:06,263 --> 00:05:09,506
+This is the case when we have
+
+87
+00:05:09,506 --> 00:05:13,530
+disocclusion, so like we see some fragment and it's just
+
+88
+00:05:13,530 --> 00:05:17,333
+not in our history. We can do a reprojection, but we are going to see
+
+89
+00:05:17,333 --> 00:05:21,756
+a different surface from the previous perspective and
+
+90
+00:05:21,756 --> 00:05:25,319
+if we just like blend those together, then we are doing something
+
+91
+00:05:25,319 --> 00:05:28,402
+it's a false reprojection. Additionally,
+
+92
+00:05:28,402 --> 00:05:33,827
+if we don't have any change in the relationship between the viewer and the subject
+
+93
+00:05:34,252 --> 00:05:38,273
+then we don't gain any extra information from stepping back in time.
+
+94
+00:05:38,273 --> 00:05:39,873
+There's no variance.
+
+95
+00:05:39,873 --> 00:05:43,554
+So, like step one, jitter your view frustum.
+
+96
+00:05:43,554 --> 00:05:46,015
+If your camera is static and you have a static scene,
+
+97
+00:05:46,015 --> 00:05:48,796
+then you are effectively losing information.
+
+98
+00:05:48,796 --> 00:05:51,657
+So, every frame prior to rendering,
+
+99
+00:05:51,657 --> 00:05:54,217
+pick some offset from a sample distribution
+
+100
+00:05:54,217 --> 00:05:57,618
+and use this offset to shear your view frustum.
+
+101
+00:05:57,618 --> 00:06:00,039
+Like, just refer to GL frustum for this.
+
+102
+00:06:02,062 --> 00:06:04,385
+I'll get back to sample distributions later.
+
+103
+00:06:04,385 --> 00:06:07,890
+They are, of course, super important.
+
+104
+00:06:07,890 --> 00:06:12,395
+Then, the temporal pass, it looks like this.
+
+105
+00:06:12,395 --> 00:06:16,000
+So, it's a full screen pass,
+
+106
+00:06:16,000 --> 00:06:18,803
+and the inputs to this are
+
+107
+00:06:19,544 --> 00:06:23,686
+uh, the history buffer, so a temporarily stable
+
+108
+00:06:23,686 --> 00:06:28,928
+image containing, uh, uh, anti-aliased
+
+109
+00:06:28,928 --> 00:06:31,689
+uh, uh, yeah, colors
+
+110
+00:06:31,689 --> 00:06:35,990
+uh, and uh, an input frame, which is the raw output from
+
+111
+00:06:35,990 --> 00:06:39,571
+from the rasterizer and all of those passes, and that's color, depth, and
+
+112
+00:06:39,571 --> 00:06:40,672
+velocity. I'm gonna, uh, go
+
+113
+00:06:40,672 --> 00:06:44,753
+into reprojection first.
+
+114
+00:06:47,427 --> 00:06:53,393
+So we have some fragment that we're in, in our full screen post pass.
+
+115
+00:06:53,393 --> 00:06:55,715
+Let's just start in this texture called P-U-V.
+
+116
+00:06:55,715 --> 00:07:01,721
+If we look at it on the boundary of the view frustum, it looks something like this.
+
+117
+00:07:01,721 --> 00:07:06,025
+Then we can sample the depth buffer and reconstruct the world space position
+
+118
+00:07:06,025 --> 00:07:10,430
+by just interpolating a corner ray and then scaling by the linear depth.
+
+119
+00:07:11,687 --> 00:07:14,131
+Once we have the world space position,
+
+120
+00:07:14,131 --> 00:07:18,059
+we can reproject this into the previous frame
+
+121
+00:07:18,059 --> 00:07:20,764
+just by using the previous frame model view matrix.
+
+122
+00:07:24,344 --> 00:07:27,845
+When we do this we obtain some normalized device
+
+123
+00:07:27,845 --> 00:07:30,446
+corners and we can transform those into Texas
+
+124
+00:07:30,446 --> 00:07:33,447
+base again and then we have this
+
+125
+00:07:33,447 --> 00:07:36,469
+a Q you be that we can
+
+126
+00:07:36,469 --> 00:07:39,590
+use to look up in our history buffer
+
+127
+00:07:39,590 --> 00:07:41,971
+and then we have completed our reprojection
+
+128
+00:07:41,971 --> 00:07:44,251
+so for dynamic scenes, it's a little
+
+129
+00:07:44,251 --> 00:07:48,553
+bit more complicated and we cannot rely
+
+130
+00:07:48,553 --> 00:07:52,014
+that on just a depth buffer. We use
+
+131
+00:07:52,014 --> 00:07:52,955
+a velocity buffer.
+
+132
+00:07:53,520 --> 00:07:57,300
+We generate this in a separate pass before the temporal pass.
+
+133
+00:07:57,300 --> 00:08:01,221
+And we initialize it to camera motion vectors,
+
+134
+00:08:01,221 --> 00:08:04,182
+just using the same approach as with reprojection,
+
+135
+00:08:04,182 --> 00:08:06,102
+sampling the depth buffer.
+
+136
+00:08:06,102 --> 00:08:09,522
+And then we render the dynamic objects on top
+
+137
+00:08:09,522 --> 00:08:12,823
+with just a biasing test.
+
+138
+00:08:12,823 --> 00:08:16,364
+Once we have a velocity buffer, the reprojection
+
+139
+00:08:16,364 --> 00:08:19,844
+becomes a read and a subtract in the temporal pass,
+
+140
+00:08:19,844 --> 00:08:22,825
+because we just look up the velocity in there.
+
+141
+00:08:23,509 --> 00:08:26,634
+in the current fragment, and then we step negatively
+
+142
+00:08:26,634 --> 00:08:30,201
+to obtain where we should sample our history buffer.
+
+143
+00:08:32,838 --> 00:08:35,840
+So we don't actually sample the velocity directly
+
+144
+00:08:35,840 --> 00:08:38,061
+in the current fragment, because if we do,
+
+145
+00:08:38,061 --> 00:08:41,283
+then fragments on edges of objects,
+
+146
+00:08:41,283 --> 00:08:44,465
+they won't travel with the occluders.
+
+147
+00:08:44,465 --> 00:08:47,667
+We use the velocity of the closest depth-wise sample
+
+148
+00:08:47,667 --> 00:08:50,908
+within our three-by-three region.
+
+149
+00:08:50,908 --> 00:08:55,951
+And this is similar to a suggestion by Keres,
+
+150
+00:08:55,951 --> 00:08:58,953
+and the result is nicer edges in motion.
+
+151
+00:09:00,338 --> 00:09:01,679
+Here's an example of this.
+
+152
+00:09:01,679 --> 00:09:04,640
+On the left, we have velocity from the current fragment
+
+153
+00:09:04,640 --> 00:09:07,142
+being used to do the reprojection.
+
+154
+00:09:07,142 --> 00:09:10,363
+And on the right, we have velocity
+
+155
+00:09:10,363 --> 00:09:12,624
+from the closest fragment in the 3x3 region.
+
+156
+00:09:12,624 --> 00:09:13,985
+So now we have our reprojection completed,
+
+157
+00:09:13,985 --> 00:09:17,266
+and we have a history sample.
+
+158
+00:09:17,266 --> 00:09:21,888
+We have to constrain this history sample,
+
+159
+00:09:21,888 --> 00:09:27,531
+because as I mentioned, we may have a false reprojection.
+
+160
+00:09:27,531 --> 00:09:28,572
+And I will talk about this now.
+
+161
+00:09:30,419 --> 00:09:34,264
+So, sometimes the reprojection is false
+
+162
+00:09:34,264 --> 00:09:39,630
+and the history sample is essentially invalid.
+
+163
+00:09:39,630 --> 00:09:42,773
+And it can be because of this occlusion and objects moving around
+
+164
+00:09:42,773 --> 00:09:44,535
+and it can also be because...
+
+165
+00:09:45,091 --> 00:09:47,273
+of transparency layers in front of,
+
+166
+00:09:47,273 --> 00:09:51,478
+like in the line of sight from one perspective,
+
+167
+00:09:51,478 --> 00:09:56,243
+and these layers being absent in the next perspective.
+
+168
+00:09:56,243 --> 00:09:59,687
+If we trivially accept the history example,
+
+169
+00:09:59,687 --> 00:10:02,711
+then we get this ghosting-like effect,
+
+170
+00:10:02,711 --> 00:10:05,153
+smearing like I've illustrated on the right.
+
+171
+00:10:05,354 --> 00:10:07,635
+So we have to constrain our history sample.
+
+172
+00:10:07,635 --> 00:10:10,017
+There are various ways to do this.
+
+173
+00:10:10,017 --> 00:10:13,159
+Depth-based rejection, velocity weighing,
+
+174
+00:10:13,159 --> 00:10:17,723
+Sousa Jimenez described this very well.
+
+175
+00:10:17,723 --> 00:10:21,406
+I spent a bit of time implementing velocity weighing
+
+176
+00:10:21,406 --> 00:10:23,287
+and trying to get this right,
+
+177
+00:10:23,287 --> 00:10:25,629
+but found that it was really fragile.
+
+178
+00:10:25,629 --> 00:10:30,072
+The threshold itself was sliding in history.
+
+179
+00:10:30,072 --> 00:10:31,633
+It was difficult to get it right.
+
+180
+00:10:32,969 --> 00:10:35,971
+And it doesn't really, like it doesn't do anything
+
+181
+00:10:35,971 --> 00:10:37,833
+about transparency layers.
+
+182
+00:10:37,833 --> 00:10:40,735
+So, you can, like we don't have velocities
+
+183
+00:10:40,735 --> 00:10:42,436
+for transparency layers.
+
+184
+00:10:42,436 --> 00:10:44,458
+And we have a lot of them interleaved
+
+185
+00:10:44,458 --> 00:10:47,180
+between our layers of opaque geometry
+
+186
+00:10:47,180 --> 00:10:52,265
+due to volumetrics and artist placed
+
+187
+00:10:52,265 --> 00:10:55,187
+like sun rays and stuff like that.
+
+188
+00:10:55,187 --> 00:10:58,390
+So, and we didn't want to just run temporal
+
+189
+00:10:58,390 --> 00:10:59,451
+after the opaque pass.
+
+190
+00:10:59,973 --> 00:11:03,473
+We needed something that would handle these cases.
+
+191
+00:11:03,473 --> 00:11:05,314
+So we went back to the brick wall for a while.
+
+192
+00:11:05,314 --> 00:11:11,775
+And then I read these slides from SUSE.
+
+193
+00:11:11,775 --> 00:11:16,436
+And that was like a big rescue, this neighborhood clamping
+
+194
+00:11:16,436 --> 00:11:18,816
+concept for us.
+
+195
+00:11:18,816 --> 00:11:22,197
+So just to recap what is neighborhood clamping,
+
+196
+00:11:22,197 --> 00:11:25,238
+it's like a pure color space operation.
+
+197
+00:11:25,238 --> 00:11:26,298
+And it's like you clamp.
+
+198
+00:11:27,018 --> 00:11:33,853
+expand a local color space around the current fragment from the raw rasterization.
+
+199
+00:11:34,518 --> 00:11:40,422
+And then you take your history sample and you smash it into that space.
+
+200
+00:11:40,422 --> 00:11:45,705
+And what Suse did in these slides,
+
+201
+00:11:45,705 --> 00:11:48,267
+or what was written there,
+
+202
+00:11:48,267 --> 00:11:51,910
+was that you would use four taps and a center text
+
+203
+00:11:51,910 --> 00:11:57,133
+and then you would clamp your history sample to the local color space
+
+204
+00:11:57,133 --> 00:11:58,814
+that enveloped these samples.
+
+205
+00:11:59,435 --> 00:12:09,603
+Quick tests show that this gave a big improvement in stability over velocity varying, and we could work with that.
+
+206
+00:12:09,603 --> 00:12:14,306
+And you don't have to use RGB to do this operation.
+
+207
+00:12:14,306 --> 00:12:22,453
+You can also do the clamping to a box in a different color space if you want to rotate that around in relation to RGB.
+
+208
+00:12:24,584 --> 00:12:30,465
+The first implementation of neighborhood clamming
+
+209
+00:12:30,465 --> 00:12:33,206
+for insight was like a dynamic variation
+
+210
+00:12:33,206 --> 00:12:35,546
+of Sousa's four-tap approach.
+
+211
+00:12:35,546 --> 00:12:40,087
+I used a variable distance to four sample points
+
+212
+00:12:40,087 --> 00:12:42,008
+decided per pixel, where a higher velocity
+
+213
+00:12:42,008 --> 00:12:44,408
+in the current fragment would result
+
+214
+00:12:44,408 --> 00:12:48,669
+in the four taps being inching closer to the center texel.
+
+215
+00:12:49,274 --> 00:12:52,197
+And this meant that it was pretty strict on motion.
+
+216
+00:12:52,197 --> 00:12:54,339
+When stuff was moving fast, then we
+
+217
+00:12:54,339 --> 00:13:00,704
+wouldn't allow a large variation from the center texel.
+
+218
+00:13:00,704 --> 00:13:02,906
+This gave us pretty decent results
+
+219
+00:13:02,906 --> 00:13:09,232
+without having a velocity buffer for per object velocities.
+
+220
+00:13:09,232 --> 00:13:10,873
+And we didn't have this at that time.
+
+221
+00:13:10,873 --> 00:13:12,895
+We used this approach for about a year.
+
+222
+00:13:13,824 --> 00:13:17,606
+And it enabled artists and, yeah,
+
+223
+00:13:17,606 --> 00:13:21,488
+artists to tailor effects and content
+
+224
+00:13:21,488 --> 00:13:24,449
+to the unique properties of having a temporal algorithm
+
+225
+00:13:24,449 --> 00:13:27,250
+that also eliminates noise from stochastic effects.
+
+226
+00:13:27,250 --> 00:13:28,651
+Then later in the production,
+
+227
+00:13:28,651 --> 00:13:29,231
+we got a bit more headroom.
+
+228
+00:13:38,887 --> 00:13:41,748
+I decided to ax the dynamic fall type approach
+
+229
+00:13:41,748 --> 00:13:43,409
+and try to improve the image quality.
+
+230
+00:13:43,409 --> 00:13:48,352
+And it kind of coincided with another presentation
+
+231
+00:13:48,352 --> 00:13:51,775
+being published by Keres,
+
+232
+00:13:51,775 --> 00:13:58,779
+who is a just use a three by three neighborhood
+
+233
+00:13:58,779 --> 00:14:01,140
+and just eat the extra cost from doing more samples.
+
+234
+00:14:01,140 --> 00:14:05,563
+So Keres uses like a larger and rounded neighborhood
+
+235
+00:14:05,563 --> 00:14:08,005
+and just clipping instead of clamping.
+
+236
+00:14:09,171 --> 00:14:12,293
+And it's not just like a 3 by 3 neighborhood.
+
+237
+00:14:12,293 --> 00:14:15,476
+It's also blended with a minimum maximum 5 taps
+
+238
+00:14:15,476 --> 00:14:17,297
+in a plus pattern.
+
+239
+00:14:17,297 --> 00:14:18,938
+And it's more expensive to do this,
+
+240
+00:14:18,938 --> 00:14:20,839
+but the image quality is better.
+
+241
+00:14:20,839 --> 00:14:25,563
+And I love the dynamic 4 tap approach that we had going,
+
+242
+00:14:25,563 --> 00:14:28,705
+but there was just, OK, this was just better.
+
+243
+00:14:28,705 --> 00:14:29,426
+So we axed it.
+
+244
+00:14:30,590 --> 00:14:34,933
+Also, clipping is really interesting, at least when you look at it geometrically.
+
+245
+00:14:34,933 --> 00:14:39,656
+And, like, I experimented with it a lot, and I felt like it had faster convergence.
+
+246
+00:14:39,656 --> 00:14:47,541
+Because clipping doesn't exhibit this problem of the constrained sample
+
+247
+00:14:47,541 --> 00:14:50,403
+ending up in corners of the local color space.
+
+248
+00:14:50,403 --> 00:14:54,146
+And I've illustrated that in the bottom left here.
+
+249
+00:14:54,146 --> 00:14:56,067
+So, clipping is...
+
+250
+00:14:57,717 --> 00:14:59,719
+in the Cedar can be a little bit slow
+
+251
+00:14:59,719 --> 00:15:02,961
+and doing the proper line clip between
+
+252
+00:15:02,961 --> 00:15:06,464
+like an arbitrary sized bounding box and two points
+
+253
+00:15:06,464 --> 00:15:07,965
+that there are problems with this
+
+254
+00:15:07,965 --> 00:15:10,286
+and of course there is a stable algorithm
+
+255
+00:15:10,286 --> 00:15:12,608
+but it's tedious to run this
+
+256
+00:15:12,608 --> 00:15:16,091
+for every fragment.
+
+257
+00:15:16,091 --> 00:15:18,712
+So we just clip towards the center of the bounding box
+
+258
+00:15:18,712 --> 00:15:21,014
+and because we do this,
+
+259
+00:15:21,014 --> 00:15:23,556
+we can just do the, calculate the divisor
+
+260
+00:15:23,556 --> 00:15:25,157
+for the ray towards the...
+
+261
+00:15:26,659 --> 00:15:27,720
+the unconstrained history sample
+
+262
+00:15:27,720 --> 00:15:29,460
+in a unit cube space.
+
+263
+00:15:29,460 --> 00:15:32,461
+So we transform the vector to the history sample
+
+264
+00:15:32,461 --> 00:15:35,522
+from the center of the bounding box into unit space.
+
+265
+00:15:35,522 --> 00:15:37,003
+Then we calculate the visor there,
+
+266
+00:15:37,003 --> 00:15:39,704
+and then we apply that in the actual clip space.
+
+267
+00:15:39,704 --> 00:15:41,944
+So now we have our constrained history sample,
+
+268
+00:15:41,944 --> 00:15:42,945
+and the next step is to weigh that.
+
+269
+00:15:54,252 --> 00:16:00,105
+and use some history and use some amount of data from the raw input.
+
+270
+00:16:02,176 --> 00:16:08,559
+And when we do this weighing, we use the unjittered input color
+
+271
+00:16:08,559 --> 00:16:09,700
+buffer.
+
+272
+00:16:09,700 --> 00:16:14,422
+The unjittering is done by just subtracting the jitter
+
+273
+00:16:14,422 --> 00:16:16,343
+from the texture coordinates.
+
+274
+00:16:16,343 --> 00:16:18,925
+So we rely on bilinear filtering for this.
+
+275
+00:16:18,925 --> 00:16:21,246
+And I mean, that works for us.
+
+276
+00:16:21,246 --> 00:16:24,948
+It's nice because we don't introduce any jittering
+
+277
+00:16:24,948 --> 00:16:26,189
+into the feedback loop.
+
+278
+00:16:26,189 --> 00:16:29,150
+So we calculate our feedback color.
+
+279
+00:16:29,737 --> 00:16:34,999
+and by doing a blend between the the on to the input and the constraint history
+
+280
+00:16:34,999 --> 00:16:35,279
+sample.
+
+281
+00:16:35,279 --> 00:16:37,381
+And then we copy this to the output.
+
+282
+00:16:37,381 --> 00:16:37,521
+Um
+
+283
+00:16:37,521 --> 00:16:43,124
+in calculating the feedback color.
+
+284
+00:16:43,124 --> 00:16:48,767
+We have to use a feedback factor obviously and we want to use feedback
+
+285
+00:16:48,767 --> 00:16:53,689
+factor that is as high as possible to increase retention because everything
+
+286
+00:16:53,689 --> 00:16:57,871
+that is nice and clean ideally is in our history sample constraint history
+
+287
+00:16:57,871 --> 00:16:58,131
+sample.
+
+288
+00:16:59,360 --> 00:17:05,630
+But I have to beware of artifacts also when choosing the feedback factor.
+
+289
+00:17:05,630 --> 00:17:11,199
+Like you want to set it pretty high, but there's going to be cases where you'll see some trailing artifacts.
+
+290
+00:17:14,243 --> 00:17:18,005
+case in point, the silhouette of the boy
+
+291
+00:17:18,005 --> 00:17:21,247
+I was looking at on my workstation
+
+292
+00:17:21,247 --> 00:17:22,568
+it runs pretty slow
+
+293
+00:17:22,568 --> 00:17:27,330
+and I was looking at the boy at really low frame rates
+
+294
+00:17:27,330 --> 00:17:29,031
+and at a low resolution
+
+295
+00:17:29,031 --> 00:17:32,453
+and I noticed these fringing artifacts on his edge
+
+296
+00:17:32,453 --> 00:17:33,294
+when he was doing...
+
+297
+00:17:33,831 --> 00:17:36,815
+like fast motion, such as turns, landings, etc.
+
+298
+00:17:36,815 --> 00:17:41,822
+And of course, this is a property of neighborhood clamping-clipping
+
+299
+00:17:41,822 --> 00:17:45,967
+that history fragments can linger if none of the neighbors force them out.
+
+300
+00:17:45,967 --> 00:17:51,574
+And that's the case for one frame when this happens near an edge.
+
+301
+00:17:52,521 --> 00:17:58,526
+And it's only really distinct that artificially low resolution and frame rate, but.
+
+302
+00:17:58,526 --> 00:18:12,858
+I looked at this and I was really annoyed by it. I wanted to do something about it anyway, and I said with another graphics programmer in a company and we were running back and forth this boy on in a high contrast area and.
+
+303
+00:18:13,339 --> 00:18:14,479
+just thinking, well, what can we do?
+
+304
+00:18:14,479 --> 00:18:18,823
+But these fragments have high motion vectors,
+
+305
+00:18:18,823 --> 00:18:21,245
+so I thought, why don't we just conceal it
+
+306
+00:18:21,245 --> 00:18:23,747
+with a little bit of motion blur in those cases?
+
+307
+00:18:23,747 --> 00:18:27,971
+So, adding motion blur to the temporal path
+
+308
+00:18:27,971 --> 00:18:35,757
+to conceal these type of artifacts looks a bit like this.
+
+309
+00:18:36,898 --> 00:18:43,108
+We update the history buffer just like before and then for the output targets where we're seeing the artifacts.
+
+310
+00:18:43,108 --> 00:18:48,156
+And so the screen basically we blend.
+
+311
+00:18:48,156 --> 00:18:49,277
+Feedback.
+
+312
+00:18:49,277 --> 00:18:50,619
+That.
+
+313
+00:18:52,974 --> 00:18:55,776
+or what we are writing into history with
+
+314
+00:18:55,776 --> 00:18:59,280
+another color, which is a motion blurred
+
+315
+00:18:59,280 --> 00:19:00,721
+sample.
+
+316
+00:19:00,721 --> 00:19:01,983
+So...
+
+317
+00:19:01,983 --> 00:19:05,026
+and we apply the same on jittering
+
+318
+00:19:05,026 --> 00:19:07,168
+to the texture coordinates where we do this.
+
+319
+00:19:07,168 --> 00:19:11,872
+The amount of motion blur we introduce
+
+320
+00:19:11,872 --> 00:19:14,275
+in each fragment is depending on the
+
+321
+00:19:14,275 --> 00:19:15,876
+per pixel velocity and...
+
+322
+00:19:16,559 --> 00:19:22,762
+And we begin introducing a little bit of motion blur at a met when the velocity has a magnitude of 2 or above.
+
+323
+00:19:22,762 --> 00:19:32,948
+And we stop like we are only motion blurred motion blur information when the magnitude is 15. It's just a linear scale.
+
+324
+00:19:32,948 --> 00:19:43,494
+So this forces transition to motion blur, but not in the feedback loop for really fast moving fragments, and it includes the immediate neighbors.
+
+325
+00:19:45,463 --> 00:19:48,185
+of the current fragment due to the velocity sample
+
+326
+00:19:48,185 --> 00:19:50,548
+relying on the closest depth-wise fragment.
+
+327
+00:19:50,548 --> 00:19:53,931
+So here's an illustration of what that looks like for the bore.
+
+328
+00:19:53,931 --> 00:19:57,934
+It's kind of an exaggerated example.
+
+329
+00:19:57,934 --> 00:20:01,638
+You have to run at sub-20 frames per second
+
+330
+00:20:01,638 --> 00:20:06,442
+and have a really terrible resolution to notice this
+
+331
+00:20:06,442 --> 00:20:08,324
+because it's for a frame or two.
+
+332
+00:20:09,176 --> 00:20:12,878
+But, yeah, it kind of...
+
+333
+00:20:12,878 --> 00:20:15,420
+it's not pleasant either way, but
+
+334
+00:20:15,420 --> 00:20:19,262
+fringing fragments on the left, I find them really distracting.
+
+335
+00:20:19,262 --> 00:20:20,803
+Excuse me.
+
+336
+00:20:20,803 --> 00:20:23,725
+So, putting it all together.
+
+337
+00:20:23,725 --> 00:20:24,265
+Again,
+
+338
+00:20:24,265 --> 00:20:24,966
+looks like this.
+
+339
+00:20:57,087 --> 00:20:58,588
+Yeah.
+
+340
+00:20:58,588 --> 00:21:03,370
+So I mentioned that I would get back to the sample distribution
+
+341
+00:21:03,370 --> 00:21:04,250
+thing.
+
+342
+00:21:04,250 --> 00:21:08,712
+This, for us, took a lot of trial and error.
+
+343
+00:21:08,712 --> 00:21:11,013
+I took a very practical approach.
+
+344
+00:21:11,013 --> 00:21:14,854
+I spent some weeks with my head really close
+
+345
+00:21:14,854 --> 00:21:18,236
+to my screen in the office with the windows magnifying glass
+
+346
+00:21:18,236 --> 00:21:20,937
+fully zoomed in.
+
+347
+00:21:20,937 --> 00:21:22,557
+And I would look at all the pixels
+
+348
+00:21:22,557 --> 00:21:24,718
+and obsess over high contrast regions.
+
+349
+00:21:26,340 --> 00:21:30,043
+I wanted to find a really good balance between quality and speed of convergence.
+
+350
+00:21:30,043 --> 00:21:35,568
+At the time we were targeting 30 frames per second and now we are at 1080p60.
+
+351
+00:21:35,568 --> 00:21:39,652
+So that was hugely important back then.
+
+352
+00:21:39,652 --> 00:21:49,280
+And also considering heuristics, that would be interesting because we have this side-scrolling behavior and mostly horizontal movement.
+
+353
+00:21:50,285 --> 00:21:53,727
+There was this scene in the game, I think it was COD,
+
+354
+00:21:53,727 --> 00:21:58,230
+where there would be a very low inclination and the boy would be able to run on the slope
+
+355
+00:21:58,230 --> 00:22:02,554
+and there was this lamp that when you ran down the slope it would sort of fade into view
+
+356
+00:22:02,554 --> 00:22:06,617
+and then you would run back up the slope and the light would hide under the shade.
+
+357
+00:22:07,381 --> 00:22:10,324
+And I would run up and down the slope again and again
+
+358
+00:22:10,324 --> 00:22:15,030
+with different distributions and offsets from the texture sensors
+
+359
+00:22:15,030 --> 00:22:20,216
+just to see where I would get like a really nice transition
+
+360
+00:22:20,216 --> 00:22:24,461
+for that single or like half pixel line under the lampshade.
+
+361
+00:22:27,139 --> 00:22:30,982
+this is like an artificial reconstruction of this happening.
+
+362
+00:22:30,982 --> 00:22:33,504
+It's not the actual scene,
+
+363
+00:22:33,504 --> 00:22:36,246
+and I think I was more zoomed in also,
+
+364
+00:22:36,246 --> 00:22:38,027
+but yeah, that's how it went.
+
+365
+00:22:38,027 --> 00:22:40,689
+The cop loves it.
+
+366
+00:22:42,831 --> 00:22:46,334
+So we are using a history buffer that is exponential
+
+367
+00:22:46,334 --> 00:22:49,957
+and the samples weigh less over time
+
+368
+00:22:49,957 --> 00:22:53,861
+and that is the reason why we need to use
+
+369
+00:22:53,861 --> 00:22:57,385
+a high feedback factor, otherwise we get a visible cycle.
+
+370
+00:22:57,385 --> 00:23:01,429
+It's interesting to see that if we use 90% of history
+
+371
+00:23:01,429 --> 00:23:02,370
+compared to 10% of the...
+
+372
+00:23:03,318 --> 00:23:06,642
+of the actual output of the rasterizer in a frame.
+
+373
+00:23:06,642 --> 00:23:09,786
+Then 16 frames later, that information
+
+374
+00:23:09,786 --> 00:23:14,552
+that was history at that time, it's down to 18 and 1 1⁄2%.
+
+375
+00:23:17,316 --> 00:23:19,877
+So, I mean, things fade out fast.
+
+376
+00:23:19,877 --> 00:23:23,699
+And for the sample distribution, it's nice to revisit,
+
+377
+00:23:23,699 --> 00:23:25,299
+I found that it's nice to revisit
+
+378
+00:23:25,299 --> 00:23:27,640
+same sub-pixels regions often,
+
+379
+00:23:27,640 --> 00:23:31,782
+because the above figure on the right here
+
+380
+00:23:31,782 --> 00:23:34,383
+assumes that we are just like trivially accepting
+
+381
+00:23:34,383 --> 00:23:38,365
+every single history sample, and that's not the case,
+
+382
+00:23:38,365 --> 00:23:42,166
+because we do a clipping based on the neighborhood.
+
+383
+00:23:42,724 --> 00:23:49,066
+And this will compress the tail of the history in the frame that we are doing, applying a constraint.
+
+384
+00:23:49,066 --> 00:23:54,648
+And that further reduces how long history lives on as the frames go on.
+
+385
+00:23:54,648 --> 00:23:58,749
+So we want to quickly return to some data within a single pixel,
+
+386
+00:23:58,749 --> 00:24:10,053
+so that if we are constraining our way out of it because of some sudden motion in one direction or the other.
+
+387
+00:24:10,617 --> 00:24:12,998
+we get back to that and obtain some information
+
+388
+00:24:12,998 --> 00:24:15,239
+about that particular part of a surface
+
+389
+00:24:15,239 --> 00:24:17,519
+that we can reconstruct a nice edge
+
+390
+00:24:17,519 --> 00:24:20,180
+or smoothen out a bit of aliasing
+
+391
+00:24:20,180 --> 00:24:22,261
+from theta aliasing, whatever.
+
+392
+00:24:22,261 --> 00:24:26,022
+So initially, used very few sample points
+
+393
+00:24:26,022 --> 00:24:27,423
+in our sampling distributions.
+
+394
+00:24:28,777 --> 00:24:31,358
+So here are some of the sequences I tested.
+
+395
+00:24:31,358 --> 00:24:33,359
+Some of them are a bit braindead,
+
+396
+00:24:33,359 --> 00:24:36,780
+and I just wanted to pick something and get going.
+
+397
+00:24:36,780 --> 00:24:40,321
+Interestingly, for a year, we used a second one
+
+398
+00:24:40,321 --> 00:24:43,503
+on the top row, which I called Uniform 4 Helix in the code.
+
+399
+00:24:43,503 --> 00:24:48,005
+And it worked really well, despite the rectangular pattern
+
+400
+00:24:48,005 --> 00:24:50,666
+and just being four samples for us,
+
+401
+00:24:50,666 --> 00:24:54,827
+because it crosses the horizontal line
+
+402
+00:24:54,827 --> 00:24:57,388
+in the pixel in every frame.
+
+403
+00:24:57,995 --> 00:25:00,578
+So you can imagine going from left to right,
+
+404
+00:25:00,578 --> 00:25:04,663
+and it would stitch across hard edges.
+
+405
+00:25:04,663 --> 00:25:08,929
+I played around with some others as well.
+
+406
+00:25:08,929 --> 00:25:13,535
+And then when we did the switch to the 3 by 3 neighborhood,
+
+407
+00:25:14,210 --> 00:25:20,293
+And clipping then, and there was also in Keres' presentation a suggestion to use the Halton distribution.
+
+408
+00:25:20,293 --> 00:25:24,715
+A colleague of mine also said, like, let's try a Halton.
+
+409
+00:25:24,715 --> 00:25:26,096
+And I was like, okay, let's try Halton.
+
+410
+00:25:26,096 --> 00:25:33,079
+And we did that, and I eventually settled on the 16 first samples of the Halton 2-3 sequence.
+
+411
+00:25:35,149 --> 00:25:38,491
+So, while using the 4TAP neighborhood,
+
+412
+00:25:38,491 --> 00:25:42,152
+as I said, uniform for helix, 4Helix was my favorite.
+
+413
+00:25:42,152 --> 00:25:44,893
+Like, the short cycle meant that you returned
+
+414
+00:25:44,893 --> 00:25:48,435
+to the same sub-tick region quickly, which is nice.
+
+415
+00:25:48,435 --> 00:25:51,196
+And it does the stitching thing.
+
+416
+00:25:51,196 --> 00:25:55,158
+And then switch to the 16 indices of Helton.
+
+417
+00:25:55,158 --> 00:25:58,819
+And the coverage in this distribution
+
+418
+00:25:58,819 --> 00:25:59,720
+is obviously much better.
+
+419
+00:25:59,720 --> 00:26:02,581
+So, like, everything converges.
+
+420
+00:26:03,140 --> 00:26:05,522
+a lot more when
+
+421
+00:26:05,522 --> 00:26:08,764
+the circumstances allow this.
+
+422
+00:26:08,764 --> 00:26:14,128
+And it's pretty good at getting back to the same
+
+423
+00:26:14,128 --> 00:26:18,011
+subspecial regions, even though the cycle length
+
+424
+00:26:18,011 --> 00:26:21,214
+is a lot longer because of the way of the
+
+425
+00:26:21,214 --> 00:26:22,635
+the way the sequence is.
+
+426
+00:26:24,341 --> 00:26:28,242
+Then I also spent some time looking at motion perpendicular pattern.
+
+427
+00:26:28,242 --> 00:26:31,664
+I don't know if maybe you noticed on previous slide.
+
+428
+00:26:31,664 --> 00:26:37,286
+That would be based on the trajectory of camera motion in screen space.
+
+429
+00:26:37,286 --> 00:26:45,649
+It didn't develop into anything that's going to be used in a release of our game.
+
+430
+00:26:45,649 --> 00:26:51,331
+But I think it's interesting to try and squeeze the distribution along the line of camera motion in this space.
+
+431
+00:26:51,331 --> 00:26:52,932
+It needs more cooking time.
+
+432
+00:26:55,018 --> 00:26:57,819
+So a summary of our implementation is that,
+
+433
+00:26:57,819 --> 00:27:00,940
+well, we did our view frustum with 16 first samples
+
+434
+00:27:00,940 --> 00:27:01,661
+of Halcyon 2.3.
+
+435
+00:27:01,661 --> 00:27:05,642
+Then we generate a velocity buffer.
+
+436
+00:27:05,642 --> 00:27:07,022
+Our engine doesn't provide one,
+
+437
+00:27:07,022 --> 00:27:11,283
+the one we are using, which is Unity.
+
+438
+00:27:11,283 --> 00:27:14,544
+So we initialized this to camera motion vectors,
+
+439
+00:27:14,544 --> 00:27:17,685
+and then we add in dynamic motion vectors
+
+440
+00:27:17,685 --> 00:27:19,046
+with manual tagging.
+
+441
+00:27:19,970 --> 00:27:32,747
+And then we do read projection by sampling our velocity buffer and we use the closest depth-wise fragment to identify where we should sample the velocity.
+
+442
+00:27:33,134 --> 00:27:39,376
+Then we do neighborhood clipping, where we center clip to the RGB minimum maximum of around a 3x3 region, like Keras.
+
+443
+00:27:39,376 --> 00:27:46,938
+And then we have this added motion blur fallback that kicks in when the magnitude exceeds 2 and it's in full effect at 15.
+
+444
+00:27:46,938 --> 00:27:52,379
+And we don't apply this to the feedback loop. We don't apply it to our history.
+
+445
+00:27:52,379 --> 00:27:58,441
+And it's not like the code. I haven't performance crunched on this code.
+
+446
+00:27:58,441 --> 00:28:00,281
+I think I spent a total of...
+
+447
+00:28:01,030 --> 00:28:08,359
+3, 2 and a half to 3 months over a couple of years, like going in and then doing other stuff on the production.
+
+448
+00:28:08,359 --> 00:28:15,026
+So it's not, I'm sure there's stuff to optimize this, around 1.7 milliseconds on Xbox One at 1080p.
+
+449
+00:28:17,028 --> 00:28:20,812
+So, of course, this implementation is greatly inspired
+
+450
+00:28:20,812 --> 00:28:23,094
+by a lot of people and their work.
+
+451
+00:28:23,094 --> 00:28:25,436
+So, Yang, Sousa, Jimenez, Karris, Maguire,
+
+452
+00:28:25,436 --> 00:28:28,019
+everything that was put online
+
+453
+00:28:28,019 --> 00:28:29,501
+in other people's presentations,
+
+454
+00:28:29,501 --> 00:28:31,983
+like, hugely appreciate this.
+
+455
+00:28:31,983 --> 00:28:34,806
+And my slides are also gonna be available.
+
+456
+00:28:36,685 --> 00:28:50,948
+The temple and she is in it also has some really nice side effects, so it's great that sucking up noise from stochastic effects and so shadows reflections for your metrics all benefit from this greatly.
+
+457
+00:28:50,948 --> 00:29:04,350
+And we have a lot of these effects in our game that are that are sort of standing on top of temporary being great and these are discussed in detail in a talk about inside rendering, which is in.
+
+458
+00:29:04,910 --> 00:29:08,412
+a couple of hours by two of my colleagues, Megan and Mikkel.
+
+459
+00:29:08,412 --> 00:29:10,733
+So you should definitely go and see that.
+
+460
+00:29:10,733 --> 00:29:11,654
+It's awesome.
+
+461
+00:29:11,654 --> 00:29:15,876
+Playdead is hiring,
+
+462
+00:29:15,876 --> 00:29:19,297
+so if anyone wants to come and talk to us
+
+463
+00:29:19,297 --> 00:29:20,238
+about having a job,
+
+464
+00:29:20,238 --> 00:29:26,040
+you can email us at job at playdead dot com.
+
+465
+00:29:26,040 --> 00:29:27,321
+You're also welcome to talk to me,
+
+466
+00:29:27,321 --> 00:29:28,722
+and I'll give you a card or something.
+
+467
+00:29:31,679 --> 00:29:33,820
+And that's the end of my talk.
+
+468
+00:29:33,820 --> 00:29:36,302
+Thank you for coming.
+
+469
+00:29:36,302 --> 00:29:40,285
+As an extra note, we are releasing the full source code
+
+470
+00:29:40,285 --> 00:29:41,546
+to our implementation.
+
+471
+00:29:41,546 --> 00:29:46,349
+And it should be on GitHub, or it will be very soon.
+
+472
+00:29:46,349 --> 00:29:49,871
+It's flagged private, but I think it may be public now.
+
+473
+00:29:51,093 --> 00:29:54,357
+and you can email me with questions
+
+474
+00:29:54,357 --> 00:29:58,262
+and if we have time for it,
+
+475
+00:29:58,262 --> 00:30:00,726
+you can also ask questions now if you have any.
+
+476
+00:30:00,726 --> 00:30:01,847
+Thank you.
+

@@ -1,0 +1,3832 @@
+1
+00:00:05,766 --> 00:00:06,707
+All right, hi.
+
+2
+00:00:06,707 --> 00:00:07,468
+I'm David Bolo.
+
+3
+00:00:07,468 --> 00:00:10,170
+I'm the lead engineer for core gameplay
+
+4
+00:00:10,170 --> 00:00:12,292
+and animation on Gears of War.
+
+5
+00:00:12,292 --> 00:00:14,074
+In this talk, it's a programming talk.
+
+6
+00:00:14,074 --> 00:00:17,096
+I'm gonna present a new approach to animation transitions
+
+7
+00:00:17,096 --> 00:00:19,639
+that we developed during Gears of War.
+
+8
+00:00:19,639 --> 00:00:21,360
+I'll describe, first I'll kind of start off
+
+9
+00:00:21,360 --> 00:00:22,481
+with the high-level intuitions
+
+10
+00:00:22,481 --> 00:00:24,803
+and the motivations behind our approach.
+
+11
+00:00:24,803 --> 00:00:27,386
+And then we're gonna dive down into some mathematics
+
+12
+00:00:27,386 --> 00:00:28,707
+and break it down in detail.
+
+13
+00:00:29,491 --> 00:00:32,153
+And then we'll come back up from that, and I'll show a bit
+
+14
+00:00:32,153 --> 00:00:34,835
+of how we integrated the technique into our existing
+
+15
+00:00:34,835 --> 00:00:35,315
+game engine.
+
+16
+00:00:35,315 --> 00:00:38,857
+Before we get into all that, though, let's take a quick
+
+17
+00:00:38,857 --> 00:00:40,518
+look at what Gears of War is all about.
+
+18
+00:01:10,511 --> 00:01:13,073
+So as you can see from the video, there's a lot going on.
+
+19
+00:01:13,073 --> 00:01:15,656
+Gears of War is a fast-paced game,
+
+20
+00:01:15,656 --> 00:01:17,177
+and our characters are frequently switching
+
+21
+00:01:17,177 --> 00:01:18,839
+between different kind of actions,
+
+22
+00:01:18,839 --> 00:01:20,941
+shooting, running, chainsawing enemies in half,
+
+23
+00:01:20,941 --> 00:01:21,561
+all that good stuff.
+
+24
+00:01:21,561 --> 00:01:25,905
+Of course, when we switch to a new action,
+
+25
+00:01:25,905 --> 00:01:27,427
+we also need to naturally transition
+
+26
+00:01:27,427 --> 00:01:28,428
+to a new animation state,
+
+27
+00:01:28,428 --> 00:01:31,090
+and so that's kind of what this talk is about.
+
+28
+00:01:31,808 --> 00:01:36,752
+Before we started Years of War 4, we were doing these transitions kind of the traditional
+
+29
+00:01:36,752 --> 00:01:41,535
+way which is with a crossfade blend, so let's take a look at a little bit about that.
+
+30
+00:01:41,535 --> 00:01:45,898
+So traditionally, when we're transitioning from one animation state to another, we...
+
+31
+00:01:47,099 --> 00:01:49,800
+run a crossfade blend between the two poses
+
+32
+00:01:49,800 --> 00:01:50,520
+from our two states.
+
+33
+00:01:50,520 --> 00:01:52,740
+So we run our kind of source state
+
+34
+00:01:52,740 --> 00:01:54,221
+and then we start a new target state
+
+35
+00:01:54,221 --> 00:01:57,762
+and then we, for the duration of the transition,
+
+36
+00:01:57,762 --> 00:02:00,322
+we run a crossfade between those two states.
+
+37
+00:02:00,322 --> 00:02:02,403
+So we keep evaluating both the source and the target
+
+38
+00:02:02,403 --> 00:02:05,404
+during the transition and we kind of ramp
+
+39
+00:02:05,404 --> 00:02:07,364
+from the showing mostly the source
+
+40
+00:02:07,364 --> 00:02:08,624
+to mostly the target, right,
+
+41
+00:02:08,624 --> 00:02:11,545
+where we're blending the actual joint angles
+
+42
+00:02:11,545 --> 00:02:12,225
+and translations.
+
+43
+00:02:13,246 --> 00:02:16,628
+Now when we think about optimizing this kind of thing,
+
+44
+00:02:16,628 --> 00:02:19,149
+often we're focusing on optimizing the blend step.
+
+45
+00:02:19,149 --> 00:02:21,251
+And there's lots of things we can do there.
+
+46
+00:02:21,251 --> 00:02:22,932
+We can do math optimizations.
+
+47
+00:02:22,932 --> 00:02:24,953
+We can do memory optimizations, cache optimizations,
+
+48
+00:02:24,953 --> 00:02:27,054
+all sorts of good things.
+
+49
+00:02:27,498 --> 00:02:33,500
+For gears at least, the biggest cost is not actually the crossfade transition itself,
+
+50
+00:02:33,500 --> 00:02:39,301
+but rather the fact that we're evaluating both the source and target states during the
+
+51
+00:02:39,301 --> 00:02:39,681
+transition.
+
+52
+00:02:39,681 --> 00:02:45,223
+And for us, each of those states is much more expensive than the simple blend cost itself
+
+53
+00:02:45,223 --> 00:02:47,364
+or the simple crossfade cost itself.
+
+54
+00:02:47,364 --> 00:02:53,205
+So I've got a little kind of tiny snapshot of what one of the pieces of one of our animation
+
+55
+00:02:53,205 --> 00:02:54,946
+graphs looks like.
+
+56
+00:02:54,946 --> 00:02:57,187
+In reality, it's actually much bigger than that.
+
+57
+00:02:57,367 --> 00:03:00,809
+And we're doing lots of things where we'll be playing multiple animations, we'll be layering things on top,
+
+58
+00:03:00,809 --> 00:03:05,632
+we'll be applying aim offsets for the gun, which involves evaluating more animations and layering them on top,
+
+59
+00:03:05,632 --> 00:03:09,955
+we'll do procedural head look at, a bunch of other procedural things.
+
+60
+00:03:09,955 --> 00:03:12,797
+So there's a lot going on in each of those states.
+
+61
+00:03:12,797 --> 00:03:17,680
+So all of that dwarfs the cost of the actual crossfade transition.
+
+62
+00:03:20,510 --> 00:03:23,992
+Now, if we're lucky, we only have a few active transitions
+
+63
+00:03:23,992 --> 00:03:25,394
+at any one time.
+
+64
+00:03:25,394 --> 00:03:26,574
+So in this kind of picture,
+
+65
+00:03:26,574 --> 00:03:28,096
+I'm showing that there's four characters going
+
+66
+00:03:28,096 --> 00:03:30,097
+and three of them are just doing their regular thing
+
+67
+00:03:30,097 --> 00:03:32,559
+and then one of them is transitioning.
+
+68
+00:03:32,559 --> 00:03:34,300
+And so the cost really during that transition
+
+69
+00:03:34,300 --> 00:03:36,902
+for this particular frame is equivalent
+
+70
+00:03:36,902 --> 00:03:38,724
+to five characters worth of animation, right?
+
+71
+00:03:38,724 --> 00:03:41,646
+Four normal characters and this one guy is transitioning,
+
+72
+00:03:41,646 --> 00:03:43,648
+so his cost is double because he has to evaluate
+
+73
+00:03:43,648 --> 00:03:45,349
+both the source and target states.
+
+74
+00:03:47,365 --> 00:03:50,349
+But in the worst case, everybody transitions at the same time.
+
+75
+00:03:50,349 --> 00:03:53,593
+And that effectively doubles your animation cost
+
+76
+00:03:53,593 --> 00:03:54,233
+for the frame.
+
+77
+00:03:54,233 --> 00:03:58,338
+And for gears, this worst case happens all the time.
+
+78
+00:03:58,338 --> 00:04:00,681
+And in fact, it happens in a bunch of really important times.
+
+79
+00:04:00,681 --> 00:04:01,882
+So for example.
+
+80
+00:04:02,222 --> 00:04:04,283
+in a player versus player match.
+
+81
+00:04:04,283 --> 00:04:07,164
+At the start of the match, everybody's kind of doing their
+
+82
+00:04:07,164 --> 00:04:08,965
+various loadout type animations,
+
+83
+00:04:08,965 --> 00:04:10,385
+getting themselves equipped.
+
+84
+00:04:10,385 --> 00:04:11,826
+And then as soon as the match starts,
+
+85
+00:04:11,826 --> 00:04:15,527
+everybody does this mad dash to strategic locations on the map.
+
+86
+00:04:15,527 --> 00:04:17,988
+And so we have, and this is all running at 60 frames a second,
+
+87
+00:04:17,988 --> 00:04:21,029
+so we have five players on each side, so ten players total,
+
+88
+00:04:21,029 --> 00:04:22,890
+and they all transition at once.
+
+89
+00:04:22,890 --> 00:04:24,571
+So at that moment, we have...
+
+90
+00:04:24,831 --> 00:04:27,112
+10 players that are costing as much as 20 players
+
+91
+00:04:27,112 --> 00:04:30,114
+because we have to evaluate all of their source animations
+
+92
+00:04:30,114 --> 00:04:32,055
+and all of their, or sort of source animation states
+
+93
+00:04:32,055 --> 00:04:33,516
+and all of their target animation states.
+
+94
+00:04:33,516 --> 00:04:34,677
+So it gets quite expensive.
+
+95
+00:04:34,677 --> 00:04:37,318
+So we asked ourselves, can we do better?
+
+96
+00:04:37,318 --> 00:04:39,860
+And there's an observation we made here,
+
+97
+00:04:39,860 --> 00:04:44,222
+which is that real humans don't do these crossfade plans.
+
+98
+00:04:44,222 --> 00:04:47,004
+This is a construct we've made up for video games
+
+99
+00:04:47,004 --> 00:04:47,704
+and I guess film too.
+
+100
+00:04:49,708 --> 00:04:52,531
+So real humans don't crossfade, but they do have inertia.
+
+101
+00:04:52,531 --> 00:04:54,633
+And an easy way of kind of picturing that is, imagine
+
+102
+00:04:54,633 --> 00:04:57,115
+that I'm waving to you, and I want to go from this waving
+
+103
+00:04:57,115 --> 00:04:59,497
+state to just having my arm down.
+
+104
+00:04:59,497 --> 00:05:03,141
+If I do a crossfade blend, then as I'm waving and I do
+
+105
+00:05:03,141 --> 00:05:06,124
+this transition, the wave kind of bleeds into the going down.
+
+106
+00:05:06,124 --> 00:05:07,285
+Real people don't do that, right?
+
+107
+00:05:07,285 --> 00:05:10,187
+And in fact, fun exercise is if you try and do this, try
+
+108
+00:05:10,187 --> 00:05:12,350
+and keep the period of the wave down while you reduce
+
+109
+00:05:12,350 --> 00:05:12,990
+its amplitude.
+
+110
+00:05:12,990 --> 00:05:13,931
+It's really hard.
+
+111
+00:05:16,906 --> 00:05:19,428
+So what would really happen is you wave,
+
+112
+00:05:19,428 --> 00:05:21,070
+and then you just bring your arm down.
+
+113
+00:05:21,070 --> 00:05:23,011
+And my arm doesn't come straight down in that case.
+
+114
+00:05:23,011 --> 00:05:25,533
+It kind of shot out because my wave was,
+
+115
+00:05:25,533 --> 00:05:27,275
+when I chose to do this transition,
+
+116
+00:05:27,275 --> 00:05:29,396
+my wave was kind of heading that way.
+
+117
+00:05:29,396 --> 00:05:31,398
+So the inertia of my hand kind of carried it down
+
+118
+00:05:31,398 --> 00:05:32,539
+and then comes down.
+
+119
+00:05:32,539 --> 00:05:36,022
+So I guess the takeaway really here is that,
+
+120
+00:05:36,022 --> 00:05:38,924
+oh, they're having a more exciting talk than us.
+
+121
+00:05:38,924 --> 00:05:42,928
+The takeaway here is that we don't blend, right?
+
+122
+00:05:42,928 --> 00:05:45,070
+We do this kind of momentum-preserving transition.
+
+123
+00:05:46,942 --> 00:05:47,802
+And so the idea we came up with is,
+
+124
+00:05:47,802 --> 00:05:50,062
+hey, let's just get rid of these transitions, right?
+
+125
+00:05:50,062 --> 00:05:52,363
+They're expensive, and then I've just kind of made this case
+
+126
+00:05:52,363 --> 00:05:53,463
+that they don't quite match reality,
+
+127
+00:05:53,463 --> 00:05:57,024
+and so we'll do that, great,
+
+128
+00:05:57,024 --> 00:05:58,804
+that solves our performance thing.
+
+129
+00:05:58,804 --> 00:06:00,564
+Right now, instead of it during the transition,
+
+130
+00:06:00,564 --> 00:06:01,585
+we're evaluating two things,
+
+131
+00:06:01,585 --> 00:06:03,365
+now we're just evaluating one thing, everything's great,
+
+132
+00:06:03,365 --> 00:06:05,265
+except, of course, we still have all these discontinuities.
+
+133
+00:06:05,265 --> 00:06:07,106
+So at the moment where we transition
+
+134
+00:06:07,106 --> 00:06:08,746
+from the source to the target,
+
+135
+00:06:08,746 --> 00:06:10,206
+we're gonna have this big pose mismatch,
+
+136
+00:06:10,206 --> 00:06:12,027
+and that's obviously not acceptable.
+
+137
+00:06:12,027 --> 00:06:14,747
+But the idea then is, can we fix these discontinuities
+
+138
+00:06:14,747 --> 00:06:16,308
+with some kind of magical post-process?
+
+139
+00:06:17,980 --> 00:06:19,785
+So that's what we're talking about,
+
+140
+00:06:19,785 --> 00:06:20,989
+is transitions as a post-process.
+
+141
+00:06:20,989 --> 00:06:24,118
+So let's make this a little bit more specific.
+
+142
+00:06:26,236 --> 00:06:28,997
+So in this picture, and I'm going to take a moment
+
+143
+00:06:28,997 --> 00:06:31,578
+to explain my notation here, because we'll
+
+144
+00:06:31,578 --> 00:06:33,459
+work with this picture for a little bit.
+
+145
+00:06:33,459 --> 00:06:35,539
+But I'm showing the blue pose, which
+
+146
+00:06:35,539 --> 00:06:37,460
+is the pose you're coming from, transitioning
+
+147
+00:06:37,460 --> 00:06:39,461
+to this gold pose.
+
+148
+00:06:39,461 --> 00:06:41,362
+The blue pose there, I've shown this blue line,
+
+149
+00:06:41,362 --> 00:06:43,102
+and it ends at the dot when we start the transition.
+
+150
+00:06:43,102 --> 00:06:44,763
+And then the gold pose is starting at this dot
+
+151
+00:06:44,763 --> 00:06:45,343
+and continuing on.
+
+152
+00:06:45,343 --> 00:06:47,624
+And you can see there's a gap between the dots, right?
+
+153
+00:06:47,624 --> 00:06:50,345
+So that's representing this pose difference
+
+154
+00:06:50,345 --> 00:06:51,205
+that we're trying to get rid of.
+
+155
+00:06:51,625 --> 00:06:54,307
+And if we just, if we look at the guy on the right
+
+156
+00:06:54,307 --> 00:06:56,168
+and we kind of look at it as an actual animation, right,
+
+157
+00:06:56,168 --> 00:06:58,570
+if we have no transition, then you just get a pop, right?
+
+158
+00:06:58,570 --> 00:07:00,551
+And that's obviously not acceptable.
+
+159
+00:07:00,551 --> 00:07:03,012
+In our game, so this is a kind of a weapon mirror transition
+
+160
+00:07:03,012 --> 00:07:04,813
+in our game, these play actually much faster
+
+161
+00:07:04,813 --> 00:07:07,555
+so that all of these videos are showing at quarter speed.
+
+162
+00:07:07,555 --> 00:07:09,876
+But anyway, you can see this discontinuity
+
+163
+00:07:09,876 --> 00:07:10,877
+and that's what we wanna solve.
+
+164
+00:07:10,877 --> 00:07:14,439
+So what we wanna do is we wanna find something
+
+165
+00:07:14,439 --> 00:07:18,322
+that's gonna fit from the old pose to the new pose
+
+166
+00:07:18,322 --> 00:07:20,243
+and be kind of smooth and continuous and pleasing.
+
+167
+00:07:21,333 --> 00:07:24,274
+and give us a result that looks kind of like the ghost image here, right?
+
+168
+00:07:24,274 --> 00:07:26,975
+So we're going from this discontinuous input
+
+169
+00:07:26,975 --> 00:07:29,776
+and then the output is this nice smooth ghost image.
+
+170
+00:07:29,776 --> 00:07:33,238
+And we identified three primary goals
+
+171
+00:07:33,238 --> 00:07:37,020
+while we were starting to think about how we could try to solve this.
+
+172
+00:07:37,020 --> 00:07:40,561
+These were kind of important rules that we didn't want to break.
+
+173
+00:07:40,561 --> 00:07:43,262
+So the first one is to respect the original animation.
+
+174
+00:07:43,262 --> 00:07:46,163
+What I mean by that is that during the transition,
+
+175
+00:07:46,163 --> 00:07:47,804
+obviously we need to change things up.
+
+176
+00:07:47,804 --> 00:07:48,945
+We know we're going to...
+
+177
+00:07:49,305 --> 00:07:52,728
+do something to make the input be continuous.
+
+178
+00:07:52,728 --> 00:07:54,210
+But when we're not transitioning,
+
+179
+00:07:54,210 --> 00:07:56,171
+we need to leave the animation exactly
+
+180
+00:07:56,171 --> 00:07:57,392
+as the animators authored it.
+
+181
+00:07:57,392 --> 00:07:59,775
+That both to kind of respect their artistry,
+
+182
+00:07:59,775 --> 00:08:01,857
+but also for a game like Gears,
+
+183
+00:08:01,857 --> 00:08:03,358
+there's important gameplay implications, right?
+
+184
+00:08:03,358 --> 00:08:05,680
+The muzzle of the gun needs to be in the right place
+
+185
+00:08:05,680 --> 00:08:07,982
+when I'm firing, otherwise if it's in the wrong place
+
+186
+00:08:07,982 --> 00:08:10,545
+while I'm moving around, then the bullets come out
+
+187
+00:08:10,545 --> 00:08:12,547
+and might hit some obstacle that I don't want it to hit.
+
+188
+00:08:14,033 --> 00:08:19,558
+Obviously we want the result to be believable and pleasing in some kind of way and really
+
+189
+00:08:19,558 --> 00:08:23,601
+we took that to mean that it should be kind of smooth and momentum preserving.
+
+190
+00:08:23,601 --> 00:08:29,726
+And this last one I call stay on model, but what I really mean here is kind of don't get
+
+191
+00:08:29,726 --> 00:08:33,870
+out of the space of poses that are your inputs.
+
+192
+00:08:36,308 --> 00:08:40,871
+An important example here and kind of the one we focus on is to eliminate overshoot, right?
+
+193
+00:08:40,871 --> 00:08:44,514
+So if I have a pose and another pose and I want to go between them,
+
+194
+00:08:44,514 --> 00:08:49,197
+I want the result to sort of, in some intuitive sense, to stay between those poses
+
+195
+00:08:49,197 --> 00:08:52,279
+and not go beyond kind of that range that they're defining,
+
+196
+00:08:52,279 --> 00:08:56,521
+because that could lead to, you know, a natural hyper extension of arms
+
+197
+00:08:56,521 --> 00:08:59,483
+or crashing through the body and other undesirable effects.
+
+198
+00:09:02,363 --> 00:09:05,664
+So our first idea, and I call this idea number zero
+
+199
+00:09:05,664 --> 00:09:07,264
+both because we didn't actually implement it,
+
+200
+00:09:07,264 --> 00:09:09,565
+but also because I'm a programmer, I count starting from zero.
+
+201
+00:09:09,565 --> 00:09:13,886
+So this first idea is that we apply a filter
+
+202
+00:09:13,886 --> 00:09:15,186
+to the output stream.
+
+203
+00:09:15,186 --> 00:09:16,506
+So you can imagine something like
+
+204
+00:09:16,506 --> 00:09:18,487
+if you have a powered ragdoll in your game,
+
+205
+00:09:18,487 --> 00:09:20,247
+your powered ragdoll could be kind of driving
+
+206
+00:09:20,247 --> 00:09:22,027
+towards all these poses.
+
+207
+00:09:22,027 --> 00:09:23,808
+During the moment of transition,
+
+208
+00:09:23,808 --> 00:09:25,168
+the poses will be discontinuous,
+
+209
+00:09:25,168 --> 00:09:28,889
+but because the powered ragdoll has limits to,
+
+210
+00:09:28,889 --> 00:09:30,069
+has a certain amount of inertia to it
+
+211
+00:09:30,069 --> 00:09:31,389
+and has limits on the drive strength.
+
+212
+00:09:31,649 --> 00:09:35,031
+then the result of the powered ragdoll will still be kind of smooth.
+
+213
+00:09:35,031 --> 00:09:37,693
+But the problem is that introduces lag, it's difficult to tune,
+
+214
+00:09:37,693 --> 00:09:41,475
+and that lag in particular is really important because then during
+
+215
+00:09:41,475 --> 00:09:44,056
+a high-speed movement, for example,
+
+216
+00:09:44,056 --> 00:09:47,178
+that isn't during a transition, so it's just animated that way,
+
+217
+00:09:47,178 --> 00:09:49,579
+the ragdoll might be lagging there and might deviate,
+
+218
+00:09:49,579 --> 00:09:51,580
+and then that kind of breaks the whole
+
+219
+00:09:51,580 --> 00:09:53,542
+respect the animation principle that we had, right?
+
+220
+00:09:53,542 --> 00:09:55,162
+So your gun might not be in the right place,
+
+221
+00:09:55,162 --> 00:09:56,783
+and it might not be matching what the artist intended.
+
+222
+00:09:58,540 --> 00:10:01,945
+So the first real idea we tried was this pretty simple idea,
+
+223
+00:10:01,945 --> 00:10:03,768
+and it's basically to blend from the,
+
+224
+00:10:03,768 --> 00:10:05,731
+or I should be careful with the use of blend here,
+
+225
+00:10:05,731 --> 00:10:09,516
+but to fade out from the pose difference
+
+226
+00:10:09,516 --> 00:10:10,758
+between the source and the target.
+
+227
+00:10:10,758 --> 00:10:13,061
+So we want to take the difference between those two poses
+
+228
+00:10:13,061 --> 00:10:14,563
+and ease that out over time.
+
+229
+00:10:15,767 --> 00:10:16,607
+Going back to our picture,
+
+230
+00:10:16,607 --> 00:10:18,368
+that gives us a graph kind of like this.
+
+231
+00:10:18,368 --> 00:10:20,770
+And you can see that the poses are continuous now.
+
+232
+00:10:20,770 --> 00:10:23,892
+So the blue line and the gold line are connected,
+
+233
+00:10:23,892 --> 00:10:27,654
+but you can see that there's a sort of a kink
+
+234
+00:10:27,654 --> 00:10:30,616
+in sort of near the where we start the transition
+
+235
+00:10:30,616 --> 00:10:32,357
+where it's not continuous and slow, right?
+
+236
+00:10:32,357 --> 00:10:33,398
+There's this velocity discontinuity.
+
+237
+00:10:33,398 --> 00:10:35,339
+And if we look at the result of that
+
+238
+00:10:35,339 --> 00:10:37,401
+in the actual character animation,
+
+239
+00:10:37,401 --> 00:10:39,582
+you can see the poses are themselves continuous.
+
+240
+00:10:39,582 --> 00:10:41,323
+So there's no frame where you see a jump,
+
+241
+00:10:41,323 --> 00:10:44,185
+but obviously you see this kind of unnatural slowing down
+
+242
+00:10:44,185 --> 00:10:45,506
+and then speeding back up.
+
+243
+00:10:45,646 --> 00:10:46,888
+of the animation, so that's no good.
+
+244
+00:10:48,811 --> 00:10:50,772
+So the second idea is kind of this natural extension
+
+245
+00:10:50,772 --> 00:10:52,514
+of the first one, which is to say, all right,
+
+246
+00:10:52,514 --> 00:10:53,574
+well, the problem with the first one
+
+247
+00:10:53,574 --> 00:10:56,316
+is that we didn't have this velocity continuity.
+
+248
+00:10:56,316 --> 00:10:57,798
+So what if we remember,
+
+249
+00:10:57,798 --> 00:11:00,740
+as well as remembering the actual pose difference,
+
+250
+00:11:00,740 --> 00:11:04,102
+we remember the velocity from the original pose.
+
+251
+00:11:04,102 --> 00:11:04,843
+And we can calculate that
+
+252
+00:11:04,843 --> 00:11:06,344
+by just doing finite differences, right?
+
+253
+00:11:06,344 --> 00:11:09,446
+We remember the previous pose and the previous pose
+
+254
+00:11:09,446 --> 00:11:10,627
+and take the difference between those,
+
+255
+00:11:10,627 --> 00:11:12,548
+divide by time, that gives us our velocity.
+
+256
+00:11:12,548 --> 00:11:14,510
+And so then this curve we're gonna fit
+
+257
+00:11:14,510 --> 00:11:16,391
+is gonna match not only the difference,
+
+258
+00:11:16,391 --> 00:11:17,972
+but match this initial velocity.
+
+259
+00:11:19,163 --> 00:11:22,444
+So when we tried this, we chose to use a fifth order polynomial
+
+260
+00:11:22,444 --> 00:11:24,625
+as this curve we're going to interpolate.
+
+261
+00:11:24,625 --> 00:11:26,706
+And we kind of drew that from some biomedical literature
+
+262
+00:11:26,706 --> 00:11:28,987
+where they basically observed that when people were moving,
+
+263
+00:11:28,987 --> 00:11:31,549
+they tended to move this way.
+
+264
+00:11:31,549 --> 00:11:35,110
+And that gets us something that's smooth.
+
+265
+00:11:35,110 --> 00:11:36,931
+And it ends up where we want it to end up.
+
+266
+00:11:36,931 --> 00:11:37,411
+So that's great.
+
+267
+00:11:37,411 --> 00:11:41,413
+But as you can see, it dips below that zero line there.
+
+268
+00:11:41,413 --> 00:11:42,694
+And that's overshoot.
+
+269
+00:11:42,694 --> 00:11:44,495
+And when we look at the actual animated result,
+
+270
+00:11:45,984 --> 00:11:48,568
+we see that the gun dips way down before coming back up.
+
+271
+00:11:48,568 --> 00:11:51,173
+So again, better than what we had,
+
+272
+00:11:51,173 --> 00:11:55,401
+but it has this overshoot, and we don't want to do that.
+
+273
+00:11:56,868 --> 00:11:58,949
+So then we took that idea a bit further and we said,
+
+274
+00:11:58,949 --> 00:12:02,451
+okay, well can we do something to limit that overshoot?
+
+275
+00:12:02,451 --> 00:12:04,232
+And the interesting thing about the fact that earlier
+
+276
+00:12:04,232 --> 00:12:06,294
+we used this sort of fifth order polynomial
+
+277
+00:12:06,294 --> 00:12:10,096
+was that we have an extra degree of freedom to play with.
+
+278
+00:12:10,096 --> 00:12:11,717
+We've got this acceleration term now
+
+279
+00:12:11,717 --> 00:12:14,819
+that we can pick to be whatever we want.
+
+280
+00:12:14,819 --> 00:12:17,300
+And in the previous idea, we simply said the acceleration
+
+281
+00:12:17,300 --> 00:12:19,022
+to be, the initial acceleration to be zero
+
+282
+00:12:19,022 --> 00:12:20,122
+and that kind of gives us something
+
+283
+00:12:20,122 --> 00:12:22,083
+like a smoother step, right?
+
+284
+00:12:23,322 --> 00:12:25,882
+But we can make a different choice for that,
+
+285
+00:12:25,882 --> 00:12:28,563
+and what we experimented with was this idea
+
+286
+00:12:28,563 --> 00:12:32,204
+of setting the initial acceleration, so a zero there,
+
+287
+00:12:32,204 --> 00:12:34,225
+to kind of resist overshoot,
+
+288
+00:12:34,225 --> 00:12:37,846
+and basically by setting it to give a zero jerk at the end.
+
+289
+00:12:37,846 --> 00:12:40,547
+And jerk is the derivative of acceleration,
+
+290
+00:12:40,547 --> 00:12:43,048
+so it's the rate of change of acceleration.
+
+291
+00:12:43,048 --> 00:12:47,889
+So when we tried that, we got a pretty good result.
+
+292
+00:12:47,889 --> 00:12:49,450
+And when we look at that in motion.
+
+293
+00:12:52,964 --> 00:12:55,005
+We get that.
+
+294
+00:12:55,005 --> 00:12:59,650
+So that worked out pretty well, and we made up a name for that.
+
+295
+00:12:59,650 --> 00:13:03,373
+So we call it inertialization because it preserves inertia
+
+296
+00:13:03,373 --> 00:13:05,815
+of the incoming motion, and because I like
+
+297
+00:13:05,815 --> 00:13:08,097
+making up new words for things.
+
+298
+00:13:08,097 --> 00:13:09,459
+My phone now, when it autocorrects,
+
+299
+00:13:09,459 --> 00:13:11,220
+it knows that word because I use it enough.
+
+300
+00:13:13,447 --> 00:13:16,712
+So let's look a bit more into the details of initialization
+
+301
+00:13:16,712 --> 00:13:18,676
+and sort of start to build up this curve
+
+302
+00:13:18,676 --> 00:13:21,280
+kind of in a more formal mathematical sense.
+
+303
+00:13:21,280 --> 00:13:23,925
+So we want to construct this fifth order curve
+
+304
+00:13:23,925 --> 00:13:25,467
+that's gonna kind of go between the blue dot
+
+305
+00:13:25,467 --> 00:13:27,090
+and the yellow dot there.
+
+306
+00:13:28,198 --> 00:13:31,140
+We know that at the end of our curve,
+
+307
+00:13:31,140 --> 00:13:36,083
+because we're adding this curve onto the target pose,
+
+308
+00:13:36,083 --> 00:13:37,965
+what we're doing to the curve itself
+
+309
+00:13:37,965 --> 00:13:39,826
+is we're basically driving it to zero.
+
+310
+00:13:39,826 --> 00:13:43,348
+So we want the final conditions of the curve to be that the.
+
+311
+00:13:44,588 --> 00:13:46,369
+the actual curve itself is at zero,
+
+312
+00:13:46,369 --> 00:13:48,751
+its velocity is zero, and also its acceleration is zero
+
+313
+00:13:48,751 --> 00:13:52,332
+so that it's kind of this smooth saddle.
+
+314
+00:13:52,332 --> 00:13:54,193
+At the beginning, we know we want to capture
+
+315
+00:13:54,193 --> 00:13:55,934
+our pose difference, so kind of worried
+
+316
+00:13:55,934 --> 00:13:58,096
+about my notation here, but basically blue guy, right,
+
+317
+00:13:58,096 --> 00:13:59,516
+is our old pose, and I've kind of shown him
+
+318
+00:13:59,516 --> 00:14:01,877
+as blue guy minus one, meaning he's the first
+
+319
+00:14:01,877 --> 00:14:05,079
+previous pose, and then sort of gold guy
+
+320
+00:14:05,079 --> 00:14:07,300
+is our initial target pose.
+
+321
+00:14:07,300 --> 00:14:09,181
+So we capture that pose difference.
+
+322
+00:14:11,015 --> 00:14:13,296
+As I said, we also want to capture the velocity difference,
+
+323
+00:14:13,296 --> 00:14:17,179
+so we do that by taking the difference between the two poses.
+
+324
+00:14:17,179 --> 00:14:21,542
+And through all of this, I'm kind of explaining it in terms of
+
+325
+00:14:21,542 --> 00:14:25,705
+sort of a single scalar value, right, a single floating point value.
+
+326
+00:14:25,705 --> 00:14:30,228
+A bit later in the talk, I'll get into how do we generalize this to vectors and quaternions,
+
+327
+00:14:30,228 --> 00:14:34,631
+because obviously we want to use this on character joints.
+
+328
+00:14:34,631 --> 00:14:37,153
+So we compute our velocity there with finite differences.
+
+329
+00:14:37,153 --> 00:14:38,134
+If...
+
+330
+00:14:39,803 --> 00:14:44,587
+I should mention too that for here I'm always showing X0 as being positive,
+
+331
+00:14:44,587 --> 00:14:46,428
+just to keep the explanation simple.
+
+332
+00:14:46,428 --> 00:14:49,750
+Obviously if it was negative you could just flip everything over,
+
+333
+00:14:49,750 --> 00:14:52,572
+so you could negate all the inputs and negate all the outputs
+
+334
+00:14:52,572 --> 00:14:54,394
+and you get the same result.
+
+335
+00:14:54,394 --> 00:14:57,196
+So to keep the explanation simple, I'm going to say from here on out
+
+336
+00:14:57,196 --> 00:14:58,857
+that X0 we assume to be positive.
+
+337
+00:14:59,998 --> 00:15:03,261
+For the velocity, so if the velocity coming in is negative,
+
+338
+00:15:03,261 --> 00:15:05,142
+great, that's basically what I've shown here, right?
+
+339
+00:15:05,142 --> 00:15:06,463
+It's heading towards zero.
+
+340
+00:15:06,463 --> 00:15:09,685
+If the velocity is positive, it's heading away
+
+341
+00:15:09,685 --> 00:15:11,026
+from the pose that we're trying to get to,
+
+342
+00:15:11,026 --> 00:15:12,947
+and that would cause overshoot,
+
+343
+00:15:12,947 --> 00:15:15,508
+or actually would cause undershoot.
+
+344
+00:15:15,508 --> 00:15:17,550
+So we don't want that, and so in that situation,
+
+345
+00:15:17,550 --> 00:15:19,531
+we just clamp the velocity to be zero.
+
+346
+00:15:19,531 --> 00:15:21,172
+Now that obviously gives us a bit
+
+347
+00:15:21,172 --> 00:15:23,854
+of a velocity discontinuity in that case,
+
+348
+00:15:23,854 --> 00:15:25,515
+but we prefer that over overshoot
+
+349
+00:15:25,515 --> 00:15:26,856
+because we don't want to end up sort of crashing
+
+350
+00:15:26,856 --> 00:15:28,897
+through the model or breaking joints or anything like that.
+
+351
+00:15:29,678 --> 00:15:32,121
+So if the velocity is positive, we set it to zero.
+
+352
+00:15:32,121 --> 00:15:33,382
+If it's negative, we just use the expression
+
+353
+00:15:33,382 --> 00:15:34,243
+that I've shown there.
+
+354
+00:15:34,243 --> 00:15:38,808
+We then compute our initial acceleration,
+
+355
+00:15:38,808 --> 00:15:40,810
+and this is basically the equation
+
+356
+00:15:40,810 --> 00:15:42,251
+to give you your initial acceleration
+
+357
+00:15:42,251 --> 00:15:46,335
+such that, as I mentioned, the jerk is zero
+
+358
+00:15:46,335 --> 00:15:49,899
+at the end there.
+
+359
+00:15:51,237 --> 00:15:58,403
+So this acceleration is to resist the situation where the velocity is heading down too aggressively,
+
+360
+00:15:58,403 --> 00:16:01,305
+too quickly towards the zero line.
+
+361
+00:16:01,305 --> 00:16:07,070
+So intuitively, that means we want our acceleration to be positive, because it's fighting this
+
+362
+00:16:07,070 --> 00:16:08,591
+incoming negative velocity.
+
+363
+00:16:08,591 --> 00:16:12,494
+If the acceleration ends up being negative, then...
+
+364
+00:16:13,607 --> 00:16:15,709
+So the way to think about that is that the math has worked out
+
+365
+00:16:15,709 --> 00:16:16,990
+that we're kind of helping our velocity,
+
+366
+00:16:16,990 --> 00:16:18,271
+and we don't really need to do that, right?
+
+367
+00:16:18,271 --> 00:16:20,672
+The whole idea is to kind of resist the motion.
+
+368
+00:16:20,672 --> 00:16:24,475
+So in that situation, we just set the acceleration to be zero.
+
+369
+00:16:24,475 --> 00:16:28,238
+All right, so velocity, always negative,
+
+370
+00:16:28,238 --> 00:16:29,219
+acceleration, always positive.
+
+371
+00:16:29,219 --> 00:16:31,380
+So once we have all of these things,
+
+372
+00:16:31,380 --> 00:16:34,102
+now we basically have our initial conditions
+
+373
+00:16:34,102 --> 00:16:35,463
+and our ending conditions,
+
+374
+00:16:35,463 --> 00:16:37,164
+and we're gonna kind of fit this
+
+375
+00:16:37,164 --> 00:16:40,187
+to this fifth order polynomial.
+
+376
+00:16:40,187 --> 00:16:41,728
+Just plug that into your favorite math package.
+
+377
+00:16:42,778 --> 00:16:44,378
+and you end up with this.
+
+378
+00:16:44,378 --> 00:16:46,379
+And so really, the key thing here, right,
+
+379
+00:16:46,379 --> 00:16:48,299
+is that at the bottom right,
+
+380
+00:16:48,299 --> 00:16:50,480
+we see this kind of equation for XT, right?
+
+381
+00:16:50,480 --> 00:16:54,261
+So that's gonna tell us what is the value of X over time,
+
+382
+00:16:54,261 --> 00:16:58,082
+and we're gonna add that onto our target pose as we're going
+
+383
+00:16:58,082 --> 00:17:00,103
+and that'll kind of get us our continuity.
+
+384
+00:17:00,103 --> 00:17:00,583
+So, so far so good,
+
+385
+00:17:00,583 --> 00:17:06,005
+but I'm gonna come back to overshoot for a moment.
+
+386
+00:17:09,008 --> 00:17:11,528
+For all the examples that I've used so far,
+
+387
+00:17:11,528 --> 00:17:13,509
+they're actually taken from real data from our game.
+
+388
+00:17:13,509 --> 00:17:15,309
+So the animation that I was showing there
+
+389
+00:17:15,309 --> 00:17:17,670
+is sort of this mirror transition
+
+390
+00:17:17,670 --> 00:17:18,970
+from a right-handed weapon grip
+
+391
+00:17:18,970 --> 00:17:20,490
+to a left-handed weapon grip,
+
+392
+00:17:20,490 --> 00:17:22,791
+transitioning to our idle stance.
+
+393
+00:17:22,791 --> 00:17:25,571
+And for the particular joint that I'm showing,
+
+394
+00:17:25,571 --> 00:17:27,912
+the actual values are kind of this 1.2
+
+395
+00:17:27,912 --> 00:17:28,792
+and a velocity of negative 12.6,
+
+396
+00:17:28,792 --> 00:17:30,132
+and we have a spline of 0.5,
+
+397
+00:17:30,132 --> 00:17:32,553
+and that gives the curve that I'm showing.
+
+398
+00:17:32,553 --> 00:17:33,873
+So those are all kind of real values.
+
+399
+00:17:34,614 --> 00:17:36,035
+But what happens if we push things further, right?
+
+400
+00:17:36,035 --> 00:17:37,055
+What happens if we say,
+
+401
+00:17:37,055 --> 00:17:39,097
+let's make this velocity ridiculous, right?
+
+402
+00:17:39,097 --> 00:17:41,578
+Let's play the initial animation even faster
+
+403
+00:17:41,578 --> 00:17:42,219
+and see what happens.
+
+404
+00:17:42,219 --> 00:17:42,999
+Does it still hold up?
+
+405
+00:17:42,999 --> 00:17:47,703
+And unfortunately, the answer is no.
+
+406
+00:17:47,703 --> 00:17:49,044
+So we get back to having overshoot.
+
+407
+00:17:49,044 --> 00:17:52,126
+Now in practice, this almost never happens for us.
+
+408
+00:17:52,126 --> 00:17:54,487
+So we could have stopped here
+
+409
+00:17:54,487 --> 00:17:56,149
+and I think we would have been fine.
+
+410
+00:17:56,149 --> 00:17:58,090
+But we really wanted to enforce this guarantee
+
+411
+00:17:58,090 --> 00:18:00,171
+of no overshoot just so that we knew we were always safe.
+
+412
+00:18:00,171 --> 00:18:01,732
+And then if we wanted to tune some animations
+
+413
+00:18:01,732 --> 00:18:03,113
+to play hyper fast.
+
+414
+00:18:03,737 --> 00:18:05,558
+that we'd be okay.
+
+415
+00:18:05,558 --> 00:18:06,398
+Not just hyperfast, too.
+
+416
+00:18:06,398 --> 00:18:09,439
+If we have a really long blend time,
+
+417
+00:18:09,439 --> 00:18:12,039
+then to hit kind of that zero mark,
+
+418
+00:18:12,039 --> 00:18:13,820
+it's gonna go further, right?
+
+419
+00:18:13,820 --> 00:18:15,560
+It's got kind of more time to kill,
+
+420
+00:18:15,560 --> 00:18:17,541
+so it's gotta do something in between,
+
+421
+00:18:17,541 --> 00:18:18,841
+and so it's gonna dip below.
+
+422
+00:18:18,841 --> 00:18:22,482
+And that idea actually there of that it relates to time
+
+423
+00:18:22,482 --> 00:18:25,103
+is important because that's actually how we fixed it,
+
+424
+00:18:25,103 --> 00:18:29,324
+is we say if we're gonna get in one of these situations
+
+425
+00:18:29,324 --> 00:18:30,664
+where it's still gonna overshoot
+
+426
+00:18:30,664 --> 00:18:32,585
+even after all the other work we've done.
+
+427
+00:18:33,450 --> 00:18:37,114
+We're gonna take the time and we're just gonna kinda nudge it
+
+428
+00:18:37,114 --> 00:18:38,335
+to the point where that doesn't happen.
+
+429
+00:18:38,335 --> 00:18:41,478
+And so then that solves all of our cases
+
+430
+00:18:41,478 --> 00:18:44,220
+and you can even kind of picture this limit case
+
+431
+00:18:44,220 --> 00:18:47,343
+where if the incoming velocity is negative infinity,
+
+432
+00:18:47,343 --> 00:18:49,124
+well it's coming straight down,
+
+433
+00:18:49,124 --> 00:18:50,546
+but if you set your time to zero,
+
+434
+00:18:50,546 --> 00:18:52,427
+sure you're gonna slam into your target,
+
+435
+00:18:52,427 --> 00:18:55,150
+but you won't overshoot and so that's really important.
+
+436
+00:18:56,232 --> 00:18:57,793
+So how did I come up with that 0.3 in this slide?
+
+437
+00:18:57,793 --> 00:19:00,315
+So I won't actually get too much into the math.
+
+438
+00:19:00,315 --> 00:19:04,257
+I'll just give you the answer, which is basically that.
+
+439
+00:19:04,257 --> 00:19:07,500
+So we take the original requested time,
+
+440
+00:19:07,500 --> 00:19:11,082
+and we're going to take the lower of that,
+
+441
+00:19:11,082 --> 00:19:14,045
+or this negative 5 x0 over v0.
+
+442
+00:19:16,267 --> 00:19:20,208
+Just to give you a bit of a quick hand-wavy explanation so you sort of believe me,
+
+443
+00:19:20,208 --> 00:19:22,528
+I mean, other than it does work, but
+
+444
+00:19:22,528 --> 00:19:25,549
+it is really, I'm setting the
+
+445
+00:19:25,549 --> 00:19:25,649
+uh...
+
+446
+00:19:25,649 --> 00:19:28,990
+I'm setting all of the routes to kind of happen at that time. So I'm figuring out what is the
+
+447
+00:19:28,990 --> 00:19:29,490
+time
+
+448
+00:19:29,490 --> 00:19:32,211
+where they all kind of cross zero and then basically using that.
+
+449
+00:19:32,211 --> 00:19:36,512
+And then I kind of feed that back in. So you actually do that step first
+
+450
+00:19:36,512 --> 00:19:38,393
+and then you go back and you compute
+
+451
+00:19:38,393 --> 00:19:39,393
+all of your initial acceleration.
+
+452
+00:19:41,220 --> 00:19:43,081
+So here's where you want to pull out your cameras,
+
+453
+00:19:43,081 --> 00:19:44,502
+take a picture of this.
+
+454
+00:19:44,502 --> 00:19:46,983
+This is basically all of the math on one slide.
+
+455
+00:19:46,983 --> 00:19:49,584
+And really the order of steps here
+
+456
+00:19:49,584 --> 00:19:51,384
+is you're going to take your X zero and your V zero,
+
+457
+00:19:51,384 --> 00:19:56,446
+you can then use that to figure out your adjusted time, T one,
+
+458
+00:19:56,446 --> 00:19:57,647
+plug that in to get your A zero.
+
+459
+00:19:57,647 --> 00:20:00,468
+Obviously remembering all of the or zero parts, right?
+
+460
+00:20:00,468 --> 00:20:01,588
+We want our V zero to be negative,
+
+461
+00:20:01,588 --> 00:20:02,489
+our A zero to be positive.
+
+462
+00:20:02,489 --> 00:20:04,690
+And then you're going to evaluate it
+
+463
+00:20:04,690 --> 00:20:06,190
+with the stuff on the right hand side.
+
+464
+00:20:06,968 --> 00:20:13,731
+So that's really the construction for a single floating point value, or a single scalar value.
+
+465
+00:20:13,731 --> 00:20:15,091
+Now let's talk about vectors and quaternions.
+
+466
+00:20:15,091 --> 00:20:21,113
+So we represent all of our joints with their translation as a vector and their rotation as quaternions.
+
+467
+00:20:21,113 --> 00:20:27,195
+We don't currently actually initialize scale, but if you were you could just do it as a vector as well.
+
+468
+00:20:28,423 --> 00:20:31,005
+So let's start with talking about vectors.
+
+469
+00:20:31,005 --> 00:20:32,526
+So the obvious choice with vectors, right,
+
+470
+00:20:32,526 --> 00:20:33,687
+it's pretty easy, you say, oh, okay,
+
+471
+00:20:33,687 --> 00:20:35,067
+I'm gonna take my X, Y, and Z,
+
+472
+00:20:35,067 --> 00:20:37,169
+and I'll just initialize each of them independently,
+
+473
+00:20:37,169 --> 00:20:39,110
+and there we go, I'm done.
+
+474
+00:20:39,494 --> 00:20:41,955
+that turns out to actually not be very good,
+
+475
+00:20:41,955 --> 00:20:43,375
+not give very good results.
+
+476
+00:20:43,375 --> 00:20:45,576
+And the reason for that is because
+
+477
+00:20:45,576 --> 00:20:47,436
+we're potentially gonna be messing with time.
+
+478
+00:20:47,436 --> 00:20:51,858
+And so if one of the axes is kind of approaching
+
+479
+00:20:51,858 --> 00:20:53,718
+very quickly and the other ones aren't,
+
+480
+00:20:53,718 --> 00:20:55,759
+then we're gonna adjust time for one of these
+
+481
+00:20:55,759 --> 00:20:56,479
+but not for the others.
+
+482
+00:20:56,479 --> 00:20:57,780
+And so you're gonna get this case
+
+483
+00:20:57,780 --> 00:20:59,960
+where one axis now completes before the other one
+
+484
+00:20:59,960 --> 00:21:01,681
+and you kind of get this unnatural motion.
+
+485
+00:21:02,808 --> 00:21:04,309
+And a different intuition about it too
+
+486
+00:21:04,309 --> 00:21:06,970
+is that we don't really want to kind of have any preference
+
+487
+00:21:06,970 --> 00:21:09,471
+for any particular set of axes, right?
+
+488
+00:21:09,471 --> 00:21:12,232
+The choice of coordinate frame ideally shouldn't matter,
+
+489
+00:21:12,232 --> 00:21:14,233
+so the fact that it would show up
+
+490
+00:21:14,233 --> 00:21:16,934
+in kind of this first formulation is not something we want.
+
+491
+00:21:17,795 --> 00:21:20,096
+So instead what we do is we observe that
+
+492
+00:21:20,096 --> 00:21:22,658
+what we're really trying to do is eliminate
+
+493
+00:21:22,658 --> 00:21:23,879
+this difference between poses.
+
+494
+00:21:23,879 --> 00:21:25,960
+And you can think of the difference in two parts.
+
+495
+00:21:25,960 --> 00:21:29,623
+There's a direction part to it and a magnitude part.
+
+496
+00:21:29,623 --> 00:21:31,064
+The direction is constant.
+
+497
+00:21:31,064 --> 00:21:33,786
+The magnitude is the part that we want to eliminate.
+
+498
+00:21:33,786 --> 00:21:37,228
+Once we get the magnitude to zero, then we're good.
+
+499
+00:21:37,228 --> 00:21:38,929
+So that's really what our approach is.
+
+500
+00:21:38,929 --> 00:21:41,090
+We decompose our vector into direction and magnitude,
+
+501
+00:21:41,090 --> 00:21:44,593
+and then we just initialize the magnitude away.
+
+502
+00:21:44,593 --> 00:21:46,374
+So let's dive into that in a bit more detail.
+
+503
+00:21:47,729 --> 00:21:52,452
+So we start off, and again I'm kind of continuing with my pictorial notation here,
+
+504
+00:21:52,452 --> 00:21:56,534
+we start off by taking the x0 as kind of this initial pose difference,
+
+505
+00:21:56,534 --> 00:22:01,576
+so we capture that from our target pose versus the previous pose.
+
+506
+00:22:01,576 --> 00:22:03,697
+We know we're going to want to compute our velocity,
+
+507
+00:22:03,697 --> 00:22:06,459
+so we're going to need kind of this previous, this x-1,
+
+508
+00:22:06,459 --> 00:22:08,940
+so we're going to compute that that way,
+
+509
+00:22:08,940 --> 00:22:11,761
+where we look at the previous previous pose versus our target pose.
+
+510
+00:22:13,943 --> 00:22:18,969
+And then we're going to do this decomposition where we're going to take that vector quantity
+
+511
+00:22:18,969 --> 00:22:24,815
+and we're going to decompose it into its direction, its unit direction, and its magnitude.
+
+512
+00:22:24,815 --> 00:22:28,900
+So here I'm showing x0 without the arrow is the magnitude, right?
+
+513
+00:22:28,900 --> 00:22:31,403
+Where I'm just taking the magnitude of the vector.
+
+514
+00:22:32,192 --> 00:22:34,695
+Now, an obvious choice for how to do that for x minus 1
+
+515
+00:22:34,695 --> 00:22:37,518
+would be to kind of repeat that same operation, right?
+
+516
+00:22:37,518 --> 00:22:39,721
+Just decompose x minus 1 into its direction and magnitude.
+
+517
+00:22:39,721 --> 00:22:43,566
+But that's actually not quite right in a bit of a subtle way
+
+518
+00:22:43,566 --> 00:22:45,768
+because what's important for x minus 1
+
+519
+00:22:45,768 --> 00:22:47,851
+and for our velocity calculation isn't
+
+520
+00:22:48,452 --> 00:22:50,694
+the velocity in kind of an absolute sense,
+
+521
+00:22:50,694 --> 00:22:53,717
+but it's the velocity along the same direction
+
+522
+00:22:53,717 --> 00:22:55,419
+that I'm amortizing away, right?
+
+523
+00:22:55,419 --> 00:22:56,821
+That's the difference that I want to get.
+
+524
+00:22:56,821 --> 00:23:00,004
+So really what I want to do is a projection.
+
+525
+00:23:00,004 --> 00:23:03,328
+So I'm going to take the x minus one vector
+
+526
+00:23:03,328 --> 00:23:06,411
+and I'm going to project it onto this kind of unit vector
+
+527
+00:23:06,411 --> 00:23:07,592
+in that same direction.
+
+528
+00:23:07,993 --> 00:23:11,235
+and get the magnitude along the lines of that direction.
+
+529
+00:23:11,235 --> 00:23:14,958
+So that means that if x minus one were not lined up,
+
+530
+00:23:14,958 --> 00:23:18,661
+sort of the difference of x minus one were not lined up
+
+531
+00:23:18,661 --> 00:23:20,242
+with the difference of x minus zero,
+
+532
+00:23:20,242 --> 00:23:22,804
+then I only care about the part that's in the same line
+
+533
+00:23:22,804 --> 00:23:25,726
+because that's what I'm gonna be adding back to my pose.
+
+534
+00:23:25,726 --> 00:23:28,769
+We then compute the velocity from finite differences,
+
+535
+00:23:28,769 --> 00:23:29,850
+which is pretty simple.
+
+536
+00:23:29,850 --> 00:23:32,171
+It's just take the difference between the two values.
+
+537
+00:23:32,171 --> 00:23:34,994
+And now we're dealing with scalars, so this is really easy.
+
+538
+00:23:34,994 --> 00:23:36,975
+And of course, divided by our delta time.
+
+539
+00:23:38,885 --> 00:23:43,008
+And then every frame, we're going to add that back onto our target pose.
+
+540
+00:23:43,008 --> 00:23:50,313
+So we're going to basically say that the vector result of this calculation
+
+541
+00:23:50,313 --> 00:23:53,776
+is the scalar XT projected back onto this direction vector that we remembered from the beginning.
+
+542
+00:23:53,776 --> 00:23:56,998
+And we do, for us, we do all of this in local space,
+
+543
+00:23:56,998 --> 00:23:59,480
+but really, just like with a traditional blend,
+
+544
+00:23:59,480 --> 00:24:04,384
+you can sort of choose your spaces to give you different kind of effects that you might want.
+
+545
+00:24:06,145 --> 00:24:10,069
+When we look at quaternions, it's a pretty similar construction.
+
+546
+00:24:10,069 --> 00:24:13,873
+Rather than decomposing onto kind of a direction and a magnitude,
+
+547
+00:24:13,873 --> 00:24:18,818
+we're going to decompose a quaternion onto the axis of rotation and its angle,
+
+548
+00:24:18,818 --> 00:24:20,440
+and then we can just initialize the angle.
+
+549
+00:24:20,440 --> 00:24:24,604
+That's, again, a scalar quantity, right?
+
+550
+00:24:24,604 --> 00:24:28,107
+Similar construction to before, except now we're using quaternion math.
+
+551
+00:24:31,306 --> 00:24:36,994
+we're going to take our quaternion and we're going to extract its axis and we're going
+
+552
+00:24:36,994 --> 00:24:41,340
+to kind of remember that as our arrow X zero and we're going to then...
+
+553
+00:24:42,190 --> 00:24:47,355
+to extract the angle and remember that as our actual initial x0 that we're going to
+
+554
+00:24:47,355 --> 00:24:49,197
+apply the initialization math to.
+
+555
+00:24:49,197 --> 00:24:54,401
+And just like with vectors where I was saying we needed to project to be onto the same direction,
+
+556
+00:24:54,401 --> 00:24:57,244
+we want to do the same thing for quaternions too.
+
+557
+00:24:57,244 --> 00:25:03,810
+So in this case what we want is we want to find the angle around that same rotation axis.
+
+558
+00:25:05,332 --> 00:25:08,253
+So the math behind that's tricky.
+
+559
+00:25:08,253 --> 00:25:11,475
+Fortunately, smarter people than me have figured it out.
+
+560
+00:25:11,475 --> 00:25:14,056
+This particular one comes from a paper from Ken Shumake
+
+561
+00:25:14,056 --> 00:25:14,656
+from way back in 94.
+
+562
+00:25:14,656 --> 00:25:17,377
+If you're interested more kind of how to do these,
+
+563
+00:25:17,377 --> 00:25:19,638
+this is called swing-twist decomposition.
+
+564
+00:25:19,638 --> 00:25:22,599
+So you can just Google or Bing, I guess,
+
+565
+00:25:22,599 --> 00:25:24,120
+for swing-twist decomposition.
+
+566
+00:25:27,630 --> 00:25:30,773
+And then now we're back and sort of working with scalars,
+
+567
+00:25:30,773 --> 00:25:33,115
+so we can compute our velocity from finite differences
+
+568
+00:25:33,115 --> 00:25:33,895
+as before.
+
+569
+00:25:33,895 --> 00:25:39,039
+And then when we apply this back to our output pose,
+
+570
+00:25:39,039 --> 00:25:43,943
+we're going to take that kind of inertialized scalar value,
+
+571
+00:25:43,943 --> 00:25:47,606
+and we're going to take the axis that we remembered,
+
+572
+00:25:47,606 --> 00:25:51,770
+construct a quaternion from sort of axis and angle construction,
+
+573
+00:25:51,770 --> 00:25:54,412
+and then layer that onto the original pose,
+
+574
+00:25:54,412 --> 00:25:55,713
+so the original unfiltered pose.
+
+575
+00:25:58,809 --> 00:26:00,956
+catch my breath after a bunch of math,
+
+576
+00:26:00,956 --> 00:26:04,245
+and then we can move on to a comparison
+
+577
+00:26:04,245 --> 00:26:05,971
+of blending versus initialization
+
+578
+00:26:05,971 --> 00:26:06,913
+in some of the properties.
+
+579
+00:26:12,683 --> 00:26:14,765
+So when we look at, this is kind of a recap
+
+580
+00:26:14,765 --> 00:26:16,306
+of a bit of how I started the talk,
+
+581
+00:26:16,306 --> 00:26:17,567
+but when we compare blending,
+
+582
+00:26:17,567 --> 00:26:19,127
+traditional kind of crossfade blending
+
+583
+00:26:19,127 --> 00:26:21,929
+versus initialization, right, with crossfade blending,
+
+584
+00:26:21,929 --> 00:26:24,151
+we're evaluating both the source and target
+
+585
+00:26:24,151 --> 00:26:26,452
+during the transition, and as I mentioned,
+
+586
+00:26:26,452 --> 00:26:29,554
+kind of making the case for this, that's expensive, right?
+
+587
+00:26:29,554 --> 00:26:31,255
+It gives us this variable frame cost,
+
+588
+00:26:31,255 --> 00:26:33,436
+and because we are working with these fixed budgets,
+
+589
+00:26:33,436 --> 00:26:34,957
+we need to kind of accommodate for that,
+
+590
+00:26:34,957 --> 00:26:35,658
+so we end up.
+
+591
+00:26:35,969 --> 00:26:39,757
+in the cases where we're not transitioning, having all of this kind of wasted room
+
+592
+00:26:39,757 --> 00:26:42,182
+because we had to accommodate the case where we are transitioning. And that's
+
+593
+00:26:42,182 --> 00:26:44,126
+really because the source and target are both expensive.
+
+594
+00:26:44,864 --> 00:26:47,445
+with inertialization, we're only evaluating the target
+
+595
+00:26:47,445 --> 00:26:49,386
+during the transition, as well as, of course,
+
+596
+00:26:49,386 --> 00:26:52,688
+the actual inertialization math, but that's pretty cheap.
+
+597
+00:26:52,688 --> 00:26:56,169
+So the cost of any given frame is fixed.
+
+598
+00:26:56,169 --> 00:26:57,710
+It doesn't matter if we're transitioning or not.
+
+599
+00:26:57,710 --> 00:27:00,291
+And that's this huge advantage, because now,
+
+600
+00:27:00,291 --> 00:27:02,712
+we can kind of use up our full buffer without really,
+
+601
+00:27:02,712 --> 00:27:04,653
+you know, our full budget, I should say,
+
+602
+00:27:04,653 --> 00:27:06,954
+without really needing to give us much headroom
+
+603
+00:27:06,954 --> 00:27:09,495
+to allow for transitions, because during transitions,
+
+604
+00:27:09,495 --> 00:27:12,136
+it costs the same as when we're not transitioning.
+
+605
+00:27:12,136 --> 00:27:14,157
+There's some other advantages, too.
+
+606
+00:27:15,621 --> 00:27:21,582
+when with a traditional blend during the actual or sort of traditional crossfade blend during the actual crossfade
+
+607
+00:27:22,721 --> 00:27:25,122
+we're evaluating both of these states at once.
+
+608
+00:27:25,122 --> 00:27:26,962
+If those are parametric states,
+
+609
+00:27:26,962 --> 00:27:30,303
+so say we're driving a gun angle or a head look at target,
+
+610
+00:27:30,303 --> 00:27:32,104
+we have to be driving that still
+
+611
+00:27:32,104 --> 00:27:33,745
+for both the source and the target.
+
+612
+00:27:33,745 --> 00:27:35,405
+And sometimes that can get really tricky,
+
+613
+00:27:35,405 --> 00:27:38,026
+especially if the thing that we were using
+
+614
+00:27:38,026 --> 00:27:40,367
+to drive the source is no longer meaningful.
+
+615
+00:27:40,367 --> 00:27:44,188
+So for example, let's say I'm doing my head look at
+
+616
+00:27:44,188 --> 00:27:47,309
+and the thing that I was looking at with my head
+
+617
+00:27:47,309 --> 00:27:50,150
+ceases to exist or I no longer wish to look at it.
+
+618
+00:27:50,150 --> 00:27:50,870
+Well.
+
+619
+00:27:51,330 --> 00:27:55,071
+I can't just stop driving that if I'm feeding the source,
+
+620
+00:27:55,071 --> 00:27:56,392
+something has to go into there
+
+621
+00:27:56,392 --> 00:27:57,912
+if it's this parametric animation,
+
+622
+00:27:57,912 --> 00:28:01,653
+so I have to maybe do tricks to remember where it was
+
+623
+00:28:01,653 --> 00:28:03,154
+and kind of always have these last values
+
+624
+00:28:03,154 --> 00:28:04,814
+and keep kind of plugging that in.
+
+625
+00:28:04,814 --> 00:28:07,155
+So it's a lot of complexity in bookkeeping.
+
+626
+00:28:07,155 --> 00:28:09,436
+With inertialization, I just don't worry about it.
+
+627
+00:28:09,436 --> 00:28:10,736
+I say, okay, well, the thing you're looking at
+
+628
+00:28:10,736 --> 00:28:12,336
+is not there anymore, so I'm gonna take you out
+
+629
+00:28:12,336 --> 00:28:14,637
+of the looking at things state
+
+630
+00:28:14,637 --> 00:28:16,578
+and I'm gonna transition you to this new state
+
+631
+00:28:16,578 --> 00:28:17,258
+and I don't worry about it
+
+632
+00:28:17,258 --> 00:28:19,578
+because you're not evaluating the source anymore.
+
+633
+00:28:21,592 --> 00:28:25,174
+And of course there's this qualitative difference,
+
+634
+00:28:25,174 --> 00:28:26,815
+and this is kind of what I was miming
+
+635
+00:28:26,815 --> 00:28:28,617
+a little bit earlier in the talk,
+
+636
+00:28:28,617 --> 00:28:30,238
+and that's not just me miming,
+
+637
+00:28:30,238 --> 00:28:31,799
+it actually ends up being true.
+
+638
+00:28:31,799 --> 00:28:33,801
+So you can see there that on the blend,
+
+639
+00:28:33,801 --> 00:28:36,923
+you see the wave kind of bleeding through
+
+640
+00:28:36,923 --> 00:28:37,704
+during the transition,
+
+641
+00:28:37,704 --> 00:28:39,685
+and so you can kind of get some unnatural artifacts.
+
+642
+00:28:39,685 --> 00:28:42,867
+And any kind of periodic motion
+
+643
+00:28:42,867 --> 00:28:44,609
+to something less periodic or with a different period,
+
+644
+00:28:44,609 --> 00:28:46,150
+you get some of these kind of artifacts.
+
+645
+00:28:46,910 --> 00:28:52,275
+With a conventional transition, often what you do is you try to tune your transition time
+
+646
+00:28:52,275 --> 00:28:55,117
+to be less than a period and then it doesn't matter as much.
+
+647
+00:28:55,117 --> 00:28:57,559
+But that means you've got to do all of this kind of fiddly work,
+
+648
+00:28:57,559 --> 00:29:00,000
+whereas with initialization, it just kind of works.
+
+649
+00:29:00,000 --> 00:29:04,724
+So let's talk a little bit about how we actually implemented this in Gears.
+
+650
+00:29:04,724 --> 00:29:08,207
+Gears Awards based on the Unreal Engine 4,
+
+651
+00:29:08,207 --> 00:29:11,629
+sort of a customized version.
+
+652
+00:29:13,507 --> 00:29:15,808
+We really broke down the work into three parts,
+
+653
+00:29:15,808 --> 00:29:17,690
+and the nice thing about this is each of these three
+
+654
+00:29:17,690 --> 00:29:20,131
+is actually pretty easy.
+
+655
+00:29:20,131 --> 00:29:22,073
+So there's this concept of an inertialization node,
+
+656
+00:29:22,073 --> 00:29:23,154
+right, this is gonna be the thing,
+
+657
+00:29:23,154 --> 00:29:24,174
+or some kind of filter, right,
+
+658
+00:29:24,174 --> 00:29:25,776
+this is gonna be the thing that's running
+
+659
+00:29:25,776 --> 00:29:27,997
+near the end of your frame and is saying,
+
+660
+00:29:27,997 --> 00:29:29,759
+and basically doing the inertialization math
+
+661
+00:29:29,759 --> 00:29:30,719
+that I presented, right?
+
+662
+00:29:30,719 --> 00:29:32,381
+It's getting this discontinuous input stream,
+
+663
+00:29:32,381 --> 00:29:34,862
+and it's gonna apply the math to it
+
+664
+00:29:34,862 --> 00:29:37,024
+and give you a continuous stream on the output.
+
+665
+00:29:38,201 --> 00:29:41,323
+We need to be able to actually tell that node
+
+666
+00:29:41,323 --> 00:29:42,664
+when to trigger an inertialization,
+
+667
+00:29:42,664 --> 00:29:44,565
+so we need some kind of hooks into the animation system
+
+668
+00:29:44,565 --> 00:29:45,825
+so that when the animation system
+
+669
+00:29:45,825 --> 00:29:48,407
+actually wants to transition to a new state,
+
+670
+00:29:48,407 --> 00:29:51,309
+it can notify and say, hey, please inertialize me now.
+
+671
+00:29:51,309 --> 00:29:54,070
+And then there's some code hooks we can do too
+
+672
+00:29:54,070 --> 00:29:55,851
+that make life a little bit easier as well,
+
+673
+00:29:55,851 --> 00:29:56,892
+and I'll get to that in a moment.
+
+674
+00:29:56,892 --> 00:30:00,034
+So the inertialization node itself,
+
+675
+00:30:00,034 --> 00:30:03,055
+in our case, as I said, we're using Unreal,
+
+676
+00:30:03,055 --> 00:30:04,136
+so it's kind of this...
+
+677
+00:30:05,684 --> 00:30:08,746
+sort of a data flow graph for poses.
+
+678
+00:30:08,746 --> 00:30:13,690
+So we basically add this node pretty late in our graph
+
+679
+00:30:13,690 --> 00:30:15,991
+and we evaluate it then and the input
+
+680
+00:30:15,991 --> 00:30:18,333
+is this discontinuous pose stream
+
+681
+00:30:18,333 --> 00:30:20,354
+and then the output is the initialized pose stream.
+
+682
+00:30:20,354 --> 00:30:23,737
+And if we dive into that a little bit deeper.
+
+683
+00:30:24,779 --> 00:30:31,166
+What we're doing is when a new inertialization is requested, we remember the pose difference
+
+684
+00:30:31,166 --> 00:30:34,910
+across all of our joints in both vectors and quaternions.
+
+685
+00:30:34,910 --> 00:30:37,113
+We remember the initial velocities as well.
+
+686
+00:30:37,113 --> 00:30:41,137
+We remember the requested inertialization durations, that's kind of the T1, and then
+
+687
+00:30:41,137 --> 00:30:42,138
+we start our timer at T0.
+
+688
+00:30:42,138 --> 00:30:44,601
+And then every frame...
+
+689
+00:30:45,664 --> 00:30:48,385
+We're just gonna update t with our delta time.
+
+690
+00:30:48,385 --> 00:30:51,126
+We're gonna evaluate that initialization curve,
+
+691
+00:30:51,126 --> 00:30:52,186
+right, that x of t curve,
+
+692
+00:30:52,186 --> 00:30:54,307
+and we're gonna add that onto our joints.
+
+693
+00:30:54,307 --> 00:30:56,168
+And then this part's important.
+
+694
+00:30:56,168 --> 00:30:58,388
+We're gonna then remember the output pose
+
+695
+00:30:58,388 --> 00:30:59,769
+in a pose history buffer
+
+696
+00:30:59,769 --> 00:31:03,510
+so that if someone were to request an initialization again,
+
+697
+00:31:03,510 --> 00:31:05,851
+we're gonna use that history of poses
+
+698
+00:31:05,991 --> 00:31:09,092
+to do the actual X0 and V0 calculations, right?
+
+699
+00:31:09,092 --> 00:31:12,894
+So in my earlier slides, that was the blue poses.
+
+700
+00:31:12,894 --> 00:31:14,875
+It's kind of our remembered pose history.
+
+701
+00:31:14,875 --> 00:31:17,816
+And it's important that we capture the output pose
+
+702
+00:31:17,816 --> 00:31:18,636
+and not the input pose,
+
+703
+00:31:18,636 --> 00:31:22,258
+because that way when we request another initialization,
+
+704
+00:31:22,258 --> 00:31:24,199
+if one was already in progress,
+
+705
+00:31:24,199 --> 00:31:27,280
+we can kind of completely discard all of our knowledge
+
+706
+00:31:27,280 --> 00:31:28,721
+about the previous initialization,
+
+707
+00:31:28,721 --> 00:31:32,302
+because it's already factored into that output pose.
+
+708
+00:31:32,302 --> 00:31:33,263
+So again, we're just kind of saying,
+
+709
+00:31:33,263 --> 00:31:34,463
+okay, we had this output pose.
+
+710
+00:31:35,083 --> 00:31:38,204
+Don't know how we got there, but we're getting to something different and there's a discontinuity,
+
+711
+00:31:38,204 --> 00:31:41,886
+I need to fix it, no problem, I just take that difference and carry on.
+
+712
+00:31:41,886 --> 00:31:44,707
+So outputPose part is important.
+
+713
+00:31:44,707 --> 00:31:52,589
+As for the actual hooks for requesting an initialization or triggering an initialization,
+
+714
+00:31:52,589 --> 00:31:54,830
+with Unreal it's pretty simple.
+
+715
+00:31:54,830 --> 00:31:59,311
+Unreal has this notion for its regular blends and all of the nodes that do any kind of blending
+
+716
+00:31:59,311 --> 00:32:00,772
+in their animation system.
+
+717
+00:32:00,772 --> 00:32:04,033
+They tend to expose this blend curve type, so you know whether you're doing a...
+
+718
+00:32:05,433 --> 00:32:08,955
+to ease in, ease out, or some linear blend or whatever.
+
+719
+00:32:08,955 --> 00:32:11,016
+We just made up a new blend curve type,
+
+720
+00:32:11,016 --> 00:32:12,977
+which we call inertialization.
+
+721
+00:32:12,977 --> 00:32:17,178
+And then when a blend is requested with this curve type,
+
+722
+00:32:17,178 --> 00:32:20,020
+we actually sort of request the actual inertialization
+
+723
+00:32:20,020 --> 00:32:21,560
+to the node that's kind of later in the system,
+
+724
+00:32:21,560 --> 00:32:23,821
+so we kind of pipe that message through.
+
+725
+00:32:23,821 --> 00:32:26,162
+And then we zero the blend time.
+
+726
+00:32:27,234 --> 00:32:29,235
+not the blend time that we're passing to the initialization,
+
+727
+00:32:29,235 --> 00:32:31,117
+but the blend time that would kind of carry through
+
+728
+00:32:31,117 --> 00:32:32,038
+through this irregular node, right?
+
+729
+00:32:32,038 --> 00:32:35,722
+So if it's an unreal blend node, it's got this blend time,
+
+730
+00:32:35,722 --> 00:32:38,024
+but we sort of right then and there inject a zero,
+
+731
+00:32:38,024 --> 00:32:40,086
+and it says, oh, okay, great, I'm done my blend,
+
+732
+00:32:40,086 --> 00:32:40,626
+I don't need to do any work,
+
+733
+00:32:40,626 --> 00:32:43,289
+I'll just pass through the target pose unchanged.
+
+734
+00:32:43,289 --> 00:32:43,729
+So kinda, we trick it.
+
+735
+00:32:45,871 --> 00:32:49,193
+And then I mentioned that there were some code hooks
+
+736
+00:32:49,193 --> 00:32:51,394
+and we found it useful to expose this ability
+
+737
+00:32:51,394 --> 00:32:53,035
+to request initialization to our actual code.
+
+738
+00:32:53,035 --> 00:32:56,317
+We don't use it in too many places,
+
+739
+00:32:56,317 --> 00:33:00,219
+but it's nice to eliminate other types of discontinuities
+
+740
+00:33:00,219 --> 00:33:04,141
+and that's kind of my segue into a little sort of section
+
+741
+00:33:04,141 --> 00:33:05,002
+on tips and tricks.
+
+742
+00:33:05,742 --> 00:33:10,327
+And I got a picture of duct tape up there because I kind of like to think of this as, you know, our animation duct tape.
+
+743
+00:33:10,327 --> 00:33:12,449
+Every once in a while something's kind of not quite right and you're like,
+
+744
+00:33:12,449 --> 00:33:16,493
+oh wait a minute, I've got some duct tape, I can just go kind of wrap it around and it's all fixed.
+
+745
+00:33:16,493 --> 00:33:17,554
+Never been better.
+
+746
+00:33:17,554 --> 00:33:18,735
+So I'll give a few examples of that.
+
+747
+00:33:18,735 --> 00:33:25,702
+So this first example, so in Gears of War one of the things you can do is called a roadie run, it's basically the sprint.
+
+748
+00:33:27,363 --> 00:33:31,124
+and when you sprint, you always face your direction of movement.
+
+749
+00:33:31,124 --> 00:33:35,385
+So if you are sidestepping, and then you hit the rotary button,
+
+750
+00:33:35,385 --> 00:33:39,106
+you trigger the sprint, then what your character does is he kind of instantly pops
+
+751
+00:33:39,106 --> 00:33:43,067
+to face your direction of movement so that the direction of movement is right,
+
+752
+00:33:43,067 --> 00:33:45,987
+and then he kind of does his sprinting thing after that.
+
+753
+00:33:45,987 --> 00:33:49,548
+So in Gears 3, that was basically the end of the story.
+
+754
+00:33:49,548 --> 00:33:51,648
+The character would have this sort of facing pop.
+
+755
+00:33:51,648 --> 00:33:53,289
+It wasn't too noticeable.
+
+756
+00:33:53,289 --> 00:33:55,509
+The camera tends to move around at the same time, but it was there.
+
+757
+00:33:56,534 --> 00:33:59,196
+For Gears 4 we wanted to eliminate that,
+
+758
+00:33:59,196 --> 00:34:02,479
+but we didn't want to affect any of the gameplay.
+
+759
+00:34:02,479 --> 00:34:04,681
+So we want to keep basically everything else the same.
+
+760
+00:34:04,681 --> 00:34:07,023
+And so what we actually do is we still snap
+
+761
+00:34:07,023 --> 00:34:09,585
+the character's rotation at the start of the sprint,
+
+762
+00:34:09,585 --> 00:34:11,527
+but we request this inertialization.
+
+763
+00:34:11,527 --> 00:34:13,188
+And so what that does is even though
+
+764
+00:34:13,188 --> 00:34:15,110
+the character's doing something discontinuous,
+
+765
+00:34:15,110 --> 00:34:18,092
+the pose itself is continuous.
+
+766
+00:34:18,794 --> 00:34:22,897
+So, if you look at the images on the bottom there,
+
+767
+00:34:22,897 --> 00:34:24,978
+the first three images are of me
+
+768
+00:34:24,978 --> 00:34:26,679
+just sort of side-strafing normally,
+
+769
+00:34:26,679 --> 00:34:29,561
+and then the remainder are me in the sprinting state.
+
+770
+00:34:29,561 --> 00:34:31,822
+It's unfortunately a bit hard to see on this projector,
+
+771
+00:34:31,822 --> 00:34:34,023
+but there's kind of a green circle underneath.
+
+772
+00:34:34,443 --> 00:34:37,244
+And the green circle shows the character's actual orientation.
+
+773
+00:34:37,244 --> 00:34:39,364
+And you can see for those first three frames,
+
+774
+00:34:39,364 --> 00:34:40,965
+you can't really see the arrow because it's pointing up
+
+775
+00:34:40,965 --> 00:34:42,605
+and it's underneath the character.
+
+776
+00:34:42,605 --> 00:34:43,805
+But all those subsequent frames,
+
+777
+00:34:43,805 --> 00:34:45,185
+the arrow's pointing to the right.
+
+778
+00:34:45,185 --> 00:34:48,546
+So that's actually the character's kind of movement capsule
+
+779
+00:34:48,546 --> 00:34:49,106
+instantly rotating.
+
+780
+00:34:49,106 --> 00:34:51,846
+But you can see that the pose that you get
+
+781
+00:34:51,846 --> 00:34:54,987
+is still continuous because we instantly rotate the capsule
+
+782
+00:34:54,987 --> 00:34:56,347
+but then we request this inertialization
+
+783
+00:34:56,347 --> 00:34:58,808
+and it says, okay, yeah, there's a discontinuity here.
+
+784
+00:34:58,808 --> 00:35:00,808
+Sure, it's just a discontinuity in the root,
+
+785
+00:35:00,808 --> 00:35:02,508
+the rest of the pose, well, actually, I mean,
+
+786
+00:35:02,508 --> 00:35:03,548
+I guess we're also changing poses.
+
+787
+00:35:03,548 --> 00:35:03,668
+But.
+
+788
+00:35:04,149 --> 00:35:06,534
+For these purposes, it's this discontinuity in the root,
+
+789
+00:35:06,534 --> 00:35:08,798
+and then inertialization just takes care of that.
+
+790
+00:35:08,798 --> 00:35:11,403
+So it was kind of this one line change
+
+791
+00:35:11,403 --> 00:35:13,147
+once we had the system in place,
+
+792
+00:35:13,147 --> 00:35:15,351
+and instant duct tape makes things better.
+
+793
+00:35:17,686 --> 00:35:22,669
+Another example that I find interesting is how we deal with our locomotion inputs.
+
+794
+00:35:22,669 --> 00:35:26,551
+So when you're driving your character around,
+
+795
+00:35:26,551 --> 00:35:31,234
+we don't actually directly feed your joystick or even your velocity inputs
+
+796
+00:35:31,234 --> 00:35:34,115
+into the blend space of motion,
+
+797
+00:35:34,115 --> 00:35:38,378
+because our game is really responsive, so that velocity can actually be pretty twitchy.
+
+798
+00:35:39,407 --> 00:35:40,768
+So what we do is we just filter it a little bit
+
+799
+00:35:40,768 --> 00:35:42,609
+and then that kind of gives you some nice,
+
+800
+00:35:42,609 --> 00:35:45,390
+nice sort of posing on the output.
+
+801
+00:35:45,390 --> 00:35:47,171
+But of course, because we're filtering that,
+
+802
+00:35:47,171 --> 00:35:49,092
+if you do a sudden change in direction,
+
+803
+00:35:49,092 --> 00:35:50,954
+then the filtered value can actually get
+
+804
+00:35:50,954 --> 00:35:52,294
+a little bit further from,
+
+805
+00:35:52,294 --> 00:35:54,596
+or a little bit too far from where you want to be
+
+806
+00:35:54,596 --> 00:35:55,956
+and you don't want to kind of stay in this,
+
+807
+00:35:55,956 --> 00:35:58,458
+you know, sidestepping when you want to be going forward
+
+808
+00:35:58,458 --> 00:35:59,178
+or something like that, right?
+
+809
+00:35:59,178 --> 00:36:01,299
+It doesn't affect the actual movement of your character,
+
+810
+00:36:01,299 --> 00:36:03,180
+but it affects the posing and it gives a lot of foot slide.
+
+811
+00:36:04,699 --> 00:36:09,784
+So what we do in that situation is we just snap it to the new value when we detect that it's too far out of line,
+
+812
+00:36:09,784 --> 00:36:12,887
+and then we inertialize, which takes care of the pose difference.
+
+813
+00:36:12,887 --> 00:36:16,811
+So that gives us kind of this fluid pose, even with twitchy inputs.
+
+814
+00:36:18,642 --> 00:36:22,003
+And then lastly, and this is a call out to last year,
+
+815
+00:36:22,003 --> 00:36:25,305
+my colleague Steve Dickinson gave a talk at GDC
+
+816
+00:36:25,305 --> 00:36:26,605
+about motion warping.
+
+817
+00:36:26,605 --> 00:36:27,766
+I won't get into his talk.
+
+818
+00:36:27,766 --> 00:36:30,627
+But one of the key things about that
+
+819
+00:36:30,627 --> 00:36:34,549
+is that you had to remember these warping kind of landmarks
+
+820
+00:36:34,549 --> 00:36:35,770
+that you're placing in the world.
+
+821
+00:36:35,770 --> 00:36:36,910
+So it's quite a bit of bookkeeping.
+
+822
+00:36:38,088 --> 00:36:41,391
+If we transition from one warped animation to another warped animation,
+
+823
+00:36:41,391 --> 00:36:43,032
+and we were doing this with a crossfade blend,
+
+824
+00:36:43,032 --> 00:36:45,594
+we have to keep track of both of those pieces of bookkeeping,
+
+825
+00:36:45,594 --> 00:36:46,975
+and that's a lot of bookkeeping.
+
+826
+00:36:46,975 --> 00:36:50,258
+So this is really nice. We actually don't even support that in our engine
+
+827
+00:36:50,258 --> 00:36:51,239
+because there's kind of no need.
+
+828
+00:36:51,239 --> 00:36:52,720
+We only have this one for each character.
+
+829
+00:36:52,720 --> 00:36:56,263
+We only have one set of warp points, these kind of landmarks.
+
+830
+00:36:56,263 --> 00:36:59,625
+But it works because we only ever have one active warp at a time.
+
+831
+00:36:59,625 --> 00:37:03,288
+If we're transitioning, we just do the initialization,
+
+832
+00:37:03,288 --> 00:37:05,570
+and so we're not remembering the old state.
+
+833
+00:37:08,015 --> 00:37:08,535
+And that's kind of it.
+
+834
+00:37:08,535 --> 00:37:09,436
+There's a lot of other examples.
+
+835
+00:37:09,436 --> 00:37:10,196
+I won't go into all those.
+
+836
+00:37:10,196 --> 00:37:12,457
+So I want to thank you very much for listening.
+
+837
+00:37:12,457 --> 00:37:15,439
+And I want to thank the people at the coalition back home for
+
+838
+00:37:15,439 --> 00:37:17,460
+working hard on all this stuff.
+
+839
+00:37:17,460 --> 00:37:19,001
+If you'd like to join the people of the
+
+840
+00:37:19,001 --> 00:37:21,262
+coalition back home, we do have some positions open.
+
+841
+00:37:21,262 --> 00:37:22,583
+And give us a shout.
+
+842
+00:37:22,583 --> 00:37:24,004
+Thanks very much.
+
+843
+00:37:31,724 --> 00:37:36,728
+And there's nobody in the room after us, so we have a couple minutes for questions before we
+
+844
+00:37:36,728 --> 00:37:41,132
+get kicked out if you'd like, and otherwise I'd be happy to chat with people outside as well.
+
+845
+00:37:41,132 --> 00:37:41,532
+Yeah?
+
+846
+00:37:41,532 --> 00:37:42,253
+Hello.
+
+847
+00:37:42,253 --> 00:37:42,293
+Hi.
+
+848
+00:37:42,293 --> 00:37:45,235
+Very interesting talk.
+
+849
+00:37:45,235 --> 00:37:46,657
+Thank you.
+
+850
+00:37:46,657 --> 00:37:51,080
+Question about, I might have glossed over this answer because there was a lot of stuff
+
+851
+00:37:51,080 --> 00:37:57,025
+happening and, you know, I kind of lost track, but you'll be able to clarify I'm sure.
+
+852
+00:37:58,177 --> 00:38:05,922
+lot of this stuff seems to, for me, we have an equivalent of this in our engine, which is
+
+853
+00:38:05,922 --> 00:38:13,488
+essentially an A stop B stop transition and using whatever type of transition you decide to
+
+854
+00:38:13,488 --> 00:38:16,671
+use between them. There's a bunch of different algorithms. This one sounds like a pretty
+
+855
+00:38:16,671 --> 00:38:22,815
+powerful one. And I'm seeing a lot on what has been shown in terms of how to deal with
+
+856
+00:38:24,083 --> 00:38:27,065
+stopping your A clip and going to the B clip.
+
+857
+00:38:27,065 --> 00:38:30,266
+Your B clip seems to assume that you have no velocity.
+
+858
+00:38:30,266 --> 00:38:32,827
+Do you guys store velocity to use
+
+859
+00:38:32,827 --> 00:38:34,768
+for each one of your clip beforehand or?
+
+860
+00:38:34,768 --> 00:38:36,589
+No, so that's a good question.
+
+861
+00:38:36,589 --> 00:38:38,129
+We don't actually factor in,
+
+862
+00:38:38,129 --> 00:38:41,070
+or we don't consider the velocity of sort of the B clip.
+
+863
+00:38:43,506 --> 00:38:45,048
+mainly because we don't want to have to kind of evaluate,
+
+864
+00:38:45,048 --> 00:38:47,651
+we don't want to have to kind of store all the velocities ahead of time,
+
+865
+00:38:47,651 --> 00:38:49,974
+and we don't want to have to evaluate two frames of the B-clip
+
+866
+00:38:49,974 --> 00:38:52,517
+to kind of know what the velocity would be.
+
+867
+00:38:52,517 --> 00:38:55,320
+It turns out in practice that doesn't actually matter, and in the...
+
+868
+00:38:57,021 --> 00:39:02,006
+sort of visually, and the reason for that is if the velocity of the B-clip is very low,
+
+869
+00:39:02,006 --> 00:39:07,732
+so the B-clip is kind of fairly idle, then obviously it doesn't matter because it's close
+
+870
+00:39:07,732 --> 00:39:08,252
+to zero anyways.
+
+871
+00:39:08,252 --> 00:39:14,039
+If the velocity is very high, then it's an animation with a lot of motion to it.
+
+872
+00:39:14,539 --> 00:39:18,740
+And so for gears especially, that's typically the start of
+
+873
+00:39:18,740 --> 00:39:20,761
+some kind of pretty powerful action.
+
+874
+00:39:20,761 --> 00:39:23,222
+And we actually want to give instant feedback of, hey,
+
+875
+00:39:23,222 --> 00:39:24,282
+you're starting to do something.
+
+876
+00:39:24,282 --> 00:39:26,303
+We wouldn't want to muddy that out too much.
+
+877
+00:39:26,303 --> 00:39:30,404
+So in those very dramatic changes, people seem less
+
+878
+00:39:30,404 --> 00:39:33,005
+sensitive to problems around velocity because there's so
+
+879
+00:39:33,005 --> 00:39:34,985
+much energy being expended anyways.
+
+880
+00:39:34,985 --> 00:39:38,667
+I think what people visually pick up on is these unnatural
+
+881
+00:39:38,667 --> 00:39:40,027
+expenditures of energy.
+
+882
+00:39:40,867 --> 00:39:44,411
+But if you're already expending energy because it's this kind of high energy move,
+
+883
+00:39:44,411 --> 00:39:50,336
+then the fact that it's not quite perfect from an energy point of view, you don't really notice.
+
+884
+00:39:50,336 --> 00:39:54,000
+Okay, so essentially you guys didn't feel like that was a problem that should be attacked
+
+885
+00:39:54,000 --> 00:39:55,441
+because there was no impact.
+
+886
+00:39:55,441 --> 00:39:59,985
+Right. And one thing that's kind of a useful tip along with that
+
+887
+00:39:59,985 --> 00:40:04,950
+is that we tend to end our A-clips, I guess sort of the source...
+
+888
+00:40:05,631 --> 00:40:07,631
+states while they're in motion.
+
+889
+00:40:07,631 --> 00:40:11,252
+And I mean, I think that's actually kind of good advice for regular crossfade transitions
+
+890
+00:40:11,252 --> 00:40:15,794
+too, but it means that then you get a case where, sort of like in my gun example, you
+
+891
+00:40:15,794 --> 00:40:18,995
+know, where the gun's heading towards this target and then we stop and it kind of just
+
+892
+00:40:18,995 --> 00:40:19,955
+continues that momentum.
+
+893
+00:40:19,955 --> 00:40:23,356
+Whereas if we'd had that animation play all the way out to a settle,
+
+894
+00:40:23,984 --> 00:40:26,505
+and then it had to transition to another pose
+
+895
+00:40:26,505 --> 00:40:27,386
+that's not quite matched,
+
+896
+00:40:27,386 --> 00:40:29,266
+then you get this kind of like, I came to a stop,
+
+897
+00:40:29,266 --> 00:40:30,647
+and then I'm starting and stopping again,
+
+898
+00:40:30,647 --> 00:40:31,728
+and that looks a bit funny,
+
+899
+00:40:31,728 --> 00:40:33,388
+so it's always, you know, basically for us,
+
+900
+00:40:33,388 --> 00:40:34,149
+it just means cut it early,
+
+901
+00:40:34,149 --> 00:40:35,749
+and that's great because it gives you
+
+902
+00:40:35,749 --> 00:40:36,670
+control back sooner too, right?
+
+903
+00:40:36,670 --> 00:40:37,810
+So, just good practice.
+
+904
+00:40:37,810 --> 00:40:39,091
+Thanks for the answer.
+
+905
+00:40:39,091 --> 00:40:39,511
+Yeah, thank you.
+
+906
+00:40:39,511 --> 00:40:42,172
+This is sort of related,
+
+907
+00:40:42,172 --> 00:40:44,353
+but when you calculate the X zero,
+
+908
+00:40:44,353 --> 00:40:47,415
+I'm assuming that's based on sort of your target blend time.
+
+909
+00:40:48,243 --> 00:40:55,746
+like the initial T1, and then you're recalculating T1 later potentially, which would...
+
+910
+00:40:55,746 --> 00:41:00,228
+Yeah, I see. So X0 is just the difference between the poses?
+
+911
+00:41:00,228 --> 00:41:00,428
+Right.
+
+912
+00:41:00,428 --> 00:41:03,309
+So it doesn't actually factor into time?
+
+913
+00:41:03,309 --> 00:41:07,151
+But what if you don't have a locked pose? What if you're like, it's a moving target, so if you...
+
+914
+00:41:07,973 --> 00:41:08,233
+Oh, I see.
+
+915
+00:41:08,233 --> 00:41:14,581
+Yeah, so we're calculating it at the moment of sort of the instantaneous frame of the
+
+916
+00:41:14,581 --> 00:41:14,961
+transition.
+
+917
+00:41:14,961 --> 00:41:15,201
+Oh, I see.
+
+918
+00:41:15,201 --> 00:41:19,707
+And then from then on, we're amortizing that way, but on top of the moving target.
+
+919
+00:41:19,707 --> 00:41:24,692
+So the movement of the target kind of shows up right away or contributes right away.
+
+920
+00:41:24,692 --> 00:41:24,913
+Gotcha.
+
+921
+00:41:24,913 --> 00:41:25,373
+Okay, thanks.
+
+922
+00:41:27,529 --> 00:41:32,191
+Most of your examples looked like they were for kind of gameplay, action, upper body sort
+
+923
+00:41:32,191 --> 00:41:33,192
+of motion.
+
+924
+00:41:33,192 --> 00:41:38,695
+Have you tried using this sort of thing for locomotion transitions or things like transitioning
+
+925
+00:41:38,695 --> 00:41:39,996
+into a cinematic?
+
+926
+00:41:39,996 --> 00:41:41,777
+Yes, we use it everywhere actually.
+
+927
+00:41:41,777 --> 00:41:42,738
+So it works really well.
+
+928
+00:41:42,738 --> 00:41:48,842
+Works reasonably well with the feet and do you factor phase into it or timing is as well?
+
+929
+00:41:48,842 --> 00:41:54,545
+So we have a separate system that kind of automatically matches phase for us.
+
+930
+00:41:54,545 --> 00:41:54,765
+Yes.
+
+931
+00:41:55,124 --> 00:41:59,326
+not as fancy as some of the kind of motion matching methods, but it does a really good job
+
+932
+00:41:59,326 --> 00:42:04,690
+and it's really cheap and fast. So we use that, that kind of gets us in, you know, it's kind of
+
+933
+00:42:04,690 --> 00:42:09,573
+true of any kind of transition, the closer you are to your, you know, between your poses,
+
+934
+00:42:09,573 --> 00:42:13,976
+the better result you're going to get. So by doing the phase match, we are always transitioning into
+
+935
+00:42:13,976 --> 00:42:17,318
+into kind of match leg phases and then we get pretty good results. Right, and then you apply this on top.
+
+936
+00:42:17,478 --> 00:42:24,270
+Yeah, and you can actually, like when I mentioned about the animation node kind of being at the end, it doesn't have to be right at the very end.
+
+937
+00:42:24,270 --> 00:42:27,676
+So we, for example, run our IK solve afterwards, which means that we're doing this in IK space.
+
+938
+00:42:28,058 --> 00:42:30,039
+Yeah, I was going to ask about that as well.
+
+939
+00:42:30,039 --> 00:42:33,780
+One of the major issues with transitions in general
+
+940
+00:42:33,780 --> 00:42:37,181
+is just the linearity of all the joints moving
+
+941
+00:42:37,181 --> 00:42:38,421
+at the same time and things like that.
+
+942
+00:42:38,421 --> 00:42:41,021
+Do you feel like this starts to address that?
+
+943
+00:42:41,021 --> 00:42:44,922
+Because each joint effectively has its own inertia
+
+944
+00:42:44,922 --> 00:42:47,483
+and blends effectively differently, right?
+
+945
+00:42:47,483 --> 00:42:50,124
+Offsets the blend for each joint.
+
+946
+00:42:50,124 --> 00:42:50,804
+Do you feel like that?
+
+947
+00:42:50,804 --> 00:42:51,304
+Yeah, exactly.
+
+948
+00:42:51,304 --> 00:42:53,724
+We are both sort of me personally,
+
+949
+00:42:53,724 --> 00:42:54,765
+but also our animators seem really
+
+950
+00:42:54,765 --> 00:42:56,345
+happy with the quality they get out of it.
+
+951
+00:42:56,345 --> 00:42:57,945
+So that's always kind of the real test.
+
+952
+00:42:58,165 --> 00:43:00,467
+Yeah, yeah, of course.
+
+953
+00:43:00,467 --> 00:43:01,088
+Thank you.
+
+954
+00:43:01,088 --> 00:43:01,488
+Thanks.
+
+955
+00:43:01,488 --> 00:43:02,049
+OK.
+
+956
+00:43:02,049 --> 00:43:04,170
+I think we've got to wrap up, but I'm
+
+957
+00:43:04,170 --> 00:43:06,852
+happy to chat with you outside if you want.
+
+958
+00:43:06,852 --> 00:43:08,874
+Thank you.
+

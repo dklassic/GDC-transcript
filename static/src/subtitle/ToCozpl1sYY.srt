@@ -1,0 +1,4080 @@
+1
+00:00:06,309 --> 00:00:11,034
+Hi everybody, my name is Jaap van Muijden and I'm a senior tech programmer at Guerrilla Games.
+
+2
+00:00:11,999 --> 00:00:14,421
+And I've been working on the procedural placement, the
+
+3
+00:00:14,481 --> 00:00:17,502
+rendering, and the simulation of the natural world of
+
+4
+00:00:17,542 --> 00:00:18,943
+Horizon Zero Dawn.
+
+5
+00:00:20,244 --> 00:00:22,926
+So today, I'm here to talk about the procedural system
+
+6
+00:00:22,946 --> 00:00:26,688
+we've built for Horizon, its result, and the GPU pipeline.
+
+7
+00:00:27,868 --> 00:00:31,290
+So the talk is basically split up into three parts.
+
+8
+00:00:31,731 --> 00:00:33,852
+The first part, I'll talk about the motivation and the
+
+9
+00:00:33,892 --> 00:00:37,014
+reason why we chose to have a real-time placement system.
+
+10
+00:00:38,060 --> 00:00:40,222
+The second part will show the artist workflow.
+
+11
+00:00:40,863 --> 00:00:43,425
+And the third part, I'll tell you a little bit about the
+
+12
+00:00:43,486 --> 00:00:45,948
+algorithm and the shaders that we use in our GPU pipeline.
+
+13
+00:00:48,570 --> 00:00:51,233
+Before we made Horizon, Guerrilla was known for their
+
+14
+00:00:51,273 --> 00:00:52,054
+Killzone franchise.
+
+15
+00:00:53,568 --> 00:00:55,889
+In our Killzone games, each square meter of a level
+
+16
+00:00:56,129 --> 00:00:58,710
+was hand-polished manually.
+
+17
+00:00:58,730 --> 00:01:02,972
+Guerrilla Games has always had a high-quality standard
+
+18
+00:01:03,312 --> 00:01:04,653
+when it comes to our environment art.
+
+19
+00:01:05,673 --> 00:01:07,734
+And environment artists are experts
+
+20
+00:01:08,034 --> 00:01:09,475
+in dressing up environments to look
+
+21
+00:01:09,535 --> 00:01:13,596
+interesting and believable using light, composition, and color.
+
+22
+00:01:15,003 --> 00:01:20,306
+Well, the open world of Horizon Zero Dawn led us to investigate how we can create and
+
+23
+00:01:20,386 --> 00:01:27,770
+dress a large open world using procedural systems while still staying true to that quality
+
+24
+00:01:27,790 --> 00:01:28,110
+standard.
+
+25
+00:01:29,331 --> 00:01:35,574
+Well, historically, procedural systems often look, you know, a bit monotonous, bland, robotic,
+
+26
+00:01:36,215 --> 00:01:38,056
+but they do allow for quick iterations.
+
+27
+00:01:42,125 --> 00:01:43,266
+They do a lot of quick iterations.
+
+28
+00:01:44,127 --> 00:01:46,849
+And at the end of the day, a reduced time investment per
+
+29
+00:01:46,869 --> 00:01:50,292
+square kilometer just makes larger world scales feasible.
+
+30
+00:01:51,873 --> 00:01:55,455
+So our goal was to create a system in which an artist can
+
+31
+00:01:55,496 --> 00:01:59,138
+describe a large variety of interesting and believable
+
+32
+00:01:59,178 --> 00:02:01,260
+environments, which can then be applied
+
+33
+00:02:01,360 --> 00:02:01,960
+anywhere in the world.
+
+34
+00:02:02,961 --> 00:02:03,962
+But we had some restrictions.
+
+35
+00:02:05,450 --> 00:02:07,491
+Both the system and the resulting content
+
+36
+00:02:08,011 --> 00:02:11,493
+had to be highly art directable and seamlessly integrate
+
+37
+00:02:11,773 --> 00:02:13,094
+with any manually placed art.
+
+38
+00:02:13,974 --> 00:02:15,976
+And on top of this, our art director
+
+39
+00:02:16,596 --> 00:02:19,698
+wanted to be able to freely move mountains, rivers,
+
+40
+00:02:19,858 --> 00:02:23,120
+move gameplay around without having to constantly update
+
+41
+00:02:23,280 --> 00:02:25,301
+and retweak our world dressing.
+
+42
+00:02:26,141 --> 00:02:29,323
+So this means that the system that we had to create
+
+43
+00:02:29,603 --> 00:02:32,925
+had to be fully data driven, deterministic, and locally
+
+44
+00:02:32,965 --> 00:02:33,245
+stable.
+
+45
+00:02:38,002 --> 00:02:41,442
+We started off with a more traditional procedural workflow
+
+46
+00:02:41,902 --> 00:02:45,003
+of using procedural definitions and offline bakes
+
+47
+00:02:45,043 --> 00:02:47,164
+to kind of roll out those definitions across the world.
+
+48
+00:02:48,744 --> 00:02:50,984
+We had already experimented a bit with this idea
+
+49
+00:02:51,004 --> 00:02:54,525
+during Shadowfall, but the bake times were a big problem.
+
+50
+00:02:54,665 --> 00:02:58,406
+And we kind of realized that scaling it up to Horizon Zero
+
+51
+00:02:58,426 --> 00:03:00,046
+Dawn would not be painless.
+
+52
+00:03:01,807 --> 00:03:04,947
+So looking for a solution, we tried
+
+53
+00:03:05,007 --> 00:03:07,308
+moving over the system to GPU.
+
+54
+00:03:08,167 --> 00:03:09,888
+in an effort to reduce the bake times.
+
+55
+00:03:11,850 --> 00:03:14,171
+And what we saw, and we were looking at the first prototype
+
+56
+00:03:14,231 --> 00:03:16,793
+and we were like, wow, this is the way to go.
+
+57
+00:03:16,853 --> 00:03:18,754
+This is, you know, we can do this.
+
+58
+00:03:19,314 --> 00:03:22,276
+So we made the jump to a fully real-time system.
+
+59
+00:03:23,497 --> 00:03:26,098
+And this would not only improve our bake times,
+
+60
+00:03:26,118 --> 00:03:27,319
+well, it would remove our bake times,
+
+61
+00:03:27,859 --> 00:03:30,381
+but it would always help us remove some data from disk
+
+62
+00:03:30,981 --> 00:03:32,142
+and save us a lot of bandwidth
+
+63
+00:03:32,382 --> 00:03:33,843
+if we would have to stream that back
+
+64
+00:03:33,883 --> 00:03:34,823
+from the disk during gameplay.
+
+65
+00:03:36,027 --> 00:03:37,829
+So this would mean, this procedural placement
+
+66
+00:03:37,849 --> 00:03:40,612
+would mean that we would be actively generating
+
+67
+00:03:40,892 --> 00:03:43,754
+the world around the player from procedural logic
+
+68
+00:03:43,895 --> 00:03:46,497
+instead of from a disk, and update the world while the
+
+69
+00:03:46,517 --> 00:03:47,518
+player walks through it.
+
+70
+00:03:47,538 --> 00:03:49,239
+So it's kind of more like a streaming system.
+
+71
+00:03:49,259 --> 00:03:50,340
+It would behave like a streaming system.
+
+72
+00:03:51,381 --> 00:03:52,783
+In order to accomplish this on GPU,
+
+73
+00:03:53,243 --> 00:03:55,425
+while still being deterministic and locally stable,
+
+74
+00:03:55,966 --> 00:03:57,407
+we choose not to do direct placement,
+
+75
+00:03:57,567 --> 00:04:00,270
+but to use something we call the density-based system.
+
+76
+00:04:02,080 --> 00:04:05,082
+which means that our procedural logic that the artists can set up
+
+77
+00:04:05,142 --> 00:04:06,623
+will not directly place items,
+
+78
+00:04:07,243 --> 00:04:08,744
+but it would create a density map
+
+79
+00:04:09,244 --> 00:04:10,485
+that will then be discretized
+
+80
+00:04:11,305 --> 00:04:13,066
+into these individual objects.
+
+81
+00:04:17,509 --> 00:04:19,209
+So, our prototype started small,
+
+82
+00:04:20,470 --> 00:04:23,192
+and we kept getting requests about expanding the systems
+
+83
+00:04:23,212 --> 00:04:26,113
+from sound, effects, and even gameplay themes.
+
+84
+00:04:27,330 --> 00:04:28,731
+Everybody's very enthusiastic about it.
+
+85
+00:04:28,751 --> 00:04:30,311
+Everybody's keep asking, like, can we use this?
+
+86
+00:04:30,991 --> 00:04:31,951
+Can we use placement for this?
+
+87
+00:04:31,991 --> 00:04:32,832
+Can we use placement for that?
+
+88
+00:04:34,352 --> 00:04:36,392
+So it grew out to be quite a versatile system.
+
+89
+00:04:37,152 --> 00:04:38,253
+And you can see the game running here.
+
+90
+00:04:38,973 --> 00:04:41,173
+And you can really see the difference
+
+91
+00:04:41,453 --> 00:04:44,134
+between the placement system, what the placement system make
+
+92
+00:04:44,154 --> 00:04:44,514
+to the game.
+
+93
+00:04:45,294 --> 00:04:46,775
+And the biggest way you can see the difference
+
+94
+00:04:47,795 --> 00:04:49,115
+is if you just turn it off.
+
+95
+00:04:53,176 --> 00:04:55,996
+So this is the world with the procedural placement turned
+
+96
+00:04:56,057 --> 00:04:56,157
+off.
+
+97
+00:04:57,225 --> 00:04:59,467
+As you can see, almost the entirety of the vegetation
+
+98
+00:04:59,647 --> 00:05:01,408
+of Horizon Zero Dawn is procedurally placed.
+
+99
+00:05:02,729 --> 00:05:05,071
+We ended up with the procedural placement
+
+100
+00:05:05,491 --> 00:05:08,173
+managing over 500 different types of objects
+
+101
+00:05:08,233 --> 00:05:08,954
+at any given time.
+
+102
+00:05:09,674 --> 00:05:11,916
+The dedicated rendering backend that we wrote for it
+
+103
+00:05:12,316 --> 00:05:15,979
+is managing around 100,000 to 200,000 Meshes at any time.
+
+104
+00:05:17,179 --> 00:05:18,961
+All this while the player is freely moving through the world.
+
+105
+00:05:20,282 --> 00:05:21,682
+It is a lot more than we scoped for
+
+106
+00:05:21,783 --> 00:05:22,863
+when we started out this project.
+
+107
+00:05:23,926 --> 00:05:26,809
+We ended up placing not only vegetation and rock meshes,
+
+108
+00:05:27,669 --> 00:05:32,033
+but effects, gameplay elements, like pickups, even wildlife.
+
+109
+00:05:33,434 --> 00:05:37,938
+And we keep tinkering the GPU pipeline to keep up
+
+110
+00:05:38,078 --> 00:05:39,219
+and keep it into budget.
+
+111
+00:05:47,031 --> 00:05:52,635
+So we ended up having around 250 microseconds
+
+112
+00:05:53,015 --> 00:05:56,057
+average busy load on GPU, which I think is pretty good.
+
+113
+00:05:58,759 --> 00:06:00,320
+And so now you can see the result.
+
+114
+00:06:00,360 --> 00:06:02,522
+We're now going to look at how artists would actually
+
+115
+00:06:02,542 --> 00:06:03,603
+build these environments.
+
+116
+00:06:05,955 --> 00:06:10,423
+So as I said earlier, one of our goals was to have a large amount of variety in the world
+
+117
+00:06:10,443 --> 00:06:10,884
+of Horizon.
+
+118
+00:06:11,184 --> 00:06:15,792
+And to accomplish this, we broke the world down into different unique environment types
+
+119
+00:06:17,294 --> 00:06:19,398
+so that we can build and design all these things independently.
+
+120
+00:06:20,427 --> 00:06:24,470
+In the real world, you would classify those environments as ecotopes.
+
+121
+00:06:24,630 --> 00:06:26,852
+So that's kind of what we used. We adopted that concept.
+
+122
+00:06:28,573 --> 00:06:33,677
+We started out by defining our own kind of definition of what an ecotope is.
+
+123
+00:06:34,457 --> 00:06:37,860
+Well, in our game, an ecotope defines which assets are being placed.
+
+124
+00:06:38,618 --> 00:06:40,199
+how they're being placed and how they're distributed,
+
+125
+00:06:40,820 --> 00:06:42,501
+colorization of rocks and plants,
+
+126
+00:06:43,162 --> 00:06:46,064
+weather systems, effects, sounds, wildlife.
+
+127
+00:06:46,104 --> 00:06:48,466
+So it's like a whole, kind of the full package
+
+128
+00:06:48,907 --> 00:06:51,569
+to create a complete kind of solid system,
+
+129
+00:06:51,929 --> 00:06:53,671
+solid environment in the game.
+
+130
+00:06:54,671 --> 00:06:56,493
+And it also follows that each of these ecotopes
+
+131
+00:06:56,953 --> 00:06:59,716
+would have its own unique procedural definition.
+
+132
+00:07:00,276 --> 00:07:02,218
+And that's why the ecotopes are basically seen
+
+133
+00:07:02,258 --> 00:07:06,741
+as our like base starting point for our procedural authoring.
+
+134
+00:07:09,783 --> 00:07:13,287
+Our goal was to populate the world in a believable and interesting manner,
+
+135
+00:07:13,908 --> 00:07:16,611
+just like a good environment artist would manually accomplish.
+
+136
+00:07:17,673 --> 00:07:20,676
+Of course, this is impossible, but we tried to get as close as possible.
+
+137
+00:07:21,237 --> 00:07:22,639
+And to do that, we created a system
+
+138
+00:07:22,659 --> 00:07:28,426
+that could kind of capture the artist's logic, expertise, and skill.
+
+139
+00:07:29,344 --> 00:07:35,588
+So what we tried to do is create a system which artists have full control over not only the input data,
+
+140
+00:07:35,828 --> 00:07:40,110
+so like what you put into the procedural system, but also the procedural logic itself.
+
+141
+00:07:41,111 --> 00:07:43,793
+And of course we were still using their own handcrafted assets.
+
+142
+00:07:45,414 --> 00:07:47,455
+So let's go into this pipeline.
+
+143
+00:07:48,115 --> 00:07:52,938
+So starting with the inputs, what kind of inputs would you need to create these kind of lush environments?
+
+144
+00:07:53,698 --> 00:07:56,360
+Well, in the beginning we had no idea. We just started building stuff.
+
+145
+00:07:57,342 --> 00:08:02,730
+And we were baking out data as we went, trying to figure out what we would need to make these,
+
+146
+00:08:02,810 --> 00:08:06,355
+like, the things that we thought were possible.
+
+147
+00:08:08,699 --> 00:08:10,281
+So we ended up with a whole bunch of data.
+
+148
+00:08:11,056 --> 00:08:12,817
+And we call this our world data, which
+
+149
+00:08:12,857 --> 00:08:16,500
+is a collection of 2D maps that we can access all
+
+150
+00:08:16,540 --> 00:08:18,562
+across our game, not only for procedural systems,
+
+151
+00:08:18,582 --> 00:08:19,783
+but also for gameplay systems.
+
+152
+00:08:20,703 --> 00:08:23,645
+And these maps are streamed in around the player in sections.
+
+153
+00:08:24,666 --> 00:08:29,009
+And they're initially seeded by baked systems,
+
+154
+00:08:29,049 --> 00:08:32,472
+like World Machine, Houdini, whatever
+
+155
+00:08:32,512 --> 00:08:34,634
+we had to generate these kind of data sets.
+
+156
+00:08:35,614 --> 00:08:38,297
+But on top of that, we have additional paintable layers
+
+157
+00:08:38,837 --> 00:08:40,319
+where artists could go into the game,
+
+158
+00:08:40,559 --> 00:08:41,800
+and if they didn't like a certain part,
+
+159
+00:08:41,820 --> 00:08:43,201
+they could just paint in the real data,
+
+160
+00:08:43,362 --> 00:08:46,204
+and the real-time system would update accordingly.
+
+161
+00:08:49,748 --> 00:08:53,992
+So the procedural system uses about 4 megabytes
+
+162
+00:08:54,052 --> 00:08:54,732
+per square kilometer.
+
+163
+00:08:55,213 --> 00:08:57,755
+So if you would look at it as like this kind of compression,
+
+164
+00:08:58,856 --> 00:09:00,398
+it's about 32 bits per square meter.
+
+165
+00:09:02,606 --> 00:09:05,568
+OK, let's look at these world data maps that we have.
+
+166
+00:09:06,149 --> 00:09:07,690
+So here we've got the placement tree map.
+
+167
+00:09:09,031 --> 00:09:12,995
+It was originally baked from World Machine, but it's so
+
+168
+00:09:13,135 --> 00:09:15,537
+extensively painted by art that it's basically, there's
+
+169
+00:09:15,557 --> 00:09:16,718
+nothing left of the original bake.
+
+170
+00:09:16,778 --> 00:09:17,739
+It's all hand painted.
+
+171
+00:09:19,079 --> 00:09:22,720
+Artists always want to pack as much data into these kind of maps as possible.
+
+172
+00:09:24,961 --> 00:09:28,062
+This particular map acts as our main tree placement map.
+
+173
+00:09:28,822 --> 00:09:30,623
+And it can be used as a density map directly,
+
+174
+00:09:31,143 --> 00:09:33,884
+but ecotopes often encode additional meaning to it.
+
+175
+00:09:34,204 --> 00:09:37,905
+So, for instance, what they do is they have this gradient,
+
+176
+00:09:38,325 --> 00:09:40,786
+and they set up like, okay, you know, we've got only one,
+
+177
+00:09:40,906 --> 00:09:42,527
+it's a grayscale map, we only have zero to one,
+
+178
+00:09:42,667 --> 00:09:44,507
+but let's try to encode something smart into it.
+
+179
+00:09:44,888 --> 00:09:47,268
+And they can use the placement logic to decode that at run time.
+
+180
+00:09:47,789 --> 00:09:51,311
+So in this case, they put sparse trees at the lower values.
+
+181
+00:09:51,911 --> 00:09:54,152
+It goes over in a forest edge.
+
+182
+00:09:54,573 --> 00:09:55,874
+And then when the values get very high,
+
+183
+00:09:56,594 --> 00:09:58,095
+it turns into a inner forest, which
+
+184
+00:09:58,155 --> 00:10:01,217
+has different types of trees, like long, thin, branchless
+
+185
+00:10:01,257 --> 00:10:01,517
+trees.
+
+186
+00:10:02,297 --> 00:10:04,038
+So they just map these curves onto it,
+
+187
+00:10:04,759 --> 00:10:06,100
+which is done in a logic.
+
+188
+00:10:06,140 --> 00:10:08,621
+And then they can link in different types of trees
+
+189
+00:10:08,661 --> 00:10:10,342
+to different ranges of the data.
+
+190
+00:10:10,703 --> 00:10:12,183
+And this way, they kind of implicitly
+
+191
+00:10:12,724 --> 00:10:14,105
+define areas in the game.
+
+192
+00:10:17,224 --> 00:10:18,264
+So we've got lots of world data.
+
+193
+00:10:18,984 --> 00:10:21,025
+We've got like tens of them.
+
+194
+00:10:21,505 --> 00:10:23,905
+Most of them are BC7 compressed, resolution about
+
+195
+00:10:24,046 --> 00:10:25,486
+one to four meters per square meter.
+
+196
+00:10:26,486 --> 00:10:27,866
+And let's look at a few more before we move on.
+
+197
+00:10:29,367 --> 00:10:30,527
+So we've got generated world data.
+
+198
+00:10:30,547 --> 00:10:33,247
+These are basically generated by our level editors, stuff
+
+199
+00:10:33,267 --> 00:10:33,528
+like that.
+
+200
+00:10:34,168 --> 00:10:38,289
+These are the maps that the placement system can read back
+
+201
+00:10:38,469 --> 00:10:40,189
+to kind of know more about the world around it.
+
+202
+00:10:41,173 --> 00:10:43,875
+As you can imagine, an artist designs procedural logic
+
+203
+00:10:43,895 --> 00:10:46,156
+for an ecotope, and he has to set it up in such a way
+
+204
+00:10:46,196 --> 00:10:49,258
+that the ecotope reacts naturally to its environment.
+
+205
+00:10:50,499 --> 00:10:54,702
+And a big part of this revolves around reading these kind
+
+206
+00:10:54,742 --> 00:10:58,224
+of maps and then defining areas, such as side of the road.
+
+207
+00:10:58,584 --> 00:10:59,365
+Where's side of the road?
+
+208
+00:11:00,385 --> 00:11:02,226
+Hey, where's next to a rock?
+
+209
+00:11:02,307 --> 00:11:02,847
+What does it mean?
+
+210
+00:11:03,347 --> 00:11:05,168
+And what does edge of a forest mean?
+
+211
+00:11:05,248 --> 00:11:07,270
+All these kind of areas are defined in logic
+
+212
+00:11:07,730 --> 00:11:09,411
+and can then be reused across all ecotopes.
+
+213
+00:11:10,807 --> 00:11:12,109
+So these structures get rather complex,
+
+214
+00:11:12,469 --> 00:11:14,131
+because you're reading lots of different data,
+
+215
+00:11:14,151 --> 00:11:15,232
+you're mapping them through curves,
+
+216
+00:11:15,252 --> 00:11:16,314
+you've got to combine them all together.
+
+217
+00:11:16,834 --> 00:11:18,035
+But you can make these things once,
+
+218
+00:11:18,276 --> 00:11:20,178
+and then just share them across ecotopes.
+
+219
+00:11:20,198 --> 00:11:22,621
+You can even have a separate, like very technical artist
+
+220
+00:11:23,021 --> 00:11:24,683
+make those graphs, and then have other artists
+
+221
+00:11:25,584 --> 00:11:26,845
+create ecotopes that use them.
+
+222
+00:11:28,622 --> 00:11:30,603
+OK, we also have a lot of height maps.
+
+223
+00:11:30,883 --> 00:11:32,764
+We got three of them, so we can place different layers
+
+224
+00:11:32,844 --> 00:11:35,685
+on top of things, on top of the ground, on top of the water.
+
+225
+00:11:36,765 --> 00:11:38,586
+And finally, these baked maps.
+
+226
+00:11:39,166 --> 00:11:41,927
+And these baked maps come out of World Machine.
+
+227
+00:11:42,187 --> 00:11:43,008
+We don't really paint them.
+
+228
+00:11:43,048 --> 00:11:44,288
+We could, but we just don't.
+
+229
+00:11:44,848 --> 00:11:49,570
+And these have stuff about erosion patterns and stuff
+
+230
+00:11:49,590 --> 00:11:49,910
+like that.
+
+231
+00:11:50,371 --> 00:11:51,411
+And we use those to create.
+
+232
+00:11:53,012 --> 00:11:55,637
+and natural variations within our ecotopes
+
+233
+00:11:55,938 --> 00:12:00,307
+to create just that little bit of extra that makes it really a believable system.
+
+234
+00:12:01,549 --> 00:12:03,994
+But I think, you know, this is, I think you get the idea, so let's move on.
+
+235
+00:12:06,510 --> 00:12:10,315
+So I hope this gives you an idea about what kind of input
+
+236
+00:12:10,335 --> 00:12:12,618
+data artists can use and can paint.
+
+237
+00:12:13,520 --> 00:12:15,542
+And we have seen how they can set it up and manipulate the
+
+238
+00:12:15,562 --> 00:12:15,983
+world data.
+
+239
+00:12:16,223 --> 00:12:19,488
+Or we're going to see how they now use it in the logic side
+
+240
+00:12:19,508 --> 00:12:19,808
+of things.
+
+241
+00:12:20,149 --> 00:12:22,091
+So what kind of logic do we give them?
+
+242
+00:12:22,292 --> 00:12:22,852
+What can they build?
+
+243
+00:12:23,594 --> 00:12:30,358
+Well, in short, we're using logic networks just like what you see in Nuke or Substance
+
+244
+00:12:30,599 --> 00:12:32,600
+or any shader builder that you have.
+
+245
+00:12:33,281 --> 00:12:38,384
+So it's basically you create a network of nodes that manipulate 2D maps.
+
+246
+00:12:39,332 --> 00:12:40,573
+And the purpose of these logic networks
+
+247
+00:12:40,633 --> 00:12:42,335
+is to generate a single density map,
+
+248
+00:12:42,656 --> 00:12:44,958
+and you link that graph network into an asset,
+
+249
+00:12:45,399 --> 00:12:47,201
+and the asset will then be placed according to that map.
+
+250
+00:12:48,082 --> 00:12:49,944
+Just to make it more clear, let's
+
+251
+00:12:49,964 --> 00:12:53,589
+go into an example of these graphs.
+
+252
+00:12:54,069 --> 00:12:55,511
+So let's say you want to place a tree in the world.
+
+253
+00:12:56,492 --> 00:12:58,675
+So we start with a placement tree map again.
+
+254
+00:13:00,083 --> 00:13:04,705
+But if you just place trees according to this map, you know, you'll get trees in the water,
+
+255
+00:13:04,805 --> 00:13:10,266
+trees on the roads, trees on rocks, because the map might be baked and then an artist
+
+256
+00:13:10,286 --> 00:13:14,208
+would come along and actually paint a road through it, but the artist is not going to
+
+257
+00:13:14,288 --> 00:13:15,368
+paint out the trees.
+
+258
+00:13:15,388 --> 00:13:16,448
+That's not how it works.
+
+259
+00:13:16,488 --> 00:13:22,470
+So we will have to make the system smart enough to figure out how to react to each of these
+
+260
+00:13:22,510 --> 00:13:23,431
+different inputs.
+
+261
+00:13:24,451 --> 00:13:26,092
+So for instance, we take out all the rocks
+
+262
+00:13:26,192 --> 00:13:28,053
+by loading in our object map.
+
+263
+00:13:29,393 --> 00:13:31,234
+We take out all the water.
+
+264
+00:13:31,454 --> 00:13:32,795
+So we take out our river map.
+
+265
+00:13:33,795 --> 00:13:34,796
+And we take out the roads.
+
+266
+00:13:35,676 --> 00:13:39,378
+And you end up with something like this as a final density
+
+267
+00:13:39,418 --> 00:13:39,558
+map.
+
+268
+00:13:39,578 --> 00:13:41,819
+So what this means is that the trees that are linked into this
+
+269
+00:13:42,199 --> 00:13:45,801
+will be placed everywhere that the tree map has been painted,
+
+270
+00:13:46,081 --> 00:13:49,303
+and not on rocks, not on roads, not in rivers, which
+
+271
+00:13:49,343 --> 00:13:50,263
+is kind of what you want.
+
+272
+00:13:51,064 --> 00:13:54,206
+And this can be used not only by a single tree, you can actually put this in a library,
+
+273
+00:13:54,606 --> 00:13:59,490
+and whenever you want to place something that's not on roads or rocks or water, you can just
+
+274
+00:13:59,530 --> 00:14:01,431
+grab this system and link it in.
+
+275
+00:14:04,415 --> 00:14:06,077
+OK, let's try to make an ecotope.
+
+276
+00:14:06,837 --> 00:14:07,918
+That's one step further.
+
+277
+00:14:08,719 --> 00:14:11,221
+So this is basically how you set up your assets
+
+278
+00:14:11,241 --> 00:14:11,921
+within an ecotope.
+
+279
+00:14:12,041 --> 00:14:13,182
+It's a graph again.
+
+280
+00:14:14,403 --> 00:14:15,404
+You can see it's a forest.
+
+281
+00:14:16,025 --> 00:14:16,865
+And we've got some bushes.
+
+282
+00:14:16,885 --> 00:14:17,406
+We've got some trees.
+
+283
+00:14:17,426 --> 00:14:18,086
+We've got some plants.
+
+284
+00:14:19,387 --> 00:14:21,369
+And they're set up in this kind of grouped system.
+
+285
+00:14:22,650 --> 00:14:26,332
+And now we have to add the footprint to these assets.
+
+286
+00:14:26,952 --> 00:14:29,554
+A footprint is basically how big is an object
+
+287
+00:14:29,654 --> 00:14:30,615
+for the procedural system.
+
+288
+00:14:31,395 --> 00:14:33,776
+Like how far apart are these objects being placed.
+
+289
+00:14:34,177 --> 00:14:38,179
+This is used by the discretization pass
+
+290
+00:14:38,219 --> 00:14:41,621
+to kind of place objects the good amount of space apart
+
+291
+00:14:41,641 --> 00:14:42,962
+and also to make sure that things
+
+292
+00:14:43,002 --> 00:14:43,802
+don't collide with each other.
+
+293
+00:14:44,283 --> 00:14:47,084
+You can see that the trees have a footprint of six meters,
+
+294
+00:14:47,124 --> 00:14:49,446
+so they will be placed six meters apart.
+
+295
+00:14:50,146 --> 00:14:52,227
+And the plants have a footprint of one meter,
+
+296
+00:14:52,547 --> 00:14:53,888
+but we placed one meter apart.
+
+297
+00:14:54,768 --> 00:14:56,209
+So, you know, we can just load it into the game.
+
+298
+00:14:56,509 --> 00:14:56,809
+Oh, sorry.
+
+299
+00:14:57,610 --> 00:15:00,591
+First of all, first, there's no density logic
+
+300
+00:15:00,771 --> 00:15:01,452
+hooked up to it yet.
+
+301
+00:15:01,992 --> 00:15:04,333
+So all the density maps are effectively just full white.
+
+302
+00:15:04,633 --> 00:15:06,554
+That means everything gets placed everywhere.
+
+303
+00:15:08,155 --> 00:15:10,236
+So, before I capture this movie,
+
+304
+00:15:10,496 --> 00:15:11,196
+let's wait for it to load.
+
+305
+00:15:13,548 --> 00:15:14,048
+Yep, there it is.
+
+306
+00:15:14,648 --> 00:15:16,809
+So that's our ecotope.
+
+307
+00:15:17,709 --> 00:15:20,150
+Before capturing this movie, I had to lower the bush density
+
+308
+00:15:20,170 --> 00:15:22,031
+a bit, otherwise you would have bushes everywhere and you
+
+309
+00:15:22,091 --> 00:15:23,032
+wouldn't see anything anymore.
+
+310
+00:15:24,852 --> 00:15:26,853
+But other than that, this is directly that thing that we
+
+311
+00:15:26,873 --> 00:15:28,254
+just built, just put into the system.
+
+312
+00:15:28,274 --> 00:15:28,814
+And it just works.
+
+313
+00:15:30,754 --> 00:15:33,676
+But that's a good starting point, but let's play a
+
+314
+00:15:33,696 --> 00:15:35,056
+little bit with a little bit of logic.
+
+315
+00:15:35,957 --> 00:15:38,398
+So again, back to our Iketope.
+
+316
+00:15:39,099 --> 00:15:41,920
+And let's say, OK, let's grab that tree map that we had.
+
+317
+00:15:42,160 --> 00:15:42,700
+Let's link that in.
+
+318
+00:15:43,561 --> 00:15:46,282
+So you can see we put the tree map in the forest root node,
+
+319
+00:15:46,643 --> 00:15:49,084
+and the density map basically trickles down.
+
+320
+00:15:49,884 --> 00:15:53,466
+It propagates through the graph, and all the objects
+
+321
+00:15:53,506 --> 00:15:55,727
+now basically listen to this map.
+
+322
+00:15:57,889 --> 00:15:58,709
+Let's do a little bit more.
+
+323
+00:15:58,749 --> 00:16:00,030
+Let's say, OK, we want to make a clearing.
+
+324
+00:16:00,050 --> 00:16:01,851
+We want to be able to paint a clearing into our forest.
+
+325
+00:16:02,492 --> 00:16:05,834
+So we add a WorldDataClearingMap, a very
+
+326
+00:16:05,994 --> 00:16:08,956
+natural density map there, a blob and a gradient.
+
+327
+00:16:09,977 --> 00:16:13,119
+So when you create a clearing, you basically want to take
+
+328
+00:16:13,299 --> 00:16:14,780
+things out, usually, not put stuff back.
+
+329
+00:16:15,840 --> 00:16:17,542
+So all the artists might disagree.
+
+330
+00:16:18,122 --> 00:16:22,104
+So I put an inverse logical node into the
+
+331
+00:16:22,345 --> 00:16:22,965
+output of that map.
+
+332
+00:16:23,565 --> 00:16:25,627
+And then I hook it up to the trees and the bushes.
+
+333
+00:16:25,787 --> 00:16:29,591
+So this means that whenever I paint in my clearing map,
+
+334
+00:16:29,671 --> 00:16:30,772
+the trees and bushes will disappear.
+
+335
+00:16:31,673 --> 00:16:33,614
+And you can see also that the density map now has been
+
+336
+00:16:33,654 --> 00:16:35,095
+updated in this example.
+
+337
+00:16:36,297 --> 00:16:37,838
+And let's load this into the game, see what happens.
+
+338
+00:16:39,059 --> 00:16:40,981
+So first off, I need to paint stuff in because we need to
+
+339
+00:16:41,021 --> 00:16:41,781
+paint that forest map in.
+
+340
+00:16:42,362 --> 00:16:42,722
+So there it goes.
+
+341
+00:16:46,109 --> 00:16:47,290
+Okay, so that's nice.
+
+342
+00:16:47,790 --> 00:16:50,713
+So, there is no actual tools code doing this,
+
+343
+00:16:50,753 --> 00:16:52,195
+it's just changing the data maps,
+
+344
+00:16:52,695 --> 00:16:53,736
+and the game just reacts to it,
+
+345
+00:16:53,756 --> 00:16:55,138
+the placement system reacts to it,
+
+346
+00:16:55,158 --> 00:16:58,081
+because it's runtime, it's pretty snappy.
+
+347
+00:16:58,861 --> 00:17:00,263
+So yeah, this is painting in the clearing.
+
+348
+00:17:01,684 --> 00:17:02,625
+As you can see, that works pretty well.
+
+349
+00:17:04,420 --> 00:17:06,560
+So this is all very basic, but it shows you
+
+350
+00:17:06,600 --> 00:17:08,741
+how an artist can set up a little piece of procedural logic.
+
+351
+00:17:09,141 --> 00:17:12,702
+In production, the Ecotopes are much, much more complex.
+
+352
+00:17:14,162 --> 00:17:16,902
+Because artists can create these crazy deep systems
+
+353
+00:17:16,942 --> 00:17:20,943
+of layers of logics and grouped assets.
+
+354
+00:17:21,023 --> 00:17:25,184
+And it's a multi-layer asset graph that they build.
+
+355
+00:17:26,524 --> 00:17:28,105
+So just to give you an example, this
+
+356
+00:17:28,165 --> 00:17:30,605
+is that one Ecotope we just made in that slide.
+
+357
+00:17:30,625 --> 00:17:32,726
+So this is what an artist sees when he opens our editor.
+
+358
+00:17:34,086 --> 00:17:40,330
+And this is basically what a density graph looks like for our shared, this is the big shared area filter node.
+
+359
+00:17:41,110 --> 00:17:50,115
+So this is basically where, this is very hard to make, but if you have a technical artist, they can make it once, set it up correctly, and then you can just use it across all your ecotopes.
+
+360
+00:17:50,135 --> 00:17:55,538
+And that's what we did. So this has stuff like, you know, like where is, I want to place something on the side of the road.
+
+361
+00:17:55,678 --> 00:17:59,240
+You just grab the side of the road node, link it into your assets, and you're done.
+
+362
+00:18:00,750 --> 00:18:04,993
+OK, let's now go and grab a fully production ecotope,
+
+363
+00:18:05,313 --> 00:18:07,355
+put it in the game, and then see what happens if we
+
+364
+00:18:07,375 --> 00:18:08,395
+start painting the world data.
+
+365
+00:18:10,157 --> 00:18:11,558
+So there's an ecotope set up now.
+
+366
+00:18:12,458 --> 00:18:13,439
+And we're just painting world data.
+
+367
+00:18:13,459 --> 00:18:14,119
+So I'm painting here.
+
+368
+00:18:14,180 --> 00:18:14,820
+It's me painting.
+
+369
+00:18:14,840 --> 00:18:15,861
+I'm horrible at this.
+
+370
+00:18:16,441 --> 00:18:17,182
+So here we are.
+
+371
+00:18:17,382 --> 00:18:18,323
+We're painting in some.
+
+372
+00:18:19,202 --> 00:18:21,463
+ground cover, make a nice big brush.
+
+373
+00:18:21,983 --> 00:18:24,604
+You can see already, it doesn't paint on the road.
+
+374
+00:18:24,624 --> 00:18:25,524
+It doesn't paint in the water.
+
+375
+00:18:25,544 --> 00:18:26,464
+That's all set up already.
+
+376
+00:18:26,884 --> 00:18:29,325
+And you can see that even the grass reacts to the rock
+
+377
+00:18:29,485 --> 00:18:32,045
+laying there, just slightly changing the composition.
+
+378
+00:18:32,625 --> 00:18:34,566
+And it's exactly this kind of stuff that an environment
+
+379
+00:18:34,646 --> 00:18:36,826
+artist knows that it looks good.
+
+380
+00:18:36,906 --> 00:18:39,547
+And he can then put it into the logic and really put his
+
+381
+00:18:39,667 --> 00:18:40,667
+expertise into the system.
+
+382
+00:18:41,308 --> 00:18:44,288
+So here I'm painting that forest map again, that tree
+
+383
+00:18:44,328 --> 00:18:44,828
+placement map.
+
+384
+00:18:45,388 --> 00:18:47,529
+You can see it's starting to place trees if there's room.
+
+385
+00:18:48,942 --> 00:18:50,102
+And I'm very sloppy with painting.
+
+386
+00:18:50,122 --> 00:18:50,982
+I'm just painting everywhere.
+
+387
+00:18:51,022 --> 00:18:53,003
+But the system knows, OK, I can't paint on roads.
+
+388
+00:18:53,023 --> 00:18:53,964
+Or I can't place on roads.
+
+389
+00:18:54,004 --> 00:18:55,324
+I can't place in the water.
+
+390
+00:18:56,305 --> 00:18:58,425
+So now I'm starting to paint in gameplay elements.
+
+391
+00:18:58,525 --> 00:19:00,246
+These are stealth bushes that the player
+
+392
+00:19:00,326 --> 00:19:01,286
+uses to hide from robots.
+
+393
+00:19:02,027 --> 00:19:03,767
+You can see, again, it's not being placed in water.
+
+394
+00:19:03,787 --> 00:19:04,808
+It's placed around rocks.
+
+395
+00:19:05,288 --> 00:19:07,729
+And other systems react with the ground cover around it
+
+396
+00:19:07,769 --> 00:19:08,449
+changes a little bit.
+
+397
+00:19:09,290 --> 00:19:11,190
+So now we're here painting in some blocking bushes, which
+
+398
+00:19:11,250 --> 00:19:13,311
+are basically things the player cannot push through.
+
+399
+00:19:13,331 --> 00:19:14,492
+So you can block stuff off.
+
+400
+00:19:14,872 --> 00:19:15,852
+And here.
+
+401
+00:19:17,573 --> 00:19:19,393
+We're just changing the entire type of the forest.
+
+402
+00:19:19,573 --> 00:19:21,474
+It was like a broadleaf forest or something like that.
+
+403
+00:19:21,734 --> 00:19:22,614
+And now it's a pine forest.
+
+404
+00:19:23,155 --> 00:19:23,795
+And now we're back again.
+
+405
+00:19:24,435 --> 00:19:26,756
+So there's stuff like variance maps that they can paint.
+
+406
+00:19:27,176 --> 00:19:30,637
+Also, each ecotope can have its own logic,
+
+407
+00:19:30,657 --> 00:19:31,537
+so they can do whatever they want.
+
+408
+00:19:32,497 --> 00:19:34,538
+So here we have the last thing where we can actually
+
+409
+00:19:34,598 --> 00:19:35,298
+move the roads around.
+
+410
+00:19:36,451 --> 00:19:38,493
+And because the roads also write to the world data, the
+
+411
+00:19:38,533 --> 00:19:40,994
+system picks it up and automatically adjusts.
+
+412
+00:19:42,215 --> 00:19:45,758
+So I think the cool thing about this is that there's no
+
+413
+00:19:45,958 --> 00:19:48,040
+tools code that is like placing these trees or
+
+414
+00:19:48,060 --> 00:19:48,320
+whatever.
+
+415
+00:19:48,340 --> 00:19:49,020
+It's just a game.
+
+416
+00:19:49,060 --> 00:19:49,981
+You just leave the game running.
+
+417
+00:19:50,441 --> 00:19:53,023
+You just have a little tool that can update world data
+
+418
+00:19:53,043 --> 00:19:54,204
+maps, and it just works.
+
+419
+00:19:57,557 --> 00:19:59,718
+OK, now we go to the other effect,
+
+420
+00:19:59,738 --> 00:20:01,499
+where you would keep the real data the same
+
+421
+00:20:01,859 --> 00:20:07,961
+and just apply different ecotopes to the same area.
+
+422
+00:20:08,301 --> 00:20:10,502
+So we are placing different ecotopes on the same area
+
+423
+00:20:10,802 --> 00:20:14,304
+and see how each ecotope handles the environment differently.
+
+424
+00:20:14,944 --> 00:20:16,985
+So we start out with this jungle ecotope.
+
+425
+00:20:17,545 --> 00:20:18,125
+Looks really nice.
+
+426
+00:20:19,966 --> 00:20:21,547
+So I think this is a production ecotope.
+
+427
+00:20:21,567 --> 00:20:22,947
+This is just whatever is now on disk.
+
+428
+00:20:24,873 --> 00:20:26,576
+But it's not actually there in the world right now.
+
+429
+00:20:27,518 --> 00:20:28,681
+If you go here in the game, there's
+
+430
+00:20:28,701 --> 00:20:30,545
+a completely different iketope here.
+
+431
+00:20:31,146 --> 00:20:32,168
+So take the iketope out.
+
+432
+00:20:36,293 --> 00:20:38,793
+And we placed back this pine forest.
+
+433
+00:20:39,053 --> 00:20:41,474
+So this is exactly the same place in the world, just
+
+434
+00:20:41,714 --> 00:20:44,134
+linking in a single link, changing a single link.
+
+435
+00:20:44,755 --> 00:20:46,995
+We're working really hard in making this hot loadable.
+
+436
+00:20:47,015 --> 00:20:48,675
+So you could just press a button in the editor, and it
+
+437
+00:20:48,695 --> 00:20:50,156
+will swap this out in the game.
+
+438
+00:20:50,776 --> 00:20:52,016
+We had it working, and then it breaks.
+
+439
+00:20:52,056 --> 00:20:54,196
+And we're still figuring that out.
+
+440
+00:20:55,157 --> 00:20:57,257
+There's also different weather systems that are hooked up to
+
+441
+00:20:57,317 --> 00:20:57,657
+ecotopes.
+
+442
+00:20:58,297 --> 00:20:59,277
+And this is the final one.
+
+443
+00:20:59,337 --> 00:21:00,458
+It's like a desert ecotope.
+
+444
+00:21:00,918 --> 00:21:02,438
+And again, it looks completely different.
+
+445
+00:21:02,818 --> 00:21:03,438
+And it's basically.
+
+446
+00:21:04,618 --> 00:21:07,239
+Exactly the same data, just a different type of logic
+
+447
+00:21:07,499 --> 00:21:08,880
+applied to the area.
+
+448
+00:21:09,340 --> 00:21:10,740
+And you can imagine that it's really nice
+
+449
+00:21:10,760 --> 00:21:11,941
+that you can just paint in.
+
+450
+00:21:12,781 --> 00:21:14,261
+You can literally paint in an environment.
+
+451
+00:21:14,281 --> 00:21:15,762
+You can say, OK, I want this to be jungle.
+
+452
+00:21:15,782 --> 00:21:17,843
+I want this to be like an icy tundra.
+
+453
+00:21:18,023 --> 00:21:19,743
+You can just, it's a single click away.
+
+454
+00:21:21,044 --> 00:21:24,405
+And it's very handy if you're iterating mad over the game
+
+455
+00:21:24,445 --> 00:21:25,045
+world like we did.
+
+456
+00:21:25,065 --> 00:21:30,306
+OK, so let's get into the technical details.
+
+457
+00:21:31,775 --> 00:21:33,236
+We've seen how artists set up the logic.
+
+458
+00:21:33,256 --> 00:21:34,997
+We've seen what the outputs are.
+
+459
+00:21:35,698 --> 00:21:39,261
+But let's look into our data that we work with on the GPU.
+
+460
+00:21:40,542 --> 00:21:42,683
+So before we do anything, we have those graphs, right?
+
+461
+00:21:42,703 --> 00:21:44,164
+The graphs don't really work well on GPU.
+
+462
+00:21:44,204 --> 00:21:47,367
+So we have to bake it down into something that's manageable.
+
+463
+00:21:48,888 --> 00:21:49,689
+Those are called layers.
+
+464
+00:21:49,829 --> 00:21:52,150
+Basically what we do, we go over those placement graphs.
+
+465
+00:21:52,711 --> 00:21:55,173
+We grab all the leaf nodes.
+
+466
+00:21:56,314 --> 00:21:58,315
+And we collect them together in a list of layers.
+
+467
+00:22:00,445 --> 00:22:02,427
+And each of these layers has all the information it needs
+
+468
+00:22:02,787 --> 00:22:04,949
+to place that associated type in the world,
+
+469
+00:22:05,409 --> 00:22:08,872
+including an intermediate form of the graph.
+
+470
+00:22:08,892 --> 00:22:11,974
+So we compile a graph into this intermediate form.
+
+471
+00:22:12,214 --> 00:22:13,635
+I won't go into detail what exactly that is,
+
+472
+00:22:13,655 --> 00:22:16,117
+but it's some kind of intermediate instruction
+
+473
+00:22:16,177 --> 00:22:16,457
+language.
+
+474
+00:22:17,298 --> 00:22:20,159
+And we can now just bake this to a compute shader,
+
+475
+00:22:20,359 --> 00:22:21,739
+and that compute shader does nothing else
+
+476
+00:22:21,819 --> 00:22:25,601
+but make that density logic inside the GPU
+
+477
+00:22:25,641 --> 00:22:28,501
+and just bakes out that one density map.
+
+478
+00:22:29,522 --> 00:22:31,022
+Or you can actually feed it directly
+
+479
+00:22:31,102 --> 00:22:33,563
+into a GPU-based interpreter shader that we have,
+
+480
+00:22:33,583 --> 00:22:36,144
+which is basically running a virtual stack machine.
+
+481
+00:22:36,684 --> 00:22:40,205
+You can push that intermediate form directly into the system
+
+482
+00:22:40,245 --> 00:22:41,826
+and you can step through it on the GPU.
+
+483
+00:22:41,866 --> 00:22:43,126
+You can hold, you can inspect.
+
+484
+00:22:43,386 --> 00:22:43,986
+It's really nice.
+
+485
+00:22:44,066 --> 00:22:45,487
+We use it all the time to debug stuff.
+
+486
+00:22:46,807 --> 00:22:50,810
+OK, so the one thing that intermediate form does
+
+487
+00:22:51,391 --> 00:22:54,093
+is basically allow merging of different subgraphs.
+
+488
+00:22:54,814 --> 00:22:58,336
+So what usually happens is you have certain assets that
+
+489
+00:22:58,356 --> 00:22:59,718
+are placed a million different ways.
+
+490
+00:22:59,738 --> 00:23:02,880
+There's millions of different layers
+
+491
+00:23:03,000 --> 00:23:05,322
+that use at one little piece of graphs, or use at one tree.
+
+492
+00:23:05,342 --> 00:23:06,003
+That's really common.
+
+493
+00:23:06,683 --> 00:23:09,125
+And because everything is in this intermediate form,
+
+494
+00:23:09,145 --> 00:23:11,807
+you can merge this all together to a single layer.
+
+495
+00:23:12,388 --> 00:23:14,429
+And an artist can actually exactly define
+
+496
+00:23:14,509 --> 00:23:15,610
+how he wants that merging to occur.
+
+497
+00:23:16,734 --> 00:23:18,816
+And it takes down the amount of layers that comes out of an
+
+498
+00:23:18,856 --> 00:23:22,078
+ecotope from several thousands to several hundreds, which is
+
+499
+00:23:22,118 --> 00:23:23,720
+still a lot, but we can do that.
+
+500
+00:23:23,800 --> 00:23:24,620
+We can handle that.
+
+501
+00:23:25,821 --> 00:23:26,042
+OK.
+
+502
+00:23:28,483 --> 00:23:30,865
+Let's start out with grabbing one of those layers.
+
+503
+00:23:31,046 --> 00:23:36,890
+And let's set one of those layers, and let's see what
+
+504
+00:23:36,930 --> 00:23:39,792
+happens if we push it through our GPU pipeline, which is
+
+505
+00:23:39,813 --> 00:23:40,293
+still the same.
+
+506
+00:23:40,333 --> 00:23:43,956
+We try to first make a density map, and then we discretize
+
+507
+00:23:43,976 --> 00:23:44,816
+that into these objects.
+
+508
+00:23:47,160 --> 00:23:49,202
+OK, so the step one is called just density map.
+
+509
+00:23:49,703 --> 00:23:50,684
+It's a density map shader.
+
+510
+00:23:50,704 --> 00:23:51,245
+It's a shader name.
+
+511
+00:23:52,046 --> 00:23:53,948
+Our first part of the runtime pipeline
+
+512
+00:23:54,128 --> 00:23:56,311
+evaluates the density graph for a single layer.
+
+513
+00:23:57,632 --> 00:23:59,634
+Within a given area of the world, it's all localized.
+
+514
+00:24:00,355 --> 00:24:01,316
+And under normal conditions, this
+
+515
+00:24:01,356 --> 00:24:04,120
+is done by the pre-compiled compute shader.
+
+516
+00:24:04,440 --> 00:24:06,382
+But we can also use that intermediate form.
+
+517
+00:24:08,574 --> 00:24:10,595
+Our entire placement pipeline scales up in granularity
+
+518
+00:24:11,956 --> 00:24:13,257
+depending on the footprint of the asset.
+
+519
+00:24:13,277 --> 00:24:18,740
+So if we're placing trees, we place a big area at once
+
+520
+00:24:19,140 --> 00:24:21,941
+so that we can really cover lots of huge forests at once.
+
+521
+00:24:22,602 --> 00:24:24,062
+And if it's something small, like near your feet,
+
+522
+00:24:24,103 --> 00:24:27,024
+like little grass bits, we do that in smaller chunks.
+
+523
+00:24:27,624 --> 00:24:31,587
+So we're kind of trying to balance the amount of work
+
+524
+00:24:31,607 --> 00:24:33,287
+we do versus how fast we can do it.
+
+525
+00:24:34,148 --> 00:24:37,410
+But independent of the actual size of the thing
+
+526
+00:24:37,430 --> 00:24:38,930
+we're going to place, like the area we're placing,
+
+527
+00:24:38,950 --> 00:24:42,612
+we're always generating a 64 by 64 pixel density map,
+
+528
+00:24:42,892 --> 00:24:44,233
+a local density map.
+
+529
+00:24:44,973 --> 00:24:47,635
+And because that is stretched more or less over the world
+
+530
+00:24:47,875 --> 00:24:50,736
+in world space, the larger blocks
+
+531
+00:24:50,816 --> 00:24:52,937
+use lower MIPS from our world data.
+
+532
+00:24:52,977 --> 00:24:55,679
+So you automatically get this kind of MIPing of your data.
+
+533
+00:24:55,699 --> 00:24:58,760
+So the big trees use more average data
+
+534
+00:24:58,820 --> 00:25:01,982
+to determine their placement than very small, high frequency
+
+535
+00:25:02,002 --> 00:25:02,662
+things like grass.
+
+536
+00:25:03,965 --> 00:25:06,423
+Again, something that solves a lot of problems and it's very fast.
+
+537
+00:25:08,602 --> 00:25:08,782
+OK.
+
+538
+00:25:09,662 --> 00:25:10,923
+So yeah, Mimit World Data.
+
+539
+00:25:11,383 --> 00:25:14,105
+So this is in-game again, kind of.
+
+540
+00:25:14,925 --> 00:25:15,766
+And this shows a debugger.
+
+541
+00:25:15,826 --> 00:25:17,106
+We know where an artist can, you know,
+
+542
+00:25:17,166 --> 00:25:19,468
+you see there's something really weirdly placed on the road,
+
+543
+00:25:19,488 --> 00:25:20,488
+and you want to know why.
+
+544
+00:25:20,968 --> 00:25:23,029
+So they load up that layer, and they
+
+545
+00:25:23,069 --> 00:25:25,911
+can load it into that interpreter
+
+546
+00:25:25,951 --> 00:25:26,711
+and just step through it.
+
+547
+00:25:27,052 --> 00:25:28,392
+So they can just step through it like this.
+
+548
+00:25:29,133 --> 00:25:31,594
+And they can see how it kind of composes everything and moves
+
+549
+00:25:31,614 --> 00:25:32,755
+it through the pipeline.
+
+550
+00:25:33,395 --> 00:25:34,496
+And then the final step, they can even
+
+551
+00:25:34,516 --> 00:25:36,617
+see the discretization step, where
+
+552
+00:25:36,657 --> 00:25:37,637
+it's like changing to objects.
+
+553
+00:25:38,738 --> 00:25:43,363
+So this is extremely useful because a lot of times an artist would come like,
+
+554
+00:25:43,763 --> 00:25:46,986
+hey, there's this weird plant coming here that I didn't place there.
+
+555
+00:25:47,026 --> 00:25:47,507
+Why is that?
+
+556
+00:25:47,547 --> 00:25:51,130
+And then they can look into here and say like, oh, wait, I forgot to set up a logic node
+
+557
+00:25:51,190 --> 00:25:52,832
+or I forgot to put an inverter there.
+
+558
+00:25:54,213 --> 00:25:58,017
+It's really helped us out a lot during the development.
+
+559
+00:26:01,695 --> 00:26:03,936
+All right, so the second step, we've got the density map.
+
+560
+00:26:03,976 --> 00:26:05,717
+Now we're doing the discretization step,
+
+561
+00:26:06,337 --> 00:26:07,478
+which I think I'm pronouncing wrong.
+
+562
+00:26:07,498 --> 00:26:09,079
+So I'll just call it the generate step,
+
+563
+00:26:09,119 --> 00:26:09,959
+which is the name of the shader.
+
+564
+00:26:11,140 --> 00:26:16,442
+And the method we use to do this step
+
+565
+00:26:16,682 --> 00:26:18,483
+is called order dithering, which is probably
+
+566
+00:26:18,523 --> 00:26:19,864
+very familiar to a lot of you.
+
+567
+00:26:21,845 --> 00:26:25,087
+So order dithering is basically like it's a graphical effect.
+
+568
+00:26:25,587 --> 00:26:27,808
+Like if you take our beautiful density map again,
+
+569
+00:26:28,469 --> 00:26:31,110
+And you throw it in Photoshop, and you click the order dither
+
+570
+00:26:31,250 --> 00:26:33,570
+function, you get something like this, which is like a
+
+571
+00:26:33,650 --> 00:26:35,231
+very common retro effect.
+
+572
+00:26:36,832 --> 00:26:39,853
+But now if you imagine that each white pixel is one object
+
+573
+00:26:39,873 --> 00:26:40,913
+that we're going to place in our game.
+
+574
+00:26:41,982 --> 00:26:44,484
+You can kind of see that it actually does what we want.
+
+575
+00:26:45,424 --> 00:26:46,805
+On the black pixels, there's nothing there.
+
+576
+00:26:46,925 --> 00:26:49,768
+And on the gray pixels, more and more dense stuff
+
+577
+00:26:49,808 --> 00:26:50,388
+gets placed.
+
+578
+00:26:50,548 --> 00:26:52,169
+And on the white pixels, you get full density
+
+579
+00:26:52,209 --> 00:26:53,911
+where the objects are as close together as possible.
+
+580
+00:26:54,691 --> 00:26:59,055
+So the cool thing about this is it's super fast.
+
+581
+00:26:59,195 --> 00:27:01,296
+It's independent.
+
+582
+00:27:01,937 --> 00:27:03,938
+You can evaluate it independently per pixel.
+
+583
+00:27:05,019 --> 00:27:06,740
+And it's just perfect for GPUs.
+
+584
+00:27:06,760 --> 00:27:08,402
+There's no dependencies in a small data set.
+
+585
+00:27:09,462 --> 00:27:11,203
+So the process behind this is simple.
+
+586
+00:27:11,323 --> 00:27:13,624
+Each pixel is evaluated independently
+
+587
+00:27:13,664 --> 00:27:16,665
+against a small repeated pattern of threshold values.
+
+588
+00:27:18,165 --> 00:27:20,586
+And the result colors the pixels black or white.
+
+589
+00:27:21,946 --> 00:27:24,607
+So the threshold values that usually are used,
+
+590
+00:27:24,627 --> 00:27:27,308
+like by Photoshop and that kind of stuff, is the Bayer matrix
+
+591
+00:27:27,348 --> 00:27:27,508
+here.
+
+592
+00:27:27,968 --> 00:27:29,148
+This is a 4x4 version of it.
+
+593
+00:27:30,689 --> 00:27:31,749
+And you can kind of see below it,
+
+594
+00:27:31,769 --> 00:27:33,430
+you can kind of see the pattern it usually generates.
+
+595
+00:27:33,490 --> 00:27:34,750
+It's also kind of a familiar pattern
+
+596
+00:27:34,770 --> 00:27:36,991
+that you usually see in all kinds of old games.
+
+597
+00:27:38,391 --> 00:27:38,451
+And
+
+598
+00:27:40,659 --> 00:27:43,060
+Let's be honest, it's a bit obvious if you use this pattern.
+
+599
+00:27:43,080 --> 00:27:44,280
+It doesn't look that good.
+
+600
+00:27:45,020 --> 00:27:46,881
+It's very, very regular.
+
+601
+00:27:47,381 --> 00:27:48,841
+But we're on a GPU.
+
+602
+00:27:49,001 --> 00:27:50,282
+We've got linear interpolation.
+
+603
+00:27:50,362 --> 00:27:51,662
+We've got all these fancy tools.
+
+604
+00:27:51,702 --> 00:27:52,723
+We get a few Vs.
+
+605
+00:27:53,443 --> 00:27:54,763
+We don't have to use these pixel boundaries.
+
+606
+00:27:55,283 --> 00:27:59,324
+So what we do, we create our own threshold map, but not a
+
+607
+00:27:59,645 --> 00:28:04,206
+grid, but we create our freestyle points on a square.
+
+608
+00:28:05,627 --> 00:28:11,336
+It's a nicely ordered set of explicit positions with each its own implicit threshold value.
+
+609
+00:28:12,137 --> 00:28:14,781
+This is an old screenshot from our pattern generator from like years ago.
+
+610
+00:28:14,821 --> 00:28:19,027
+We built, I built it once, we used it and it kind of, it kept working, it's fine.
+
+611
+00:28:19,748 --> 00:28:22,752
+So it's not a coincidence that everybody's using this
+
+612
+00:28:22,812 --> 00:28:26,518
+Bayer matrix you just saw for their retro gaming, dithering
+
+613
+00:28:27,459 --> 00:28:30,363
+patterns, because it's very mathematically constructed.
+
+614
+00:28:30,703 --> 00:28:33,007
+And there's some nice properties that we also want
+
+615
+00:28:33,027 --> 00:28:34,549
+to have in our freestyle version over there.
+
+616
+00:28:35,290 --> 00:28:37,171
+So those properties are basically
+
+617
+00:28:37,912 --> 00:28:39,813
+the thresholds themselves, so the threshold values
+
+618
+00:28:39,993 --> 00:28:42,975
+on each of these sample points, are evenly
+
+619
+00:28:42,995 --> 00:28:43,996
+spread between 0 and 1.
+
+620
+00:28:45,217 --> 00:28:47,719
+And kind of the most important one is that the points are
+
+621
+00:28:47,839 --> 00:28:50,521
+ordered to have maximum distance between two
+
+622
+00:28:50,581 --> 00:28:51,862
+consecutive threshold values.
+
+623
+00:28:53,223 --> 00:28:54,584
+So that's what this generator does.
+
+624
+00:28:54,624 --> 00:28:56,185
+The color coding is kind of weird,
+
+625
+00:28:56,265 --> 00:28:58,407
+but basically blue is like very low,
+
+626
+00:28:58,507 --> 00:29:02,110
+and then it turns to purple when it goes up in threshold value.
+
+627
+00:29:03,110 --> 00:29:03,651
+And now the.
+
+628
+00:29:05,473 --> 00:29:07,974
+The final trick, basically, is to scale this pattern
+
+629
+00:29:08,014 --> 00:29:11,136
+in world space, just so that the distance between all
+
+630
+00:29:11,156 --> 00:29:13,478
+these sample points becomes exactly
+
+631
+00:29:13,558 --> 00:29:16,539
+equal to the footprint of the object that you want to place.
+
+632
+00:29:16,599 --> 00:29:19,001
+Because if we now discretize using this pattern,
+
+633
+00:29:19,461 --> 00:29:21,943
+the resulting point cloud we get out of it
+
+634
+00:29:22,243 --> 00:29:25,245
+will be exactly spaced one footprint apart.
+
+635
+00:29:26,045 --> 00:29:27,366
+So this is how we do that.
+
+636
+00:29:30,528 --> 00:29:33,930
+So this is basically how we discretize our density maps.
+
+637
+00:29:35,898 --> 00:29:37,659
+So trees in the forest are a good example
+
+638
+00:29:37,679 --> 00:29:40,560
+of a very large footprint combined
+
+639
+00:29:40,600 --> 00:29:42,861
+with very full density coverage.
+
+640
+00:29:43,701 --> 00:29:46,062
+Because we want trees that are always like six meters apart,
+
+641
+00:29:46,742 --> 00:29:48,283
+but we still want as much trees as possible.
+
+642
+00:29:49,403 --> 00:29:51,104
+And the problem is you start to see patterns.
+
+643
+00:29:51,244 --> 00:29:52,044
+It's kind of hard to see.
+
+644
+00:29:52,204 --> 00:29:53,425
+Even with a proper Bayer pattern,
+
+645
+00:29:53,445 --> 00:29:55,886
+you see patterns like you can kind of see it's,
+
+646
+00:29:56,966 --> 00:29:57,966
+no, yeah, you're trying to see.
+
+647
+00:29:58,246 --> 00:29:59,687
+You can see with the white triangle,
+
+648
+00:29:59,727 --> 00:30:01,848
+those trees behind it are kind of lined up exactly.
+
+649
+00:30:02,943 --> 00:30:04,504
+And it took a long time before people
+
+650
+00:30:04,524 --> 00:30:05,224
+start seeing these patterns.
+
+651
+00:30:05,244 --> 00:30:06,825
+But when they saw it, they will never unsee it.
+
+652
+00:30:06,885 --> 00:30:07,585
+So we had to fix it.
+
+653
+00:30:08,325 --> 00:30:10,866
+And the thing we did at the end was just
+
+654
+00:30:11,026 --> 00:30:13,667
+add a little bit of jitter to the pattern,
+
+655
+00:30:13,687 --> 00:30:15,188
+a little bit of randomization.
+
+656
+00:30:15,548 --> 00:30:17,069
+But artists can set up how much they want.
+
+657
+00:30:17,129 --> 00:30:19,290
+So again, it's fully art.
+
+658
+00:30:19,610 --> 00:30:20,951
+The artists have full control over it.
+
+659
+00:30:22,211 --> 00:30:24,832
+So when you add a little jitter, this ends up being like this.
+
+660
+00:30:25,493 --> 00:30:26,253
+And the pattern is gone.
+
+661
+00:30:27,794 --> 00:30:30,635
+We had plans for multiple stencils, wang tiling.
+
+662
+00:30:31,055 --> 00:30:31,795
+It was all not necessary.
+
+663
+00:30:34,323 --> 00:30:36,843
+OK, so let's have a small overview of our generate
+
+664
+00:30:37,044 --> 00:30:37,564
+compute shader.
+
+665
+00:30:39,944 --> 00:30:41,265
+I wanted to do shader code.
+
+666
+00:30:41,285 --> 00:30:42,925
+I was like, well, that's not really clear.
+
+667
+00:30:42,985 --> 00:30:45,246
+So I'll just go through it step by step.
+
+668
+00:30:46,046 --> 00:30:49,007
+So you can see here that we've got an area we want to fill
+
+669
+00:30:49,087 --> 00:30:50,207
+with these sample points.
+
+670
+00:30:50,407 --> 00:30:53,248
+And we're just stenciling the same pattern across it, just
+
+671
+00:30:53,288 --> 00:30:55,508
+like what we do with the old graphical dithering.
+
+672
+00:30:56,729 --> 00:31:01,832
+And each stencil pattern is one thread group on our ComputeShader,
+
+673
+00:31:02,292 --> 00:31:05,474
+and each stencil point is one thread in our ComputeShader.
+
+674
+00:31:05,514 --> 00:31:08,696
+So that maps really nicely to the whole ComputeShader thing,
+
+675
+00:31:09,316 --> 00:31:10,577
+because it's all independent of each other.
+
+676
+00:31:12,187 --> 00:31:13,649
+OK, so let's step through a single thread
+
+677
+00:31:13,669 --> 00:31:14,269
+and see what it does.
+
+678
+00:31:15,010 --> 00:31:15,991
+First, we have an early out test.
+
+679
+00:31:16,171 --> 00:31:18,193
+If one of those sample points fall outside the area,
+
+680
+00:31:18,213 --> 00:31:19,295
+just kill them right away.
+
+681
+00:31:20,876 --> 00:31:22,998
+But then if it doesn't feel there, we go on
+
+682
+00:31:23,098 --> 00:31:24,200
+and we do the threshold test.
+
+683
+00:31:24,220 --> 00:31:25,981
+So this is actually like the dithering test.
+
+684
+00:31:26,762 --> 00:31:28,664
+And when that succeeds, we want to emit that point
+
+685
+00:31:28,764 --> 00:31:29,966
+into our point cloud.
+
+686
+00:31:31,607 --> 00:31:35,650
+But wait, we only have two coordinates because this is like all 2D stuff and we need a 3D
+
+687
+00:31:35,750 --> 00:31:36,771
+point in our world of course.
+
+688
+00:31:36,811 --> 00:31:42,255
+So, we load in the height map data to complete our XYZ coordinate.
+
+689
+00:31:43,196 --> 00:31:45,238
+And while we're there, you know, we're reading the height map.
+
+690
+00:31:45,698 --> 00:31:49,741
+Let's use our height map, our texture cache and let's just read out some more samples
+
+691
+00:31:49,761 --> 00:31:50,342
+to get a normal.
+
+692
+00:31:51,302 --> 00:31:52,182
+Because we're there anyway, right?
+
+693
+00:31:52,442 --> 00:31:55,063
+So we generate the normal that goes with the position.
+
+694
+00:31:55,343 --> 00:31:56,583
+So we have the position of the object
+
+695
+00:31:56,643 --> 00:31:59,244
+and the normal of the ground or height map at that object.
+
+696
+00:32:00,084 --> 00:32:03,025
+Now we've got an, what do you call it, ordered point cloud.
+
+697
+00:32:04,645 --> 00:32:08,426
+And yeah, it's not a full matrix yet.
+
+698
+00:32:09,186 --> 00:32:11,486
+We haven't applied any per object logic yet,
+
+699
+00:32:11,526 --> 00:32:15,187
+like rotation and jittering and tilting and stuff like that.
+
+700
+00:32:16,928 --> 00:32:17,628
+But we'll get at that later.
+
+701
+00:32:20,193 --> 00:32:22,095
+The first thing you do, the last thing you do is actually,
+
+702
+00:32:22,415 --> 00:32:26,137
+we don't emit our point cloud directly to a buffer
+
+703
+00:32:26,257 --> 00:32:28,898
+because the problem is then it's an atomic operation
+
+704
+00:32:28,958 --> 00:32:30,319
+and you get a lot of pressure on your buffer,
+
+705
+00:32:31,340 --> 00:32:32,080
+on your atomics.
+
+706
+00:32:32,440 --> 00:32:34,702
+So what we do, we stage it through a thread,
+
+707
+00:32:34,802 --> 00:32:37,563
+thread local memory block on the PS4.
+
+708
+00:32:37,844 --> 00:32:39,805
+It's a nice trick to get some more performance out of it.
+
+709
+00:32:41,689 --> 00:32:43,590
+Okay, let's look at the debug fuse again.
+
+710
+00:32:43,870 --> 00:32:49,454
+So here you can see the result of these generate discretization steps.
+
+711
+00:32:49,894 --> 00:32:54,977
+So this is like a... I think it's a particle effect that spawns a little bit of smoke or something.
+
+712
+00:32:55,157 --> 00:32:58,660
+A little bit of... Oh, no, it's pollen. So it spawns a little bit of pollen around in the world.
+
+713
+00:32:59,400 --> 00:33:02,841
+And basically, this is a very simple layer that sets up,
+
+714
+00:33:02,901 --> 00:33:04,422
+just fill it, just fill the entire,
+
+715
+00:33:04,462 --> 00:33:06,342
+flood fill the area around the player.
+
+716
+00:33:06,562 --> 00:33:09,303
+And you can see you get this very densely packed object
+
+717
+00:33:09,363 --> 00:33:10,064
+being next to each other.
+
+718
+00:33:10,084 --> 00:33:13,025
+And then we've got another one, which is a tree in a forest.
+
+719
+00:33:14,145 --> 00:33:15,105
+It's a Douglas fir.
+
+720
+00:33:16,186 --> 00:33:17,826
+And you can see this is much more like random.
+
+721
+00:33:17,846 --> 00:33:19,747
+So you can see that they put a little bit of jitter in here,
+
+722
+00:33:19,767 --> 00:33:20,407
+I think.
+
+723
+00:33:21,506 --> 00:33:23,851
+But there's also probably other types of trees placed in between.
+
+724
+00:33:24,212 --> 00:33:26,938
+So there's two layers kind of placing between each other.
+
+725
+00:33:27,239 --> 00:33:28,342
+And you're only seeing one layer here.
+
+726
+00:33:28,723 --> 00:33:29,865
+And how that works we'll come to later.
+
+727
+00:33:31,838 --> 00:33:34,339
+So yeah, it's pretty cool.
+
+728
+00:33:35,280 --> 00:33:36,720
+So we said we have this point cloud,
+
+729
+00:33:36,740 --> 00:33:38,001
+but we don't have full matrices yet
+
+730
+00:33:38,061 --> 00:33:39,682
+to instantiate those stuff into our game.
+
+731
+00:33:40,282 --> 00:33:42,163
+So there's a third separate shader
+
+732
+00:33:42,183 --> 00:33:43,443
+that we made called the placement shader.
+
+733
+00:33:44,444 --> 00:33:46,324
+And that one grabs the point cloud
+
+734
+00:33:46,505 --> 00:33:50,286
+and just one by one applies all kinds of tweak values
+
+735
+00:33:50,446 --> 00:33:51,687
+and additional locally.
+
+736
+00:33:53,147 --> 00:33:59,936
+defined placement rules like how much you want the trees to like bend with the with the ground it's standing on or how much
+
+737
+00:33:59,956 --> 00:34:02,400
+Do you want to rotate the rocks randomly around its angle?
+
+738
+00:34:03,601 --> 00:34:09,049
+We put in stuff like that certain assets that are like kind of slanted can be placed always facing
+
+739
+00:34:09,289 --> 00:34:11,572
+Downhill stuff like that that it's done in this shader
+
+740
+00:34:12,483 --> 00:34:14,304
+And because it's all very local to the objects, it's a
+
+741
+00:34:14,344 --> 00:34:18,045
+single thread just runs a single oriented point and
+
+742
+00:34:18,105 --> 00:34:22,026
+outputs one single world matrix.
+
+743
+00:34:22,086 --> 00:34:25,028
+But the thing is, everything thus far was completely
+
+744
+00:34:25,308 --> 00:34:28,429
+deterministic, except for the part we just saw where we were
+
+745
+00:34:28,709 --> 00:34:29,869
+emitting everything to a buffer.
+
+746
+00:34:31,290 --> 00:34:33,951
+Different threads, different thread groups, all emitting to
+
+747
+00:34:33,971 --> 00:34:34,291
+a buffer.
+
+748
+00:34:34,311 --> 00:34:36,132
+That'll become non-deterministic.
+
+749
+00:34:36,152 --> 00:34:36,792
+So what we have to do.
+
+750
+00:34:37,632 --> 00:34:40,953
+is add an additional stencil ID and stencil point ID
+
+751
+00:34:41,013 --> 00:34:42,813
+with each of these oriented points.
+
+752
+00:34:43,554 --> 00:34:50,095
+And we use that then as the RNG seed for this shader.
+
+753
+00:34:50,135 --> 00:34:51,775
+And then we actually output the RNG seed
+
+754
+00:34:52,476 --> 00:34:55,656
+along with the world matrix to use it for CPU side
+
+755
+00:34:56,276 --> 00:34:58,637
+randomization and UUID generation.
+
+756
+00:35:00,637 --> 00:35:02,118
+Okay, so we have now completed our journey
+
+757
+00:35:02,218 --> 00:35:05,598
+from the graphs all the way to the world matrices.
+
+758
+00:35:09,511 --> 00:35:11,332
+And this is our shader pipeline.
+
+759
+00:35:12,092 --> 00:35:14,413
+So we start with an init shader, which is not really important.
+
+760
+00:35:14,433 --> 00:35:14,994
+It's overhead.
+
+761
+00:35:15,454 --> 00:35:17,475
+And then we have the density map shader
+
+762
+00:35:17,495 --> 00:35:20,116
+that reads the real data, of course,
+
+763
+00:35:20,376 --> 00:35:21,937
+then outputs the density map.
+
+764
+00:35:21,957 --> 00:35:23,638
+Then it goes into the generate shader
+
+765
+00:35:23,658 --> 00:35:24,778
+to generate the point cloud.
+
+766
+00:35:25,239 --> 00:35:27,860
+And that point cloud goes into the final placement shader
+
+767
+00:35:27,880 --> 00:35:29,360
+that then outputs the actual matrices.
+
+768
+00:35:29,761 --> 00:35:30,961
+And that is then copied to the CPU.
+
+769
+00:35:31,021 --> 00:35:35,724
+And there it's embedded into the scene graph or your physics
+
+770
+00:35:35,784 --> 00:35:38,005
+world, whatever systems you have in your game.
+
+771
+00:35:39,909 --> 00:35:41,350
+OK, so you can see how this probably, you know,
+
+772
+00:35:41,370 --> 00:35:44,753
+you can run this over multiple of these layers at once on your GPU,
+
+773
+00:35:44,773 --> 00:35:46,875
+you know, all parallel, nice and quick.
+
+774
+00:35:47,956 --> 00:35:48,556
+And then we're done.
+
+775
+00:35:48,836 --> 00:35:51,859
+But no, wait, we're not done, because if we're doing this
+
+776
+00:35:52,039 --> 00:35:54,701
+over all these different objects with all these different layers,
+
+777
+00:35:55,182 --> 00:35:57,103
+you'll just get stuff thrown on top of each other.
+
+778
+00:35:57,123 --> 00:35:59,425
+There's no notion of collision or anything.
+
+779
+00:35:59,906 --> 00:36:00,846
+And that we have to fix first.
+
+780
+00:36:02,968 --> 00:36:04,890
+Luckily, there's a very interesting solution to this problem.
+
+781
+00:36:09,528 --> 00:36:11,110
+OK, so the general solution for collision
+
+782
+00:36:11,551 --> 00:36:13,834
+is to just do readbacks, which means you just
+
+783
+00:36:14,695 --> 00:36:17,098
+look at your list of already placed objects.
+
+784
+00:36:17,178 --> 00:36:18,400
+You see if you're colliding with them.
+
+785
+00:36:18,420 --> 00:36:23,226
+And if you are, you just discard or reiterate your point
+
+786
+00:36:23,266 --> 00:36:23,867
+in your point cloud.
+
+787
+00:36:24,768 --> 00:36:26,450
+But this creates really complex dependencies,
+
+788
+00:36:26,510 --> 00:36:27,731
+and a GPU doesn't like those.
+
+789
+00:36:29,032 --> 00:36:31,274
+You still want to have your local stability, which
+
+790
+00:36:31,334 --> 00:36:32,035
+you also lose.
+
+791
+00:36:32,876 --> 00:36:35,098
+And you want deterministic behavior,
+
+792
+00:36:35,118 --> 00:36:37,640
+which means you have to do lots of additional bookkeeping.
+
+793
+00:36:38,341 --> 00:36:39,462
+GPUs don't like any of that.
+
+794
+00:36:39,482 --> 00:36:41,423
+And you're going to get flushes everywhere.
+
+795
+00:36:42,705 --> 00:36:45,527
+But there's another really interesting kind of special case
+
+796
+00:36:45,627 --> 00:36:48,609
+where if you have two objects with the same footprints,
+
+797
+00:36:49,030 --> 00:36:51,652
+you can actually get really quick collision resolving.
+
+798
+00:36:52,653 --> 00:36:54,654
+And the readback, so the first entry
+
+799
+00:36:54,674 --> 00:36:56,055
+is actually never used in the game.
+
+800
+00:36:56,456 --> 00:36:57,597
+We only use the fast path.
+
+801
+00:36:59,353 --> 00:36:59,894
+So, oh, sorry.
+
+802
+00:37:00,474 --> 00:37:02,614
+So that means that we can only collide objects
+
+803
+00:37:02,634 --> 00:37:03,414
+with the same footprint.
+
+804
+00:37:03,735 --> 00:37:04,455
+That's kind of weird.
+
+805
+00:37:05,055 --> 00:37:06,975
+But artists, they kind of liked it.
+
+806
+00:37:07,015 --> 00:37:08,856
+They were starting to make all these cool things.
+
+807
+00:37:08,916 --> 00:37:10,196
+But OK, we're going to use these objects.
+
+808
+00:37:10,216 --> 00:37:11,116
+We want these to collide.
+
+809
+00:37:11,136 --> 00:37:12,957
+So I'll put them in the same footprint.
+
+810
+00:37:13,097 --> 00:37:15,757
+And we'll make categories of footprints
+
+811
+00:37:15,878 --> 00:37:16,518
+and all that kind of stuff.
+
+812
+00:37:16,538 --> 00:37:17,938
+So that actually worked out very well for us.
+
+813
+00:37:18,078 --> 00:37:20,999
+But let's go on to the algorithm.
+
+814
+00:37:22,279 --> 00:37:26,282
+OK, so first, this algorithm is better explained in 1D,
+
+815
+00:37:26,502 --> 00:37:28,304
+and dithering can work in 1D, 2D, 3D.
+
+816
+00:37:28,344 --> 00:37:30,545
+So I'm going to first map down to 1D.
+
+817
+00:37:30,665 --> 00:37:31,826
+So I'll grab a density map.
+
+818
+00:37:32,827 --> 00:37:33,868
+I'll take a slice out of it.
+
+819
+00:37:35,089 --> 00:37:36,850
+And we'll use that as our data.
+
+820
+00:37:36,870 --> 00:37:38,031
+It's very nice.
+
+821
+00:37:42,334 --> 00:37:42,754
+Yeah, there it goes.
+
+822
+00:37:43,054 --> 00:37:45,235
+So in normal dithering, you only have one density map.
+
+823
+00:37:45,316 --> 00:37:47,236
+And then you sample that with that sampling pattern.
+
+824
+00:37:48,357 --> 00:37:50,218
+And we'll do the same here.
+
+825
+00:37:50,258 --> 00:37:51,438
+We have the same starting position.
+
+826
+00:37:51,458 --> 00:37:52,239
+We just have a single map.
+
+827
+00:37:52,699 --> 00:37:55,020
+We add the dithering pattern.
+
+828
+00:37:55,040 --> 00:37:56,481
+You can actually now visualize it better.
+
+829
+00:37:56,821 --> 00:37:59,322
+So each of these sticks is a sample point
+
+830
+00:37:59,362 --> 00:38:00,583
+in your dither pattern.
+
+831
+00:38:01,043 --> 00:38:04,465
+And when the point, the little knob is like the threshold.
+
+832
+00:38:04,865 --> 00:38:08,006
+So if it's below the density, you actually emit a point.
+
+833
+00:38:08,847 --> 00:38:09,467
+Okay, so that's fine.
+
+834
+00:38:09,727 --> 00:38:11,127
+But what happens if you now place two layers
+
+835
+00:38:11,747 --> 00:38:13,688
+with the same footprint in the same area?
+
+836
+00:38:14,568 --> 00:38:15,028
+You get this.
+
+837
+00:38:15,068 --> 00:38:19,809
+So the blue is another layer with a different layer logic.
+
+838
+00:38:20,609 --> 00:38:21,469
+It's a different density map,
+
+839
+00:38:21,489 --> 00:38:23,610
+but it's placing stuff exactly on top of the other one.
+
+840
+00:38:24,530 --> 00:38:25,190
+And we can't have that.
+
+841
+00:38:25,770 --> 00:38:28,191
+So now we do something really simple.
+
+842
+00:38:29,311 --> 00:38:30,091
+Just add them together.
+
+843
+00:38:31,032 --> 00:38:34,834
+So, now you're layering them on top of each other and suddenly you don't have any collision
+
+844
+00:38:34,894 --> 00:38:38,536
+because the point of the threshold, so the threshold value can only lay in one of these
+
+845
+00:38:38,636 --> 00:38:39,476
+regions never in both.
+
+846
+00:38:40,296 --> 00:38:42,377
+And they're nicely, you know, mixed up together.
+
+847
+00:38:42,958 --> 00:38:48,921
+You can now actually see the, like, the values along the threshold line, along the sample
+
+848
+00:38:48,941 --> 00:38:49,141
+point.
+
+849
+00:38:49,501 --> 00:38:51,422
+You can actually see that there's a probability distribution.
+
+850
+00:38:52,163 --> 00:38:53,664
+And the threshold of the sample point,
+
+851
+00:38:53,704 --> 00:38:56,347
+it basically evenly distributed stochastic value.
+
+852
+00:38:56,387 --> 00:38:58,068
+So it becomes like a stochastic sampling thing.
+
+853
+00:38:58,489 --> 00:38:58,949
+It's really cool.
+
+854
+00:39:00,230 --> 00:39:02,533
+And this whole thing is then extendable
+
+855
+00:39:02,573 --> 00:39:04,595
+to the 2D system that we're using.
+
+856
+00:39:06,897 --> 00:39:07,077
+Okay.
+
+857
+00:39:08,082 --> 00:39:10,445
+So we solved collision, but we still have some dependencies.
+
+858
+00:39:10,485 --> 00:39:12,587
+Because as you saw, we're layering on top of each other.
+
+859
+00:39:12,607 --> 00:39:15,029
+So if you want to place the second layer, you first have
+
+860
+00:39:15,049 --> 00:39:16,010
+to generate the first layer.
+
+861
+00:39:18,172 --> 00:39:21,014
+So what we do there is, well, there's nothing really we can
+
+862
+00:39:21,035 --> 00:39:21,375
+do about it.
+
+863
+00:39:21,715 --> 00:39:24,598
+What we do know is we only have these dependencies on the
+
+864
+00:39:25,038 --> 00:39:25,599
+density map phase.
+
+865
+00:39:28,021 --> 00:39:30,543
+And we can tweak our share in such a way
+
+866
+00:39:30,903 --> 00:39:33,205
+that even though we need to execute them all,
+
+867
+00:39:33,485 --> 00:39:34,926
+we can execute them all independently,
+
+868
+00:39:34,946 --> 00:39:36,748
+which means we don't have any GPU flushes in between,
+
+869
+00:39:36,888 --> 00:39:37,548
+which is very nice.
+
+870
+00:39:38,709 --> 00:39:39,910
+So at the end, we have the headache,
+
+871
+00:39:39,970 --> 00:39:41,631
+but we get at least performance out of it.
+
+872
+00:39:43,993 --> 00:39:46,735
+OK, so I'm running a bit out of time,
+
+873
+00:39:46,755 --> 00:39:47,816
+so I'm going to skip a little bit of this.
+
+874
+00:39:48,116 --> 00:39:49,477
+But yeah, it basically solved the issue,
+
+875
+00:39:50,478 --> 00:39:53,100
+but only for objects with the same footprint, which
+
+876
+00:39:53,120 --> 00:39:55,962
+is exactly how artists are setting it up and using it.
+
+877
+00:39:59,582 --> 00:40:02,965
+OK, so to make it fast enough, because one layer per frame
+
+878
+00:40:03,025 --> 00:40:03,625
+is not going to work.
+
+879
+00:40:03,645 --> 00:40:04,646
+That's going to be way too slow.
+
+880
+00:40:05,167 --> 00:40:08,910
+So we're just instantiating that pipeline like 64 times
+
+881
+00:40:09,471 --> 00:40:10,111
+and running it all.
+
+882
+00:40:10,292 --> 00:40:12,374
+And they all emit to the GPU command queue.
+
+883
+00:40:14,014 --> 00:40:17,036
+The problem is that all this is very like, it's kind of a silly way to do it,
+
+884
+00:40:17,096 --> 00:40:20,737
+because you get still all these dependencies from like density map to
+
+885
+00:40:20,777 --> 00:40:23,418
+generate to compute. Those are still all dependent on each other, so you get
+
+886
+00:40:23,478 --> 00:40:27,779
+flushes everywhere. You get, you have to wait for them to be completely finished
+
+887
+00:40:27,819 --> 00:40:32,321
+before you can move on to the next shader. So what we actually did, we
+
+888
+00:40:32,381 --> 00:40:36,862
+finally like, I went on and like, I kind of looked at how we can optimize that.
+
+889
+00:40:38,303 --> 00:40:42,725
+And this is the final GPU pipeline that we have at this moment on disk.
+
+890
+00:40:44,066 --> 00:40:45,347
+So we have all these multiple pipelines,
+
+891
+00:40:46,167 --> 00:40:47,568
+they're all running the density map,
+
+892
+00:40:48,748 --> 00:40:50,789
+we're running the density maps
+
+893
+00:40:50,809 --> 00:40:56,012
+basically in a loop until one of the pipelines
+
+894
+00:40:56,933 --> 00:41:00,634
+hits the layer that it actually wants to place inside that stack.
+
+895
+00:41:01,455 --> 00:41:03,396
+Then it moves on to the generate shader.
+
+896
+00:41:04,225 --> 00:41:08,608
+Then it moves, then it syncs again, then it moves on to an allocation shader which is
+
+897
+00:41:08,688 --> 00:41:10,288
+used to allocate memory on the GPU.
+
+898
+00:41:11,989 --> 00:41:15,551
+And then at the end, the entire thing can be repeated multiple times until we got the
+
+899
+00:41:15,731 --> 00:41:20,553
+entire pipeline, the entire layer stack basically placed.
+
+900
+00:41:23,127 --> 00:41:25,528
+And at the end, it just copies all the data in one go.
+
+901
+00:41:26,228 --> 00:41:29,109
+So yeah, the details are not that important,
+
+902
+00:41:29,129 --> 00:41:30,450
+but it's more about that you really
+
+903
+00:41:30,470 --> 00:41:34,352
+have to think about how you set up your GPU compute
+
+904
+00:41:34,392 --> 00:41:37,013
+dispatches, because that will eat you alive,
+
+905
+00:41:37,093 --> 00:41:40,775
+because the compute shaders are so small and so fast
+
+906
+00:41:41,315 --> 00:41:44,096
+that stuff like flushes or doing something very small,
+
+907
+00:41:44,296 --> 00:41:47,538
+like not optimally, it will tank your performance.
+
+908
+00:41:48,867 --> 00:41:50,729
+Okay, well that's basically it.
+
+909
+00:41:51,430 --> 00:41:53,332
+This is the game running with the debug mode turned on,
+
+910
+00:41:53,352 --> 00:41:55,835
+where you can actually see that those dependency stacks,
+
+911
+00:41:55,875 --> 00:41:57,537
+those layered layers,
+
+912
+00:41:58,158 --> 00:41:59,540
+are being resolved while the game is running.
+
+913
+00:42:00,240 --> 00:42:02,523
+I had to push down the amount of pipelines
+
+914
+00:42:02,543 --> 00:42:03,444
+that it can run in parallel,
+
+915
+00:42:03,484 --> 00:42:04,485
+because you can see it can actually
+
+916
+00:42:05,346 --> 00:42:06,247
+emit a lot of pipelines.
+
+917
+00:42:07,929 --> 00:42:09,811
+So yeah, it actually works, it's actually in-game.
+
+918
+00:42:12,233 --> 00:42:12,953
+Now, the conclusion.
+
+919
+00:42:13,954 --> 00:42:14,594
+So there you have it.
+
+920
+00:42:14,874 --> 00:42:15,735
+That's the entire system.
+
+921
+00:42:16,515 --> 00:42:17,395
+It was quite a success.
+
+922
+00:42:18,216 --> 00:42:19,897
+We use it everywhere in our game.
+
+923
+00:42:19,997 --> 00:42:22,378
+We use it for meshes, effects, and gameplay elements.
+
+924
+00:42:23,818 --> 00:42:25,019
+The visual quality is very good.
+
+925
+00:42:25,659 --> 00:42:27,020
+It was very suitable for art direction.
+
+926
+00:42:27,040 --> 00:42:28,301
+And I think that's why it looks so good.
+
+927
+00:42:28,341 --> 00:42:31,602
+I think artists could really take it and do exactly what
+
+928
+00:42:31,622 --> 00:42:32,142
+they wanted with it.
+
+929
+00:42:33,243 --> 00:42:36,924
+And even the unpolished areas, so areas where artists never really got to,
+
+930
+00:42:36,984 --> 00:42:38,685
+never really painted anything into the real data maps,
+
+931
+00:42:39,185 --> 00:42:40,405
+were already shippable quality.
+
+932
+00:42:41,466 --> 00:42:44,847
+Yeah, we were running about 250 microseconds busy load,
+
+933
+00:42:45,267 --> 00:42:46,547
+which was within budget.
+
+934
+00:42:47,348 --> 00:42:51,389
+And it's a very powerful tool in making these open worlds,
+
+935
+00:42:51,429 --> 00:42:55,630
+because all our nature assets were only made by three people in the entire company,
+
+936
+00:42:56,431 --> 00:42:59,392
+and all the ecotopes, all the logic, all the procedural stuff was done by one guy.
+
+937
+00:43:03,094 --> 00:43:05,756
+So before I close, I want to show you some cool pictures.
+
+938
+00:43:05,776 --> 00:43:09,279
+So these are cool pictures of our procedurally generated
+
+939
+00:43:10,239 --> 00:43:10,760
+landscapes.
+
+940
+00:43:12,221 --> 00:43:14,222
+And these are actually made by users.
+
+941
+00:43:14,703 --> 00:43:16,504
+They posted them online because they thought
+
+942
+00:43:16,544 --> 00:43:17,185
+it looked so good.
+
+943
+00:43:17,245 --> 00:43:20,967
+And I think that really shows that we got
+
+944
+00:43:20,987 --> 00:43:21,728
+where we wanted to be.
+
+945
+00:43:21,828 --> 00:43:25,691
+I mean, the users are really enjoying the generated content.
+
+946
+00:43:29,574 --> 00:43:29,934
+Any questions?
+
+947
+00:43:42,476 --> 00:43:50,982
+Hi, you showed off some really cool brushes that was like, you had your tree brush and
+
+948
+00:43:51,002 --> 00:43:52,143
+then you had your other things.
+
+949
+00:43:52,183 --> 00:43:56,266
+And you mentioned that you bundled in like effects and sound and stuff like that too.
+
+950
+00:43:56,806 --> 00:43:57,967
+Did you have like an effects?
+
+951
+00:43:58,788 --> 00:44:01,490
+brush or did you kind of bundle those assets together?
+
+952
+00:44:01,510 --> 00:44:05,653
+Like only certain woods would get that butterfly or something?
+
+953
+00:44:05,673 --> 00:44:09,597
+Yeah, so the idea is that all the brushes are very kind of high level, I guess.
+
+954
+00:44:10,617 --> 00:44:12,579
+And everything else just rolls out of the logic.
+
+955
+00:44:12,679 --> 00:44:17,443
+So what happens is one artist is setting up the logic for an asset,
+
+956
+00:44:17,463 --> 00:44:19,885
+it's somewhere in the graph, in another file,
+
+957
+00:44:20,606 --> 00:44:23,128
+and they're all independently working on the Ecotope.
+
+958
+00:44:23,208 --> 00:44:25,510
+So there's no, the editor doesn't know anything,
+
+959
+00:44:25,550 --> 00:44:27,191
+it just paints in these world data maps.
+
+960
+00:44:27,931 --> 00:44:28,731
+Awesome, thank you.
+
+961
+00:44:31,312 --> 00:44:35,313
+So since it's all 2D maps, basically, how do you deal
+
+962
+00:44:35,353 --> 00:44:38,394
+with caves and overhangs?
+
+963
+00:44:38,834 --> 00:44:41,755
+Yeah, so basically, the system can handle that kind of stuff
+
+964
+00:44:41,775 --> 00:44:42,135
+pretty well.
+
+965
+00:44:42,235 --> 00:44:44,936
+I mean, the dithering is very much extendable to 3D if you
+
+966
+00:44:44,976 --> 00:44:45,196
+want to.
+
+967
+00:44:46,816 --> 00:44:49,357
+But we didn't have world data that's like full metric.
+
+968
+00:44:50,458 --> 00:44:52,478
+And so that kind of blocked that.
+
+969
+00:44:52,958 --> 00:44:56,700
+So basically, whenever it gets too crazy, we just went back
+
+970
+00:44:56,720 --> 00:44:57,300
+to hand placed.
+
+971
+00:44:57,500 --> 00:45:00,281
+And those are integrated into the same rendering back end in
+
+972
+00:45:00,301 --> 00:45:01,481
+the same instantiation logic.
+
+973
+00:45:01,501 --> 00:45:04,462
+So you don't have any overhead GPU performance wise.
+
+974
+00:45:07,483 --> 00:45:08,943
+But the artists got away with really crazy stuff.
+
+975
+00:45:08,963 --> 00:45:10,664
+Like sometimes they did things, and I was like,
+
+976
+00:45:10,824 --> 00:45:11,664
+that's not even possible.
+
+977
+00:45:11,844 --> 00:45:14,065
+They had stuff like on overhangs,
+
+978
+00:45:14,105 --> 00:45:16,365
+and they did all this very creative stuff
+
+979
+00:45:16,405 --> 00:45:19,746
+by making the height maps kind of cross together
+
+980
+00:45:19,766 --> 00:45:20,206
+and stuff like that.
+
+981
+00:45:20,226 --> 00:45:22,186
+So yeah, there's definitely things you cannot do with it.
+
+982
+00:45:22,746 --> 00:45:24,987
+And I hope for the next game, we'll
+
+983
+00:45:25,007 --> 00:45:27,527
+be able to get either a volumetric approach
+
+984
+00:45:28,128 --> 00:45:30,748
+or some kind of UV unwrap in a 3D space.
+
+985
+00:45:30,768 --> 00:45:31,828
+Thank you.
+
+986
+00:45:34,399 --> 00:45:35,921
+Hi, nice talk.
+
+987
+00:45:37,744 --> 00:45:39,847
+I was wondering if you have considered
+
+988
+00:45:39,927 --> 00:45:45,135
+to use what you use to place every data, every object,
+
+989
+00:45:45,235 --> 00:45:48,580
+vegetation, and everything to help the lighting system.
+
+990
+00:45:49,302 --> 00:45:52,126
+For example, to make occlusion around the trees,
+
+991
+00:45:52,607 --> 00:45:55,150
+and particularly of what is very far,
+
+992
+00:45:55,230 --> 00:45:56,372
+it's very hard to lit,
+
+993
+00:45:56,552 --> 00:45:58,755
+because with the cascaded shadows,
+
+994
+00:45:58,815 --> 00:46:00,577
+you can't have the precision on everything.
+
+995
+00:46:00,978 --> 00:46:03,141
+Most of the time, it look like very flat,
+
+996
+00:46:03,581 --> 00:46:06,185
+and maybe it can help to the lighting too.
+
+997
+00:46:06,645 --> 00:46:11,889
+Well, so I think, basically we can place anything we want with the placement system.
+
+998
+00:46:11,909 --> 00:46:14,130
+So we also place like annotations and stuff like that.
+
+999
+00:46:14,150 --> 00:46:16,052
+So you could also place lights, it would not be a problem.
+
+1000
+00:46:16,072 --> 00:46:19,254
+I think we might be doing that because we can place full entities.
+
+1001
+00:46:19,634 --> 00:46:21,515
+It's more to place shadows than lights.
+
+1002
+00:46:21,935 --> 00:46:23,296
+Oh, to place shadows. Yeah, you could do that.
+
+1003
+00:46:23,376 --> 00:46:28,780
+Yeah, it's because, you know, it's not making the cast shadows because it's very precise,
+
+1004
+00:46:28,820 --> 00:46:34,103
+but something that is more low frequency like ambient occlusion or something like this.
+
+1005
+00:46:34,144 --> 00:46:34,864
+Definitely, definitely.
+
+1006
+00:46:35,078 --> 00:46:38,180
+Yeah, basically anything that you can throw into some kind
+
+1007
+00:46:38,220 --> 00:46:41,863
+of structure you can place.
+
+1008
+00:46:41,943 --> 00:46:44,486
+So I spent a lot of time on the placement stuff.
+
+1009
+00:46:44,526 --> 00:46:47,308
+But actually, almost half my time went into the actual
+
+1010
+00:46:47,368 --> 00:46:49,810
+rendering back end, which has to render like thousands,
+
+1011
+00:46:49,870 --> 00:46:50,931
+hundreds of thousands of objects.
+
+1012
+00:46:51,631 --> 00:46:55,875
+And yeah, so there you can see that those things kind of
+
+1013
+00:46:55,915 --> 00:46:57,776
+working together, it's very powerful.
+
+1014
+00:46:57,796 --> 00:46:59,278
+You can create really interesting things.
+
+1015
+00:46:59,458 --> 00:47:02,240
+And you can also help rendering out by being smart
+
+1016
+00:47:02,280 --> 00:47:03,681
+about automatically placing stuff.
+
+1017
+00:47:04,282 --> 00:47:04,622
+Definitely.
+
+1018
+00:47:04,942 --> 00:47:05,884
+OK, thanks.
+
+1019
+00:47:12,254 --> 00:47:13,656
+OK, I think that's it.
+
+1020
+00:47:14,437 --> 00:47:14,838
+Thank you very much.
+

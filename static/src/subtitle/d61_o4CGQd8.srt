@@ -1,0 +1,2544 @@
+1
+00:00:12,133 --> 00:00:16,238
+Hi, my name is Bill Rockenbeck, and I'm an engine programmer at Sucker Punch Productions
+
+2
+00:00:16,238 --> 00:00:17,179
+in Bellevue, Washington.
+
+3
+00:00:17,179 --> 00:00:22,305
+Today, I'm going to talk about various techniques that we used to add windblown motion to our
+
+4
+00:00:22,305 --> 00:00:23,426
+game Ghost of Tsushima.
+
+5
+00:00:24,922 --> 00:00:26,783
+Ghost of Tsushima is an open world game
+
+6
+00:00:26,783 --> 00:00:30,345
+which takes place in 13th century Japan on the island of Tsushima.
+
+7
+00:00:30,345 --> 00:00:32,507
+You play as Jin Sakai, one of the few samurai
+
+8
+00:00:32,507 --> 00:00:35,549
+to survive an invasion by Mongol forces.
+
+9
+00:00:35,549 --> 00:00:38,931
+In Ghost, the guiding wind is a central gameplay mechanic,
+
+10
+00:00:38,931 --> 00:00:42,052
+replacing the traditional heads up display or compass
+
+11
+00:00:42,052 --> 00:00:44,674
+to show the direction towards various gameplay waypoints.
+
+12
+00:00:44,674 --> 00:00:47,256
+This keeps the UI uncluttered and helps keep up the illusion
+
+13
+00:00:47,256 --> 00:00:48,957
+that you're playing inside of a samurai film.
+
+14
+00:00:49,992 --> 00:00:53,614
+It goes without saying, but wind itself is not actually visible.
+
+15
+00:00:53,614 --> 00:00:56,435
+Wind is not something extra added in a cohesive rendering pass,
+
+16
+00:00:56,435 --> 00:00:58,176
+like draw the stuff and then draw the wind.
+
+17
+00:00:58,176 --> 00:01:00,958
+The wind is, of course, motion built into many different
+
+18
+00:01:00,958 --> 00:01:02,338
+rendered objects in the world.
+
+19
+00:01:02,338 --> 00:01:06,600
+These include particles, foliage, grass, and cloth.
+
+20
+00:01:06,600 --> 00:01:08,961
+The wind direction is controlled by gameplay mechanics
+
+21
+00:01:08,961 --> 00:01:10,762
+and can change at any time.
+
+22
+00:01:10,762 --> 00:01:12,983
+It's not in general possible to bake the motion
+
+23
+00:01:12,983 --> 00:01:15,004
+into a pre-rendered offline animation,
+
+24
+00:01:15,004 --> 00:01:17,906
+and we prefer procedural or simulated motion systems.
+
+25
+00:01:18,875 --> 00:01:20,136
+In addition to the gameplay aspects,
+
+26
+00:01:20,136 --> 00:01:22,039
+all the large and small secondary motions
+
+27
+00:01:22,039 --> 00:01:24,402
+arising from the simulations make the game less static
+
+28
+00:01:24,402 --> 00:01:26,585
+and make it seem more realistic and alive.
+
+29
+00:01:28,687 --> 00:01:30,987
+A couple of words about this presentation.
+
+30
+00:01:30,987 --> 00:01:33,749
+I've been lucky enough to be with Sucker Punch for the whole PS4 era.
+
+31
+00:01:33,749 --> 00:01:37,330
+Infamous Second Son was one of the first games to be released in 2014,
+
+32
+00:01:37,330 --> 00:01:39,311
+shortly after the PS4 launch,
+
+33
+00:01:39,311 --> 00:01:41,992
+and Ghost of Tsushima is one of the last AAA games to be released
+
+34
+00:01:41,992 --> 00:01:43,552
+before the next generation came along.
+
+35
+00:01:43,552 --> 00:01:47,914
+The techniques described here were based on the quality performance trade-offs
+
+36
+00:01:47,914 --> 00:01:49,175
+that we needed to make on the PS4.
+
+37
+00:01:49,175 --> 00:01:51,796
+As the next generation comes along,
+
+38
+00:01:51,796 --> 00:01:53,677
+we may need to revisit some of these decisions.
+
+39
+00:01:54,556 --> 00:01:57,317
+The techniques I'll describe today are not pushing the boundaries
+
+40
+00:01:57,317 --> 00:01:59,637
+of accurate academic simulation technology,
+
+41
+00:01:59,637 --> 00:02:03,158
+like you might find in a movie where the effects are all done offline,
+
+42
+00:02:03,158 --> 00:02:06,399
+or in a tech demo, where a large fraction of the available
+
+43
+00:02:06,399 --> 00:02:09,400
+computing power can be used to simulate a small scene.
+
+44
+00:02:09,400 --> 00:02:11,881
+We're more in the realm of heuristics and hacks,
+
+45
+00:02:11,881 --> 00:02:14,482
+which allow us to blow millions of verts around,
+
+46
+00:02:14,482 --> 00:02:17,102
+using only a small fraction of the PS4's computational capacity.
+
+47
+00:02:17,102 --> 00:02:21,624
+For the purposes of the game, these simulations don't need accuracy,
+
+48
+00:02:21,624 --> 00:02:22,944
+per se, but they do need volume.
+
+49
+00:02:24,117 --> 00:02:27,841
+And for better or worse, Sucker Punch is a nearly entirely homegrown engine.
+
+50
+00:02:27,841 --> 00:02:30,764
+In this talk, I'll describe some of the nitty-gritty details
+
+51
+00:02:30,764 --> 00:02:32,285
+of how we implemented things.
+
+52
+00:02:32,285 --> 00:02:34,047
+I'm not claiming that all the techniques we used
+
+53
+00:02:34,047 --> 00:02:36,570
+were a shining example of the best way to do things,
+
+54
+00:02:36,570 --> 00:02:39,333
+but they are what we actually did, and maybe that's a useful data point.
+
+55
+00:02:41,728 --> 00:02:44,110
+So the model we use for the wind velocity is quite simple.
+
+56
+00:02:44,110 --> 00:02:46,333
+For the most part, it's just a single vector
+
+57
+00:02:46,333 --> 00:02:49,216
+pointing from the hero towards a current goal.
+
+58
+00:02:49,216 --> 00:02:51,778
+Or in cut scenes and other non-guiding wind situations,
+
+59
+00:02:51,778 --> 00:02:53,620
+there's just a single authored vector,
+
+60
+00:02:53,620 --> 00:02:57,504
+which might vary with the weather and be longer when stormy.
+
+61
+00:02:57,504 --> 00:02:59,766
+We're not doing any real modeling of fluid dynamics.
+
+62
+00:03:01,083 --> 00:03:03,125
+And the main wind vector has a constant direction,
+
+63
+00:03:03,125 --> 00:03:06,807
+but we vary the magnitude a bit from place to place
+
+64
+00:03:06,807 --> 00:03:08,448
+using time-varying Perlin noise.
+
+65
+00:03:08,448 --> 00:03:11,790
+This is visible, for example, on large fields of grass,
+
+66
+00:03:11,790 --> 00:03:14,112
+and you can see gusts of wind blow through.
+
+67
+00:03:14,112 --> 00:03:18,454
+Particle systems will also often add in some higher frequency curl noise
+
+68
+00:03:18,454 --> 00:03:20,015
+to sort of make things swirl around more.
+
+69
+00:03:21,550 --> 00:03:25,632
+Particle systems also have access to a system we call vorticals.
+
+70
+00:03:25,632 --> 00:03:27,874
+These are invisible wind generating particles
+
+71
+00:03:27,874 --> 00:03:29,815
+which can be sampled by other particles.
+
+72
+00:03:29,815 --> 00:03:31,076
+They're potentially quite powerful,
+
+73
+00:03:31,076 --> 00:03:35,038
+but we use them only in a few sort of one-off places.
+
+74
+00:03:35,038 --> 00:03:38,000
+Particles, grass and foliage also have access to some inputs
+
+75
+00:03:38,000 --> 00:03:39,862
+that let us model local disturbances
+
+76
+00:03:39,862 --> 00:03:41,943
+caused by footfalls or the passage of characters.
+
+77
+00:03:41,943 --> 00:03:45,225
+These aren't wind per se, but they do move things around in a similar way,
+
+78
+00:03:45,225 --> 00:03:46,566
+so I'll talk about them as well.
+
+79
+00:03:49,380 --> 00:03:52,483
+Probably the most obvious thing moved by the wind in the game is particles.
+
+80
+00:03:52,483 --> 00:03:56,787
+The air is usually full of leaves, dust, smoke, fog, pollen.
+
+81
+00:03:56,787 --> 00:03:59,749
+Since the very earliest days of the PS4,
+
+82
+00:03:59,749 --> 00:04:03,973
+Sucker Punch has been using a proprietary particle system,
+
+83
+00:04:03,973 --> 00:04:05,354
+which has served us very well
+
+84
+00:04:05,354 --> 00:04:07,436
+since we introduced it with Infamous Second Son.
+
+85
+00:04:08,226 --> 00:04:10,648
+The core architecture has changed actually very little
+
+86
+00:04:10,648 --> 00:04:12,469
+from the second son version.
+
+87
+00:04:12,469 --> 00:04:15,731
+I gave a GDC talk in 2014, which covered the system in detail.
+
+88
+00:04:15,731 --> 00:04:18,793
+So this talk is going to gloss over the implementation.
+
+89
+00:04:18,793 --> 00:04:20,715
+But here's a high level overview.
+
+90
+00:04:20,715 --> 00:04:23,737
+Our particle system is entirely GPU based system
+
+91
+00:04:23,737 --> 00:04:26,298
+where each particle is touched only by compute shaders,
+
+92
+00:04:26,298 --> 00:04:27,940
+running an async compute.
+
+93
+00:04:27,940 --> 00:04:29,861
+So it's fairly high performance.
+
+94
+00:04:31,297 --> 00:04:34,998
+And its biggest advantage is that it's extremely programmable.
+
+95
+00:04:34,998 --> 00:04:37,079
+Instead of fixed function features that sets,
+
+96
+00:04:37,079 --> 00:04:38,840
+you can just sort of turn switch on and off.
+
+97
+00:04:38,840 --> 00:04:42,341
+It's based around these complex text-based expressions,
+
+98
+00:04:42,341 --> 00:04:44,942
+which just get compiled into optimized GPU code.
+
+99
+00:04:44,942 --> 00:04:47,943
+And this lets artists mix and match features
+
+100
+00:04:47,943 --> 00:04:50,184
+and sometimes surprising and wonderful ways.
+
+101
+00:04:50,184 --> 00:04:51,984
+I'm mostly going to talk about new functions
+
+102
+00:04:51,984 --> 00:04:53,605
+we've added to this framework.
+
+103
+00:04:53,605 --> 00:04:55,705
+And our lead artist, Matt Vainio,
+
+104
+00:04:55,705 --> 00:04:59,247
+has an excellent blog post back in January about the effects
+
+105
+00:04:59,247 --> 00:05:01,147
+and goes to two issues, which I suggest you look at.
+
+106
+00:05:02,662 --> 00:05:04,442
+There are a lot of leaves in Ghost, like a lot.
+
+107
+00:05:04,442 --> 00:05:07,744
+There are thick carpets of leaves coating every surface
+
+108
+00:05:07,744 --> 00:05:09,845
+across large areas of the island.
+
+109
+00:05:09,845 --> 00:05:12,886
+Obviously, we're not modeling all billion leaves at once.
+
+110
+00:05:12,886 --> 00:05:14,167
+And in the distance, the leaf cover
+
+111
+00:05:14,167 --> 00:05:15,968
+does just become a texture.
+
+112
+00:05:15,968 --> 00:05:17,848
+But most of the leaves in the immediate area
+
+113
+00:05:17,848 --> 00:05:21,070
+around the character and the camera are in fact live.
+
+114
+00:05:21,070 --> 00:05:24,451
+And they do respond to wind and disturbances.
+
+115
+00:05:24,451 --> 00:05:26,912
+There's something like 10,000 active leaves
+
+116
+00:05:26,912 --> 00:05:27,733
+in a typical scene.
+
+117
+00:05:27,873 --> 00:05:29,835
+Here you can see how many of the leaves on the ground
+
+118
+00:05:29,835 --> 00:05:31,837
+are actively simulating particles, which
+
+119
+00:05:31,837 --> 00:05:33,058
+react to the hero's movement.
+
+120
+00:05:33,058 --> 00:05:35,080
+And they're kicked up when he moves past them.
+
+121
+00:05:35,080 --> 00:05:37,001
+There are some complicated expressions
+
+122
+00:05:37,001 --> 00:05:38,563
+on the leaves, which model them as disks,
+
+123
+00:05:38,563 --> 00:05:40,325
+so that as they hit the ground, they
+
+124
+00:05:40,325 --> 00:05:41,846
+rotate according to the torques and things,
+
+125
+00:05:41,846 --> 00:05:43,608
+and they sort of touch and spin and settle down.
+
+126
+00:05:46,402 --> 00:05:48,602
+We switched our main train implementation
+
+127
+00:05:48,602 --> 00:05:51,763
+during the development of Ghost to a height map based approach
+
+128
+00:05:51,763 --> 00:05:56,365
+with a hierarchy of tiles containing various resolutions of height map
+
+129
+00:05:56,365 --> 00:05:59,046
+that can get paged in and out.
+
+130
+00:05:59,046 --> 00:06:01,447
+We gave the particles access to this height map
+
+131
+00:06:01,447 --> 00:06:03,447
+via a terrain pause function,
+
+132
+00:06:03,447 --> 00:06:07,269
+which just snaps the given particle down onto the ground.
+
+133
+00:06:08,369 --> 00:06:10,830
+We also use it for larger scale wind gusts.
+
+134
+00:06:10,830 --> 00:06:13,830
+As I mentioned, we're not adjusting the wind direction in general
+
+135
+00:06:13,830 --> 00:06:16,051
+to flow around mountains in a complex way.
+
+136
+00:06:16,051 --> 00:06:17,731
+And this is fine for most things.
+
+137
+00:06:17,731 --> 00:06:21,152
+But it looks bad if wind carrying stuff
+
+138
+00:06:21,152 --> 00:06:22,913
+is flowing straight into the side of a mountain
+
+139
+00:06:22,913 --> 00:06:24,953
+and the stuff is just kind of disappearing into the ground.
+
+140
+00:06:24,953 --> 00:06:28,354
+So we are doing the most basic approximation of fluid dynamics
+
+141
+00:06:28,354 --> 00:06:31,855
+for just this case by taking several height map samples
+
+142
+00:06:31,855 --> 00:06:33,535
+out in front of each particle
+
+143
+00:06:33,535 --> 00:06:35,635
+and sort of giving it an upwards velocity in advance
+
+144
+00:06:35,635 --> 00:06:37,356
+so that it goes up over things nicely.
+
+145
+00:06:39,578 --> 00:06:45,460
+The technique we use to add a bit more interactivity to the particle motion is what we call vorticals.
+
+146
+00:06:45,460 --> 00:06:49,862
+These are a special flavor of particle which don't actually draw themselves but are visible
+
+147
+00:06:49,862 --> 00:06:51,323
+only through their effect on other particles.
+
+148
+00:06:51,323 --> 00:06:54,064
+They're basically like little spheres of wind.
+
+149
+00:06:54,064 --> 00:07:00,447
+They output a position, an orientation, and a radius, and also a vector which determines
+
+150
+00:07:00,447 --> 00:07:01,268
+the direction of the wind.
+
+151
+00:07:02,162 --> 00:07:05,364
+using a coordinate system which is attached to the surface of the sphere.
+
+152
+00:07:05,364 --> 00:07:08,466
+So it has like east-west, north-south, and up-down components.
+
+153
+00:07:08,466 --> 00:07:11,728
+So just by pointing this vector around in different directions,
+
+154
+00:07:11,728 --> 00:07:14,489
+you can model several interesting shapes of wind,
+
+155
+00:07:14,489 --> 00:07:17,271
+including circular vortexes, linear gusts,
+
+156
+00:07:17,271 --> 00:07:19,473
+and sort of outward facing blasts.
+
+157
+00:07:19,473 --> 00:07:25,236
+Vortical emitters atomically append these into a single small array,
+
+158
+00:07:25,236 --> 00:07:26,697
+listing all the vorticals in the world.
+
+159
+00:07:28,063 --> 00:07:30,545
+And regular particle emitters can access this array
+
+160
+00:07:30,545 --> 00:07:32,106
+through a new function which samples
+
+161
+00:07:32,106 --> 00:07:34,348
+the accumulated vortical contribution at a point.
+
+162
+00:07:34,348 --> 00:07:36,851
+And it's doing this in a really bright brute force way,
+
+163
+00:07:36,851 --> 00:07:38,012
+just running down the whole list
+
+164
+00:07:38,012 --> 00:07:40,354
+and adding up all of the contributions.
+
+165
+00:07:40,354 --> 00:07:44,558
+And it somewhat amazingly works even up to like hundreds of vorticals.
+
+166
+00:07:44,558 --> 00:07:48,101
+This isn't an automatic thing, particle emitters only opt into this
+
+167
+00:07:48,101 --> 00:07:52,905
+in a voluntary fashion for relatively few places where it kind of helps.
+
+168
+00:07:54,357 --> 00:07:57,219
+And since it's another building block function,
+
+169
+00:07:57,219 --> 00:07:59,880
+emitters decide for themselves what to do with this information.
+
+170
+00:07:59,880 --> 00:08:02,721
+They might just sort of in a straightforward way,
+
+171
+00:08:02,721 --> 00:08:05,022
+add the vertical wind under their acceleration vector.
+
+172
+00:08:05,022 --> 00:08:06,723
+And so they sort of get blown around by it,
+
+173
+00:08:06,723 --> 00:08:08,364
+like these leaves over a campfire,
+
+174
+00:08:08,364 --> 00:08:12,206
+where there's some upward facing verticals emitting from it.
+
+175
+00:08:13,332 --> 00:08:17,774
+But we can also use vorticals spawned by sword strikes and character motion
+
+176
+00:08:17,774 --> 00:08:21,935
+to, say, extinguish candle flame particles as you go near them,
+
+177
+00:08:21,935 --> 00:08:23,736
+or to scare away animals, like crabs.
+
+178
+00:08:23,736 --> 00:08:27,457
+Or an arrow shot that shoots a little vortical that makes them say,
+
+179
+00:08:27,457 --> 00:08:32,019
+hey, I need to dig myself into the sand now.
+
+180
+00:08:32,019 --> 00:08:32,719
+During the game...
+
+181
+00:08:33,578 --> 00:08:35,979
+Tsushima is overrun by Mongol armies,
+
+182
+00:08:35,979 --> 00:08:37,881
+and so there ought to be actual armies.
+
+183
+00:08:37,881 --> 00:08:40,402
+We have all these amazing, beautifully sculpted
+
+184
+00:08:40,402 --> 00:08:41,643
+and animated character models
+
+185
+00:08:41,643 --> 00:08:43,525
+and rigging for regular gameplay,
+
+186
+00:08:43,525 --> 00:08:45,506
+but those are pretty expensive.
+
+187
+00:08:45,506 --> 00:08:48,148
+The CPU has to compute all the AI and animations,
+
+188
+00:08:48,148 --> 00:08:51,950
+render 100,000 polys with lots of fancy materials.
+
+189
+00:08:51,950 --> 00:08:54,392
+And we can afford to have a few tens
+
+190
+00:08:54,392 --> 00:08:56,493
+of these heavyweight NPCs in the game at once,
+
+191
+00:08:56,493 --> 00:08:59,315
+but there are some scenes like the initial invasion
+
+192
+00:08:59,315 --> 00:09:01,196
+where you'd really like to see a horde.
+
+193
+00:09:02,377 --> 00:09:03,858
+Enter animated particles.
+
+194
+00:09:03,858 --> 00:09:06,319
+Here's a scene from the very beginning of the game
+
+195
+00:09:06,319 --> 00:09:08,640
+as the Mongols are overrunning the beach.
+
+196
+00:09:08,640 --> 00:09:11,861
+Most of the ones you see are full NPCs.
+
+197
+00:09:11,861 --> 00:09:14,222
+But if I fly over here away from the main action,
+
+198
+00:09:14,222 --> 00:09:17,224
+sort of into the distance, you can see that there's a whole crowd
+
+199
+00:09:17,224 --> 00:09:20,805
+of Mongols there in green who are actually a particle system.
+
+200
+00:09:20,805 --> 00:09:25,127
+Then all those green ones are super low cost GPU only particles.
+
+201
+00:09:26,249 --> 00:09:29,231
+Here's another example. This is the Samurai's fortification,
+
+202
+00:09:29,231 --> 00:09:31,272
+seen in the background at the very beginning of the game.
+
+203
+00:09:31,272 --> 00:09:33,094
+It's just kind of a little bit of set dressing.
+
+204
+00:09:33,094 --> 00:09:34,855
+All of the Samurai here are particles.
+
+205
+00:09:34,855 --> 00:09:37,817
+Up close, they're a far cry from the real models,
+
+206
+00:09:37,817 --> 00:09:40,338
+but at any distance at all, they're remarkably complex
+
+207
+00:09:40,338 --> 00:09:41,919
+for taking basically zero CPU.
+
+208
+00:09:41,919 --> 00:09:47,003
+We added this feature specifically for armies of people.
+
+209
+00:09:47,697 --> 00:09:50,319
+It turned out to be even more useful for all kinds of critters,
+
+210
+00:09:50,319 --> 00:09:53,642
+like butterflies, birds, crabs, dragonflies.
+
+211
+00:09:53,642 --> 00:09:57,925
+This crane is a particle, as are the seagulls up in the upper left
+
+212
+00:09:57,925 --> 00:09:59,546
+and the whole flock of starlings.
+
+213
+00:09:59,546 --> 00:10:03,649
+Animations for an animated particle are compiled into a fat texture
+
+214
+00:10:03,649 --> 00:10:06,872
+containing the local skinning matrix for each joint at each frame.
+
+215
+00:10:06,872 --> 00:10:09,774
+This can get large, so it's best suited for simple objects
+
+216
+00:10:09,774 --> 00:10:12,056
+and maybe only a few tens of joints.
+
+217
+00:10:12,056 --> 00:10:14,677
+Each particle can individually specify which clip
+
+218
+00:10:14,677 --> 00:10:17,440
+and which frame within that clip it should display at each time step.
+
+219
+00:10:18,487 --> 00:10:21,148
+Since animation state is just another building block,
+
+220
+00:10:21,148 --> 00:10:23,670
+artists have great freedom to use it however they want.
+
+221
+00:10:23,670 --> 00:10:28,212
+Artists have done some amazing things with multiple animation clips
+
+222
+00:10:28,212 --> 00:10:30,934
+like frogs which float on the surface of the water
+
+223
+00:10:30,934 --> 00:10:32,175
+until the player gets near to them.
+
+224
+00:10:32,175 --> 00:10:35,196
+And then they swim away and spawn a little water ripple particle
+
+225
+00:10:35,196 --> 00:10:37,958
+as they go, or if they're on land, they hop away.
+
+226
+00:10:37,958 --> 00:10:39,639
+So animated particles were easy to implement
+
+227
+00:10:39,639 --> 00:10:41,640
+and they gave a really big bang for the buck.
+
+228
+00:10:46,857 --> 00:10:49,338
+Ghost is set in feudal Japan,
+
+229
+00:10:49,338 --> 00:10:51,400
+and most of what you see is natural objects,
+
+230
+00:10:51,400 --> 00:10:53,801
+and especially trees and shrubs.
+
+231
+00:10:53,801 --> 00:10:56,863
+Nearly every vertex of all of these is in constant motion,
+
+232
+00:10:56,863 --> 00:10:57,964
+influenced by the wind.
+
+233
+00:10:57,964 --> 00:10:59,985
+Most of our trees are modeled in SpeedTree,
+
+234
+00:10:59,985 --> 00:11:01,547
+but the runtime is entirely homegrown.
+
+235
+00:11:03,179 --> 00:11:05,641
+The motion of the trees is implemented by effectively skinning
+
+236
+00:11:05,641 --> 00:11:07,181
+the geometry onto a simple skeleton,
+
+237
+00:11:07,181 --> 00:11:10,643
+just three levels, trunk, branch and sub branch.
+
+238
+00:11:10,643 --> 00:11:13,085
+The actual drawn geometry is attached to the skeleton.
+
+239
+00:11:13,085 --> 00:11:16,967
+These aren't implemented as traditionally skin joints
+
+240
+00:11:16,967 --> 00:11:19,409
+where a separate stage of computation builds up these joint matrices.
+
+241
+00:11:19,409 --> 00:11:22,370
+They're actually run entirely in the vertex shader
+
+242
+00:11:22,370 --> 00:11:25,472
+using only local information stored at each vertex.
+
+243
+00:11:25,672 --> 00:11:28,217
+So each vertex stores extra data in the vertex stream
+
+244
+00:11:28,217 --> 00:11:29,619
+about the branches it's attached to,
+
+245
+00:11:29,619 --> 00:11:31,182
+basically just the beginning and end points
+
+246
+00:11:31,182 --> 00:11:33,006
+of both the branch and the sub branch.
+
+247
+00:11:33,006 --> 00:11:35,109
+So the vertexes are thus fairly fat.
+
+248
+00:11:35,109 --> 00:11:37,293
+It does have the advantage that it supports
+
+249
+00:11:37,293 --> 00:11:39,076
+an extremely large number of branches.
+
+250
+00:11:40,516 --> 00:11:43,278
+When you add wind, the vertex shader takes the wind vector
+
+251
+00:11:43,278 --> 00:11:44,959
+at the tree's location into account,
+
+252
+00:11:44,959 --> 00:11:47,802
+it rotates each branch around its origin away from the wind
+
+253
+00:11:47,802 --> 00:11:49,723
+to get the whole tree to bend.
+
+254
+00:11:49,723 --> 00:11:53,986
+And we also add a little bit of sinusoidal motion
+
+255
+00:11:53,986 --> 00:11:56,108
+from each branch to make it bounce back and forth.
+
+256
+00:11:56,108 --> 00:11:59,330
+And the phase of this motion is based on a hash of its position
+
+257
+00:11:59,330 --> 00:12:02,953
+so that the additional adjacent branches and adjacent trees
+
+258
+00:12:02,953 --> 00:12:04,594
+don't move quite the same as one another.
+
+259
+00:12:05,606 --> 00:12:08,127
+This wind sway is running on pretty much every vert
+
+260
+00:12:08,127 --> 00:12:10,268
+and all of the greenery you see in Tsushima,
+
+261
+00:12:10,268 --> 00:12:12,490
+including most imposter level geometry
+
+262
+00:12:12,490 --> 00:12:15,091
+for trees covering distant hillsides.
+
+263
+00:12:15,091 --> 00:12:17,372
+We also optionally take the displacement buffer into account
+
+264
+00:12:17,372 --> 00:12:19,653
+using very similar code based on the same skeleton
+
+265
+00:12:19,653 --> 00:12:21,374
+so the branches can get bent out of the way
+
+266
+00:12:21,374 --> 00:12:22,415
+as Jim walks through them.
+
+267
+00:12:24,368 --> 00:12:27,632
+Now we come to grass, which covers most of the ground on Sushima.
+
+268
+00:12:27,632 --> 00:12:30,995
+We have a whole GPU pipeline for specifically grass blades.
+
+269
+00:12:30,995 --> 00:12:33,198
+We handle numerous different styles of grass
+
+270
+00:12:33,198 --> 00:12:35,240
+with no limit to how many different styles
+
+271
+00:12:35,240 --> 00:12:37,883
+can be drawn in the same frame.
+
+272
+00:12:37,883 --> 00:12:40,907
+A typical grass heavy scene like these will process
+
+273
+00:12:40,907 --> 00:12:43,930
+a little more than a million separate potential grass blades.
+
+274
+00:12:44,652 --> 00:12:47,293
+And after we've put this number down using a variety of heuristics
+
+275
+00:12:47,293 --> 00:12:49,674
+like visibility calling and distance limits,
+
+276
+00:12:49,674 --> 00:12:51,495
+we end up drawing around 100,000 blades.
+
+277
+00:12:51,495 --> 00:12:54,876
+Each one of these reacts to the wind.
+
+278
+00:12:54,876 --> 00:12:57,818
+I should note here that the pampas flowers you see so many of here
+
+279
+00:12:57,818 --> 00:13:00,559
+are not drawn through the grass pipeline.
+
+280
+00:13:00,559 --> 00:13:02,580
+They're actually more akin to foliage
+
+281
+00:13:02,580 --> 00:13:04,921
+and are drawn through the same GPU code path
+
+282
+00:13:04,921 --> 00:13:06,722
+that we use to generate large instance
+
+283
+00:13:06,722 --> 00:13:09,563
+to draw calls for trees and rocks and stuff like that.
+
+284
+00:13:11,260 --> 00:13:12,781
+The basic flow of a grass system is this.
+
+285
+00:13:12,781 --> 00:13:14,481
+Of course, it's all done on the GPU.
+
+286
+00:13:14,481 --> 00:13:17,022
+There's a compute shader which generates each blade of grass,
+
+287
+00:13:17,022 --> 00:13:19,563
+each frame. We dispatch one instance of the shader
+
+288
+00:13:19,563 --> 00:13:21,443
+for each terrain tile out in front of the camera
+
+289
+00:13:21,443 --> 00:13:24,304
+with one thread per potential blade of grass.
+
+290
+00:13:24,304 --> 00:13:26,925
+Each thread first does a look up into a grass kind map
+
+291
+00:13:26,925 --> 00:13:28,885
+to figure out whether there should be grass here at all
+
+292
+00:13:28,885 --> 00:13:31,546
+and uses the terrain height map to position it.
+
+293
+00:13:31,546 --> 00:13:34,447
+It prunes against the view frustum and occlusion buffer
+
+294
+00:13:34,447 --> 00:13:36,268
+and fades with distance.
+
+295
+00:13:36,268 --> 00:13:38,328
+We have a bunch of different grass in the game,
+
+296
+00:13:38,328 --> 00:13:41,029
+so there's a big array of constant data for each kind of grass.
+
+297
+00:13:41,820 --> 00:13:44,482
+So, blades which survive this pruning get a bunch of parameters
+
+298
+00:13:44,482 --> 00:13:46,784
+computed like their height, width, bend, etc.
+
+299
+00:13:46,784 --> 00:13:51,467
+And are appended atomically onto a buffer in fast GPU memory,
+
+300
+00:13:51,467 --> 00:13:54,370
+along with accounts that we can dispatch an indirect draw.
+
+301
+00:13:55,844 --> 00:13:58,585
+The draw shaders also consume the grass parameters
+
+302
+00:13:58,585 --> 00:14:00,926
+to place individual verts and color the pixels.
+
+303
+00:14:00,926 --> 00:14:03,607
+This is arranged so that we can do most of the heavy lifting
+
+304
+00:14:03,607 --> 00:14:04,887
+only once per blade of grass.
+
+305
+00:14:04,887 --> 00:14:07,468
+Since there are hundreds of thousands of blades of grass
+
+306
+00:14:07,468 --> 00:14:10,309
+being drawn in many scenes, the blade list could get big.
+
+307
+00:14:10,309 --> 00:14:13,491
+So we dispatch the compute and draw shaders in a pipelined manner
+
+308
+00:14:13,491 --> 00:14:14,791
+with a double buffered blade list,
+
+309
+00:14:14,791 --> 00:14:16,472
+so that one set of blades is being drawn
+
+310
+00:14:16,472 --> 00:14:17,772
+while the next one is being set up.
+
+311
+00:14:19,675 --> 00:14:22,495
+The actual vertex shader for the grass is straightforward
+
+312
+00:14:22,495 --> 00:14:25,836
+and takes all the blade information from the per-blade compute pass
+
+313
+00:14:25,836 --> 00:14:28,597
+and adjusts the verts to bend and color, et cetera, the blade.
+
+314
+00:14:28,597 --> 00:14:30,158
+The motion is much like the foliage,
+
+315
+00:14:30,158 --> 00:14:34,359
+with a sinusoidal sway added to the top of the general bias away from the wind.
+
+316
+00:14:34,359 --> 00:14:35,979
+It also considers several other factors,
+
+317
+00:14:35,979 --> 00:14:39,140
+like bending each blade away from the center of its clump
+
+318
+00:14:39,140 --> 00:14:40,320
+and bending them downhill.
+
+319
+00:14:41,211 --> 00:14:45,293
+Wind includes both high and low frequency noise based on the position.
+
+320
+00:14:45,293 --> 00:14:48,314
+There's also a TD displacement buffer around the camera,
+
+321
+00:14:48,314 --> 00:14:50,235
+which we write into using a special kind of particle.
+
+322
+00:14:50,235 --> 00:14:54,657
+As a hero passes by, the blades will bend and tilt accordingly.
+
+323
+00:14:54,657 --> 00:14:57,718
+My colleague Eric Walla gave a GTC talk this year.
+
+324
+00:14:57,718 --> 00:14:59,739
+It goes into much more detail about how all this works.
+
+325
+00:14:59,739 --> 00:15:01,000
+So I recommend you see that.
+
+326
+00:15:06,810 --> 00:15:09,673
+Being set in old Japan meant that we ended up
+
+327
+00:15:09,673 --> 00:15:12,596
+with a lot of cloth in the game, armor, kimonos,
+
+328
+00:15:12,596 --> 00:15:15,920
+those Sashimono banners that the foot soldiers wear.
+
+329
+00:15:15,920 --> 00:15:18,984
+We started off with a CPU cloth implementation
+
+330
+00:15:18,984 --> 00:15:22,147
+left over from Second Son, which could handle a few characters,
+
+331
+00:15:22,147 --> 00:15:24,010
+each with a few pieces of cloth.
+
+332
+00:15:24,070 --> 00:15:27,093
+As Ghost took form, the number of cloth sims kept growing.
+
+333
+00:15:27,093 --> 00:15:31,839
+There was a bit of an arms race at times with artists adding more cloth and kind of tanking
+
+334
+00:15:31,839 --> 00:15:36,223
+the perf and then me hacking the code to try to make it run faster somehow and so on in
+
+335
+00:15:36,223 --> 00:15:37,485
+what I suppose was a virtuous cycle.
+
+336
+00:15:37,485 --> 00:15:42,410
+In the final game, we usually have several hundred cloth sims running on screen, sometimes
+
+337
+00:15:42,410 --> 00:15:43,191
+as many as a thousand.
+
+338
+00:15:44,370 --> 00:15:48,333
+In this scene, there are about 250 cloth sims for clothing,
+
+339
+00:15:48,333 --> 00:15:52,655
+banners, tent flaps, for a total of around 70,000 simulated vertexes.
+
+340
+00:15:52,655 --> 00:15:54,876
+And it's taking about 2% of this PS4 GPU.
+
+341
+00:15:54,876 --> 00:15:59,439
+In addition to cloth and leather, we use cloth sims for a few things
+
+342
+00:15:59,439 --> 00:16:03,241
+which strictly speaking aren't cloth, like strands of human and horse hair
+
+343
+00:16:03,241 --> 00:16:04,982
+and even hanging bodies in some cases.
+
+344
+00:16:07,492 --> 00:16:10,355
+Our cloth sim starts with a sim mesh authored in Maya.
+
+345
+00:16:10,355 --> 00:16:11,837
+Here, it's just a nice rectangle,
+
+346
+00:16:11,837 --> 00:16:13,859
+but in general, it's not quite so regular.
+
+347
+00:16:13,859 --> 00:16:17,323
+This mesh is used to generate basic damped spring mass system
+
+348
+00:16:17,323 --> 00:16:19,786
+with nodes at the verts and springs in between.
+
+349
+00:16:19,786 --> 00:16:21,828
+Here are the stretch springs.
+
+350
+00:16:21,828 --> 00:16:24,671
+And we also add springs crosswise for shear.
+
+351
+00:16:24,671 --> 00:16:26,934
+There are even further springs to handle bending,
+
+352
+00:16:26,934 --> 00:16:28,435
+but we actually do this a little bit differently.
+
+353
+00:16:29,747 --> 00:16:32,509
+We also support one-dimensional chains or ropes.
+
+354
+00:16:32,509 --> 00:16:34,450
+Since meshes in Maya are lists of faces,
+
+355
+00:16:34,450 --> 00:16:38,032
+you can't have a linear mesh with just vertexes and edges,
+
+356
+00:16:38,032 --> 00:16:40,333
+and we use this a lot for individual strands of hair.
+
+357
+00:16:41,951 --> 00:16:44,272
+The nodes store information about the base position,
+
+358
+00:16:44,272 --> 00:16:46,492
+which in general can be skinned onto a skeleton.
+
+359
+00:16:46,492 --> 00:16:50,513
+And they also have a vertex painted maximum distance
+
+360
+00:16:50,513 --> 00:16:52,574
+that they're allowed to move from this position.
+
+361
+00:16:52,574 --> 00:16:56,255
+Most nodes get a big radius so that they can move freely around.
+
+362
+00:16:56,255 --> 00:16:58,476
+But some of them, like the couple in the corners there,
+
+363
+00:16:58,476 --> 00:17:00,616
+have a distance of zero,
+
+364
+00:17:00,616 --> 00:17:02,377
+which makes them stick to the underlying model.
+
+365
+00:17:02,377 --> 00:17:03,817
+That's how you attach the things.
+
+366
+00:17:04,941 --> 00:17:06,602
+So to draw a piece of cloth in the world,
+
+367
+00:17:06,602 --> 00:17:08,544
+we need to author two separate meshes in our system.
+
+368
+00:17:08,544 --> 00:17:10,345
+One is the SimMesh, which we saw before,
+
+369
+00:17:10,345 --> 00:17:12,306
+which describes how the cloth moves and deforms.
+
+370
+00:17:12,306 --> 00:17:14,428
+And we have a separate DrawMesh,
+
+371
+00:17:14,428 --> 00:17:18,111
+which also contains the shaded triangles to draw into the scene.
+
+372
+00:17:18,111 --> 00:17:22,114
+And the DrawMesh is often similar to or identical to the SimMesh,
+
+373
+00:17:22,114 --> 00:17:24,936
+but it might have more detail, provides a place to attach,
+
+374
+00:17:24,936 --> 00:17:27,618
+rendering specific stuff like vertex colors
+
+375
+00:17:27,618 --> 00:17:29,119
+and UVs separate from the Sim.
+
+376
+00:17:31,138 --> 00:17:33,440
+The actual connection happens in a kind of skinning.
+
+377
+00:17:33,440 --> 00:17:36,182
+Each sim vertex creates a joint,
+
+378
+00:17:36,182 --> 00:17:39,003
+which generates a full transformation matrix.
+
+379
+00:17:39,003 --> 00:17:42,666
+From the point of view of the draw mesh rendering code,
+
+380
+00:17:42,666 --> 00:17:44,247
+these are just like regular joints.
+
+381
+00:17:44,247 --> 00:17:46,208
+But under the hood, they take a different code path
+
+382
+00:17:46,208 --> 00:17:48,449
+than regular animated joints, because there are just so many of them.
+
+383
+00:17:48,449 --> 00:17:50,350
+There are hundreds of thousands of them in a scene.
+
+384
+00:17:50,350 --> 00:17:52,652
+So these are generated by the cloth sim on the GPU
+
+385
+00:17:52,652 --> 00:17:54,113
+and are never even touched by the CPU.
+
+386
+00:17:55,698 --> 00:17:57,365
+As models get further away from the camera,
+
+387
+00:17:57,365 --> 00:18:00,558
+we often switch out draw meshes for one to the simpler level of detail.
+
+388
+00:18:01,594 --> 00:18:04,695
+In these cases, we don't switch the cloth sims generally.
+
+389
+00:18:04,695 --> 00:18:08,798
+We'll replace the draw mesh, but keep the higher res sim running
+
+390
+00:18:08,798 --> 00:18:11,880
+with the new draw mesh attached to the same sim,
+
+391
+00:18:11,880 --> 00:18:15,722
+so that we don't get a pop when we switch from one sim to the other.
+
+392
+00:18:15,722 --> 00:18:18,464
+We do fade out cloth sim motion entirely
+
+393
+00:18:18,464 --> 00:18:20,645
+once they get further enough in the distance.
+
+394
+00:18:20,645 --> 00:18:22,647
+This depends on the size of the object.
+
+395
+00:18:22,647 --> 00:18:25,989
+So little tassels might fade away after a few meters,
+
+396
+00:18:25,989 --> 00:18:29,271
+but a large banner that you can see in silhouette might never light out.
+
+397
+00:18:29,411 --> 00:18:32,736
+We had to actually push out the sim-laud distance for horses really far,
+
+398
+00:18:32,736 --> 00:18:35,661
+because their mains are actually modeled standing straight up.
+
+399
+00:18:35,661 --> 00:18:37,624
+So as they got to the laud distance, they'd get Mohawks.
+
+400
+00:18:40,090 --> 00:18:43,994
+The basic data flow and organization of the GPU cloth is this.
+
+401
+00:18:43,994 --> 00:18:47,018
+Each piece of cloth in the game gets a single compute shader dispatch
+
+402
+00:18:47,018 --> 00:18:48,940
+running on a single thread group in async compute.
+
+403
+00:18:48,940 --> 00:18:52,084
+It consumes some fixed data like the topology of the springs.
+
+404
+00:18:52,084 --> 00:18:55,408
+And since we're using standard Verlet integration,
+
+405
+00:18:55,408 --> 00:18:57,951
+it only needs to keep track of each node's current position
+
+406
+00:18:57,951 --> 00:18:58,712
+and previous position.
+
+407
+00:18:58,712 --> 00:19:00,634
+From this, it can compute the current velocity.
+
+408
+00:19:01,889 --> 00:19:04,452
+The shader computes the updated positions of the nodes
+
+409
+00:19:04,452 --> 00:19:06,394
+for the next frame and writes them back to main memory.
+
+410
+00:19:06,394 --> 00:19:08,516
+This memory is overlapped with the previous node positions
+
+411
+00:19:08,516 --> 00:19:10,157
+and will become the next frame's current.
+
+412
+00:19:10,157 --> 00:19:12,940
+They sort of ping pong back and forth between the two buffers.
+
+413
+00:19:12,940 --> 00:19:16,884
+It also computes the new joint matrices for each node
+
+414
+00:19:16,884 --> 00:19:18,386
+and writes them into the appropriate place
+
+415
+00:19:18,386 --> 00:19:20,868
+so that they can be picked up by the drawing code later in the frame.
+
+416
+00:19:23,060 --> 00:19:26,702
+During the solve, it also uses some fast GPU local data store
+
+417
+00:19:26,702 --> 00:19:28,082
+to store intermediate results.
+
+418
+00:19:28,082 --> 00:19:30,884
+This includes the base skin position
+
+419
+00:19:30,884 --> 00:19:32,965
+as well as updated position at various stages.
+
+420
+00:19:32,965 --> 00:19:35,286
+Since we're using a single thread group,
+
+421
+00:19:35,286 --> 00:19:38,008
+we can sync data across threads between stages
+
+422
+00:19:38,008 --> 00:19:40,449
+with a simple instruction without having to do multiple dispatches
+
+423
+00:19:40,449 --> 00:19:42,090
+or complicated cache flushes.
+
+424
+00:19:42,370 --> 00:19:46,332
+This does mean that only 512 threads at a time are active per cloth sim,
+
+425
+00:19:46,332 --> 00:19:49,453
+and that's too small to get good resource usage,
+
+426
+00:19:49,453 --> 00:19:53,575
+so we do rely on overlapping multiple separate cloth sims
+
+427
+00:19:53,575 --> 00:19:57,097
+with the graphics pipe so that we can keep up overall performance.
+
+428
+00:19:57,097 --> 00:19:59,558
+Although we only run 512 threads,
+
+429
+00:19:59,558 --> 00:20:02,800
+we can actually support more nodes than that by looping the shader
+
+430
+00:20:02,800 --> 00:20:05,962
+so that each thread updates multiple nodes.
+
+431
+00:20:07,735 --> 00:20:09,936
+The fundamental portions of simulating the cloth
+
+432
+00:20:09,936 --> 00:20:11,056
+are reasonably straightforward.
+
+433
+00:20:11,056 --> 00:20:14,398
+The usual Fairleigh integration to take little time steps
+
+434
+00:20:14,398 --> 00:20:18,519
+and apply all the forces and solve where each node should be in this frame.
+
+435
+00:20:18,519 --> 00:20:20,980
+And taking all the constraints and forces into account in general
+
+436
+00:20:20,980 --> 00:20:23,301
+reduces to solving a giant end by end matrix,
+
+437
+00:20:23,301 --> 00:20:27,462
+which if you have enough processing power, you can just do directly.
+
+438
+00:20:27,462 --> 00:20:31,183
+And for better or worse, we're not doing that.
+
+439
+00:20:31,183 --> 00:20:33,844
+A big difficulty with the spring mass model
+
+440
+00:20:33,844 --> 00:20:37,405
+is that it requires many small time steps for stiff material.
+
+441
+00:20:38,026 --> 00:20:45,411
+It's fairly easy using traditional methods to believably simulate a bunch of like bowling balls connected by springs or big sheet of heavy rubber.
+
+442
+00:20:45,411 --> 00:20:48,753
+Integrate through these little forces, everything moves nicely.
+
+443
+00:20:49,797 --> 00:20:55,302
+But for real-world materials like leather or ropes, these things are stiff and don't stretch much at all.
+
+444
+00:20:55,302 --> 00:20:59,987
+And the way to model this accurately is to use really stiff springs,
+
+445
+00:20:59,987 --> 00:21:05,412
+so that even a small offset from the rest lengths generates a large restorative force.
+
+446
+00:21:05,412 --> 00:21:07,994
+But that starts running into numerical difficulties.
+
+447
+00:21:08,134 --> 00:21:10,336
+We're doing this with numerical integration,
+
+448
+00:21:10,336 --> 00:21:12,258
+taking little time steps and applying the forces.
+
+449
+00:21:12,258 --> 00:21:15,521
+If the time steps are too large for the accelerations involved,
+
+450
+00:21:15,521 --> 00:21:18,143
+things go bad quickly, you might start overshooting
+
+451
+00:21:18,143 --> 00:21:21,366
+and getting further and getting a positive feedback thing,
+
+452
+00:21:21,366 --> 00:21:24,829
+and eventually things just go crazy.
+
+453
+00:21:24,829 --> 00:21:27,991
+You can solve this in general by taking really small time steps
+
+454
+00:21:27,991 --> 00:21:30,814
+and taking a lot of them, but that takes a lot of computation
+
+455
+00:21:30,814 --> 00:21:32,235
+and we're going for fast and dirty here.
+
+456
+00:21:33,180 --> 00:21:35,401
+So we're using a giant hack.
+
+457
+00:21:35,401 --> 00:21:37,923
+Instead of using Hooke's Law to calculate spring forces
+
+458
+00:21:37,923 --> 00:21:39,104
+and integrating as usual,
+
+459
+00:21:39,104 --> 00:21:41,286
+we're applying springs in a separate step
+
+460
+00:21:41,286 --> 00:21:44,928
+and just restoring the spring some fraction towards its rest length.
+
+461
+00:21:44,928 --> 00:21:47,850
+So even with a big time step,
+
+462
+00:21:47,850 --> 00:21:50,272
+we never overshoot the rest position of the spring,
+
+463
+00:21:50,272 --> 00:21:51,113
+so it remains stable.
+
+464
+00:21:52,195 --> 00:21:55,197
+The big issue this causes is that we lose our time step invariance.
+
+465
+00:21:55,197 --> 00:21:57,238
+You can tune the restorative percentage
+
+466
+00:21:57,238 --> 00:21:58,559
+to get things to be more or less stiff.
+
+467
+00:21:58,559 --> 00:21:59,959
+But if you change the number of iterations,
+
+468
+00:21:59,959 --> 00:22:01,580
+it behaves subtly differently.
+
+469
+00:22:01,580 --> 00:22:04,082
+This is fine as long as the frame rate stays the same,
+
+470
+00:22:04,082 --> 00:22:08,184
+but it has caused us problems when we've changed the clock speed
+
+471
+00:22:08,184 --> 00:22:11,206
+for cinematic effects or when running in backwards compatibility mode
+
+472
+00:22:11,206 --> 00:22:12,587
+on PS5 where we double the frame rate.
+
+473
+00:22:14,830 --> 00:22:16,933
+To get the same running in a fully parallel way,
+
+474
+00:22:16,933 --> 00:22:19,256
+we want to compute many different springs at once.
+
+475
+00:22:19,256 --> 00:22:22,199
+We could just run them all at once with one thread per spring,
+
+476
+00:22:22,199 --> 00:22:25,343
+but this does present a problem of how to combine the inputs
+
+477
+00:22:25,343 --> 00:22:27,306
+from the different springs and avoid multiple threads
+
+478
+00:22:27,306 --> 00:22:29,288
+sort of stomping on each other's outputs.
+
+479
+00:22:29,548 --> 00:22:31,930
+The way we're dealing with this is to classify the springs
+
+480
+00:22:31,930 --> 00:22:34,070
+into a bunch of separate spring sets,
+
+481
+00:22:34,070 --> 00:22:39,013
+so that no node is updated by more than one spring within each set.
+
+482
+00:22:39,013 --> 00:22:41,914
+So we might first apply here the blue spring set,
+
+483
+00:22:41,914 --> 00:22:43,154
+sort of one spring per thread,
+
+484
+00:22:43,154 --> 00:22:44,815
+updating each endpoint from a single thread,
+
+485
+00:22:44,815 --> 00:22:47,616
+and then black, orange, etc., and syncing in between each
+
+486
+00:22:47,616 --> 00:22:49,497
+so that they can see each other's outputs.
+
+487
+00:22:50,516 --> 00:22:52,938
+For this regular grid, it's really easy to find a coloring
+
+488
+00:22:52,938 --> 00:22:54,439
+which satisfies this requirement,
+
+489
+00:22:54,439 --> 00:22:56,160
+but most of our cloth isn't quite so simple.
+
+490
+00:22:56,160 --> 00:23:00,044
+This is an example of the NP complete graph coloring problem.
+
+491
+00:23:00,044 --> 00:23:02,626
+It's basically just solving Sudoku.
+
+492
+00:23:02,626 --> 00:23:05,548
+A simple greedy algorithm does a pretty decent job,
+
+493
+00:23:05,548 --> 00:23:07,470
+but I did squeeze a few more percent out of it
+
+494
+00:23:07,470 --> 00:23:10,413
+by writing a simple genetic algorithm to try to choose minimal sets.
+
+495
+00:23:12,385 --> 00:23:15,025
+The solution of computing all the nodes in parallel
+
+496
+00:23:15,025 --> 00:23:16,386
+has some big problems.
+
+497
+00:23:16,386 --> 00:23:17,966
+Foremost among them is that each node
+
+498
+00:23:17,966 --> 00:23:20,626
+is only really interacting with its immediate neighbors.
+
+499
+00:23:20,626 --> 00:23:23,407
+It takes many iterations for a change at one end of the SIM
+
+500
+00:23:23,407 --> 00:23:25,127
+to make its way all the way to the other side.
+
+501
+00:23:25,127 --> 00:23:27,108
+Let's imagine the common case of a banner
+
+502
+00:23:27,108 --> 00:23:28,688
+hanging horizontally from a bar.
+
+503
+00:23:28,688 --> 00:23:32,329
+When we integrate the motion of this, all of the nodes move down
+
+504
+00:23:32,329 --> 00:23:34,889
+by some amount according to the time step and the gravity,
+
+505
+00:23:34,889 --> 00:23:37,130
+except for the nodes on top, which are attached to the pole.
+
+506
+00:23:37,130 --> 00:23:40,211
+This causes the attached strings to spread.
+
+507
+00:23:40,211 --> 00:23:41,451
+And so as we take a step,
+
+508
+00:23:42,091 --> 00:23:43,852
+they pull back towards their rest positions,
+
+509
+00:23:43,852 --> 00:23:46,755
+but only the ones attached directly to the stretched springs
+
+510
+00:23:46,755 --> 00:23:47,615
+feel this pull initially.
+
+511
+00:23:47,615 --> 00:23:50,177
+If you add more iterations, the wave of spring tension
+
+512
+00:23:50,177 --> 00:23:52,359
+moves through the cloth and eventually things will even out
+
+513
+00:23:52,359 --> 00:23:54,340
+and things will contract as desired.
+
+514
+00:23:54,340 --> 00:23:56,822
+But for a detailed SIM with many short springs,
+
+515
+00:23:56,822 --> 00:23:58,984
+it's more iterations than we're willing to compute.
+
+516
+00:24:00,914 --> 00:24:03,995
+This is particularly noticeable when you have cloth hanging from something.
+
+517
+00:24:03,995 --> 00:24:07,276
+The visible effect is that the cloth becomes super stretchy.
+
+518
+00:24:07,276 --> 00:24:10,277
+Even though the individual springs are stiff,
+
+519
+00:24:10,277 --> 00:24:11,738
+the whole sim is very much not.
+
+520
+00:24:11,738 --> 00:24:14,079
+With the parallel implementation I've described so far,
+
+521
+00:24:14,079 --> 00:24:15,859
+Jim's robe looks like it's made of rubber.
+
+522
+00:24:15,859 --> 00:24:18,840
+It's especially noticeable in the white tassels at the corner of the building,
+
+523
+00:24:18,840 --> 00:24:21,982
+where they stretch unnaturally and are several times longer than they were authored.
+
+524
+00:24:22,979 --> 00:24:25,980
+A hacky solution I used is to identify during compilation
+
+525
+00:24:25,980 --> 00:24:27,320
+nearby anchor points.
+
+526
+00:24:27,320 --> 00:24:29,360
+These are the ones which have a maximum distance of zero
+
+527
+00:24:29,360 --> 00:24:31,621
+from their skin positions and so are fixed in place,
+
+528
+00:24:31,621 --> 00:24:33,021
+the top row here.
+
+529
+00:24:33,021 --> 00:24:36,162
+Each node remembers the index of its nearest anchor point
+
+530
+00:24:36,162 --> 00:24:38,402
+and the original distance to that point.
+
+531
+00:24:38,402 --> 00:24:41,723
+At runtime, once we've applied the offset from integration,
+
+532
+00:24:41,723 --> 00:24:45,324
+we enforce a distance limit so that the anchor point
+
+533
+00:24:45,324 --> 00:24:47,284
+doesn't get farther than that from the anchor point.
+
+534
+00:24:47,284 --> 00:24:50,045
+This can be done entirely in parallel for each node.
+
+535
+00:24:51,421 --> 00:24:53,823
+The allowed distance to the anchor might be slightly greater
+
+536
+00:24:53,823 --> 00:24:56,705
+than the initial distance let stretch a little bit in general,
+
+537
+00:24:56,705 --> 00:24:58,226
+it's pretty close to unity.
+
+538
+00:24:58,226 --> 00:25:00,528
+In this way, we can apply the impulse from the anchors
+
+539
+00:25:00,528 --> 00:25:02,249
+directly out to each node directly
+
+540
+00:25:02,249 --> 00:25:04,791
+without having to go through all the intermediate springs.
+
+541
+00:25:04,791 --> 00:25:07,513
+I think of it kind of like in addition to the wobbly springs and masses,
+
+542
+00:25:07,513 --> 00:25:09,875
+there are these inelastic pieces of invisible fishing line
+
+543
+00:25:09,875 --> 00:25:11,536
+connecting each node to its anchor.
+
+544
+00:25:11,536 --> 00:25:13,457
+They can't stretch any further than that,
+
+545
+00:25:13,457 --> 00:25:15,339
+but they are free to move around within those radii
+
+546
+00:25:15,339 --> 00:25:17,520
+and that allows plenty of wind flapping and movement.
+
+547
+00:25:18,421 --> 00:25:21,083
+There are some common cases where a single anchor
+
+548
+00:25:21,083 --> 00:25:24,065
+doesn't work well enough, and so we support two anchors,
+
+549
+00:25:24,065 --> 00:25:27,087
+and this handles like the case of a rope hanging suspended,
+
+550
+00:25:27,087 --> 00:25:27,768
+and it gives a nice caponary.
+
+551
+00:25:27,768 --> 00:25:29,869
+Here's the version using anchors.
+
+552
+00:25:29,869 --> 00:25:32,491
+The cloth still moves around quite a lot and looks loose and blowy,
+
+553
+00:25:32,491 --> 00:25:35,213
+but it doesn't stretch like even all the way to the ground.
+
+554
+00:25:35,213 --> 00:25:38,095
+And the tassels are short and stiff, just like we want.
+
+555
+00:25:38,095 --> 00:25:41,277
+And here's a debug view showing where the anchors are attached.
+
+556
+00:25:43,177 --> 00:25:45,262
+There's some cases which are not well handled by anchors,
+
+557
+00:25:45,262 --> 00:25:47,648
+which I don't have time to describe in detail.
+
+558
+00:25:47,648 --> 00:25:49,954
+It does work quite well for the majority of cases, though.
+
+559
+00:25:51,162 --> 00:25:53,382
+Cloth doesn't exist in a vacuum and it needs to interact
+
+560
+00:25:53,382 --> 00:25:54,962
+at least somewhat with the things around it.
+
+561
+00:25:54,962 --> 00:25:56,383
+In the important case of clothing,
+
+562
+00:25:56,383 --> 00:25:59,223
+it needs to drape around the body of the character.
+
+563
+00:25:59,223 --> 00:26:01,444
+We only support a very limited form of cloth collision.
+
+564
+00:26:01,444 --> 00:26:03,904
+It's entirely separate from our general physics model
+
+565
+00:26:03,904 --> 00:26:06,285
+and built up of just a couple of kinds of simple shapes.
+
+566
+00:26:06,285 --> 00:26:08,866
+We support ellipsoids, but most of our character cloth collisions
+
+567
+00:26:08,866 --> 00:26:11,586
+are built up of a particular shape we call a sphere pair.
+
+568
+00:26:11,586 --> 00:26:13,807
+It's just a capsule consisting of a pair of spheres
+
+569
+00:26:13,807 --> 00:26:15,547
+and the frustum connecting them.
+
+570
+00:26:15,547 --> 00:26:18,808
+We collide only the nodes themselves against the collision shapes,
+
+571
+00:26:18,808 --> 00:26:20,928
+which is insufficient to be really accurate.
+
+572
+00:26:21,268 --> 00:26:26,651
+Both spheres are optionally skinned on animated joints, so it's possible to attach these to
+
+573
+00:26:26,651 --> 00:26:30,832
+the actual joints of a character and they can build up a halfway accurate approximation
+
+574
+00:26:30,832 --> 00:26:32,853
+to the shape of a human.
+
+575
+00:26:32,853 --> 00:26:36,294
+They also support a single collision plane which can be set up to automatically match
+
+576
+00:26:36,294 --> 00:26:38,535
+the ground beneath the character.
+
+577
+00:26:38,535 --> 00:26:41,357
+Here are the collision volumes used by Jen and his horse.
+
+578
+00:26:44,217 --> 00:26:47,358
+The difficulty with collisions, especially only checking the vertexes like we do, is
+
+579
+00:26:47,358 --> 00:26:50,719
+preventing sudden movements from completely penetrating the cloth.
+
+580
+00:26:50,719 --> 00:26:54,981
+This is especially problematic because since this is a video game, for combat and gameplay
+
+581
+00:26:54,981 --> 00:26:58,543
+reasons, sometimes the hero can change poses at superhuman speeds.
+
+582
+00:26:58,743 --> 00:27:01,085
+His arms, say, can be animated outside of the current cloth
+
+583
+00:27:01,085 --> 00:27:02,726
+between one frame and the next.
+
+584
+00:27:02,726 --> 00:27:05,088
+And once this happens, it's kind of difficult to know what to do.
+
+585
+00:27:05,088 --> 00:27:08,431
+Each vertex can get pushed outside of the volume, the collisions,
+
+586
+00:27:08,431 --> 00:27:10,152
+but some of them are now on the wrong side,
+
+587
+00:27:10,152 --> 00:27:13,635
+and the collisions are working to keep them there.
+
+588
+00:27:13,635 --> 00:27:16,157
+So we're computing each vertex in parallel,
+
+589
+00:27:16,157 --> 00:27:17,838
+so it only has local information,
+
+590
+00:27:17,838 --> 00:27:21,281
+but this is kind of a global problem you need to solve to get one manifold.
+
+591
+00:27:22,021 --> 00:27:25,362
+manifold outside of another, we have a trick for maintaining cloth
+
+592
+00:27:25,362 --> 00:27:29,064
+on the same side of a collision volume. For some collisions, in addition to
+
+593
+00:27:29,064 --> 00:27:32,025
+pushing the node outside the volume itself, we look at the original skin
+
+594
+00:27:32,025 --> 00:27:34,466
+position of the node before any simulation
+
+595
+00:27:34,466 --> 00:27:37,788
+has occurred. We find the nearest point on that shape and construct a plane
+
+596
+00:27:37,788 --> 00:27:40,889
+tangent to that point, but didn't set it backwards by some
+
+597
+00:27:40,889 --> 00:27:45,090
+amount, and we can train the sim mode to stay on that side of that plane.
+
+598
+00:27:45,090 --> 00:27:49,772
+We want it to be able to deform and slide around some, but if it somehow gets too
+
+599
+00:27:49,772 --> 00:27:50,813
+far around, we'll stop it. This works pretty well.
+
+600
+00:27:52,682 --> 00:27:53,903
+You won't be surprised to hear about that.
+
+601
+00:27:53,903 --> 00:27:57,007
+We're not doing full cloth versus cloth collision.
+
+602
+00:27:57,007 --> 00:27:59,270
+Doing that right is a big N squared problem,
+
+603
+00:27:59,270 --> 00:28:01,352
+but we do support layering one piece of cloth
+
+604
+00:28:01,352 --> 00:28:02,794
+over another in a very limited way.
+
+605
+00:28:02,794 --> 00:28:06,438
+We do this by making use of some machinery we already have in place.
+
+606
+00:28:06,438 --> 00:28:09,241
+You remember that each node has a maximum distance
+
+607
+00:28:09,241 --> 00:28:10,723
+it can move from its skin position.
+
+608
+00:28:11,450 --> 00:28:13,691
+Now imagine we want to layer this light blue cloth sim
+
+609
+00:28:13,691 --> 00:28:14,931
+over the black cloth sim.
+
+610
+00:28:14,931 --> 00:28:17,132
+We're going to use the same kind of max distance radii,
+
+611
+00:28:17,132 --> 00:28:20,174
+but instead of centering them on the initial position,
+
+612
+00:28:20,174 --> 00:28:23,395
+we offset them outwards and skin them onto the base cloth layer.
+
+613
+00:28:23,395 --> 00:28:26,016
+This means we have to remember an extra position
+
+614
+00:28:26,016 --> 00:28:28,257
+and skinning information at each layered point.
+
+615
+00:28:28,257 --> 00:28:33,059
+But we said use that instead of the original radius
+
+616
+00:28:33,059 --> 00:28:35,080
+when we're doing that max distance check.
+
+617
+00:28:35,251 --> 00:28:38,333
+This allows each node to move around,
+
+618
+00:28:38,333 --> 00:28:40,094
+and the spheres move with them,
+
+619
+00:28:40,094 --> 00:28:42,376
+and it only works if the top cloth layer
+
+620
+00:28:42,376 --> 00:28:45,178
+doesn't move very far relative to the bottom,
+
+621
+00:28:45,178 --> 00:28:47,279
+and if the bottom cloth doesn't deform extremely,
+
+622
+00:28:47,279 --> 00:28:49,401
+but it's pretty effective for many common cases.
+
+623
+00:28:50,793 --> 00:28:53,754
+The Khan's costume is a good one to see this layering in action.
+
+624
+00:28:53,754 --> 00:28:58,157
+The separate layers show quite a bit of movement relative to one another,
+
+625
+00:28:58,157 --> 00:29:00,698
+but they don't usually clip through one another.
+
+626
+00:29:00,698 --> 00:29:06,101
+Even like the chain things on his back are layered outside of his cape.
+
+627
+00:29:06,101 --> 00:29:10,903
+So that's it for my talk. Thank you for coming.
+
+628
+00:29:10,903 --> 00:29:11,964
+Thank you for listening.
+
+629
+00:29:11,964 --> 00:29:15,146
+And I'll do my best to answer questions in the chat
+
+630
+00:29:15,146 --> 00:29:16,586
+or in this email address.
+
+631
+00:29:19,831 --> 00:29:19,951
+Bye!
+
+632
+00:29:19,951 --> 00:29:20,012
+Bye!
+
+633
+00:29:20,012 --> 00:29:20,072
+Bye!
+
+634
+00:29:20,072 --> 00:29:20,172
+Bye!
+
+635
+00:29:20,172 --> 00:29:20,273
+Bye!
+
+636
+00:29:20,273 --> 00:29:20,333
+Bye!
+

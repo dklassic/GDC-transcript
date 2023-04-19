@@ -1,0 +1,4340 @@
+1
+00:00:05,809 --> 00:00:07,570
+Alrighty, are we ready to get going?
+
+2
+00:00:09,910 --> 00:00:11,211
+Okay, so I'm Earl.
+
+3
+00:00:11,691 --> 00:00:14,752
+I'm a lead programmer at Respawn Entertainment
+
+4
+00:00:14,832 --> 00:00:16,512
+and I like programming stuff.
+
+5
+00:00:17,053 --> 00:00:18,393
+Here's some of the stuff I've done.
+
+6
+00:00:19,573 --> 00:00:21,814
+And before we get started too much,
+
+7
+00:00:22,194 --> 00:00:25,795
+I'd like to remind you to please turn off your noisemakers
+
+8
+00:00:26,256 --> 00:00:29,256
+and to fill out those emailed surveys you get
+
+9
+00:00:29,597 --> 00:00:31,337
+and invite me back next year.
+
+10
+00:00:32,725 --> 00:00:33,665
+So that's who I am.
+
+11
+00:00:34,126 --> 00:00:36,047
+If this is who you are, then you're in the right talk.
+
+12
+00:00:36,087 --> 00:00:39,249
+If you like math, bit operations, vectors, then
+
+13
+00:00:39,469 --> 00:00:40,310
+you're in the right spot.
+
+14
+00:00:41,831 --> 00:00:44,632
+And just to warn you, we may set a record for most slides
+
+15
+00:00:44,672 --> 00:00:46,133
+in a 50-minute presentation.
+
+16
+00:00:46,934 --> 00:00:50,416
+So this is not a relaxing talk, but hopefully it's
+
+17
+00:00:50,456 --> 00:00:50,896
+informative.
+
+18
+00:00:52,357 --> 00:00:53,958
+So first, why did we do this?
+
+19
+00:00:55,982 --> 00:00:59,467
+and then we'll get into how we built our access align
+
+20
+00:00:59,487 --> 00:01:02,892
+bounding box trees, how we optimized our traversal of the
+
+21
+00:01:02,932 --> 00:01:07,579
+trees, and how we did SIMD parallelization of the final
+
+22
+00:01:07,600 --> 00:01:08,321
+collision tests.
+
+23
+00:01:10,190 --> 00:01:13,355
+So collision detection is basically broken down into two
+
+24
+00:01:13,795 --> 00:01:14,696
+broad categories.
+
+25
+00:01:14,736 --> 00:01:16,619
+There's discrete collision detection.
+
+26
+00:01:17,159 --> 00:01:19,502
+Are these two things intersecting right here, right
+
+27
+00:01:19,562 --> 00:01:22,346
+now, and you don't care about what's before or after?
+
+28
+00:01:22,366 --> 00:01:25,270
+And then there's continuous collision detection.
+
+29
+00:01:25,710 --> 00:01:28,474
+Where when does this thing that's moving first hit that
+
+30
+00:01:28,554 --> 00:01:28,955
+other thing?
+
+31
+00:01:31,438 --> 00:01:35,441
+And the discrete detection, since it doesn't have to do with motion, is often faster.
+
+32
+00:01:35,941 --> 00:01:37,602
+But it has some downsides, too.
+
+33
+00:01:37,722 --> 00:01:40,004
+It teleports, essentially, each step.
+
+34
+00:01:40,745 --> 00:01:45,828
+So it just detects that you're stuck right now, and it's up to someone else to fix it.
+
+35
+00:01:46,969 --> 00:01:52,633
+And even worse, fast objects, if they step too far, they can completely skip something.
+
+36
+00:01:52,753 --> 00:01:56,616
+So you could have something like a bullet going through a wall is the classic example.
+
+37
+00:01:58,657 --> 00:02:01,239
+But rotation is no different than translation.
+
+38
+00:02:02,260 --> 00:02:03,761
+So in Titanfall, in Titanfall 2,
+
+39
+00:02:03,981 --> 00:02:05,803
+we used continuous collision detection
+
+40
+00:02:06,463 --> 00:02:08,224
+and it was continuous for translation only.
+
+41
+00:02:08,405 --> 00:02:12,208
+The rotation, we just did fixed steps.
+
+42
+00:02:13,729 --> 00:02:16,151
+But we also did discrete collision detection
+
+43
+00:02:16,571 --> 00:02:17,712
+at the initial position,
+
+44
+00:02:17,772 --> 00:02:19,934
+so we did both tests at the same time.
+
+45
+00:02:21,335 --> 00:02:24,057
+But there were some limitations that led us to revisit it.
+
+46
+00:02:24,998 --> 00:02:27,660
+The collider shape, for one, depended on the situation.
+
+47
+00:02:28,721 --> 00:02:32,844
+Usually it was kind of a capsule-cylinder hybrid, where we start with a cylinder and
+
+48
+00:02:32,884 --> 00:02:39,309
+then we chop planes off of it, tangent to the capsule, so that it is smoother over rough
+
+49
+00:02:39,329 --> 00:02:39,630
+terrain.
+
+50
+00:02:40,230 --> 00:02:44,113
+And it was efficient, but it had some oddities.
+
+51
+00:02:44,934 --> 00:02:48,196
+And even some things would fall back all the way to an axis-aligned bounding box.
+
+52
+00:02:50,226 --> 00:02:52,808
+Some of our optimizations in the collision code
+
+53
+00:02:52,848 --> 00:02:58,551
+assumed that Z was up, so if we rotated the capsule
+
+54
+00:02:58,611 --> 00:03:00,332
+so that you were leaning forward or lying down,
+
+55
+00:03:00,712 --> 00:03:03,054
+we had to basically fit that in a larger capsule
+
+56
+00:03:03,174 --> 00:03:05,916
+and transform all of the world then to the smaller capsule
+
+57
+00:03:05,956 --> 00:03:09,218
+and the larger capsule, so it worked, but it was expensive.
+
+58
+00:03:10,458 --> 00:03:13,660
+And the real reason we revisited it is there is a hard limit
+
+59
+00:03:13,800 --> 00:03:17,483
+of about a million triangles because we index triangles
+
+60
+00:03:17,543 --> 00:03:18,643
+by a 20-bit index.
+
+61
+00:03:19,210 --> 00:03:20,832
+There are no bits left to do more.
+
+62
+00:03:21,512 --> 00:03:23,874
+And strangely enough, our content creators
+
+63
+00:03:23,914 --> 00:03:25,676
+keep adding stuff and want more, more, more.
+
+64
+00:03:27,657 --> 00:03:29,699
+So our goals were no hard triangle limit,
+
+65
+00:03:29,899 --> 00:03:33,161
+arbitrarily oriented colliders, consistent collision shape,
+
+66
+00:03:33,682 --> 00:03:35,023
+fast constant iteration times.
+
+67
+00:03:35,043 --> 00:03:36,264
+We don't want people waiting on this.
+
+68
+00:03:36,965 --> 00:03:40,347
+And ideally, the game doesn't get any worse in memory
+
+69
+00:03:40,387 --> 00:03:40,788
+or time.
+
+70
+00:03:41,932 --> 00:03:42,973
+And we met all our goals.
+
+71
+00:03:43,773 --> 00:03:46,434
+And memory usage was maybe a few percent less,
+
+72
+00:03:46,554 --> 00:03:48,575
+but not anything to write home about.
+
+73
+00:03:48,695 --> 00:03:51,195
+But performance more than doubled on console,
+
+74
+00:03:51,636 --> 00:03:53,256
+which was an unexpected benefit.
+
+75
+00:03:55,037 --> 00:03:57,498
+So our target platforms are all x64,
+
+76
+00:03:58,038 --> 00:04:01,599
+but we can't rely on SSE4 or AVX
+
+77
+00:04:01,639 --> 00:04:02,879
+because of our low-end PC.
+
+78
+00:04:04,840 --> 00:04:06,861
+So some relevant traits about x64
+
+79
+00:04:07,041 --> 00:04:08,781
+in Jaguar's implementation.
+
+80
+00:04:09,342 --> 00:04:10,982
+We've got 64-byte cache lines.
+
+81
+00:04:12,250 --> 00:04:13,691
+and that's pretty standard in practice,
+
+82
+00:04:13,771 --> 00:04:16,373
+even if they can do different things if they want to.
+
+83
+00:04:17,014 --> 00:04:19,235
+L2 cache misses are usually around 100 cycles,
+
+84
+00:04:20,536 --> 00:04:22,598
+and mispredicted branches are about 20 cycles,
+
+85
+00:04:23,018 --> 00:04:24,699
+which is about the same cost as a square root.
+
+86
+00:04:28,542 --> 00:04:30,664
+It also has parallel execution pipelines
+
+87
+00:04:30,724 --> 00:04:32,585
+for both integer and floating point,
+
+88
+00:04:32,605 --> 00:04:34,267
+so you can do both of those at the same time.
+
+89
+00:04:35,988 --> 00:04:39,471
+And there's four-way SIMD with SSA2 required.
+
+90
+00:04:40,456 --> 00:04:43,598
+We actually use supplemental streaming SIMD extensions,
+
+91
+00:04:44,718 --> 00:04:49,661
+three, SSE3, and we'll get to why near the end of the talk.
+
+92
+00:04:50,982 --> 00:04:53,263
+And it's 98% of hardware according to Steam.
+
+93
+00:04:55,265 --> 00:04:57,726
+So here's our design overview for our collision detection.
+
+94
+00:04:58,627 --> 00:05:01,248
+We use a four-way access-aligned bounding box tree,
+
+95
+00:05:01,288 --> 00:05:03,569
+which is ideal for four-way SIMD.
+
+96
+00:05:04,170 --> 00:05:06,631
+We pack each node into 64 bytes,
+
+97
+00:05:07,211 --> 00:05:09,113
+which is ideal for cache coherency.
+
+98
+00:05:10,287 --> 00:05:14,950
+and we swept oriented capsules versus triangles as our basic
+
+99
+00:05:15,010 --> 00:05:19,053
+collision technique. Um, it's, the techniques in this talk are
+
+100
+00:05:19,113 --> 00:05:23,296
+applicable mostly to any type of collision shape you want, but
+
+101
+00:05:23,417 --> 00:05:25,798
+this is what our code used in the past, so we kept it.
+
+102
+00:05:27,623 --> 00:05:29,464
+I noticed that this is already optimizing.
+
+103
+00:05:30,125 --> 00:05:32,487
+This is all based on what the hardware is good at.
+
+104
+00:05:32,727 --> 00:05:34,989
+The four boxes is based on four-way SSE.
+
+105
+00:05:35,369 --> 00:05:37,851
+The tree structure is good because we call about
+
+106
+00:05:37,891 --> 00:05:39,973
+three quarters of the stuff each step.
+
+107
+00:05:41,815 --> 00:05:44,517
+64 bytes of voice waiting on memory.
+
+108
+00:05:46,118 --> 00:05:48,220
+We're going to find branchless AABB tests.
+
+109
+00:05:49,301 --> 00:05:51,803
+And all of these early high-level optimizations
+
+110
+00:05:52,403 --> 00:05:52,964
+are important.
+
+111
+00:05:54,065 --> 00:05:58,906
+So what's an AABB? It's a box that contains stuff and it's
+
+112
+00:05:59,046 --> 00:06:03,988
+axis aligned. Not necessarily cats. It's defined by a min and
+
+113
+00:06:04,028 --> 00:06:09,009
+max coordinate. In 3D that's three floats each, so 24 bytes.
+
+114
+00:06:10,930 --> 00:06:15,171
+You can also define it by center and extents, but when I looked
+
+115
+00:06:15,191 --> 00:06:19,312
+into that it uses one or two more instructions to do all of
+
+116
+00:06:19,352 --> 00:06:19,872
+your testing.
+
+117
+00:06:21,111 --> 00:06:24,594
+and the dependency chain is one or two instructions deeper.
+
+118
+00:06:25,014 --> 00:06:27,416
+So, men's maxes tends to be better.
+
+119
+00:06:29,097 --> 00:06:30,238
+What's an AABB tree?
+
+120
+00:06:30,398 --> 00:06:31,959
+It's just boxes in boxes.
+
+121
+00:06:33,821 --> 00:06:35,122
+Here's a four-way AABB tree.
+
+122
+00:06:35,142 --> 00:06:38,124
+You see a blue box containing four orange boxes.
+
+123
+00:06:41,086 --> 00:06:41,446
+Excuse me.
+
+124
+00:06:44,549 --> 00:06:46,630
+So, four bounding boxes is 96 bytes, which...
+
+125
+00:06:48,652 --> 00:06:51,053
+Some quick math tells us doesn't fit in 64 bytes.
+
+126
+00:06:52,214 --> 00:06:53,474
+So we have to pack it.
+
+127
+00:06:53,954 --> 00:06:56,615
+We did the obvious thing of packing in 16-bit integers.
+
+128
+00:06:57,916 --> 00:07:00,257
+That leaves 16 bytes for the rest of our tree structure.
+
+129
+00:07:01,577 --> 00:07:04,158
+And we're using our hardware architecture here
+
+130
+00:07:04,678 --> 00:07:07,319
+so that we know that decoding the integer part
+
+131
+00:07:07,539 --> 00:07:09,560
+is gonna be free because it's going to run
+
+132
+00:07:09,620 --> 00:07:12,921
+in parallel on the CPU to the floating point
+
+133
+00:07:13,382 --> 00:07:14,642
+axis-aligned binding box test.
+
+134
+00:07:16,103 --> 00:07:17,943
+So here's our structure kind of shown.
+
+135
+00:07:19,214 --> 00:07:24,617
+You can see we've got the men's maxes or the four boxes taking
+
+136
+00:07:25,037 --> 00:07:29,259
+three quarters of the structure. This is to scale. Indexes are
+
+137
+00:07:29,779 --> 00:07:35,762
+24 bits. That's either a child bounding volume node or a
+
+138
+00:07:36,442 --> 00:07:40,904
+collision primitive index. We have the 0, 1, 2, 3. Those are
+
+139
+00:07:41,084 --> 00:07:45,707
+the child types. Each one of those is 8 bits. So we have 4
+
+140
+00:07:45,967 --> 00:07:46,787
+bits per child type.
+
+141
+00:07:48,790 --> 00:07:50,071
+And then there's a collision mask.
+
+142
+00:07:50,551 --> 00:07:53,113
+We use a 32-bit collision mask to decide
+
+143
+00:07:53,533 --> 00:07:54,954
+whether or not we want to collide with this,
+
+144
+00:07:55,055 --> 00:07:57,897
+like Titan only, player only, and so on,
+
+145
+00:07:57,957 --> 00:08:01,999
+mass, water only, you can, the idea.
+
+146
+00:08:02,820 --> 00:08:05,762
+And there's 32 bits, but we don't use all combinations,
+
+147
+00:08:05,822 --> 00:08:08,224
+so eight-bit index is enough.
+
+148
+00:08:14,328 --> 00:08:16,890
+Well, so why an access-aligned bounding box
+
+149
+00:08:16,910 --> 00:08:18,071
+for a bound of volume hierarchy?
+
+150
+00:08:18,857 --> 00:08:19,938
+Well, it's a good trade-off.
+
+151
+00:08:20,698 --> 00:08:25,522
+To be a net win, a slower collision bounding volume
+
+152
+00:08:25,562 --> 00:08:28,645
+needs to be better at culling stuff.
+
+153
+00:08:29,486 --> 00:08:31,627
+So if you use spheres, it'd be faster.
+
+154
+00:08:34,230 --> 00:08:35,371
+But you wouldn't cull as much stuff.
+
+155
+00:08:37,212 --> 00:08:38,733
+And if you used oriented bounding boxes,
+
+156
+00:08:39,314 --> 00:08:42,377
+or KDOPs, which is a discrete oriented polytope,
+
+157
+00:08:43,017 --> 00:08:44,739
+means you pick a certain number of directions,
+
+158
+00:08:45,459 --> 00:08:47,241
+like three is an AABB.
+
+159
+00:08:49,166 --> 00:08:51,268
+You get more storage, you get more culling,
+
+160
+00:08:51,328 --> 00:08:52,509
+but it's slower to test.
+
+161
+00:08:53,429 --> 00:08:55,411
+So access aligned binding boxes are a good trade off.
+
+162
+00:08:58,614 --> 00:09:02,157
+Might be interesting to use different shapes
+
+163
+00:09:02,397 --> 00:09:03,438
+in different parts of the tree.
+
+164
+00:09:04,579 --> 00:09:06,420
+Up high near the top of the tree,
+
+165
+00:09:06,440 --> 00:09:08,822
+you expect most of your leaves,
+
+166
+00:09:09,083 --> 00:09:10,164
+or most of your nodes are gonna miss.
+
+167
+00:09:11,168 --> 00:09:13,990
+So it might be worth a faster test that's less accurate.
+
+168
+00:09:14,670 --> 00:09:17,151
+And then near the leaves, it's more likely that you're close
+
+169
+00:09:17,191 --> 00:09:19,833
+to the stuff, so a more accurate test that might be
+
+170
+00:09:19,873 --> 00:09:20,834
+worth a little extra time.
+
+171
+00:09:21,674 --> 00:09:23,095
+So that might be worth future research.
+
+172
+00:09:24,356 --> 00:09:25,917
+So how do we build our trees?
+
+173
+00:09:29,684 --> 00:09:31,865
+Well, BVH, Bounding Volume Hierarchy, again,
+
+174
+00:09:31,905 --> 00:09:33,186
+we basically do it in two passes.
+
+175
+00:09:33,746 --> 00:09:35,508
+One pass, you make a binary tree,
+
+176
+00:09:35,528 --> 00:09:36,328
+because that's easier.
+
+177
+00:09:36,928 --> 00:09:39,770
+And the second pass, you throw away 2 3rds in the nodes
+
+178
+00:09:40,250 --> 00:09:42,512
+to get a four-way tree instead of a two-way tree.
+
+179
+00:09:44,553 --> 00:09:46,074
+So, how do you build a two-way tree?
+
+180
+00:09:47,094 --> 00:09:48,595
+Basically, you just try a bunch of ways
+
+181
+00:09:48,635 --> 00:09:51,957
+to split all of your boxes into two sets of boxes.
+
+182
+00:09:52,778 --> 00:09:55,679
+Then, you evaluate them based on some heuristic we use,
+
+183
+00:09:55,779 --> 00:09:58,221
+the surface area heuristic, like everybody in the world.
+
+184
+00:09:58,945 --> 00:10:00,306
+and then you recurse on the two halves.
+
+185
+00:10:01,226 --> 00:10:04,047
+And then stop once the cost of a split
+
+186
+00:10:04,087 --> 00:10:05,547
+exceeds the cost of not splitting.
+
+187
+00:10:07,628 --> 00:10:10,168
+So the surface area heuristic assumes the probability
+
+188
+00:10:10,609 --> 00:10:12,769
+of a ray hitting a box proportional
+
+189
+00:10:12,809 --> 00:10:14,050
+to the box's surface area.
+
+190
+00:10:15,130 --> 00:10:16,550
+And this is true for random rays
+
+191
+00:10:16,570 --> 00:10:17,771
+that start outside of a box.
+
+192
+00:10:18,631 --> 00:10:20,051
+And it works really well in practice
+
+193
+00:10:20,731 --> 00:10:23,652
+and it's better than using the box's volume
+
+194
+00:10:24,152 --> 00:10:26,593
+because flat boxes still have area
+
+195
+00:10:26,893 --> 00:10:27,873
+even if they have no volume.
+
+196
+00:10:29,535 --> 00:10:29,577
+Um...
+
+197
+00:10:31,295 --> 00:10:34,577
+Now we tweak it slightly because we expect to test volumes,
+
+198
+00:10:34,617 --> 00:10:36,538
+not just rays, because we expect players
+
+199
+00:10:36,658 --> 00:10:38,019
+to collide with the world in Titans.
+
+200
+00:10:38,560 --> 00:10:40,941
+So we increase the node box sizes
+
+201
+00:10:41,422 --> 00:10:42,863
+by half the player's radius
+
+202
+00:10:43,363 --> 00:10:46,926
+to increase the surface area cost of every box.
+
+203
+00:10:47,506 --> 00:10:50,388
+This leads to a shallower tree with fewer nodes,
+
+204
+00:10:50,468 --> 00:10:51,409
+which saves some memory.
+
+205
+00:10:51,949 --> 00:10:55,332
+And it also saves some CPU time for testing boxes
+
+206
+00:10:55,832 --> 00:10:57,433
+because you don't spend a lot of time
+
+207
+00:10:57,873 --> 00:11:00,495
+seeing that this player's capsule intersects.
+
+208
+00:11:00,875 --> 00:11:05,400
+a lot of leaves that are near each other, a lot of small leaves.
+
+209
+00:11:05,501 --> 00:11:09,084
+It really helps solve the problem of lots of small leaves for small triangles.
+
+210
+00:11:11,387 --> 00:11:13,129
+So we use three split strategies.
+
+211
+00:11:13,169 --> 00:11:16,472
+The first one is the most important and is pretty easy.
+
+212
+00:11:16,512 --> 00:11:21,238
+You just sort all of the boxes by their centers and you do this once per axis.
+
+213
+00:11:22,358 --> 00:11:23,659
+And then you just walk that list,
+
+214
+00:11:24,080 --> 00:11:25,481
+trying all ways of splitting it
+
+215
+00:11:25,581 --> 00:11:27,182
+from the first half and the last half.
+
+216
+00:11:27,922 --> 00:11:30,324
+And you get the surface area heuristic for each sides,
+
+217
+00:11:30,544 --> 00:11:32,085
+evaluate the cost.
+
+218
+00:11:34,387 --> 00:11:36,429
+And that's the most important one.
+
+219
+00:11:38,370 --> 00:11:41,852
+Strategy number two is a unique one to us, I think.
+
+220
+00:11:42,553 --> 00:11:45,035
+We just take all of the big ones and put them in one list.
+
+221
+00:11:45,495 --> 00:11:48,077
+I think it's if it's over half the size of the parent box.
+
+222
+00:11:48,657 --> 00:11:50,098
+And we put the little ones in another list.
+
+223
+00:11:51,117 --> 00:11:53,918
+This really helps when you have playable geometry
+
+224
+00:11:53,939 --> 00:11:56,180
+in the middle of giant background geometry,
+
+225
+00:11:56,240 --> 00:11:57,161
+such as a skybox.
+
+226
+00:11:57,781 --> 00:12:00,083
+It separates all of that big geometry
+
+227
+00:12:00,103 --> 00:12:01,584
+you almost never collide against
+
+228
+00:12:01,764 --> 00:12:03,825
+from all of the detailed geometry
+
+229
+00:12:03,845 --> 00:12:04,806
+you collide against a lot,
+
+230
+00:12:05,386 --> 00:12:07,908
+and keeps from making weird hierarchies.
+
+231
+00:12:08,188 --> 00:12:09,149
+So this helped us a lot.
+
+232
+00:12:10,790 --> 00:12:12,751
+And then you can also split your,
+
+233
+00:12:13,852 --> 00:12:14,752
+on a regular grid,
+
+234
+00:12:15,833 --> 00:12:16,774
+and when you do this,
+
+235
+00:12:16,794 --> 00:12:17,634
+you,
+
+236
+00:12:19,639 --> 00:12:26,964
+Consider if a primitive is big, then you can put part of it on one side of the tree and part of it on the other side of the tree.
+
+237
+00:12:26,984 --> 00:12:35,850
+You basically chop it in half, see what bounding box fits on the two halves, and then use just that bounding box on each side, but put the whole object.
+
+238
+00:12:36,851 --> 00:12:44,016
+So it sticks out the bounding box on one side, it sticks out the bounding box on the other side, but you put them together and it's inside all of the bounding boxes.
+
+239
+00:12:46,224 --> 00:12:53,086
+This causes the same primitive to possibly be tested more than once, but it actually didn't really help us.
+
+240
+00:12:53,646 --> 00:12:58,308
+It pretty much never gets chosen, probably because of our big little strategy worked better.
+
+241
+00:12:59,468 --> 00:13:02,289
+So, we have a two-way tree. How do we get a four-way tree out of it?
+
+242
+00:13:03,549 --> 00:13:05,410
+Well, we just do a greedy top-down merge.
+
+243
+00:13:06,170 --> 00:13:10,372
+And there are five different ways that you can merge subtrees.
+
+244
+00:13:11,594 --> 00:13:14,796
+There's one symmetric way, which you see over here.
+
+245
+00:13:15,577 --> 00:13:17,859
+And then there are four asymmetric ways.
+
+246
+00:13:18,519 --> 00:13:21,762
+And I only drew one of them because you can easily see
+
+247
+00:13:21,802 --> 00:13:23,243
+what all of the others are.
+
+248
+00:13:25,505 --> 00:13:30,209
+And we don't necessarily have four leaves because artists are
+
+249
+00:13:30,229 --> 00:13:30,870
+making this stuff.
+
+250
+00:13:31,370 --> 00:13:33,432
+And they don't always make it perfectly nice for code.
+
+251
+00:13:34,192 --> 00:13:37,475
+So we can end up one symmetric way or two asymmetric ways of
+
+252
+00:13:37,535 --> 00:13:39,837
+having less than four leaves.
+
+253
+00:13:41,766 --> 00:13:45,049
+So it's wasteful in memory to not use all four children
+
+254
+00:13:45,289 --> 00:13:46,510
+because we always store four children.
+
+255
+00:13:47,611 --> 00:13:50,033
+And because we do a greedy construction from the top down,
+
+256
+00:13:50,473 --> 00:13:52,855
+this can only happen at the leaves.
+
+257
+00:13:54,496 --> 00:13:56,858
+So can we tweak the greedy algorithm near the root
+
+258
+00:13:57,359 --> 00:14:00,001
+to make the partial leaves better lower in the tree?
+
+259
+00:14:00,622 --> 00:14:00,802
+Yes.
+
+260
+00:14:02,163 --> 00:14:03,304
+So first an observation.
+
+261
+00:14:03,504 --> 00:14:05,345
+Adding a node turns one child leaf
+
+262
+00:14:05,385 --> 00:14:06,626
+into four grandchildren leaves,
+
+263
+00:14:07,027 --> 00:14:08,388
+which is a difference of three leaves.
+
+264
+00:14:09,149 --> 00:14:09,669
+And at the root,
+
+265
+00:14:10,318 --> 00:14:14,521
+and one node has four leaves, so you have three k plus one leaves for k nodes.
+
+266
+00:14:16,122 --> 00:14:23,126
+So you can solve and find out that if you have n nodes, you're in a subtree, you're
+
+267
+00:14:23,146 --> 00:14:27,909
+going to waste n plus one modulus three leaves, and I'm not going to waste your time reading
+
+268
+00:14:27,989 --> 00:14:28,569
+algebra to you.
+
+269
+00:14:31,247 --> 00:14:34,269
+So that tells us how much leaves we're going to waste
+
+270
+00:14:34,309 --> 00:14:36,150
+if we put this many nodes on this branch.
+
+271
+00:14:36,570 --> 00:14:38,912
+So when merging, we just slightly increase
+
+272
+00:14:39,152 --> 00:14:41,733
+the subtree cost if it's going to have unused leaves.
+
+273
+00:14:42,514 --> 00:14:44,715
+And this does a pretty good job in practice
+
+274
+00:14:45,336 --> 00:14:49,218
+of reducing the number of wasted leaves.
+
+275
+00:14:49,987 --> 00:14:52,709
+And also, it helps a lot high up in the tree.
+
+276
+00:14:52,870 --> 00:14:55,331
+As you get lower in the tree, closer to the leaves,
+
+277
+00:14:55,712 --> 00:14:58,574
+it doesn't really help much, and it starts to hurt.
+
+278
+00:14:59,235 --> 00:15:01,877
+So we fade out the cost as we go down the tree.
+
+279
+00:15:03,138 --> 00:15:03,778
+Fade out the penalty.
+
+280
+00:15:04,679 --> 00:15:07,121
+But we still end up with a lot of two-way leaves.
+
+281
+00:15:08,001 --> 00:15:10,083
+And these are leaves that are only half full, which
+
+282
+00:15:10,143 --> 00:15:11,324
+are the most wasteful.
+
+283
+00:15:13,012 --> 00:15:16,554
+So the idea we had was if the leaves are half full
+
+284
+00:15:16,594 --> 00:15:17,374
+and we have two of them,
+
+285
+00:15:17,474 --> 00:15:19,295
+why don't we just smash them together
+
+286
+00:15:19,335 --> 00:15:20,636
+and make one completely full leaf?
+
+287
+00:15:21,796 --> 00:15:23,837
+And that works great, but now you have two parents,
+
+288
+00:15:24,117 --> 00:15:25,037
+but we don't care.
+
+289
+00:15:25,238 --> 00:15:29,139
+We don't keep parent pointers, so we can have two parents.
+
+290
+00:15:30,660 --> 00:15:31,760
+And this saves a lot of memory.
+
+291
+00:15:32,581 --> 00:15:34,422
+And there's actually no added cost at runtime
+
+292
+00:15:34,462 --> 00:15:36,282
+since we're gonna test all four boxes anyway,
+
+293
+00:15:36,823 --> 00:15:39,484
+as long as we end up culling these shared leaves.
+
+294
+00:15:40,379 --> 00:15:44,360
+And culling is more likely if we pair with leaves far away
+
+295
+00:15:44,440 --> 00:15:46,421
+spatially in the world.
+
+296
+00:15:47,161 --> 00:15:50,182
+So how do we maximize the distance between things we
+
+297
+00:15:50,222 --> 00:15:54,663
+pair? Well, first we just collect all of the two-way
+
+298
+00:15:55,223 --> 00:15:58,484
+leaves in tree order, which should roughly match spatial
+
+299
+00:15:58,524 --> 00:15:59,604
+ordering, but not perfect.
+
+300
+00:16:00,164 --> 00:16:03,525
+And then in that list we pair nodes that are halfway apart,
+
+301
+00:16:03,985 --> 00:16:06,786
+which again, it's a rough heuristic that they might be
+
+302
+00:16:06,826 --> 00:16:07,286
+far apart.
+
+303
+00:16:09,304 --> 00:16:10,125
+And then we make it better.
+
+304
+00:16:10,145 --> 00:16:12,046
+How do we make it better?
+
+305
+00:16:12,106 --> 00:16:15,389
+Well, we sort all the pairs by increasing distance so that
+
+306
+00:16:15,429 --> 00:16:16,590
+the closest pair is first.
+
+307
+00:16:17,790 --> 00:16:20,192
+And then we just order the first 1 8th of the list.
+
+308
+00:16:21,353 --> 00:16:24,175
+For each of those pairs, we pick one other pair
+
+309
+00:16:24,736 --> 00:16:25,456
+anywhere in the list.
+
+310
+00:16:26,437 --> 00:16:30,180
+Try all ways of swapping pairs around, and we
+
+311
+00:16:30,220 --> 00:16:31,000
+pick the best one.
+
+312
+00:16:31,140 --> 00:16:32,721
+And if that changed, great.
+
+313
+00:16:32,922 --> 00:16:33,842
+We've improved things.
+
+314
+00:16:33,902 --> 00:16:35,804
+If not, we pick another one up to 10 times.
+
+315
+00:16:37,668 --> 00:16:39,708
+And then we repeat the whole thing 32 times.
+
+316
+00:16:40,428 --> 00:16:42,429
+And that is really fast.
+
+317
+00:16:42,709 --> 00:16:46,570
+And in the end, our pairs are usually about half a map
+
+318
+00:16:46,610 --> 00:16:48,510
+apart, so it works really well.
+
+319
+00:16:49,510 --> 00:16:52,631
+It can increase the time complexity using a smarter
+
+320
+00:16:52,691 --> 00:16:55,952
+partition, but we didn't bother because when it's two
+
+321
+00:16:55,992 --> 00:16:58,912
+seconds, you don't get much by making it better.
+
+322
+00:16:58,952 --> 00:17:00,273
+So now we have beautiful trees.
+
+323
+00:17:01,733 --> 00:17:03,613
+And now we get to do math to collide.
+
+324
+00:17:05,687 --> 00:17:09,507
+So we call, how do we test these AABBs?
+
+325
+00:17:10,468 --> 00:17:14,549
+We call if the line segment misses the AABB.
+
+326
+00:17:14,629 --> 00:17:16,209
+So we test this infinite line,
+
+327
+00:17:17,009 --> 00:17:19,130
+and then we only care about from the start time
+
+328
+00:17:19,170 --> 00:17:21,650
+to the end time, and see if that infinite line
+
+329
+00:17:21,770 --> 00:17:23,231
+intersects this box at all.
+
+330
+00:17:24,611 --> 00:17:26,892
+And for volume traces, this is how we do rays.
+
+331
+00:17:26,932 --> 00:17:30,172
+For volumes, we just increase the box size
+
+332
+00:17:30,232 --> 00:17:32,633
+by however big the swept volume projects
+
+333
+00:17:33,173 --> 00:17:34,373
+onto the coordinate axes.
+
+334
+00:17:36,214 --> 00:17:37,054
+So how do we do this?
+
+335
+00:17:37,134 --> 00:17:38,075
+That's pretty standard.
+
+336
+00:17:38,916 --> 00:17:43,139
+You find the enter and leave times of the infinite line for
+
+337
+00:17:43,259 --> 00:17:46,021
+all of the planes through all of the box faces.
+
+338
+00:17:46,402 --> 00:17:49,184
+This works for convex polyhedra, not just axis
+
+339
+00:17:49,224 --> 00:17:50,085
+aligned bounding boxes.
+
+340
+00:17:51,065 --> 00:17:52,707
+So this is the last enter time.
+
+341
+00:17:52,787 --> 00:17:53,808
+Here's another enter time.
+
+342
+00:17:54,348 --> 00:17:55,509
+Here's the first exit time.
+
+343
+00:17:55,969 --> 00:17:56,430
+Here's another.
+
+344
+00:17:57,150 --> 00:17:58,972
+And it's easier to see in 2D, but it works
+
+345
+00:17:59,813 --> 00:18:00,493
+in each dimension.
+
+346
+00:18:02,539 --> 00:18:05,803
+And a cool thing is that there's no intersection if we exit
+
+347
+00:18:05,903 --> 00:18:09,248
+before we enter. So that's a pretty cheap test.
+
+348
+00:18:11,299 --> 00:18:12,919
+And how do we deal with line segments?
+
+349
+00:18:12,979 --> 00:18:14,020
+It's also really simple.
+
+350
+00:18:14,500 --> 00:18:17,661
+The start of the line and the end of the line
+
+351
+00:18:17,781 --> 00:18:21,023
+are just extra enter and exit events.
+
+352
+00:18:21,823 --> 00:18:24,524
+And they get to be either first or last enter.
+
+353
+00:18:24,705 --> 00:18:28,386
+In this case, the last exit is the end of the ray,
+
+354
+00:18:28,806 --> 00:18:30,087
+so it misses the box.
+
+355
+00:18:30,867 --> 00:18:33,368
+And here's the other two exits.
+
+356
+00:18:36,133 --> 00:18:39,394
+So here's the math, you just do vector algebra
+
+357
+00:18:39,434 --> 00:18:41,995
+and you end up with this guy for when you hit.
+
+358
+00:18:42,395 --> 00:18:44,455
+And it's pretty cheap, you do a vector subtraction
+
+359
+00:18:44,495 --> 00:18:47,016
+and a dot product and divide by a dot product.
+
+360
+00:18:47,096 --> 00:18:49,877
+And this is where we get some optimizations.
+
+361
+00:18:51,397 --> 00:18:54,178
+First, the point on the plane is always gonna be
+
+362
+00:18:54,258 --> 00:18:56,598
+one of the two corners of your axis-aligned bounding box.
+
+363
+00:18:58,739 --> 00:19:01,079
+Three of them use the mins and three of them use the maxes.
+
+364
+00:19:02,139 --> 00:19:05,960
+The plane normal is always going to be a coordinate axis.
+
+365
+00:19:07,342 --> 00:19:11,064
+So the numerator just picks x, y, or z from this vector
+
+366
+00:19:11,084 --> 00:19:13,106
+subtract, so we don't have to do a dot product at all.
+
+367
+00:19:13,626 --> 00:19:14,867
+We just pick a coordinate.
+
+368
+00:19:15,748 --> 00:19:18,650
+And then 1 over d dot n is going to be a constant,
+
+369
+00:19:18,690 --> 00:19:20,672
+because we only have three values for n.
+
+370
+00:19:21,192 --> 00:19:25,315
+So we can just precalculate those once for all a, a, b, b's.
+
+371
+00:19:25,355 --> 00:19:28,237
+And that's just one divide at the start of your ray trace,
+
+372
+00:19:28,938 --> 00:19:31,480
+because we do it in SIMD, so we get x, y, and z at once.
+
+373
+00:19:32,898 --> 00:19:36,220
+So our plane distance check is just a subtract and a multiply
+
+374
+00:19:36,901 --> 00:19:38,442
+to find when we hit each plane.
+
+375
+00:19:38,562 --> 00:19:39,343
+And we do six of those.
+
+376
+00:19:41,705 --> 00:19:46,188
+So we found that when you hit the mins and maxes for each
+
+377
+00:19:46,308 --> 00:19:51,893
+axis, so it's going to be true that on an axis, you always
+
+378
+00:19:52,413 --> 00:19:53,974
+hit the Enter before you leave.
+
+379
+00:19:55,275 --> 00:19:56,877
+It's only when you combine axes that you can
+
+380
+00:19:56,897 --> 00:19:57,717
+leave before you enter.
+
+381
+00:19:58,625 --> 00:20:01,386
+So we use that to trivially find the enter and leave times.
+
+382
+00:20:01,426 --> 00:20:03,786
+We just take the min of the two times we found and the max
+
+383
+00:20:03,826 --> 00:20:06,647
+of the two times we found to find the enter and leave times.
+
+384
+00:20:07,928 --> 00:20:11,609
+And modern hardware has instructions for min and max
+
+385
+00:20:11,629 --> 00:20:12,649
+that are as fast as add.
+
+386
+00:20:13,089 --> 00:20:13,850
+So that's really cheap.
+
+387
+00:20:16,033 --> 00:20:19,216
+So it's good to get fast code and edge cases.
+
+388
+00:20:20,216 --> 00:20:21,837
+Special cases slow down code.
+
+389
+00:20:22,438 --> 00:20:24,839
+Even if you don't take the special case branch,
+
+390
+00:20:25,020 --> 00:20:27,421
+you spend something to detect
+
+391
+00:20:27,461 --> 00:20:28,362
+that you don't need to take it.
+
+392
+00:20:28,442 --> 00:20:30,483
+You spend some code cache space,
+
+393
+00:20:30,523 --> 00:20:32,404
+you spend some cycles just doing the if.
+
+394
+00:20:32,965 --> 00:20:34,126
+You don't necessarily pay
+
+395
+00:20:34,186 --> 00:20:35,687
+the branch miss prediction penalty,
+
+396
+00:20:35,767 --> 00:20:37,408
+but there is still some cost.
+
+397
+00:20:37,448 --> 00:20:40,150
+So it's always, always, always better to tweak code
+
+398
+00:20:40,190 --> 00:20:41,731
+so that all of your special cases
+
+399
+00:20:42,211 --> 00:20:43,812
+can be handled in normal code.
+
+400
+00:20:44,860 --> 00:20:48,135
+And that's where we're going now, by dividing by zero.
+
+401
+00:20:51,093 --> 00:20:53,374
+Dividing by zero, we're all afraid of because it's
+
+402
+00:20:53,414 --> 00:20:57,436
+undefined behavior in C++, but IEEE floats to find it
+
+403
+00:20:57,576 --> 00:20:58,996
+in a way that makes a lot of sense.
+
+404
+00:20:59,676 --> 00:21:03,277
+And almost all hardware you'll see is IEEE 754 floats.
+
+405
+00:21:03,878 --> 00:21:05,698
+The exceptions are probably irrelevant to us.
+
+406
+00:21:06,378 --> 00:21:09,640
+It's like IBM mainframes, Unisys, Cray, I think,
+
+407
+00:21:10,260 --> 00:21:13,281
+and maybe some microcontrollers somewhere.
+
+408
+00:21:13,921 --> 00:21:15,962
+So I doubt any of us will ever see those.
+
+409
+00:21:17,402 --> 00:21:18,662
+So undefined behavior.
+
+410
+00:21:21,056 --> 00:21:22,937
+C used to have undefined behavior
+
+411
+00:21:22,957 --> 00:21:24,617
+just to let different architectures,
+
+412
+00:21:24,918 --> 00:21:27,059
+CPUs handle the edge cases different ways,
+
+413
+00:21:27,119 --> 00:21:28,639
+like is it ones or twos complement?
+
+414
+00:21:29,119 --> 00:21:30,760
+Can we innovate different ways?
+
+415
+00:21:32,221 --> 00:21:33,941
+Modern compilers use it to mean
+
+416
+00:21:34,842 --> 00:21:36,502
+I get to do any bizarre thing I want
+
+417
+00:21:36,563 --> 00:21:38,223
+if it speeds up an artificial benchmark,
+
+418
+00:21:38,263 --> 00:21:39,204
+even if you don't want me to.
+
+419
+00:21:40,164 --> 00:21:43,125
+So I really think that the standards committees
+
+420
+00:21:43,165 --> 00:21:44,366
+should define undefined behavior
+
+421
+00:21:44,386 --> 00:21:45,846
+to be what the hardware does,
+
+422
+00:21:46,987 --> 00:21:48,608
+in cases like divide by zero.
+
+423
+00:21:49,426 --> 00:21:51,747
+So I like floats, IEEE floats,
+
+424
+00:21:51,767 --> 00:21:54,729
+because they are very smart about their decisions.
+
+425
+00:21:55,749 --> 00:21:58,030
+So in IEEE floats, you can represent all numbers
+
+426
+00:21:58,050 --> 00:21:59,791
+from minus infinity to plus infinity,
+
+427
+00:21:59,811 --> 00:22:01,392
+and you do that in only 32 bits,
+
+428
+00:22:02,252 --> 00:22:04,173
+which is only possible because
+
+429
+00:22:04,494 --> 00:22:05,874
+intervals map to a single float.
+
+430
+00:22:07,975 --> 00:22:09,976
+And for the edge cases of plus or minus zero,
+
+431
+00:22:10,417 --> 00:22:11,597
+and plus or minus infinity,
+
+432
+00:22:12,598 --> 00:22:14,859
+it's useful to think of those values as limits
+
+433
+00:22:15,059 --> 00:22:17,560
+as you approach them instead of as discrete values.
+
+434
+00:22:18,634 --> 00:22:21,256
+So plus or minus zero are just,
+
+435
+00:22:21,676 --> 00:22:24,278
+you can think of them as equivalent to one-sided limits
+
+436
+00:22:24,579 --> 00:22:25,460
+as you approach zero.
+
+437
+00:22:26,000 --> 00:22:28,542
+So this is approaching zero from the positive numbers,
+
+438
+00:22:29,023 --> 00:22:30,804
+this is approaching zero from the negative numbers.
+
+439
+00:22:31,482 --> 00:22:34,784
+And if you do that, it makes divide by zero well-defined,
+
+440
+00:22:34,864 --> 00:22:37,185
+and it makes plus and minus zero really useful.
+
+441
+00:22:37,205 --> 00:22:39,786
+I mean, it might have seemed odd to have negative zero,
+
+442
+00:22:39,826 --> 00:22:42,428
+but because of this, and the fact that there are
+
+443
+00:22:42,468 --> 00:22:44,489
+plus and minus infinity when you divide by them,
+
+444
+00:22:44,889 --> 00:22:47,231
+it's actually very useful to us to have
+
+445
+00:22:47,691 --> 00:22:49,252
+positive and negative zero be different.
+
+446
+00:22:51,313 --> 00:22:53,614
+And multiplication by infinity is also well-defined,
+
+447
+00:22:54,154 --> 00:22:55,435
+because you can use these limits,
+
+448
+00:22:55,495 --> 00:22:58,277
+and you see you basically just combine the sign bits
+
+449
+00:22:58,877 --> 00:23:00,078
+and keep infinity.
+
+450
+00:23:01,577 --> 00:23:07,119
+Unless F is zero, then zero times infinity is the same as zero divided by zero, which is not well defined.
+
+451
+00:23:08,220 --> 00:23:13,061
+It's this limit, which in calculus we can solve using L'Hospital's rule.
+
+452
+00:23:13,982 --> 00:23:14,922
+I hope I pronounced that right.
+
+453
+00:23:15,722 --> 00:23:20,264
+But CPUs don't have enough info for that because you have to take the derivative of the numerator and the denominator.
+
+454
+00:23:20,784 --> 00:23:24,446
+CPUs just have the values, they don't have the derivatives.
+
+455
+00:23:24,966 --> 00:23:26,846
+So, IEEE floats return NAN.
+
+456
+00:23:27,781 --> 00:23:28,681
+which means not a number.
+
+457
+00:23:29,301 --> 00:23:31,842
+For 00, you can think of it as not a number
+
+458
+00:23:32,322 --> 00:23:35,022
+because it could be any after you apply Lajoux-Pattal's rule.
+
+459
+00:23:35,642 --> 00:23:37,463
+For other NANDs like the square root of minus one
+
+460
+00:23:37,683 --> 00:23:39,163
+or the arc sine of two,
+
+461
+00:23:39,483 --> 00:23:41,023
+you can think of it as not a number
+
+462
+00:23:41,524 --> 00:23:43,764
+because there's no such number, that's where it,
+
+463
+00:23:44,344 --> 00:23:45,744
+and you often see these in debuggers
+
+464
+00:23:45,824 --> 00:23:48,645
+as one pound I and D for indefinite.
+
+465
+00:23:51,105 --> 00:23:52,466
+So an interesting thing about NANDs
+
+466
+00:23:52,526 --> 00:23:54,706
+is any comparison with them returns false.
+
+467
+00:23:55,166 --> 00:23:57,006
+So A equals A can be false.
+
+468
+00:23:57,928 --> 00:23:59,968
+if and only if A is a NAND.
+
+469
+00:24:00,688 --> 00:24:03,109
+And if you turn on fast math in your compilers,
+
+470
+00:24:03,369 --> 00:24:06,529
+they usually ignore NANDs, but NANDs can be important,
+
+471
+00:24:06,909 --> 00:24:08,470
+so I don't turn on fast math.
+
+472
+00:24:10,510 --> 00:24:14,631
+And math with NANDs also returns NAND, for the most part.
+
+473
+00:24:15,191 --> 00:24:17,131
+But what about our min-max instructions?
+
+474
+00:24:17,911 --> 00:24:19,792
+IEEE originally didn't have those.
+
+475
+00:24:20,092 --> 00:24:22,732
+In 2008, they suggested you should return
+
+476
+00:24:22,772 --> 00:24:25,893
+the non-NAND number, and that's exactly what HLSL does.
+
+477
+00:24:26,692 --> 00:24:28,492
+And that's exactly opposite what ARM does.
+
+478
+00:24:29,892 --> 00:24:30,852
+ARM makes it like plus.
+
+479
+00:24:32,193 --> 00:24:34,033
+And SSE does something different still.
+
+480
+00:24:34,073 --> 00:24:35,873
+They return just the second argument.
+
+481
+00:24:36,574 --> 00:24:38,754
+The only other option would be to return the first argument,
+
+482
+00:24:38,874 --> 00:24:39,614
+and I haven't seen that.
+
+483
+00:24:41,234 --> 00:24:43,435
+The reason SSE does this, it's a natural consequence,
+
+484
+00:24:43,495 --> 00:24:46,575
+is they said min is equal to this code sequence.
+
+485
+00:24:47,176 --> 00:24:50,096
+Well, if A or B is NAND, this is going to be false,
+
+486
+00:24:50,236 --> 00:24:51,636
+and it's going to return the second argument.
+
+487
+00:24:53,837 --> 00:24:55,317
+So, dividing by zero.
+
+488
+00:24:56,898 --> 00:25:00,120
+We have this thing, and here's our divide by zero,
+
+489
+00:25:00,160 --> 00:25:02,221
+which is undefined behavior in C++.
+
+490
+00:25:02,642 --> 00:25:04,083
+Fortunately, we're using intrinsics,
+
+491
+00:25:04,443 --> 00:25:08,246
+and we're not using C++, so it's defined for SSE,
+
+492
+00:25:08,806 --> 00:25:09,827
+and it's well-defined for us.
+
+493
+00:25:10,327 --> 00:25:13,429
+And it becomes plus or minus infinity,
+
+494
+00:25:14,010 --> 00:25:15,831
+which when we multiply it by this guy
+
+495
+00:25:15,971 --> 00:25:17,612
+is going to give us minus infinity,
+
+496
+00:25:18,272 --> 00:25:19,693
+nan, or plus infinity.
+
+497
+00:25:20,474 --> 00:25:22,035
+And it will turn out that this is
+
+498
+00:25:22,175 --> 00:25:23,316
+almost exactly what we want.
+
+499
+00:25:25,139 --> 00:25:29,664
+So when we're doing our test, we're going to keep just the
+
+500
+00:25:29,704 --> 00:25:32,888
+last enter time, when we find all of our enter times and
+
+501
+00:25:32,928 --> 00:25:34,910
+leave times, and we're going to just keep the first leave.
+
+502
+00:25:35,330 --> 00:25:38,914
+So if we ever calculate a negative infinity enter time,
+
+503
+00:25:39,255 --> 00:25:41,497
+that's always going to be not the last one.
+
+504
+00:25:41,857 --> 00:25:43,319
+Some other one is going to be more laster.
+
+505
+00:25:44,292 --> 00:25:46,933
+And similarly with the leave time, plus infinity can never
+
+506
+00:25:46,993 --> 00:25:48,934
+be the first time we leave.
+
+507
+00:25:49,535 --> 00:25:51,756
+So in these whites, you can see we basically ignore it.
+
+508
+00:25:51,856 --> 00:25:55,077
+And right here in the middle, we're ignoring both the enter
+
+509
+00:25:55,117 --> 00:25:55,657
+and leave time.
+
+510
+00:25:56,358 --> 00:25:58,759
+So the other coordinates decide whether we
+
+511
+00:25:58,799 --> 00:25:59,619
+hit the box or not.
+
+512
+00:26:00,780 --> 00:26:04,081
+And then for these red and green cases, well, if the
+
+513
+00:26:04,141 --> 00:26:06,622
+enter time is plus infinity, that's always going to be the
+
+514
+00:26:06,662 --> 00:26:10,164
+last enter, and that's always going to be greater than our
+
+515
+00:26:10,224 --> 00:26:10,764
+first exit.
+
+516
+00:26:11,103 --> 00:26:12,884
+So we're always going to cull a box over here.
+
+517
+00:26:13,525 --> 00:26:15,866
+And the red leaf time does the same thing over here.
+
+518
+00:26:16,246 --> 00:26:19,007
+So our plus and minus infinities from dividing by
+
+519
+00:26:19,047 --> 00:26:22,389
+zero are automatically culling and handling all of our edge
+
+520
+00:26:22,429 --> 00:26:24,290
+cases so far, except one.
+
+521
+00:26:25,851 --> 00:26:29,633
+We get a NAN on this case when the ray goes right through the
+
+522
+00:26:29,693 --> 00:26:30,313
+edge of a box.
+
+523
+00:26:31,874 --> 00:26:35,176
+And what should we do and how can we get that?
+
+524
+00:26:35,971 --> 00:26:38,032
+Well, our desired behavior is that there's no gaps
+
+525
+00:26:38,092 --> 00:26:40,053
+between two AABBs that touch.
+
+526
+00:26:40,733 --> 00:26:43,474
+If there were a gap, you could basically have two walls
+
+527
+00:26:43,514 --> 00:26:45,435
+that touch, and you could shoot right between them.
+
+528
+00:26:46,095 --> 00:26:48,136
+Or you could drop something right through the floor.
+
+529
+00:26:49,177 --> 00:26:49,757
+We don't want that.
+
+530
+00:26:50,637 --> 00:26:53,318
+So the easiest way is to make the edges of the box
+
+531
+00:26:53,378 --> 00:26:54,459
+considered part of the box.
+
+532
+00:26:56,059 --> 00:26:57,480
+We'll do this for SSE.
+
+533
+00:26:58,600 --> 00:27:01,202
+Other platforms are an exercise for the reader.
+
+534
+00:27:03,623 --> 00:27:03,763
+So.
+
+535
+00:27:04,975 --> 00:27:10,217
+it turns out we're going to need to turn negative zero to positive zero. This will make it so
+
+536
+00:27:10,257 --> 00:27:19,061
+that negative, uh, we only have positive infinity to deal with. And we'll also use a specific
+
+537
+00:27:19,141 --> 00:27:24,064
+ordering of our arguments to min and max. And I'm not going to put you through the
+
+538
+00:27:24,084 --> 00:27:30,927
+derivation. I basically tried all ways of doing it and picked the one that worked, which is
+
+539
+00:27:31,527 --> 00:27:34,168
+not exciting to do and even less exciting to watch.
+
+540
+00:27:35,462 --> 00:27:36,662
+So enough math for now.
+
+541
+00:27:37,362 --> 00:27:37,842
+Let's code.
+
+542
+00:27:39,343 --> 00:27:42,004
+Here's the entire code to test four bounding boxes.
+
+543
+00:27:42,724 --> 00:27:43,944
+It all fits on one slide.
+
+544
+00:27:43,984 --> 00:27:46,385
+And it's not even a lot of, like this, oops.
+
+545
+00:27:48,966 --> 00:27:50,367
+This is two instructions.
+
+546
+00:27:50,887 --> 00:27:52,007
+This is one instruction.
+
+547
+00:27:52,427 --> 00:27:53,007
+This is a lot.
+
+548
+00:27:53,028 --> 00:27:54,308
+This is like four instructions.
+
+549
+00:27:54,628 --> 00:27:55,788
+This is like two instructions.
+
+550
+00:27:56,129 --> 00:27:57,549
+So that's not a lot.
+
+551
+00:27:58,809 --> 00:27:59,230
+That's it.
+
+552
+00:28:00,696 --> 00:28:02,837
+OK, so we'll do a quick explanation.
+
+553
+00:28:03,297 --> 00:28:05,737
+Here, we're just finding all of the plane distances.
+
+554
+00:28:06,238 --> 00:28:07,558
+This is mostly for reference later.
+
+555
+00:28:09,078 --> 00:28:13,120
+Here, we combined them to find the enter and leave times for
+
+556
+00:28:13,180 --> 00:28:13,720
+each axis.
+
+557
+00:28:14,300 --> 00:28:16,541
+And again, this is for four boxes at once, because it's
+
+558
+00:28:16,681 --> 00:28:21,082
+SSE. And I've highlighted that we're swapping the order of
+
+559
+00:28:21,122 --> 00:28:24,123
+the min and maxes for these min and max instructions.
+
+560
+00:28:24,763 --> 00:28:28,384
+And that turns out to be crucial for getting correct.
+
+561
+00:28:29,435 --> 00:28:32,116
+edge case behavior on SSE when you go through the edges of a
+
+562
+00:28:32,176 --> 00:28:39,379
+box. And then this just finds the global minimum, uh, the last
+
+563
+00:28:39,439 --> 00:28:43,321
+enter time, this finds the first exit time and this decides if
+
+564
+00:28:43,361 --> 00:28:46,242
+you should keep each of the four boxes or not and puts it in a
+
+565
+00:28:46,322 --> 00:28:51,865
+four bit register, well, four bits of a 32 bit register. So,
+
+566
+00:28:52,965 --> 00:28:57,007
+robust code. This code is robust. This code looks almost
+
+567
+00:28:57,047 --> 00:28:58,348
+exactly the same and is broken.
+
+568
+00:28:59,746 --> 00:29:03,349
+This code looks almost exactly the same and looks like it's better because it has a lower
+
+569
+00:29:03,369 --> 00:29:10,095
+dependency chain. And it's less broken, but it's also broken. So when you have code like
+
+570
+00:29:10,115 --> 00:29:14,319
+this where you've carefully designed it, leave warnings in the comments so that future
+
+571
+00:29:14,359 --> 00:29:19,324
+programs don't come in and make things better and break edge cases that happen to one
+
+572
+00:29:19,384 --> 00:29:22,586
+person every month or so and you talk up to gremlins.
+
+573
+00:29:25,197 --> 00:29:29,139
+So here I've given for future reference detailed analysis of
+
+574
+00:29:29,239 --> 00:29:33,581
+why it's broken, but that's kind of boring right now, so
+
+575
+00:29:33,601 --> 00:29:34,102
+let's move on.
+
+576
+00:29:35,342 --> 00:29:37,964
+And then here's some more boilerplate code of just how
+
+577
+00:29:38,004 --> 00:29:40,565
+we decode the axis and line bounding boxes.
+
+578
+00:29:41,086 --> 00:29:45,648
+We get a constant, we unpack our 16-bit integers, and we
+
+579
+00:29:45,688 --> 00:29:49,590
+decode them using fixed point and relative origin.
+
+580
+00:29:51,672 --> 00:29:53,693
+OK, now we need to find our traversal order.
+
+581
+00:29:54,755 --> 00:29:55,756
+This is going to end up being cool.
+
+582
+00:29:55,776 --> 00:29:58,239
+We'll get some branchless code using bit manipulation
+
+583
+00:29:58,579 --> 00:30:01,582
+and magic numbers to visit a specified subset
+
+584
+00:30:01,643 --> 00:30:05,186
+using a mask of the boxes in the ideal order.
+
+585
+00:30:06,768 --> 00:30:08,290
+So keep flags, which we've just found,
+
+586
+00:30:08,610 --> 00:30:10,692
+has a bit set for each box we want to keep
+
+587
+00:30:10,732 --> 00:30:11,713
+because it hits the ray.
+
+588
+00:30:12,194 --> 00:30:13,475
+And we want front to back order
+
+589
+00:30:13,915 --> 00:30:16,638
+for doing earlier rejection tests.
+
+590
+00:30:17,819 --> 00:30:21,764
+So our min and max enter times for each box
+
+591
+00:30:22,345 --> 00:30:25,608
+have this information, and we'll keep the maximum.
+
+592
+00:30:25,869 --> 00:30:28,732
+So this is the time that they first leave each box,
+
+593
+00:30:28,832 --> 00:30:30,013
+not the time they first enter.
+
+594
+00:30:30,854 --> 00:30:33,217
+And almost always they'll give you the same order.
+
+595
+00:30:33,678 --> 00:30:35,119
+There's only one case where they're different.
+
+596
+00:30:36,361 --> 00:30:40,104
+um, the only case is when you have a big box holding littler
+
+597
+00:30:40,124 --> 00:30:44,509
+boxes. This is the case you have the sky box holding your playable
+
+598
+00:30:44,529 --> 00:30:49,874
+geo. In that case, if you use the exit time, it will visit the
+
+599
+00:30:50,034 --> 00:30:53,037
+interior box first, then the outer box, so it will visit your
+
+600
+00:30:53,057 --> 00:30:55,940
+playable space and then the background geometry, which is
+
+601
+00:30:55,980 --> 00:30:58,883
+what we want in that edge case. So that's why we use Tmax, but
+
+602
+00:30:59,023 --> 00:31:00,064
+Tmin is almost as good.
+
+603
+00:31:02,407 --> 00:31:08,130
+You also go fast by doing too much work. We write all the boxes even though we don't use all the
+
+604
+00:31:08,150 --> 00:31:13,112
+boxes. But we only increase the count of boxes we have by however many we're going to keep.
+
+605
+00:31:13,972 --> 00:31:18,755
+This gets rid of all of loops and branching and we need room for all of those boxes anyway
+
+606
+00:31:18,775 --> 00:31:23,957
+and the off chance we hit them all and it's okay to have garbage data if you never read it.
+
+607
+00:31:26,338 --> 00:31:29,660
+So how do we figure out where each box goes in our sorted list?
+
+608
+00:31:30,759 --> 00:31:34,241
+we don't want them just in the order they're in the tree, we want them in front to back order.
+
+609
+00:31:34,921 --> 00:31:40,084
+So we observed that the index it should go to is the number of boxes that should go before it.
+
+610
+00:31:40,785 --> 00:31:46,848
+So I'll call the boxes A, B, C, D. Box A's index is B is less than A plus C is less than A plus D
+
+611
+00:31:46,868 --> 00:31:53,191
+is less than A. That's pretty easy. So we could do this and it would not work. We could just do
+
+612
+00:31:53,231 --> 00:31:58,815
+it for each box, but it doesn't work. So why is it broken? It's because of ties.
+
+613
+00:31:59,730 --> 00:32:04,313
+If all the distances happen to be exactly equal, every box
+
+614
+00:32:04,353 --> 00:32:06,835
+says I belong in index zero and they're going to fight for it.
+
+615
+00:32:08,415 --> 00:32:12,358
+So we fix it by if we're testing A versus B to go into
+
+616
+00:32:12,418 --> 00:32:15,560
+index A and to go into index B, we make sure they give exact
+
+617
+00:32:15,640 --> 00:32:16,420
+opposite results.
+
+618
+00:32:17,281 --> 00:32:20,402
+And so it's not A is less than B. And this works even if we
+
+619
+00:32:20,422 --> 00:32:21,063
+happen to have an AND.
+
+620
+00:32:23,802 --> 00:32:27,003
+So another receptility is that if we use A is less than B,
+
+621
+00:32:27,144 --> 00:32:30,305
+and B is less than C, we have to use A is less than C.
+
+622
+00:32:30,666 --> 00:32:32,567
+We're not free to choose C is less than A
+
+623
+00:32:33,027 --> 00:32:33,847
+for one of our tests.
+
+624
+00:32:34,768 --> 00:32:37,369
+And it's because if we chose C is less than A,
+
+625
+00:32:37,429 --> 00:32:39,811
+we could end up with our all equal test saying
+
+626
+00:32:39,851 --> 00:32:43,473
+that C is greater than C, which makes no sense.
+
+627
+00:32:44,654 --> 00:32:47,035
+So because of that, one of the four boxes
+
+628
+00:32:47,055 --> 00:32:49,256
+always has to be on the left-hand side of each test.
+
+629
+00:32:50,295 --> 00:32:51,996
+And one of them always has to be on the back.
+
+630
+00:32:52,036 --> 00:32:55,559
+That kind of narrows the combinations we can check.
+
+631
+00:32:56,899 --> 00:33:00,461
+And so here's my solution to do six tests.
+
+632
+00:33:00,962 --> 00:33:04,004
+There are 24 possible solutions that correspond
+
+633
+00:33:04,044 --> 00:33:07,065
+to different permutations of the all equal case.
+
+634
+00:33:08,526 --> 00:33:09,727
+This gives three, two, one, zero.
+
+635
+00:33:11,588 --> 00:33:14,190
+So we're now going to translate this into SIMD.
+
+636
+00:33:15,350 --> 00:33:16,871
+We are going to do this using SWZLs.
+
+637
+00:33:18,125 --> 00:33:21,687
+So this notation means we test box A versus box B,
+
+638
+00:33:22,507 --> 00:33:25,648
+A versus C, A versus D, and B versus C.
+
+639
+00:33:25,728 --> 00:33:28,129
+So that's doing four tests at once.
+
+640
+00:33:29,569 --> 00:33:31,850
+And we have a lot of flexibility in how we group these.
+
+641
+00:33:31,950 --> 00:33:33,491
+This is kind of one arbitrary grouping.
+
+642
+00:33:34,211 --> 00:33:36,352
+When we do this, we want to do
+
+643
+00:33:36,392 --> 00:33:38,313
+the fewest possible swizzles.
+
+644
+00:33:38,733 --> 00:33:40,653
+This is like solving a little puzzle,
+
+645
+00:33:41,034 --> 00:33:42,414
+and my solution is not unique.
+
+646
+00:33:44,521 --> 00:33:47,481
+Now, we also get eight results but only need six, which gives
+
+647
+00:33:47,501 --> 00:33:49,662
+some flexibility in how we pack things.
+
+648
+00:33:50,402 --> 00:33:54,703
+So these two extra ones we can choose so that they always go
+
+649
+00:33:54,723 --> 00:33:58,363
+zero, like A is less than A. We can use a result we need
+
+650
+00:33:58,403 --> 00:34:02,444
+already, like A is less than B. Or we can use a result we
+
+651
+00:34:02,464 --> 00:34:05,105
+don't care about, like B is greater than A. I ended up
+
+652
+00:34:05,465 --> 00:34:07,145
+just doing things like A is less than A.
+
+653
+00:34:09,085 --> 00:34:12,206
+Here's a table of how I played around and came up with.
+
+654
+00:34:14,241 --> 00:34:18,764
+which tests I used and this box used these tests. And this is
+
+655
+00:34:19,204 --> 00:34:23,646
+four tests in one register, four in another. And these are the
+
+656
+00:34:23,666 --> 00:34:27,108
+two swizzles. And notice that this swizzle is repeated twice.
+
+657
+00:34:27,508 --> 00:34:31,990
+And one other subtlety is this is bit 3210, which is like
+
+658
+00:34:32,110 --> 00:34:36,692
+Intel's preferred order. This order, I often do A, B, C, D.
+
+659
+00:34:37,813 --> 00:34:41,495
+But DCBA in this case is not permuted. It's natural order.
+
+660
+00:34:42,945 --> 00:34:49,408
+turns out to be nice when I'm keeping track of which box is in which bit. So here's all that
+
+661
+00:34:49,448 --> 00:34:54,690
+code. It's not much. We do a shuffle, we do a couple comparisons and we combine them. The
+
+662
+00:34:54,730 --> 00:34:59,072
+combining is interesting. Normally you'd expect to take four bits and tack them on to four
+
+663
+00:34:59,112 --> 00:35:05,475
+bits. But that leaves two zeros in the middle. You can see the two zeros right here. So
+
+664
+00:35:05,515 --> 00:35:08,977
+instead, we just move it over two to get rid of those zeros.
+
+665
+00:35:10,240 --> 00:35:13,502
+But instead of doing bit ops, we do a multiply and add,
+
+666
+00:35:13,962 --> 00:35:16,424
+because we know that our bits don't overlap,
+
+667
+00:35:16,504 --> 00:35:17,885
+so we're not ever going to have carries.
+
+668
+00:35:18,545 --> 00:35:20,587
+And using a multiply and add lets the compiler
+
+669
+00:35:20,667 --> 00:35:24,169
+use a single LEA, load effective address instruction,
+
+670
+00:35:24,289 --> 00:35:25,730
+to do this calculation.
+
+671
+00:35:26,130 --> 00:35:28,952
+So we save, like, bytes of code space
+
+672
+00:35:29,012 --> 00:35:32,595
+in one cycle of execution time, which is a huge win.
+
+673
+00:35:34,156 --> 00:35:37,618
+And then we just use pop count to do the test.
+
+674
+00:35:38,279 --> 00:35:38,439
+Now,
+
+675
+00:35:39,309 --> 00:35:45,253
+we use bit operations to do the not. So we sometimes use A is less than B, sometimes not A
+
+676
+00:35:45,273 --> 00:35:49,856
+is less than B. And so we use XOR. In this case we want to flip all of the tests so we use
+
+677
+00:35:49,896 --> 00:35:55,560
+tilde. And then this just picks the three bits we care about. And then this counts the three
+
+678
+00:35:55,600 --> 00:36:04,185
+bits. So pretty simple code. And then we only want to keep the boxes that passed our test, but
+
+679
+00:36:04,265 --> 00:36:07,388
+we've been sorting all the boxes together. So how do we limit it to the ones we care about?
+
+680
+00:36:09,282 --> 00:36:12,924
+We just force the time to infinity for the ones we don't
+
+681
+00:36:12,944 --> 00:36:14,945
+care about, and the ones we like are in the front.
+
+682
+00:36:16,006 --> 00:36:17,307
+We don't care what happens at the end.
+
+683
+00:36:18,027 --> 00:36:19,368
+So that's pretty easy.
+
+684
+00:36:19,428 --> 00:36:21,949
+That's just a couple of minor tweaks here, which you can
+
+685
+00:36:22,650 --> 00:36:23,070
+look later.
+
+686
+00:36:23,090 --> 00:36:24,451
+It's just a couple extra instructions.
+
+687
+00:36:25,852 --> 00:36:26,452
+One more gotcha.
+
+688
+00:36:26,472 --> 00:36:29,754
+We need to limit it to just node boxes or just leaf boxes.
+
+689
+00:36:30,734 --> 00:36:31,355
+Here's a leaf box.
+
+690
+00:36:34,395 --> 00:36:38,018
+So we have isNode and isLeafMasks in integer registers,
+
+691
+00:36:38,038 --> 00:36:39,599
+which we, I haven't shown you that,
+
+692
+00:36:39,639 --> 00:36:42,161
+but we decoded that in parallel to our AABB test.
+
+693
+00:36:43,582 --> 00:36:45,743
+Now we need either a LUT or a long code sequence
+
+694
+00:36:45,803 --> 00:36:48,225
+to force plus infinity based on a register
+
+695
+00:36:48,365 --> 00:36:50,226
+inside our SSE register.
+
+696
+00:36:52,028 --> 00:36:55,369
+And if we did that, we'd have to do all of our compare logic
+
+697
+00:36:55,790 --> 00:36:57,070
+and mask works twice anyway.
+
+698
+00:36:57,390 --> 00:37:01,071
+So instead, we stay in the integer unit, and we change
+
+699
+00:37:01,111 --> 00:37:05,352
+the output bits of all of that floating point math as if we
+
+700
+00:37:05,432 --> 00:37:06,473
+had done it.
+
+701
+00:37:06,993 --> 00:37:09,733
+So we don't actually force to infinity, we just do bit
+
+702
+00:37:09,793 --> 00:37:11,954
+twiddling to make it as if we had done that.
+
+703
+00:37:13,650 --> 00:37:17,292
+So if we're comparing A and B, if A should be infinity,
+
+704
+00:37:17,832 --> 00:37:18,593
+we force a zero.
+
+705
+00:37:19,193 --> 00:37:22,175
+If B should be infinity, otherwise we force one.
+
+706
+00:37:22,775 --> 00:37:26,217
+And this also says exactly how to handle the edge case.
+
+707
+00:37:27,117 --> 00:37:31,820
+We put it into a fun lookup table, which is just using the
+
+708
+00:37:31,840 --> 00:37:36,263
+stuff we've had before and saying, what bits do we change
+
+709
+00:37:36,303 --> 00:37:36,963
+in these cases?
+
+710
+00:37:37,083 --> 00:37:38,104
+It's pretty straightforward.
+
+711
+00:37:38,929 --> 00:37:42,911
+These bits correspond to, oh my mouse stopped working.
+
+712
+00:37:43,632 --> 00:37:46,974
+These bits, why did my mouse stop working?
+
+713
+00:37:49,135 --> 00:37:52,117
+Oh, there it works again.
+
+714
+00:37:52,458 --> 00:37:54,319
+Yeah, these bits correspond to these hex constants.
+
+715
+00:37:55,259 --> 00:37:57,021
+And one thing to note that'll be useful to us
+
+716
+00:37:57,081 --> 00:38:00,263
+is each bit appears exactly once.
+
+717
+00:38:02,104 --> 00:38:03,725
+The implication of this is if you flip
+
+718
+00:38:03,845 --> 00:38:06,087
+all of your input bits, you'll also flip
+
+719
+00:38:06,187 --> 00:38:07,107
+all of your output bits.
+
+720
+00:38:07,835 --> 00:38:08,736
+this will be useful to us.
+
+721
+00:38:10,498 --> 00:38:12,921
+We are already finding a mask for is it a node
+
+722
+00:38:13,001 --> 00:38:13,682
+and is it a leaf?
+
+723
+00:38:15,064 --> 00:38:16,866
+So the regular inputs to this table
+
+724
+00:38:16,966 --> 00:38:18,107
+use not a node, not a leaf,
+
+725
+00:38:18,788 --> 00:38:20,950
+but inverted inputs use is a node, is a leaf,
+
+726
+00:38:20,990 --> 00:38:21,711
+which is what we have.
+
+727
+00:38:22,172 --> 00:38:23,673
+So that's why inverted inputs are better.
+
+728
+00:38:24,094 --> 00:38:25,215
+And if you use inverted inputs,
+
+729
+00:38:25,235 --> 00:38:26,236
+you get inverted outputs,
+
+730
+00:38:26,276 --> 00:38:28,459
+so you invert your bit math.
+
+731
+00:38:30,664 --> 00:38:32,325
+So how do we get those masks?
+
+732
+00:38:32,566 --> 00:38:34,427
+Well, we have that four-bit child type
+
+733
+00:38:34,447 --> 00:38:35,548
+we saw back at the beginning.
+
+734
+00:38:36,228 --> 00:38:37,989
+We encode it this specific way.
+
+735
+00:38:38,090 --> 00:38:42,132
+Zero is a node, one is empty,
+
+736
+00:38:42,733 --> 00:38:45,155
+and the rest are different primitive types.
+
+737
+00:38:45,775 --> 00:38:48,337
+And we decode that into a 32-bit integer per child
+
+738
+00:38:48,457 --> 00:38:48,937
+using this.
+
+739
+00:38:50,358 --> 00:38:52,680
+The child type minus one underflows
+
+740
+00:38:52,860 --> 00:38:54,461
+if and only if it was zero.
+
+741
+00:38:55,682 --> 00:38:57,063
+And that makes the upper 28 bits all set.
+
+742
+00:38:59,432 --> 00:39:05,134
+and no underflow means the upper 28 bits are all clear. And this is defined behavior as long as
+
+743
+00:39:05,174 --> 00:39:12,037
+you use unsigned types. So don't use signed integers for this. So we end this with those
+
+744
+00:39:12,117 --> 00:39:18,260
+magic constants I've shown you. We also have a bit saying this box is a node. We order the
+
+745
+00:39:18,300 --> 00:39:23,342
+constants together for each of the four boxes to get all of the bits we need to set and clear.
+
+746
+00:39:24,442 --> 00:39:26,523
+And then we separate into the set bits,
+
+747
+00:39:26,863 --> 00:39:27,624
+into the clear bits,
+
+748
+00:39:27,784 --> 00:39:29,506
+into the what type of boxes it bits in the end.
+
+749
+00:39:29,986 --> 00:39:31,387
+And that fits on a single slide.
+
+750
+00:39:31,987 --> 00:39:32,928
+And I've color coded,
+
+751
+00:39:32,948 --> 00:39:34,349
+these are sets,
+
+752
+00:39:34,569 --> 00:39:35,170
+these are clears,
+
+753
+00:39:36,011 --> 00:39:37,352
+I mean, these are clears, these are sets.
+
+754
+00:39:37,752 --> 00:39:38,693
+This is what type is it.
+
+755
+00:39:39,814 --> 00:39:42,856
+And then you can see it's just a little bit of bit math.
+
+756
+00:39:44,117 --> 00:39:44,737
+That's pretty cool.
+
+757
+00:39:46,479 --> 00:39:48,400
+So, we still need to actually write that stuff.
+
+758
+00:39:50,452 --> 00:39:53,554
+So leaves are processed in front to back order,
+
+759
+00:39:53,594 --> 00:39:56,115
+so we can simply write them into a FIFO queue.
+
+760
+00:39:57,196 --> 00:39:59,077
+Nodes are processed depth first.
+
+761
+00:39:59,737 --> 00:40:01,978
+If you did a FIFO queue, you would do breadth first.
+
+762
+00:40:02,598 --> 00:40:04,159
+So a stack is depth first,
+
+763
+00:40:04,199 --> 00:40:05,540
+so we need to write in reverse order.
+
+764
+00:40:07,361 --> 00:40:08,341
+FIFO order would be 0, 1, 2, 3.
+
+765
+00:40:09,742 --> 00:40:10,342
+Stack order is 3, 2, 1, 0.
+
+766
+00:40:12,223 --> 00:40:16,206
+So if you look at it, you end up with
+
+767
+00:40:16,906 --> 00:40:18,006
+this is what you need to do.
+
+768
+00:40:19,195 --> 00:40:21,436
+And here's a table you just make.
+
+769
+00:40:21,857 --> 00:40:24,698
+If it's this, if I want to keep all four, I want this
+
+770
+00:40:24,758 --> 00:40:26,278
+order, if I want to keep three, I want this order.
+
+771
+00:40:26,679 --> 00:40:29,460
+And you just notice this works and it's
+
+772
+00:40:29,760 --> 00:40:30,600
+solving a puzzle again.
+
+773
+00:40:32,461 --> 00:40:33,301
+And you get this code.
+
+774
+00:40:33,341 --> 00:40:34,362
+This we've seen before.
+
+775
+00:40:34,902 --> 00:40:35,722
+This is the new code.
+
+776
+00:40:35,763 --> 00:40:39,404
+This is just that thing I just showed on the previous slide
+
+777
+00:40:39,444 --> 00:40:40,505
+that remaps indexes.
+
+778
+00:40:41,025 --> 00:40:45,066
+And that's how we do front to back depth first traversal.
+
+779
+00:40:46,842 --> 00:40:48,883
+That's pretty cool, not much code, no branches.
+
+780
+00:40:51,003 --> 00:40:52,884
+And lots of instruction level parallelism,
+
+781
+00:40:52,944 --> 00:40:55,885
+so parallel CPU pipes can be effective,
+
+782
+00:40:55,905 --> 00:40:58,345
+but we can still make it better one way by not doing it.
+
+783
+00:40:59,946 --> 00:41:01,226
+It turns out that most of the time, 80%,
+
+784
+00:41:02,306 --> 00:41:03,887
+we only have zero or one children,
+
+785
+00:41:04,407 --> 00:41:06,847
+and you don't need to sort if you've got that few.
+
+786
+00:41:07,708 --> 00:41:08,428
+So it's worth a branch.
+
+787
+00:41:09,964 --> 00:41:13,606
+If we know we have zero or one, we have a 4-bit mask that we
+
+788
+00:41:13,646 --> 00:41:15,327
+know has at most one bit set.
+
+789
+00:41:15,367 --> 00:41:17,088
+So it's going to be one of these five values.
+
+790
+00:41:17,588 --> 00:41:19,029
+And we want to turn it into an index, so
+
+791
+00:41:19,069 --> 00:41:19,849
+we want these values.
+
+792
+00:41:21,110 --> 00:41:22,470
+And another little puzzle.
+
+793
+00:41:23,171 --> 00:41:25,212
+I noticed that dividing by two almost worked,
+
+794
+00:41:25,252 --> 00:41:26,052
+except for this guy.
+
+795
+00:41:26,432 --> 00:41:28,253
+So I added a fudge factor to make him work.
+
+796
+00:41:29,094 --> 00:41:34,216
+And that ends up this cheap code, which you can put into
+
+797
+00:41:34,296 --> 00:41:35,757
+C++ and it looks like this.
+
+798
+00:41:36,557 --> 00:41:38,438
+The leaf code is exactly the same.
+
+799
+00:41:39,319 --> 00:41:39,579
+Ta-da.
+
+800
+00:41:41,132 --> 00:41:44,213
+Now I tried pre-caching and it didn't help on console
+
+801
+00:41:44,253 --> 00:41:46,493
+even though I know better than the hardware.
+
+802
+00:41:47,313 --> 00:41:49,434
+So that was sad.
+
+803
+00:41:50,054 --> 00:41:51,654
+I thought, I only need one cache line.
+
+804
+00:41:51,674 --> 00:41:53,215
+Surely pre-fetching is ideal for this,
+
+805
+00:41:53,275 --> 00:41:55,435
+but no matter where I put it, it didn't help.
+
+806
+00:41:57,435 --> 00:41:59,496
+So how do we batch leaves?
+
+807
+00:42:00,336 --> 00:42:02,336
+We just, like I said, we append to a FIFO queue
+
+808
+00:42:02,416 --> 00:42:03,877
+and we amped it when it's full enough.
+
+809
+00:42:04,497 --> 00:42:07,037
+It turned out it was faster if we always traced rays
+
+810
+00:42:07,077 --> 00:42:08,177
+right away against triangles.
+
+811
+00:42:10,262 --> 00:42:12,504
+and it's also useful to always test them right away if you're
+
+812
+00:42:12,544 --> 00:42:17,148
+debugging it. So you see where things came from. Otherwise we
+
+813
+00:42:18,008 --> 00:42:21,431
+drain a queue when it gets too full. This helps prediction in
+
+814
+00:42:21,451 --> 00:42:25,134
+code cache. So now we need to do triangle collision. Some more
+
+815
+00:42:25,174 --> 00:42:29,518
+math. Here's an efficient test by these guys whose names are
+
+816
+00:42:29,558 --> 00:42:36,924
+cool. And there's one problem with it. It can have cracks.
+
+817
+00:42:37,868 --> 00:42:42,670
+If you look at this, vertex A is treated differently than
+
+818
+00:42:42,710 --> 00:42:45,971
+vertexes B and C. And that means that the order of
+
+819
+00:42:45,991 --> 00:42:48,332
+vertices can affect the results of any edge test,
+
+820
+00:42:48,832 --> 00:42:51,313
+whether or not it exactly passes an edge test or not.
+
+821
+00:42:52,061 --> 00:42:55,103
+So if you get really unlucky, you can have a shared edge
+
+822
+00:42:55,143 --> 00:42:56,765
+between two triangles with no cracks.
+
+823
+00:42:57,205 --> 00:43:00,227
+But because of the order, the floating point math ends up
+
+824
+00:43:00,247 --> 00:43:02,709
+putting a tiny hole in between those two edges, and
+
+825
+00:43:02,749 --> 00:43:03,630
+something can go through it.
+
+826
+00:43:04,170 --> 00:43:05,892
+And it's going to be an extremely rare bug that
+
+827
+00:43:05,912 --> 00:43:07,733
+you'll chalk up to mysteries.
+
+828
+00:43:08,293 --> 00:43:11,096
+So it's better to notice it when you read code, because
+
+829
+00:43:11,116 --> 00:43:12,357
+you'll never find it any other way.
+
+830
+00:43:14,350 --> 00:43:17,351
+So I did something else that doesn't have cracks.
+
+831
+00:43:17,912 --> 00:43:20,633
+I create a plane that goes through the ray origin
+
+832
+00:43:20,793 --> 00:43:23,855
+and each edge, three points defines a plane,
+
+833
+00:43:24,915 --> 00:43:27,497
+and the ray hits the triangle if and only if
+
+834
+00:43:27,577 --> 00:43:29,277
+it's on the same side of all three planes.
+
+835
+00:43:30,458 --> 00:43:31,879
+And we still have to see if it hits
+
+836
+00:43:31,919 --> 00:43:32,939
+in the right distance range.
+
+837
+00:43:33,980 --> 00:43:35,561
+So I tried to do a perspective sketch,
+
+838
+00:43:36,081 --> 00:43:39,503
+pretend it's 3D, but I don't know if this ray hits
+
+839
+00:43:39,563 --> 00:43:40,623
+or not based on the sketch.
+
+840
+00:43:41,538 --> 00:43:44,380
+It's easier to see if you move the camera to the origin so that
+
+841
+00:43:44,420 --> 00:43:46,861
+the planes now go through the camera and they become lines.
+
+842
+00:43:47,581 --> 00:43:48,662
+So here's a ray that misses.
+
+843
+00:43:48,722 --> 00:43:49,642
+Here's one that hits.
+
+844
+00:43:49,702 --> 00:43:51,923
+You can see this one's on the same side of all of these.
+
+845
+00:43:52,263 --> 00:43:54,064
+We don't know if it's plus or minus, but we don't care.
+
+846
+00:43:55,145 --> 00:43:57,946
+This is on a different side of this edge than these two, so
+
+847
+00:43:58,006 --> 00:43:58,366
+it misses.
+
+848
+00:44:00,767 --> 00:44:03,729
+And then this has no cracks, even with floating point math,
+
+849
+00:44:03,969 --> 00:44:05,089
+independent of vertex order.
+
+850
+00:44:05,730 --> 00:44:08,131
+And when done in SIMD, it's roughly the same cost.
+
+851
+00:44:11,717 --> 00:44:16,264
+How you treat plus and minus depends whether you hit both front and back faces,
+
+852
+00:44:16,685 --> 00:44:18,467
+just front faces, or just back faces.
+
+853
+00:44:19,048 --> 00:44:21,852
+And whether plus or minus is front or back depends on your winding order.
+
+854
+00:44:24,095 --> 00:44:26,078
+Okay. So here's that math.
+
+855
+00:44:26,158 --> 00:44:28,362
+It's just you make the plane.
+
+856
+00:44:28,890 --> 00:44:30,050
+and you dot product with it.
+
+857
+00:44:30,411 --> 00:44:30,911
+Pretty boring.
+
+858
+00:44:31,491 --> 00:44:33,372
+This doesn't do the test for the distance,
+
+859
+00:44:33,552 --> 00:44:34,493
+but we saw that earlier.
+
+860
+00:44:35,033 --> 00:44:35,774
+It's time for capsules.
+
+861
+00:44:36,294 --> 00:44:38,015
+The capsule is split into three features,
+
+862
+00:44:38,475 --> 00:44:40,076
+two spheres and a cylinder.
+
+863
+00:44:40,457 --> 00:44:41,657
+The triangle has eight features,
+
+864
+00:44:41,717 --> 00:44:43,798
+three vertices, three edges, two faces.
+
+865
+00:44:44,959 --> 00:44:47,481
+So we have 24 feature pairs to test,
+
+866
+00:44:48,241 --> 00:44:50,102
+and they're broken down this way.
+
+867
+00:44:52,245 --> 00:44:54,506
+We don't test the cylinder versus a face
+
+868
+00:44:54,586 --> 00:44:57,348
+because that's a very rare case that can only happen
+
+869
+00:44:57,368 --> 00:45:00,950
+if you start intersecting and only if your spheres
+
+870
+00:45:01,690 --> 00:45:03,951
+on the top and bottom don't overlap at all
+
+871
+00:45:04,431 --> 00:45:06,392
+so that there has to be a gap between your two spheres
+
+872
+00:45:06,433 --> 00:45:07,513
+for this case to ever matter.
+
+873
+00:45:10,415 --> 00:45:12,296
+Which means that the height of your cylinder
+
+874
+00:45:12,356 --> 00:45:13,696
+has to be bigger than the diameter.
+
+875
+00:45:17,839 --> 00:45:20,380
+Anyway, we don't want to test all pairs.
+
+876
+00:45:21,971 --> 00:45:23,572
+If we did this in the naive SIMD way,
+
+877
+00:45:23,992 --> 00:45:26,334
+since if you rounded these up to multiples of four,
+
+878
+00:45:26,674 --> 00:45:29,496
+you would end up with seven SIMD tests with 28 results.
+
+879
+00:45:30,657 --> 00:45:32,639
+And 20% of them would be useless to you.
+
+880
+00:45:35,021 --> 00:45:36,342
+And it's often easy to see
+
+881
+00:45:36,402 --> 00:45:37,883
+that you don't need to do all the tests.
+
+882
+00:45:38,403 --> 00:45:39,224
+So we'd like to do that.
+
+883
+00:45:40,545 --> 00:45:43,507
+So what we'll do is we'll quickly call some collision pairs
+
+884
+00:45:44,048 --> 00:45:47,310
+and put the ones we keep into type-specific queues
+
+885
+00:45:47,330 --> 00:45:49,192
+for like sphere versus vertex,
+
+886
+00:45:49,232 --> 00:45:50,593
+cylinder versus edge, and so on.
+
+887
+00:45:51,192 --> 00:45:52,814
+and will train queues when they get full.
+
+888
+00:45:53,394 --> 00:45:56,778
+And this does automatic vectorization for SIMD at runtime.
+
+889
+00:45:57,398 --> 00:46:01,082
+And it is perfectly good for eight-way SIMD in the future,
+
+890
+00:46:01,603 --> 00:46:03,304
+and is as good as you can get.
+
+891
+00:46:04,866 --> 00:46:06,187
+So, how do we do the quick calling?
+
+892
+00:46:06,207 --> 00:46:07,849
+We'll do an orthographic projection
+
+893
+00:46:08,269 --> 00:46:10,351
+in the direction that the ray is moving.
+
+894
+00:46:10,391 --> 00:46:11,853
+So you're looking along the ray direction.
+
+895
+00:46:12,745 --> 00:46:15,067
+And so that means the swept carry, from your perspective,
+
+896
+00:46:15,187 --> 00:46:16,948
+appears perfectly stationary.
+
+897
+00:46:17,568 --> 00:46:20,170
+And so instead of doing a 3D swept test, you can do a 2D
+
+898
+00:46:20,631 --> 00:46:21,451
+intersection test.
+
+899
+00:46:22,812 --> 00:46:23,933
+So here's a picture.
+
+900
+00:46:24,674 --> 00:46:25,314
+That's a capsule.
+
+901
+00:46:25,354 --> 00:46:25,935
+That's a triangle.
+
+902
+00:46:27,116 --> 00:46:28,577
+Here's the capsule broken into parts.
+
+903
+00:46:29,137 --> 00:46:30,658
+And then what we're going to do is we're going to take the
+
+904
+00:46:31,079 --> 00:46:34,641
+center of the two spheres and compare it with the infinite
+
+905
+00:46:34,681 --> 00:46:36,203
+extensions of each edge.
+
+906
+00:46:36,723 --> 00:46:39,485
+And we're going to take the radius of the sphere and move
+
+907
+00:46:39,505 --> 00:46:39,745
+it to.
+
+908
+00:46:40,616 --> 00:46:44,398
+a band around each edge and that gives you this diagram.
+
+909
+00:46:45,158 --> 00:46:48,040
+Then we're going to test the sphere's origins, how far it is from each edge.
+
+910
+00:46:48,500 --> 00:46:53,522
+That tells us is it on which side of this edge and we can do a radius check to see is
+
+911
+00:46:53,542 --> 00:46:54,183
+it in this band.
+
+912
+00:46:55,683 --> 00:46:59,525
+So a sphere versus edge test is needed as if you're inside this box.
+
+913
+00:47:00,646 --> 00:47:02,247
+We see if you're inside this infinite band.
+
+914
+00:47:02,747 --> 00:47:04,168
+If you're inside these two edges.
+
+915
+00:47:05,379 --> 00:47:07,080
+you need to do it, or if you're inside these bands,
+
+916
+00:47:07,220 --> 00:47:07,781
+you need to do it.
+
+917
+00:47:08,361 --> 00:47:10,022
+And so that's just a few tests.
+
+918
+00:47:10,903 --> 00:47:11,863
+Vertices are similar.
+
+919
+00:47:13,004 --> 00:47:14,605
+If you're inside this band and this band,
+
+920
+00:47:14,625 --> 00:47:15,706
+you need to test this vertex.
+
+921
+00:47:16,106 --> 00:47:17,948
+We don't need to test any of our six vertices.
+
+922
+00:47:20,349 --> 00:47:23,691
+The face is if you're all on the same side of lines.
+
+923
+00:47:24,552 --> 00:47:26,693
+We don't need to test the face with either.
+
+924
+00:47:27,694 --> 00:47:29,035
+Cylinder is exactly the same,
+
+925
+00:47:29,095 --> 00:47:30,876
+except instead of using the radius,
+
+926
+00:47:31,096 --> 00:47:34,299
+you project the sphere perpendicular to the edge,
+
+927
+00:47:34,779 --> 00:47:34,919
+which.
+
+928
+00:47:35,460 --> 00:47:43,422
+is pretty cheap. So you get a different radius for each band for the cylinder. So our quick
+
+929
+00:47:43,442 --> 00:47:47,684
+call eliminated 20 out of 22 tests. That's pretty good. We only kept two tests. So how
+
+930
+00:47:47,704 --> 00:47:54,486
+do we do that in code? Well, first we need to find the distance to the edge. So we described
+
+931
+00:47:54,506 --> 00:48:01,568
+it working in 2D, finding the projection of 3D space. If you extend those 2D edges into
+
+932
+00:48:01,788 --> 00:48:04,229
+3D planes that go through the view direction.
+
+933
+00:48:05,190 --> 00:48:07,772
+The 2D distance to the edge is the 3D plane distance.
+
+934
+00:48:07,912 --> 00:48:10,354
+So we can skip the projection and just stay in 3D.
+
+935
+00:48:11,755 --> 00:48:13,497
+To get the normal, you just do this cross product.
+
+936
+00:48:14,377 --> 00:48:16,279
+And to find the distance, you just do this dot product.
+
+937
+00:48:16,299 --> 00:48:18,580
+So it's pretty cheap to find how far you are from an edge.
+
+938
+00:48:20,942 --> 00:48:23,964
+And then you can do three to four edges at once in SIMD.
+
+939
+00:48:24,044 --> 00:48:25,966
+So you can do triangles and quads, which is what we do.
+
+940
+00:48:27,249 --> 00:48:29,550
+it all ends up being roughly equivalent to four dot products.
+
+941
+00:48:30,010 --> 00:48:32,371
+And you usually need that triple product anyway,
+
+942
+00:48:32,831 --> 00:48:35,832
+so you can save the results when you batch up the features
+
+943
+00:48:35,892 --> 00:48:36,452
+and use them later.
+
+944
+00:48:38,053 --> 00:48:40,313
+So we still need to test the distance to the radius.
+
+945
+00:48:41,334 --> 00:48:42,754
+It turns out we don't need to know if positive
+
+946
+00:48:42,794 --> 00:48:44,615
+or negative distance is inside or outside.
+
+947
+00:48:45,495 --> 00:48:46,475
+For edges we just test,
+
+948
+00:48:46,635 --> 00:48:48,416
+is the magnitude of distance less than radius?
+
+949
+00:48:49,416 --> 00:48:51,457
+For vertices we test if both edges are flagged.
+
+950
+00:48:51,997 --> 00:48:54,698
+And for face we just see if all have the same sign.
+
+951
+00:48:57,489 --> 00:48:59,210
+One gotcha is the normal is not normalized,
+
+952
+00:48:59,431 --> 00:49:01,192
+and you don't want to normalize if you don't have to.
+
+953
+00:49:01,972 --> 00:49:05,295
+So you basically need to square both sides
+
+954
+00:49:05,335 --> 00:49:06,256
+to avoid a square root.
+
+955
+00:49:07,076 --> 00:49:09,718
+Move the magnitude of the normal to the right
+
+956
+00:49:09,758 --> 00:49:11,940
+to avoid a divide, and it's all faster,
+
+957
+00:49:12,100 --> 00:49:13,021
+gives you the same results.
+
+958
+00:49:14,522 --> 00:49:15,082
+Almost there.
+
+959
+00:49:17,164 --> 00:49:18,905
+So here's some quick notation.
+
+960
+00:49:19,585 --> 00:49:21,147
+B means you're in an edges band.
+
+961
+00:49:21,747 --> 00:49:25,070
+RB means you're in the band of the edge rotated right, LB.
+
+962
+00:49:25,735 --> 00:49:30,017
+means and left edge is band. So this is for a triangle a 3 bit value. This is that 3 bit
+
+963
+00:49:30,057 --> 00:49:35,519
+value rotated right, rotated left. And then S is just the edge assigned bit. But again, we
+
+964
+00:49:35,559 --> 00:49:41,983
+don't know if plus or minus is in or out. And so here's kind of a sketch showing here's the
+
+965
+00:49:42,003 --> 00:49:47,005
+band we're interested in. Here's left, here's right. Signed bit says which side of this
+
+966
+00:49:47,125 --> 00:49:50,047
+edge. And I've just shown bit 0, but we have
+
+967
+00:49:50,972 --> 00:49:53,913
+it rotated for bits one and two also. And we calculate all at
+
+968
+00:49:54,013 --> 00:49:57,535
+once. So for an edge to hit, you need to be in its band and
+
+969
+00:49:57,595 --> 00:50:00,396
+either between its neighbor bands, neighbor edges, which is
+
+970
+00:50:00,416 --> 00:50:04,317
+this test, or inside the neighbor's band, which is that
+
+971
+00:50:04,357 --> 00:50:09,159
+test. So it's just this bit math. And this is cool. This
+
+972
+00:50:09,199 --> 00:50:09,879
+only depends on
+
+973
+00:50:10,417 --> 00:50:13,481
+three or four S bits, and this only depends on three or four B
+
+974
+00:50:14,262 --> 00:50:17,867
+bits. So they can be put into a micro LUT, which is a single
+
+975
+00:50:18,007 --> 00:50:21,332
+integer literal. It's a LUT so small you can hold it in a
+
+976
+00:50:21,392 --> 00:50:26,559
+constant integer. So for three, we have three bits.
+
+977
+00:50:27,393 --> 00:50:29,695
+We want to get a three bit mask for each of them, so we only
+
+978
+00:50:29,735 --> 00:50:30,976
+need 24 bits for a LUT.
+
+979
+00:50:31,576 --> 00:50:33,618
+So here's a case where octal is actually useful.
+
+980
+00:50:34,238 --> 00:50:37,521
+You could show each entry in octal using only three bits.
+
+981
+00:50:38,141 --> 00:50:41,564
+And if you work out the truth table for rotating and oring
+
+982
+00:50:41,584 --> 00:50:45,066
+and all this, you get these magic numbers, and I'm sure
+
+983
+00:50:45,086 --> 00:50:45,587
+you can do that.
+
+984
+00:50:46,207 --> 00:50:48,409
+And for quads, you get these magic numbers, and
+
+985
+00:50:48,469 --> 00:50:49,390
+it's so fun to do.
+
+986
+00:50:51,561 --> 00:50:56,683
+So for face to hit, all edges must have the same sign. We can do that with the microlet too. We
+
+987
+00:50:56,723 --> 00:51:04,187
+just use it with the most significant bit set and the least significant bit set. To get the
+
+988
+00:51:04,227 --> 00:51:08,949
+left rotated band, we need to rotate three bits by one bit. There's no instruction for that,
+
+989
+00:51:09,009 --> 00:51:14,032
+but we can use this to do it. We can multiply by nine and shift right two. Multiplying by
+
+990
+00:51:14,072 --> 00:51:19,495
+nine makes two copies of the bits. And then shifting right two keeps just these three, so
+
+991
+00:51:19,575 --> 00:51:20,795
+this is actually rotated.
+
+992
+00:51:21,848 --> 00:51:27,733
+This also keeps this bit, but we don't care. We won't use it. It becomes this code you can look
+
+993
+00:51:27,773 --> 00:51:37,041
+at later. It turns out we can cull even more tests with precalculation. A shared edge, you
+
+994
+00:51:37,061 --> 00:51:41,124
+only need to test it one way. You don't have to test it for both triangles. And you also
+
+995
+00:51:41,164 --> 00:51:43,146
+don't need to test an edge that's in a valley.
+
+996
+00:51:44,794 --> 00:51:47,794
+But you do need to test both edges when it's co-planar
+
+997
+00:51:47,894 --> 00:51:50,254
+because, or at least you need to test one edge
+
+998
+00:51:50,334 --> 00:51:52,395
+when they're co-planar because otherwise
+
+999
+00:51:52,455 --> 00:51:54,535
+each triangle may think the other will catch the collision
+
+1000
+00:51:54,935 --> 00:51:57,196
+and you'll fall through the floor mysteriously once ever.
+
+1001
+00:51:59,656 --> 00:52:01,236
+So we just store a mask with each poly
+
+1002
+00:52:02,057 --> 00:52:06,237
+and do a bitwise and, and we call 60% of our edge tests,
+
+1003
+00:52:06,357 --> 00:52:06,857
+which is great.
+
+1004
+00:52:09,738 --> 00:52:11,478
+Now can we do the same thing for vertices?
+
+1005
+00:52:11,818 --> 00:52:12,298
+Well we need to,
+
+1006
+00:52:14,097 --> 00:52:18,460
+do a vertex if either edge is ever tested. So we have to keep
+
+1007
+00:52:18,500 --> 00:52:22,083
+a vertex if either of its neighbors edges is kept. It
+
+1008
+00:52:22,123 --> 00:52:25,245
+culls about 15 to 35 percent. Not as good, but it's something.
+
+1009
+00:52:26,646 --> 00:52:29,649
+We tend to hit way fewer vertices than edges anyway, so
+
+1010
+00:52:29,969 --> 00:52:32,671
+it's okay that it's not as accurate. And to get more
+
+1011
+00:52:32,711 --> 00:52:35,533
+accurate, we need more bits stored per triangle, and we'd
+
+1012
+00:52:35,553 --> 00:52:39,516
+rather use those bits for other stuff. So, last thing to do is
+
+1013
+00:52:39,616 --> 00:52:40,677
+queue the collision tests.
+
+1014
+00:52:42,677 --> 00:52:45,539
+We want to compact the fields and SIMD registers to tightly
+
+1015
+00:52:45,579 --> 00:52:47,821
+pack the channels whose bits are set in the
+
+1016
+00:52:47,841 --> 00:52:48,602
+mask we just found.
+
+1017
+00:52:49,343 --> 00:52:52,205
+So we found we want this one and this one.
+
+1018
+00:52:52,386 --> 00:52:54,368
+So we want x1 and x3 to pack here.
+
+1019
+00:52:54,748 --> 00:52:55,629
+Don't really care what's here.
+
+1020
+00:52:56,770 --> 00:52:58,331
+And we grow the count by the number of set
+
+1021
+00:52:58,351 --> 00:52:59,312
+bits, in this case, two.
+
+1022
+00:53:00,753 --> 00:53:02,215
+We still store the whole thing.
+
+1023
+00:53:03,756 --> 00:53:05,057
+There is no good option in SSE.
+
+1024
+00:53:06,645 --> 00:53:09,986
+But supplemental SIMD extensions three
+
+1025
+00:53:10,066 --> 00:53:11,387
+finally added something usable.
+
+1026
+00:53:11,867 --> 00:53:14,568
+This shuffle that takes a 16 byte shuffle pattern
+
+1027
+00:53:14,588 --> 00:53:15,888
+that says where each byte goes.
+
+1028
+00:53:16,968 --> 00:53:18,649
+It's something, but yeah.
+
+1029
+00:53:19,829 --> 00:53:24,331
+So we'll end up with this code for each field
+
+1030
+00:53:24,351 --> 00:53:25,851
+that we're putting in our struct of a ways
+
+1031
+00:53:25,931 --> 00:53:27,552
+to compile, to collide against.
+
+1032
+00:53:28,032 --> 00:53:29,152
+So this is how we add Q.
+
+1033
+00:53:29,632 --> 00:53:30,733
+We still need to find the pattern.
+
+1034
+00:53:32,193 --> 00:53:34,514
+So we need to get it out of a bit mask.
+
+1035
+00:53:38,413 --> 00:53:42,695
+it's too big for a microlet so we need to solve a puzzle.
+
+1036
+00:53:42,755 --> 00:53:45,916
+Basically we need this pattern 1010 stored in an integer
+
+1037
+00:53:45,936 --> 00:53:48,997
+register to get into this byte pattern stored in an SSE
+
+1038
+00:53:49,037 --> 00:53:54,519
+register. And note that this one corresponds to 4567 because
+
+1039
+00:53:54,539 --> 00:53:56,720
+we have to say where each of the four bytes in our four byte
+
+1040
+00:53:56,760 --> 00:54:00,061
+value goes. So, uh, so, uh, so, so, so, so, so, so, so, so, so,
+
+1041
+00:54:00,951 --> 00:54:06,814
+we want four destination indexes expanded from our bit mask in the range zero to three. So we
+
+1042
+00:54:06,854 --> 00:54:13,517
+basically end up doing a micro let for each index. So we have four micro let's instead of
+
+1043
+00:54:13,617 --> 00:54:22,721
+one. And this code does that. And according to Agner Fogg's timings, it should be about 23
+
+1044
+00:54:23,201 --> 00:54:26,362
+cycles on Jaguar, which is about a quarter of the cost of a cache miss.
+
+1045
+00:54:27,652 --> 00:54:30,373
+But to be honest, we just pay for the cache miss and do it the
+
+1046
+00:54:30,593 --> 00:54:31,574
+simple lookup table way.
+
+1047
+00:54:33,135 --> 00:54:33,435
+OK.
+
+1048
+00:54:33,995 --> 00:54:34,495
+Conclusion.
+
+1049
+00:54:34,755 --> 00:54:35,276
+We got there.
+
+1050
+00:54:37,517 --> 00:54:37,957
+Takeaways.
+
+1051
+00:54:38,197 --> 00:54:40,939
+When you're doing your AABB trees, consider big versus
+
+1052
+00:54:40,959 --> 00:54:43,040
+little splits.
+
+1053
+00:54:43,400 --> 00:54:45,521
+If you have a four-way tree, you can merge two half empty
+
+1054
+00:54:45,561 --> 00:54:46,482
+leaves to save space.
+
+1055
+00:54:47,702 --> 00:54:50,964
+It's OK to write garbage data if you don't ever read it.
+
+1056
+00:54:52,125 --> 00:54:53,405
+Microlets are really awesome.
+
+1057
+00:54:53,917 --> 00:54:56,978
+They fit in the code cache, so you don't get any cache misses.
+
+1058
+00:54:57,018 --> 00:54:59,159
+They're really pretty much perfectly prefetched.
+
+1059
+00:54:59,659 --> 00:55:00,419
+They're super fast.
+
+1060
+00:55:02,020 --> 00:55:04,521
+Mask and bit tricks are great for branchless code, which
+
+1061
+00:55:04,621 --> 00:55:05,782
+are good for performance.
+
+1062
+00:55:07,523 --> 00:55:08,983
+Divide by zero can be your friend.
+
+1063
+00:55:09,243 --> 00:55:09,984
+It's not always bad.
+
+1064
+00:55:10,744 --> 00:55:12,905
+Know your edge case behavior and try to make your typical
+
+1065
+00:55:12,945 --> 00:55:14,025
+case work for edge cases.
+
+1066
+00:55:15,106 --> 00:55:18,527
+And Quick Call plus automatic SOA batching is great for
+
+1067
+00:55:18,687 --> 00:55:19,468
+SSE and AVX.
+
+1068
+00:55:20,119 --> 00:55:22,121
+And like I said at the beginning, it made our collision
+
+1069
+00:55:22,161 --> 00:55:24,743
+code twice as fast, even though it was doing more work.
+
+1070
+00:55:26,845 --> 00:55:29,348
+So a special thanks to Chris Butcher for his help and for
+
+1071
+00:55:29,508 --> 00:55:31,630
+the Titanfall artists for all the pretty pictures they've
+
+1072
+00:55:31,710 --> 00:55:32,430
+used in the background.
+
+1073
+00:55:33,451 --> 00:55:34,773
+And here's some references.
+
+1074
+00:55:35,914 --> 00:55:36,274
+That's it.
+
+1075
+00:55:36,975 --> 00:55:37,695
+Any questions?
+
+1076
+00:55:37,956 --> 00:55:40,638
+If you've got questions, please use the microphones
+
+1077
+00:55:40,678 --> 00:55:42,320
+that are set up there and there.
+
+1078
+00:55:53,378 --> 00:55:55,739
+Just a quick question, you used pop count in a number of your
+
+1079
+00:55:55,759 --> 00:56:00,900
+slides. Is that a concern on the low end PCs? When I looked, I
+
+1080
+00:56:00,960 --> 00:56:06,782
+couldn't find any CPUs that had SSSE3 and pop count, or not pop
+
+1081
+00:56:06,842 --> 00:56:14,645
+count. So, yeah. Good question. So he asked if any CPUs had SSSE
+
+1082
+00:56:15,305 --> 00:56:17,706
+or any CPUs we cared about didn't have the pop count
+
+1083
+00:56:17,746 --> 00:56:21,267
+instruction. If you didn't hear it. Anything else?
+
+1084
+00:56:25,039 --> 00:56:26,220
+All right, thank you all for coming.
+
+1085
+00:56:26,601 --> 00:56:27,623
+And remember to fill out your views.
+

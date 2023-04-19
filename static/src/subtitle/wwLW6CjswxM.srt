@@ -1,0 +1,5588 @@
+1
+00:00:06,366 --> 00:00:09,609
+Today I'm going to be talking about a bunch of work we did at Blackbird.
+
+2
+00:00:09,609 --> 00:00:14,352
+I'm the CTO for Blackbird Interactive, and was one of the lead programmers on Deserts of Karak.
+
+3
+00:00:14,352 --> 00:00:18,615
+I'm covering quite a bit of ground, which gave me some grief picking a title,
+
+4
+00:00:18,615 --> 00:00:22,398
+because there's sort of like four little presentations in one.
+
+5
+00:00:22,398 --> 00:00:23,759
+So I wasn't exactly sure what to call it.
+
+6
+00:00:23,759 --> 00:00:27,242
+I don't know if the thin attendance is because I picked a weird, confusing, abstract title.
+
+7
+00:00:27,242 --> 00:00:32,186
+I thought about calling it How to Make a Multiplayer RTS Game Using Unity and C Sharp.
+
+8
+00:00:32,780 --> 00:00:37,324
+But then RTS is so niche, I was worried that would turn people away too, so I didn't do that either.
+
+9
+00:00:37,324 --> 00:00:39,246
+How many people know what RTS stands for? Show of hands.
+
+10
+00:00:39,246 --> 00:00:43,750
+How many people have played RTS games on the PC in the past year?
+
+11
+00:00:43,750 --> 00:00:47,193
+Have you played our game?
+
+12
+00:00:47,193 --> 00:00:48,854
+Yay, thank you.
+
+13
+00:00:48,854 --> 00:00:52,537
+Okay, so we're going to talk a little bit about how we did what we did.
+
+14
+00:00:52,537 --> 00:00:58,303
+But for the people that may not have seen the game, I'm going to show a short video.
+
+15
+00:00:58,303 --> 00:00:59,824
+Just to give a sense of what this is all about.
+
+16
+00:01:36,208 --> 00:01:39,490
+So that's a quick taste of Deserts of Karak.
+
+17
+00:01:39,490 --> 00:01:41,711
+I think 80% of that video was shot in-engine,
+
+18
+00:01:41,711 --> 00:01:42,951
+so it's all Unity.
+
+19
+00:01:42,951 --> 00:01:45,653
+There's some hand-animated cutscenes,
+
+20
+00:01:45,653 --> 00:01:48,254
+but most of that's happening in real time
+
+21
+00:01:48,254 --> 00:01:51,575
+using Unity as our rendering engine.
+
+22
+00:01:51,575 --> 00:01:53,256
+My agenda is kind of a,
+
+23
+00:01:53,256 --> 00:01:54,576
+here's a breakdown of the title
+
+24
+00:01:54,576 --> 00:01:56,257
+that leads us into the agenda.
+
+25
+00:01:56,257 --> 00:01:58,938
+I'm gonna talk about what I mean by the Great Divide
+
+26
+00:01:58,938 --> 00:02:00,839
+and how we separated our simulation layer
+
+27
+00:02:00,839 --> 00:02:01,800
+from our presentation layer.
+
+28
+00:02:03,057 --> 00:02:05,819
+I'm going to get into some of how we achieved
+
+29
+00:02:05,819 --> 00:02:07,180
+the unique visual look of the game.
+
+30
+00:02:07,180 --> 00:02:07,980
+It's quite painterly.
+
+31
+00:02:07,980 --> 00:02:09,561
+We put a lot of work into the terrain system,
+
+32
+00:02:09,561 --> 00:02:11,903
+which is what I'll talk about more.
+
+33
+00:02:11,903 --> 00:02:13,203
+And also aesthetic physics,
+
+34
+00:02:13,203 --> 00:02:17,286
+how we decorated the presentation layer with Unity physics
+
+35
+00:02:17,286 --> 00:02:20,508
+without letting them interfere with the simulation.
+
+36
+00:02:20,508 --> 00:02:22,109
+I'll talk a bit about deterministic gameplay,
+
+37
+00:02:22,109 --> 00:02:24,290
+why that's important, why we'd want to do that,
+
+38
+00:02:24,290 --> 00:02:25,351
+how we architected it,
+
+39
+00:02:25,351 --> 00:02:27,152
+and how we got rid of floating point numbers.
+
+40
+00:02:27,984 --> 00:02:31,985
+And then at the end, I'm going to dig a little bit into some C Sharp code and talk about
+
+41
+00:02:31,985 --> 00:02:33,726
+how we got performance out of the system.
+
+42
+00:02:33,726 --> 00:02:37,847
+This is the programming track, but I've got lots of pictures, so hopefully it won't be
+
+43
+00:02:37,847 --> 00:02:39,707
+super boring for everyone who's not a programmer.
+
+44
+00:02:39,707 --> 00:02:40,908
+I'll do my best.
+
+45
+00:02:40,908 --> 00:02:41,288
+Let's see.
+
+46
+00:02:41,288 --> 00:02:43,088
+So, the Great Divide.
+
+47
+00:02:43,088 --> 00:02:45,989
+What do I mean by that?
+
+48
+00:02:45,989 --> 00:02:49,310
+It's how we separated the game simulation from the visual presentation.
+
+49
+00:02:50,517 --> 00:02:52,659
+So you can sort of think of it as gameplay versus graphics.
+
+50
+00:02:52,659 --> 00:02:55,522
+What's the core heart of the game and how it plays
+
+51
+00:02:55,522 --> 00:02:57,984
+versus how do we make it look pretty with pixels on screen?
+
+52
+00:02:57,984 --> 00:03:01,447
+So core game logic and systems,
+
+53
+00:03:01,447 --> 00:03:03,269
+which were in kind of pure C Sharp code,
+
+54
+00:03:03,269 --> 00:03:05,871
+and then a rich audio-visual presentation layer
+
+55
+00:03:05,871 --> 00:03:08,894
+that we used Unity for.
+
+56
+00:03:08,894 --> 00:03:10,935
+So kind of in an abstract sense, it looks a bit like this.
+
+57
+00:03:10,935 --> 00:03:14,178
+It's very much like the MVC pattern in the large.
+
+58
+00:03:16,094 --> 00:03:19,336
+For us, instead of calling it the model in our business layer,
+
+59
+00:03:19,336 --> 00:03:22,058
+we call it the simulation in our gameplay layer.
+
+60
+00:03:22,058 --> 00:03:24,419
+Instead of calling it the view, it's the presentation layer.
+
+61
+00:03:24,419 --> 00:03:27,341
+It's where user inputs get pulled in, it's where pixels go to the screen,
+
+62
+00:03:27,341 --> 00:03:29,582
+it's where sound comes out of the speakers.
+
+63
+00:03:29,582 --> 00:03:31,723
+And then we connect the two with a little controller layer.
+
+64
+00:03:31,723 --> 00:03:34,265
+The controller takes user input,
+
+65
+00:03:34,265 --> 00:03:36,086
+turns it into commands that drive the simulation.
+
+66
+00:03:36,086 --> 00:03:38,488
+The simulation updates its internal state,
+
+67
+00:03:38,488 --> 00:03:41,009
+and then pushes that state and event triggers
+
+68
+00:03:41,009 --> 00:03:42,890
+back to the presentation layer to be visualized.
+
+69
+00:03:44,142 --> 00:03:46,984
+The simulation is pure C Sharp code
+
+70
+00:03:46,984 --> 00:03:49,146
+with very few external dependencies.
+
+71
+00:03:49,146 --> 00:03:50,346
+And then the presentation is where
+
+72
+00:03:50,346 --> 00:03:51,587
+all the unity magic happens.
+
+73
+00:03:51,587 --> 00:03:55,490
+So that theme of separating those two
+
+74
+00:03:55,490 --> 00:03:57,171
+is gonna play out throughout every aspect
+
+75
+00:03:57,171 --> 00:03:57,992
+of the presentation.
+
+76
+00:03:57,992 --> 00:03:59,113
+And I'll keep coming back to that.
+
+77
+00:03:59,113 --> 00:04:00,373
+So that's just a little bit of background.
+
+78
+00:04:00,373 --> 00:04:01,534
+We'll get deeper into it later.
+
+79
+00:04:01,534 --> 00:04:03,336
+So the terrain system.
+
+80
+00:04:03,336 --> 00:04:06,258
+I'm gonna talk a little bit about
+
+81
+00:04:06,258 --> 00:04:07,338
+the different layers of our terrain
+
+82
+00:04:07,338 --> 00:04:09,260
+and how we built up our maps and worlds.
+
+83
+00:04:10,194 --> 00:04:13,277
+I'm going to do a little bit deeper dive on our deferred decal system,
+
+84
+00:04:13,277 --> 00:04:16,739
+which was how the artist painted over everything and made it look nice.
+
+85
+00:04:16,739 --> 00:04:19,901
+Talk a little bit about how we authored those decals.
+
+86
+00:04:19,901 --> 00:04:23,784
+And then a little bit about what terrain meant or didn't mean in the simulation layer.
+
+87
+00:04:23,784 --> 00:04:25,165
+There's a lot of sand ahead.
+
+88
+00:04:25,165 --> 00:04:27,227
+It's a desert planet.
+
+89
+00:04:27,227 --> 00:04:29,428
+There's sand everywhere.
+
+90
+00:04:29,428 --> 00:04:33,371
+We didn't have to deal with trees or water or all that other yucky crap.
+
+91
+00:04:33,371 --> 00:04:34,872
+It did simplify certain things,
+
+92
+00:04:34,872 --> 00:04:37,154
+but we also put a lot of work into making the sand look really good.
+
+93
+00:04:37,831 --> 00:04:41,674
+but this particular brown area of the palette
+
+94
+00:04:41,674 --> 00:04:45,757
+is gonna be in view a lot over the next few slides.
+
+95
+00:04:45,757 --> 00:04:50,021
+Here's a bird's eye view of one of our maps.
+
+96
+00:04:50,021 --> 00:04:52,182
+The outer layer, there's a big flat ground plane.
+
+97
+00:04:52,182 --> 00:04:53,764
+It's sort of like a horizontal skybox.
+
+98
+00:04:53,764 --> 00:04:56,566
+Basically, if the camera accidentally looks off
+
+99
+00:04:56,566 --> 00:04:58,507
+into the distance, let's make sure it's still brown
+
+100
+00:04:58,507 --> 00:04:59,648
+is basically what that bit's doing.
+
+101
+00:05:00,637 --> 00:05:05,959
+There's a progressive detail skirting area surrounding the gameplay region.
+
+102
+00:05:05,959 --> 00:05:09,380
+This area, artists are sculpting it in Mudbox.
+
+103
+00:05:09,380 --> 00:05:14,282
+We also use World Machine for an erosion pass to give it more realism.
+
+104
+00:05:14,282 --> 00:05:19,243
+And then we pass this through a custom pipeline that breaks everything up into chunks.
+
+105
+00:05:19,688 --> 00:05:22,891
+and decimates the height map into a mesh
+
+106
+00:05:22,891 --> 00:05:24,632
+and decimates the vertices on that mesh.
+
+107
+00:05:24,632 --> 00:05:28,674
+If you look at the chunk in the corner facing you,
+
+108
+00:05:28,674 --> 00:05:30,615
+you can see some sort of grid-like artifacting.
+
+109
+00:05:30,615 --> 00:05:33,057
+That's because the progressive mesh decimation
+
+110
+00:05:33,057 --> 00:05:36,779
+is preserving vertices along the edges of those grid layers
+
+111
+00:05:36,779 --> 00:05:39,161
+to avoid seaming when we go from one level of detail
+
+112
+00:05:39,161 --> 00:05:39,601
+to another.
+
+113
+00:05:39,601 --> 00:05:42,403
+So that shows up a little bit when you see the wireframe.
+
+114
+00:05:42,403 --> 00:05:44,384
+You don't really see it in the art itself.
+
+115
+00:05:44,384 --> 00:05:48,627
+In the middle is a high-detail chunked gameplay region.
+
+116
+00:05:49,766 --> 00:05:51,927
+Again, same basic pipeline, Mudbox, World Machine,
+
+117
+00:05:51,927 --> 00:05:54,687
+and then running through our custom process
+
+118
+00:05:54,687 --> 00:05:56,068
+for breaking everything up into chunks
+
+119
+00:05:56,068 --> 00:05:58,709
+so that meshes don't exceed the 65,000 vertices
+
+120
+00:05:58,709 --> 00:06:00,169
+you're allowed to have in Unity,
+
+121
+00:06:00,169 --> 00:06:03,350
+and things are broken up into pieces for culling
+
+122
+00:06:03,350 --> 00:06:05,610
+so you can only draw what's on camera.
+
+123
+00:06:05,610 --> 00:06:10,252
+And then there's a layer of set dressing and props.
+
+124
+00:06:10,252 --> 00:06:12,732
+Our art team has an interesting idea
+
+125
+00:06:12,732 --> 00:06:13,973
+of what constitutes a prop.
+
+126
+00:06:13,973 --> 00:06:16,133
+So some of the props are several kilometers long.
+
+127
+00:06:16,727 --> 00:06:20,109
+I think they did this because the height map
+
+128
+00:06:20,109 --> 00:06:22,450
+didn't always do a great job on cliffs,
+
+129
+00:06:22,450 --> 00:06:24,411
+so if you wanted a real detailed cliff,
+
+130
+00:06:24,411 --> 00:06:27,593
+you'd probably want to hand paint it and bring it in.
+
+131
+00:06:27,593 --> 00:06:30,355
+And then the gameplay region is overlaid
+
+132
+00:06:30,355 --> 00:06:31,916
+with over a thousand deferred decals,
+
+133
+00:06:31,916 --> 00:06:34,818
+which I'll talk more about what that looks like.
+
+134
+00:06:34,818 --> 00:06:37,579
+Scale-wise, the skirt region in this particular map
+
+135
+00:06:37,579 --> 00:06:39,981
+is about 45 kilometers, 45,000 units in Unity,
+
+136
+00:06:39,981 --> 00:06:43,243
+and the gameplay region is about 15 kilometers square,
+
+137
+00:06:43,243 --> 00:06:44,043
+so it's a pretty big map.
+
+138
+00:06:44,899 --> 00:06:46,200
+Obviously, everything's kind of relative.
+
+139
+00:06:46,200 --> 00:06:49,182
+Our vehicles are pretty big, too.
+
+140
+00:06:49,182 --> 00:06:49,703
+So what is this?
+
+141
+00:06:49,703 --> 00:06:50,143
+A level for ants?
+
+142
+00:06:50,143 --> 00:06:53,625
+Anyway, scale is always a relative thing,
+
+143
+00:06:53,625 --> 00:06:55,126
+but the maps are pretty big, and you
+
+144
+00:06:55,126 --> 00:06:57,668
+get to drive around and do cool stuff with them.
+
+145
+00:06:57,668 --> 00:06:58,569
+And there's a banana for scale.
+
+146
+00:06:58,569 --> 00:07:01,471
+Getting down closer to the world,
+
+147
+00:07:01,471 --> 00:07:05,834
+here's kind of the base terrain layer.
+
+148
+00:07:05,834 --> 00:07:07,875
+So it's kind of undulating.
+
+149
+00:07:07,875 --> 00:07:09,617
+It looks OK.
+
+150
+00:07:09,617 --> 00:07:10,457
+Not much detail there.
+
+151
+00:07:11,778 --> 00:07:16,741
+Here's the prop layer coming in, so we throw down rocks and other things to break it up a bit.
+
+152
+00:07:16,741 --> 00:07:19,724
+And then the decals are really what come in and enrich it.
+
+153
+00:07:19,724 --> 00:07:25,708
+I mean, it's easy to think of a decal as this extra little sticker that gets stuck on top of the real art,
+
+154
+00:07:25,708 --> 00:07:29,791
+but in the case of our levels, there was a lot more invested into those decals,
+
+155
+00:07:29,791 --> 00:07:31,772
+and they really brought out the detail.
+
+156
+00:07:31,772 --> 00:07:35,555
+So toggling back and forth, base layer, decals, base layer, decals.
+
+157
+00:07:35,555 --> 00:07:39,198
+So you can see we're bringing in a lot of natural erosion in there.
+
+158
+00:07:39,198 --> 00:07:40,619
+We're modulating the lighting.
+
+159
+00:07:41,368 --> 00:07:43,149
+We're bringing some detail into the ripples of the sand
+
+160
+00:07:43,149 --> 00:07:47,034
+and trying to make it look a lot better than we could do with a simple height map.
+
+161
+00:07:47,034 --> 00:07:50,697
+Not that the base layer is that simple either.
+
+162
+00:07:50,697 --> 00:07:53,741
+There's this sort of monster shader on it that...
+
+163
+00:07:54,560 --> 00:07:57,182
+It actually, I think, has 15 different texture samplers.
+
+164
+00:07:57,182 --> 00:08:01,567
+And basically there's a kind of two control textures
+
+165
+00:08:01,567 --> 00:08:04,590
+that are then blending in combinations
+
+166
+00:08:04,590 --> 00:08:08,734
+of five times bump map plus diffuse
+
+167
+00:08:08,734 --> 00:08:10,295
+and kind of giving the artists an ability
+
+168
+00:08:10,295 --> 00:08:12,998
+to kind of raise and lower different elements
+
+169
+00:08:12,998 --> 00:08:15,921
+of the terrain as they, across the map.
+
+170
+00:08:15,921 --> 00:08:17,062
+But I'm not gonna go much into that.
+
+171
+00:08:17,062 --> 00:08:18,463
+I just wanted to say that the base layer
+
+172
+00:08:18,463 --> 00:08:19,384
+isn't that simple either.
+
+173
+00:08:20,301 --> 00:08:23,304
+So, deferred decals, let's get into that a little more.
+
+174
+00:08:23,304 --> 00:08:26,447
+Here's my super awesome programmer art of a piece of terrain
+
+175
+00:08:26,447 --> 00:08:27,488
+that you want to render on a camera.
+
+176
+00:08:27,488 --> 00:08:31,152
+So I'm going to give a quick overview of what I mean by a deferred decal.
+
+177
+00:08:31,152 --> 00:08:34,775
+Basically, you render all the terrain first.
+
+178
+00:08:34,775 --> 00:08:36,617
+So you've built up, rendered your scene,
+
+179
+00:08:36,617 --> 00:08:40,301
+you've got your depth buffer populated with the distance to each pixel.
+
+180
+00:08:40,799 --> 00:08:42,781
+And now you want to go and splat a decal
+
+181
+00:08:42,781 --> 00:08:44,522
+on top of that rendered terrain.
+
+182
+00:08:44,522 --> 00:08:47,985
+So this little dashed line here represents
+
+183
+00:08:47,985 --> 00:08:50,127
+the bounding box of a decal volume that I want to draw.
+
+184
+00:08:51,955 --> 00:08:54,117
+As that volume is drawn, what actually happens
+
+185
+00:08:54,117 --> 00:08:56,859
+is the shader is sampling the distance from the camera,
+
+186
+00:08:56,859 --> 00:09:00,422
+basically sampling the depth buffer at that pixel point,
+
+187
+00:09:00,422 --> 00:09:02,885
+and deciding whether that represents
+
+188
+00:09:02,885 --> 00:09:07,048
+a depth that's inside the bounding box of the decal
+
+189
+00:09:07,048 --> 00:09:07,389
+or not.
+
+190
+00:09:07,389 --> 00:09:10,391
+So in this case, 0.1 is inside the box.
+
+191
+00:09:10,391 --> 00:09:10,552
+0.2 isn't.
+
+192
+00:09:10,552 --> 00:09:11,753
+So at 0.1, we do draw the decal.
+
+193
+00:09:11,753 --> 00:09:12,653
+At 0.2, we don't.
+
+194
+00:09:12,653 --> 00:09:14,695
+And so you get your decal in the little pink region here.
+
+195
+00:09:16,276 --> 00:09:18,917
+When you're drawing it, the decal has a texture associated with it,
+
+196
+00:09:18,917 --> 00:09:24,578
+and the texture coordinates of that decal come basically from the model space of the bounding blocks.
+
+197
+00:09:24,578 --> 00:09:25,898
+So it's relatively simple,
+
+198
+00:09:25,898 --> 00:09:29,239
+and that's the basic idea of how it works.
+
+199
+00:09:29,239 --> 00:09:32,720
+Again, base terrain, I want to add a new decal,
+
+200
+00:09:32,720 --> 00:09:37,881
+so I drop that in, I've got my gizmos showing me what's there.
+
+201
+00:09:37,881 --> 00:09:40,902
+I can move, rotate, and scale it into place.
+
+202
+00:09:40,902 --> 00:09:44,483
+I can adjust the position and get it lined up right where I want.
+
+203
+00:09:45,651 --> 00:09:47,472
+Ridgelines like this on sand dunes
+
+204
+00:09:47,472 --> 00:09:49,172
+were a thing that we used the decals for a lot
+
+205
+00:09:49,172 --> 00:09:52,154
+because if you try and do a nice crisp ridgeline
+
+206
+00:09:52,154 --> 00:09:54,375
+in a height map, you're gonna get a lot of artifacting
+
+207
+00:09:54,375 --> 00:09:56,676
+based on the kind of geometry of the height map
+
+208
+00:09:56,676 --> 00:09:57,676
+being all on squares,
+
+209
+00:09:57,676 --> 00:09:59,797
+and you get a lot of artifacting as a result.
+
+210
+00:09:59,797 --> 00:10:02,658
+But if you can go in and hand paint a nice crisp line,
+
+211
+00:10:02,658 --> 00:10:05,599
+the vertices can be pretty smooth,
+
+212
+00:10:05,599 --> 00:10:07,460
+and it still looks good.
+
+213
+00:10:07,460 --> 00:10:10,181
+Here's all the decals in that particular little region,
+
+214
+00:10:10,181 --> 00:10:12,382
+all overdrawn as you see all their bounding volume
+
+215
+00:10:12,382 --> 00:10:12,902
+stacking up.
+
+216
+00:10:13,660 --> 00:10:15,641
+And here's how it looks when you put it all together.
+
+217
+00:10:15,641 --> 00:10:18,483
+So base layer with all the decals.
+
+218
+00:10:18,483 --> 00:10:23,906
+So it makes quite a big difference in the look of the map.
+
+219
+00:10:23,906 --> 00:10:26,987
+And here's how it looks in gameplay.
+
+220
+00:10:26,987 --> 00:10:29,449
+This is a shot in the level
+
+221
+00:10:29,449 --> 00:10:31,090
+with a lot of depth fog going on.
+
+222
+00:10:31,090 --> 00:10:33,151
+So everything's kind of desaturated at this point.
+
+223
+00:10:33,151 --> 00:10:35,372
+There's a storm coming.
+
+224
+00:10:35,372 --> 00:10:36,753
+You can see some of the decals here.
+
+225
+00:10:36,753 --> 00:10:38,854
+So the ridge lines, the sand ripples.
+
+226
+00:10:40,242 --> 00:10:44,224
+We also use decals dynamically for anytime something blew up,
+
+227
+00:10:44,224 --> 00:10:45,464
+it would leave a decal behind it.
+
+228
+00:10:45,464 --> 00:10:46,965
+And we had a dynamic decal system
+
+229
+00:10:46,965 --> 00:10:51,027
+that could kind of add these decals as the game was running.
+
+230
+00:10:51,027 --> 00:10:54,549
+The ones I've talked about so far were all statically done
+
+231
+00:10:54,549 --> 00:10:56,109
+and baked into the Unity scene.
+
+232
+00:10:56,109 --> 00:10:59,071
+So what does this look like in Unity?
+
+233
+00:10:59,071 --> 00:11:00,752
+Couple pieces.
+
+234
+00:11:00,752 --> 00:11:03,413
+There's our deferred decal controller,
+
+235
+00:11:03,413 --> 00:11:06,574
+which is a monobehaviour script with a bunch of properties.
+
+236
+00:11:06,574 --> 00:11:08,075
+You can see here.
+
+237
+00:11:08,765 --> 00:11:13,047
+The transform was the thing driving the bounding volume of the decal.
+
+238
+00:11:13,047 --> 00:11:16,810
+So basically we would just take, instead of having extra data to represent the bounding volume,
+
+239
+00:11:16,810 --> 00:11:21,153
+we just use the size and position of the transform, the scale of the transform.
+
+240
+00:11:21,153 --> 00:11:25,435
+Because there's really no geometry associated with the decal, it's just sort of this virtual object
+
+241
+00:11:25,435 --> 00:11:29,638
+with some editor hooks to draw the gizmos and the bounding box.
+
+242
+00:11:29,638 --> 00:11:33,801
+But the box isn't really there, it's a virtual box.
+
+243
+00:11:34,083 --> 00:11:36,465
+And then we had an overall preferences thing
+
+244
+00:11:36,465 --> 00:11:38,867
+that let you control how the selected decals look like
+
+245
+00:11:38,867 --> 00:11:41,049
+and how the unselected ones look like.
+
+246
+00:11:41,049 --> 00:11:43,731
+I found myself toggling this off and on as I use the system
+
+247
+00:11:43,731 --> 00:11:46,033
+because if you have all the unselected decals
+
+248
+00:11:46,033 --> 00:11:47,514
+in their bounding boxes drawing,
+
+249
+00:11:47,514 --> 00:11:50,076
+you get like a huge mass of blue boxes
+
+250
+00:11:50,076 --> 00:11:51,037
+and you can't see what's going on.
+
+251
+00:11:51,037 --> 00:11:55,840
+Digging into these settings a little bit more,
+
+252
+00:11:55,840 --> 00:11:58,382
+the material associated with the decal chooses
+
+253
+00:11:58,382 --> 00:11:59,764
+which shader you're gonna use.
+
+254
+00:11:59,764 --> 00:12:02,846
+In this case, it's our decals alpha bump diffuse shader.
+
+255
+00:12:04,184 --> 00:12:05,805
+It's got a couple texture inputs,
+
+256
+00:12:05,805 --> 00:12:08,206
+diffuse texture and bump map, so we can modulate lighting.
+
+257
+00:12:08,206 --> 00:12:10,447
+There's also a checkbox for normals only,
+
+258
+00:12:10,447 --> 00:12:13,028
+so if you want a decal that's only affecting the lighting,
+
+259
+00:12:13,028 --> 00:12:15,689
+you turn that on and don't bother supplying a main texture.
+
+260
+00:12:15,689 --> 00:12:18,510
+There's a tint color that you could use
+
+261
+00:12:18,510 --> 00:12:19,470
+to color shift the decal,
+
+262
+00:12:19,470 --> 00:12:21,651
+although generally that was just used as an alpha blend
+
+263
+00:12:21,651 --> 00:12:23,372
+so that you could kind of dial up and down
+
+264
+00:12:23,372 --> 00:12:24,892
+how much of that decal you wanted to appear.
+
+265
+00:12:26,137 --> 00:12:30,058
+There's a flag whether or not you want to draw over the set dressing layer so
+
+266
+00:12:30,058 --> 00:12:33,100
+basically you could have decals that go over the rocks or decals that stay under
+
+267
+00:12:33,100 --> 00:12:38,282
+the rocks and to do that we used a stencil mask and that was actually a
+
+268
+00:12:38,282 --> 00:12:42,404
+property of the shader and toggling set dressing on and off was actually
+
+269
+00:12:42,404 --> 00:12:44,245
+choosing a slightly different variant on the shader.
+
+270
+00:12:47,818 --> 00:12:50,619
+One thing of interest, we culled front-facing polygons
+
+271
+00:12:50,619 --> 00:12:52,940
+and drew the back-facing ones instead.
+
+272
+00:12:52,940 --> 00:12:55,762
+The reason for that was that if the camera got too close
+
+273
+00:12:55,762 --> 00:12:58,943
+to a big deckle box, you'd start to clip into that box
+
+274
+00:12:58,943 --> 00:13:02,025
+and you'd be losing the deckle where it clipped.
+
+275
+00:13:02,025 --> 00:13:03,846
+So instead of clipping the front-facing,
+
+276
+00:13:03,846 --> 00:13:06,147
+or clipping those polygons that are closer towards you,
+
+277
+00:13:06,147 --> 00:13:08,208
+we don't even draw those and we draw the back face.
+
+278
+00:13:08,208 --> 00:13:11,009
+So you can sort of think of it as a little bounding bowl
+
+279
+00:13:11,009 --> 00:13:12,410
+rather than a bounding box.
+
+280
+00:13:14,510 --> 00:13:16,090
+And because you're not actually drawing the polygons,
+
+281
+00:13:16,090 --> 00:13:18,251
+you're just using it to decide kind of where in the scene
+
+282
+00:13:18,251 --> 00:13:18,892
+to run the shader.
+
+283
+00:13:18,892 --> 00:13:19,932
+It doesn't really matter.
+
+284
+00:13:19,932 --> 00:13:20,753
+It all kind of works out.
+
+285
+00:13:20,753 --> 00:13:24,514
+There's a transparency setting.
+
+286
+00:13:24,514 --> 00:13:26,415
+This was used procedurally under the hood.
+
+287
+00:13:26,415 --> 00:13:29,617
+So we had a budget for how many decals
+
+288
+00:13:29,617 --> 00:13:31,198
+could be on screen at a time.
+
+289
+00:13:31,198 --> 00:13:33,579
+And we wanted to be able to fade things in and out gracefully.
+
+290
+00:13:33,579 --> 00:13:35,660
+So rather than just toggling, snapping them on and off
+
+291
+00:13:35,660 --> 00:13:38,821
+when we go over budget, they'd fade out over a short period.
+
+292
+00:13:38,821 --> 00:13:40,402
+And that's what the transparency would do.
+
+293
+00:13:42,603 --> 00:13:44,424
+And then this shader is really just kind of
+
+294
+00:13:44,424 --> 00:13:47,586
+the high level set up the state for the shader.
+
+295
+00:13:47,586 --> 00:13:49,367
+The actual work was in this include file.
+
+296
+00:13:49,367 --> 00:13:51,628
+I'm not gonna dig into the details of that,
+
+297
+00:13:51,628 --> 00:13:54,869
+but basically it just samples the depth buffer,
+
+298
+00:13:54,869 --> 00:13:57,290
+does the calculation to determine whether or not
+
+299
+00:13:57,290 --> 00:14:00,632
+that depth is inside or outside the bounding volume,
+
+300
+00:14:00,632 --> 00:14:03,813
+and then does the normal sort of lighting and color pass
+
+301
+00:14:03,813 --> 00:14:07,435
+from using its normal map and diffuse map,
+
+302
+00:14:07,435 --> 00:14:09,896
+and then blends the pixel into the frame buffer.
+
+303
+00:14:13,429 --> 00:14:15,371
+All of this, nothing super original here.
+
+304
+00:14:15,371 --> 00:14:16,952
+The main thing was kind of getting it into Unity
+
+305
+00:14:16,952 --> 00:14:19,154
+and getting it performant.
+
+306
+00:14:19,154 --> 00:14:21,656
+Pope Kim from Relic, also Vancouver,
+
+307
+00:14:21,656 --> 00:14:23,798
+a couple years ago at SIGGRAPH gave an awesome paper
+
+308
+00:14:23,798 --> 00:14:25,159
+on all the details of deferred decals.
+
+309
+00:14:25,159 --> 00:14:26,881
+So if you want to know more, definitely look that up.
+
+310
+00:14:26,881 --> 00:14:27,922
+He's got a slide share online.
+
+311
+00:14:27,922 --> 00:14:32,806
+And then one of the render engineers at Unity
+
+312
+00:14:32,806 --> 00:14:36,089
+wrote a blog post and did a demo of deferred decals
+
+313
+00:14:36,089 --> 00:14:37,230
+in Unity using command buffers.
+
+314
+00:14:37,677 --> 00:14:39,298
+which kind of got us going as to seeing
+
+315
+00:14:39,298 --> 00:14:40,438
+how to integrate it into Unity,
+
+316
+00:14:40,438 --> 00:14:42,379
+how to set up the shader in the Unity environment,
+
+317
+00:14:42,379 --> 00:14:43,399
+that kind of thing.
+
+318
+00:14:43,399 --> 00:14:45,780
+We then did a bunch of work on optimizing
+
+319
+00:14:45,780 --> 00:14:47,820
+how we sorted them and culling and things like that
+
+320
+00:14:47,820 --> 00:14:49,381
+to kind of integrate it into the engine
+
+321
+00:14:49,381 --> 00:14:51,602
+and into our game and get it performant.
+
+322
+00:14:51,602 --> 00:14:55,943
+Quick aside, if all the sand you've been seeing
+
+323
+00:14:55,943 --> 00:14:56,643
+looks sort of familiar,
+
+324
+00:14:56,643 --> 00:15:00,524
+you may have seen similar sand on NASA galleries
+
+325
+00:15:00,524 --> 00:15:03,805
+because of course, our nearest dusty desert planet,
+
+326
+00:15:03,805 --> 00:15:05,346
+we were gonna look at that for reference.
+
+327
+00:15:06,121 --> 00:15:12,124
+Recently we came full circle and JPL actually approached us about doing a visualization
+
+328
+00:15:12,124 --> 00:15:14,025
+of a Mars base of the future.
+
+329
+00:15:14,025 --> 00:15:18,307
+So over the past month a bunch of guys at work in their, mostly in their spare time,
+
+330
+00:15:18,307 --> 00:15:24,169
+kind of put together this quick visualization project, which was a reimagining of a Mars
+
+331
+00:15:24,169 --> 00:15:29,352
+base of the future using terrain data and texture data from NASA, putting it into our
+
+332
+00:15:29,352 --> 00:15:29,852
+terrain engine.
+
+333
+00:15:30,610 --> 00:15:31,930
+deckling it up to make it look pretty,
+
+334
+00:15:31,930 --> 00:15:35,592
+and then building some crazy futuristic Mars bases.
+
+335
+00:15:35,592 --> 00:15:38,194
+This was presented at DICE about a week or two ago,
+
+336
+00:15:38,194 --> 00:15:40,075
+and we've been getting a lot of good press coverage
+
+337
+00:15:40,075 --> 00:15:40,575
+out of it since.
+
+338
+00:15:40,575 --> 00:15:42,556
+That's also built in Unity.
+
+339
+00:15:42,556 --> 00:15:44,657
+We're still trying to decide if we're gonna make it available
+
+340
+00:15:44,657 --> 00:15:46,298
+or what happens next with this project,
+
+341
+00:15:46,298 --> 00:15:50,501
+but it was a fun little thing to do.
+
+342
+00:15:50,501 --> 00:15:52,322
+Okay, so that's terrain on the presentation side.
+
+343
+00:15:52,322 --> 00:15:53,602
+What about in the simulation?
+
+344
+00:15:53,602 --> 00:15:55,744
+Do we have terrain there?
+
+345
+00:15:55,744 --> 00:15:56,444
+Almost not.
+
+346
+00:15:56,444 --> 00:15:59,906
+The simulation is 2D for all unit movement.
+
+347
+00:16:00,506 --> 00:16:01,106
+mostly.
+
+348
+00:16:01,106 --> 00:16:02,887
+This is a Homeworld game.
+
+349
+00:16:02,887 --> 00:16:05,948
+Homeworld was renowned as being the first 3D RTS game.
+
+350
+00:16:05,948 --> 00:16:09,189
+And when people heard that we were gonna bring it down
+
+351
+00:16:09,189 --> 00:16:10,870
+to ground level and make it a 2D game again,
+
+352
+00:16:10,870 --> 00:16:12,050
+they were like, oh my God, what are you doing?
+
+353
+00:16:12,050 --> 00:16:13,691
+You can't do that.
+
+354
+00:16:13,691 --> 00:16:15,852
+So we needed some sort of 3D in there.
+
+355
+00:16:15,852 --> 00:16:17,272
+Here's what that looked like.
+
+356
+00:16:17,272 --> 00:16:18,993
+We took a course height map,
+
+357
+00:16:18,993 --> 00:16:20,293
+brought that into the simulation.
+
+358
+00:16:20,293 --> 00:16:22,114
+So there's a notion of how high or low units are.
+
+359
+00:16:22,114 --> 00:16:24,795
+The white you can think of as being high ground
+
+360
+00:16:24,795 --> 00:16:26,195
+and the dark as being low ground.
+
+361
+00:16:27,834 --> 00:16:30,955
+We gave the designers a mechanism for drawing in ridge lines,
+
+362
+00:16:30,955 --> 00:16:33,976
+which are basically along the crests of dunes.
+
+363
+00:16:33,976 --> 00:16:35,377
+Ridge lines block line of fire,
+
+364
+00:16:35,377 --> 00:16:36,677
+so you can't shoot over a dune,
+
+365
+00:16:36,677 --> 00:16:39,038
+you need to get up on the dune to shoot.
+
+366
+00:16:39,038 --> 00:16:42,680
+And the higher unit, a higher unit firing on a lower unit
+
+367
+00:16:42,680 --> 00:16:45,161
+will deal more damage, so there's a height advantage there.
+
+368
+00:16:45,161 --> 00:16:47,782
+So it brings in 3D elements of gameplay,
+
+369
+00:16:47,782 --> 00:16:50,043
+but all the math is pretty much 2D under the hood.
+
+370
+00:16:50,043 --> 00:16:51,883
+So the units are driving around on a flat plane.
+
+371
+00:16:52,846 --> 00:16:54,868
+The ridgelines act like sort of these infinitely high walls
+
+372
+00:16:54,868 --> 00:16:56,289
+that you can't shoot through.
+
+373
+00:16:56,289 --> 00:16:58,811
+And when two units are in battle,
+
+374
+00:16:58,811 --> 00:16:59,892
+you'll just sample the height map,
+
+375
+00:16:59,892 --> 00:17:03,834
+see which one's higher and give him an advantage.
+
+376
+00:17:03,834 --> 00:17:05,556
+So it kept all the calculations pretty simple.
+
+377
+00:17:05,556 --> 00:17:09,959
+Unique visuals, let's move on to the next step.
+
+378
+00:17:09,959 --> 00:17:14,262
+Aesthetic physics, what do I mean by that?
+
+379
+00:17:14,262 --> 00:17:15,883
+Key part of our game was to convey
+
+380
+00:17:15,883 --> 00:17:18,525
+a really rich vehicle fantasy of these giant vehicles
+
+381
+00:17:18,525 --> 00:17:20,647
+lumbering around in the desert and leaping off sand dunes
+
+382
+00:17:20,647 --> 00:17:21,868
+and getting air and all the rest of it.
+
+383
+00:17:23,701 --> 00:17:27,364
+But we needed to reconcile that with our 2D simulation layer.
+
+384
+00:17:27,364 --> 00:17:29,846
+So what we did was we have a fairly simple driving model,
+
+385
+00:17:29,846 --> 00:17:34,290
+a fairly complicated two-dimensional driving model,
+
+386
+00:17:34,290 --> 00:17:36,031
+which is deterministic, so we can use it
+
+387
+00:17:36,031 --> 00:17:38,513
+within the RTS framework that I'll get into more.
+
+388
+00:17:38,513 --> 00:17:41,976
+And then on the presentation side is where the jumps happen,
+
+389
+00:17:41,976 --> 00:17:43,298
+the vehicle suspension happens,
+
+390
+00:17:43,298 --> 00:17:45,019
+and all the cool stuff like that.
+
+391
+00:17:45,019 --> 00:17:47,381
+I'll talk a little bit about how we did this.
+
+392
+00:17:49,143 --> 00:17:51,645
+So here's a scene from the game,
+
+393
+00:17:51,645 --> 00:17:52,586
+and here's another scene.
+
+394
+00:17:52,586 --> 00:17:56,068
+So there's stuff blowing up, there's vehicles getting air.
+
+395
+00:17:56,068 --> 00:17:57,049
+How do we do it?
+
+396
+00:17:57,049 --> 00:17:59,171
+If movement is 2D, what does that mean?
+
+397
+00:17:59,171 --> 00:18:01,653
+So if you give a unit a move order,
+
+398
+00:18:01,653 --> 00:18:04,195
+you queue up a set of waypoints.
+
+399
+00:18:04,195 --> 00:18:06,497
+What we do is the driving model
+
+400
+00:18:06,497 --> 00:18:08,538
+understands the top speed of the vehicle
+
+401
+00:18:08,538 --> 00:18:11,160
+and how fast it can turn and things like that.
+
+402
+00:18:11,160 --> 00:18:13,662
+And so we can take the turning radius,
+
+403
+00:18:13,662 --> 00:18:15,104
+kind of lay it onto the waypoint,
+
+404
+00:18:15,104 --> 00:18:15,764
+and
+
+405
+00:18:16,801 --> 00:18:22,842
+figure out the tangents that bring us into the waypoint, turn as tightly as possible
+
+406
+00:18:22,842 --> 00:18:26,563
+given the mechanics of the vehicle, still hit the waypoint and then move on to the next
+
+407
+00:18:26,563 --> 00:18:27,683
+waypoint.
+
+408
+00:18:27,683 --> 00:18:32,244
+So in this image here, let's see if I can do this laser pointer thing, that would be
+
+409
+00:18:32,244 --> 00:18:32,324
+cool.
+
+410
+00:18:32,324 --> 00:18:37,905
+So basically we've got a straight line segment, a curve segment, another straight line, another
+
+411
+00:18:37,905 --> 00:18:40,446
+curve, another straight line.
+
+412
+00:18:41,284 --> 00:18:43,125
+what we get is an analytical solution
+
+413
+00:18:43,125 --> 00:18:44,406
+for where the vehicle is gonna move
+
+414
+00:18:44,406 --> 00:18:45,327
+given a set of waypoints.
+
+415
+00:18:45,327 --> 00:18:46,487
+It's kind of like a control curve
+
+416
+00:18:46,487 --> 00:18:47,588
+that the vehicle follows along.
+
+417
+00:18:47,588 --> 00:18:49,790
+There's also a bunch of subtlety in there
+
+418
+00:18:49,790 --> 00:18:51,831
+like the, as we're coming into a corner,
+
+419
+00:18:51,831 --> 00:18:54,273
+there's a mechanism for skidding and drifting
+
+420
+00:18:54,273 --> 00:18:55,014
+and things like that.
+
+421
+00:18:55,014 --> 00:18:57,035
+So the model isn't totally simple,
+
+422
+00:18:57,035 --> 00:18:58,376
+but it is a 2D analytical model
+
+423
+00:18:58,376 --> 00:18:59,837
+of where the vehicle's gonna go.
+
+424
+00:18:59,837 --> 00:19:01,158
+It's not, we're not throwing it into PhysX
+
+425
+00:19:01,158 --> 00:19:03,340
+or rigid bodies or doing discrete time step simulation
+
+426
+00:19:03,340 --> 00:19:04,140
+or anything like that.
+
+427
+00:19:04,140 --> 00:19:08,904
+You're thinking, but I saw that vehicle get air.
+
+428
+00:19:08,904 --> 00:19:09,825
+How did that happen?
+
+429
+00:19:11,595 --> 00:19:12,576
+Here's kind of how we approach it.
+
+430
+00:19:12,576 --> 00:19:15,096
+So the presentation layer is this gorgeous butterfly
+
+431
+00:19:15,096 --> 00:19:16,977
+that flaps its wings, and then the sim is a pin
+
+432
+00:19:16,977 --> 00:19:18,277
+that just stabs through the butterfly
+
+433
+00:19:18,277 --> 00:19:20,157
+and holds it in where it wants to be.
+
+434
+00:19:20,157 --> 00:19:21,998
+So the sim can move the butterfly around,
+
+435
+00:19:21,998 --> 00:19:24,379
+and the butterfly can flap its wings and look pretty,
+
+436
+00:19:24,379 --> 00:19:25,539
+but it's under control of the sim
+
+437
+00:19:25,539 --> 00:19:27,259
+as far as positioning goes.
+
+438
+00:19:27,259 --> 00:19:29,580
+If you don't like killing butterflies,
+
+439
+00:19:29,580 --> 00:19:31,080
+we could talk about carousel horses.
+
+440
+00:19:31,080 --> 00:19:32,721
+There's a carousel across the street.
+
+441
+00:19:32,721 --> 00:19:35,161
+Same kind of idea, you've got the beautiful painted horse,
+
+442
+00:19:35,161 --> 00:19:37,182
+and the sim is the rod that holds the horse in place
+
+443
+00:19:37,182 --> 00:19:38,762
+and forces it to go round and round in a circle.
+
+444
+00:19:41,714 --> 00:19:45,359
+So let's talk a little bit about how we rigged the vehicles
+
+445
+00:19:45,359 --> 00:19:48,082
+to make this work and to get the kind of the rich aesthetic
+
+446
+00:19:48,082 --> 00:19:50,024
+vehicle fantasy look without having to simulate
+
+447
+00:19:50,024 --> 00:19:53,308
+every little piece of it and have it affect gameplay.
+
+448
+00:19:54,613 --> 00:19:57,714
+We've got our vehicle set up with wheel colliders,
+
+449
+00:19:57,714 --> 00:19:59,574
+so there's a fairly complex rig on the vehicle.
+
+450
+00:19:59,574 --> 00:20:03,636
+There's also a rigid body on the vehicle itself.
+
+451
+00:20:03,636 --> 00:20:05,596
+If you look here, you'll see that that rigid body
+
+452
+00:20:05,596 --> 00:20:08,897
+is constrained so the physics doesn't affect
+
+453
+00:20:08,897 --> 00:20:10,458
+X or Z position or Y rotation.
+
+454
+00:20:10,458 --> 00:20:11,878
+That's basically the pin.
+
+455
+00:20:11,878 --> 00:20:13,419
+Those are the degrees of freedom
+
+456
+00:20:13,419 --> 00:20:14,479
+that the simulation controls.
+
+457
+00:20:15,042 --> 00:20:16,883
+And what's left over is the ability
+
+458
+00:20:16,883 --> 00:20:18,905
+for the presentation layer physics
+
+459
+00:20:18,905 --> 00:20:22,467
+to bounce the vehicle up and down on the y-axis,
+
+460
+00:20:22,467 --> 00:20:24,708
+roll it side to side on the z-axis,
+
+461
+00:20:24,708 --> 00:20:26,910
+and pitch it up and down on the,
+
+462
+00:20:26,910 --> 00:20:29,431
+you said it'd be the x-axis or something like that.
+
+463
+00:20:29,431 --> 00:20:33,174
+But anyway, we sort of split the rigid body down the middle
+
+464
+00:20:33,174 --> 00:20:35,695
+and let the sim control half the degrees of freedom
+
+465
+00:20:35,695 --> 00:20:37,437
+and the presentation layer control the other half.
+
+466
+00:20:37,437 --> 00:20:39,958
+Also, those wheel colliders,
+
+467
+00:20:39,958 --> 00:20:43,220
+there's no geometry associated with them, so we're not.
+
+468
+00:20:43,979 --> 00:20:45,480
+letting the wheel collide with the ground
+
+469
+00:20:45,480 --> 00:20:47,261
+and then having that move geometry directly.
+
+470
+00:20:47,261 --> 00:20:50,304
+What we do instead is we have this little magical
+
+471
+00:20:50,304 --> 00:20:52,045
+animated suspension script.
+
+472
+00:20:52,045 --> 00:20:54,587
+What it's doing is monitoring the position
+
+473
+00:20:54,587 --> 00:20:57,469
+of the wheel collider and the compression forces
+
+474
+00:20:57,469 --> 00:20:59,291
+acting on the springs of that wheel collider,
+
+475
+00:20:59,291 --> 00:21:01,493
+basically how much tension is it under
+
+476
+00:21:01,493 --> 00:21:04,555
+and how far out of its rest position is it,
+
+477
+00:21:04,555 --> 00:21:06,917
+and feeding those parameters into a blend tree.
+
+478
+00:21:07,570 --> 00:21:11,512
+And then there's a whole pile of one frame animations
+
+479
+00:21:11,512 --> 00:21:14,593
+on every unit that then get blended together
+
+480
+00:21:14,593 --> 00:21:15,934
+based on the steering parameters
+
+481
+00:21:15,934 --> 00:21:17,814
+and the position of the wheel colliders
+
+482
+00:21:17,814 --> 00:21:20,916
+and the orientation of the wheels to steer left and right.
+
+483
+00:21:20,916 --> 00:21:23,097
+So those poses look something like this.
+
+484
+00:21:23,097 --> 00:21:25,938
+There's basically different positions of the suspension
+
+485
+00:21:25,938 --> 00:21:28,479
+of the front end of the vehicle in this case.
+
+486
+00:21:28,479 --> 00:21:31,741
+And they get blended together in different degrees
+
+487
+00:21:31,741 --> 00:21:33,702
+to give the illusion that the vehicle is compressing
+
+488
+00:21:33,702 --> 00:21:36,343
+and the shocks are moving in and out and all the rest of it.
+
+489
+00:21:39,040 --> 00:21:41,381
+We also, I don't have a very good picture for this,
+
+490
+00:21:41,381 --> 00:21:43,442
+that arrow is supposed to represent an impulse force
+
+491
+00:21:43,442 --> 00:21:45,184
+being applied to the rigid body of the vehicle.
+
+492
+00:21:45,184 --> 00:21:49,867
+So we have those forces are applied to give the vehicle air
+
+493
+00:21:49,867 --> 00:21:51,748
+when all four wheel colliders go off the ground,
+
+494
+00:21:51,748 --> 00:21:54,230
+we detect that point and give it a bit of force
+
+495
+00:21:54,230 --> 00:21:55,971
+to lift it up in the air and kind of bring it back down
+
+496
+00:21:55,971 --> 00:21:56,751
+on a decent parabola.
+
+497
+00:21:56,751 --> 00:22:00,554
+We also have to deal with six wheeled vehicles
+
+498
+00:22:00,554 --> 00:22:02,755
+and treaded vehicles and hover vehicles.
+
+499
+00:22:02,755 --> 00:22:04,316
+So there's a whole bunch of different variations
+
+500
+00:22:04,316 --> 00:22:04,856
+on this theme.
+
+501
+00:22:05,445 --> 00:22:07,907
+And each of those units has a fairly complex rig
+
+502
+00:22:07,907 --> 00:22:09,528
+that uses the techniques I've just shown.
+
+503
+00:22:09,528 --> 00:22:13,151
+When it works, it's great, and every now and then,
+
+504
+00:22:13,151 --> 00:22:15,052
+there's some super weird bugs when the sim
+
+505
+00:22:15,052 --> 00:22:18,995
+and presentation layer kind of disagree about what's going on.
+
+506
+00:22:18,995 --> 00:22:21,717
+We also had a long-standing bug with the carrier.
+
+507
+00:22:21,717 --> 00:22:24,539
+It's this, like, massive land crawler in our game.
+
+508
+00:22:24,951 --> 00:22:26,852
+Every now and then, we never did fully resolve it.
+
+509
+00:22:26,852 --> 00:22:29,573
+We'd give it a huge impulse force upwards,
+
+510
+00:22:29,573 --> 00:22:31,514
+and the carrier would fly way up in the air
+
+511
+00:22:31,514 --> 00:22:32,715
+and then come crashing back down again.
+
+512
+00:22:32,715 --> 00:22:35,216
+Fortunately, the sim's still chugging along fine.
+
+513
+00:22:35,216 --> 00:22:37,097
+Like, the vehicles are in the right XZ position,
+
+514
+00:22:37,097 --> 00:22:38,918
+and they're facing the right way, so it doesn't care.
+
+515
+00:22:38,918 --> 00:22:41,439
+Gameplay's fine, but it made for some
+
+516
+00:22:41,439 --> 00:22:42,460
+pretty amusing bugs and outtakes.
+
+517
+00:22:42,460 --> 00:22:48,663
+Okay, so that's the aesthetic physics.
+
+518
+00:22:48,663 --> 00:22:50,644
+Next I wanna talk about deterministic gameplay
+
+519
+00:22:50,644 --> 00:22:52,725
+and how we structured the RTS game
+
+520
+00:22:52,725 --> 00:22:54,046
+to work well in multiplayer.
+
+521
+00:22:55,622 --> 00:22:58,827
+which is the reason for being deterministic.
+
+522
+00:22:58,827 --> 00:23:01,010
+So we've got this rich game
+
+523
+00:23:01,010 --> 00:23:03,714
+and we want to replicate the state of that game
+
+524
+00:23:03,714 --> 00:23:05,697
+across multiple peers,
+
+525
+00:23:05,697 --> 00:23:07,540
+over these thin little series of pipes
+
+526
+00:23:07,540 --> 00:23:08,561
+that makes up the internet.
+
+527
+00:23:11,010 --> 00:23:12,011
+So, bandwidth.
+
+528
+00:23:12,011 --> 00:23:15,152
+In a first-person shooter, there's a limited amount of state,
+
+529
+00:23:15,152 --> 00:23:18,053
+but in an RTS game, we've got position speed,
+
+530
+00:23:18,053 --> 00:23:21,234
+health, power, turret orientations,
+
+531
+00:23:21,234 --> 00:23:23,294
+amount of ammunition, potentially in multiple weapons,
+
+532
+00:23:23,294 --> 00:23:26,295
+the position of projectiles in flight,
+
+533
+00:23:26,295 --> 00:23:28,116
+which abilities are active on which units,
+
+534
+00:23:28,116 --> 00:23:32,177
+and what state of the cooldowns are on those abilities.
+
+535
+00:23:32,177 --> 00:23:33,897
+Each unit can have a queued up set of goals
+
+536
+00:23:33,897 --> 00:23:35,378
+and move orders as to where it's going,
+
+537
+00:23:35,378 --> 00:23:37,619
+and then which other units are of interest
+
+538
+00:23:37,619 --> 00:23:39,099
+that it's supposed to be targeting.
+
+539
+00:23:40,714 --> 00:23:42,996
+And then buffs, all of the attributes in the game
+
+540
+00:23:42,996 --> 00:23:45,698
+pretty much can be modified when you go into a zone
+
+541
+00:23:45,698 --> 00:23:48,080
+or get hit by a weapon,
+
+542
+00:23:48,080 --> 00:23:51,182
+or like there's constant attribute values
+
+543
+00:23:51,182 --> 00:23:53,504
+changing and fluctuating.
+
+544
+00:23:53,504 --> 00:23:55,366
+Ideally times 800 plus units,
+
+545
+00:23:55,366 --> 00:23:59,389
+depending on how many players are in the game.
+
+546
+00:23:59,389 --> 00:24:00,390
+And the pipes cannot cope.
+
+547
+00:24:00,390 --> 00:24:02,072
+We can't.
+
+548
+00:24:03,505 --> 00:24:06,966
+we didn't feel confident that we could send that much data
+
+549
+00:24:06,966 --> 00:24:09,187
+and have an authoritative server feeding out
+
+550
+00:24:09,187 --> 00:24:11,928
+that ginormous amount of state to all the different clients.
+
+551
+00:24:11,928 --> 00:24:14,328
+So we followed a pattern that was established
+
+552
+00:24:14,328 --> 00:24:17,229
+eight years ago and went with determinism.
+
+553
+00:24:17,229 --> 00:24:19,370
+The basic idea being that you run the same program
+
+554
+00:24:19,370 --> 00:24:22,350
+on every computer, you give each computer the same inputs,
+
+555
+00:24:22,350 --> 00:24:23,931
+and then they produce the same outputs
+
+556
+00:24:23,931 --> 00:24:26,532
+and everyone stays synchronized
+
+557
+00:24:26,532 --> 00:24:28,532
+because you're all running the same procedures.
+
+558
+00:24:31,188 --> 00:24:32,728
+So it's great when it works.
+
+559
+00:24:32,728 --> 00:24:35,309
+Basically, you have this simulation presentation split
+
+560
+00:24:35,309 --> 00:24:38,309
+happening on each player's computer.
+
+561
+00:24:38,309 --> 00:24:40,250
+You're gathering commands from each player.
+
+562
+00:24:40,250 --> 00:24:41,810
+You share those commands over the network.
+
+563
+00:24:41,810 --> 00:24:43,130
+The commands are nice and small,
+
+564
+00:24:43,130 --> 00:24:45,090
+so that's good on bandwidth.
+
+565
+00:24:45,090 --> 00:24:48,311
+And then each simulation runs that same set of commands
+
+566
+00:24:48,311 --> 00:24:49,771
+and produces the same results,
+
+567
+00:24:49,771 --> 00:24:52,312
+and everyone experiences the same world.
+
+568
+00:24:52,312 --> 00:24:53,552
+At least, that's the hope.
+
+569
+00:24:53,552 --> 00:24:55,452
+So, what could possibly go wrong?
+
+570
+00:24:58,528 --> 00:25:01,491
+Being deterministic has a bunch of implications.
+
+571
+00:25:01,491 --> 00:25:04,593
+It means that your simulation can't expose
+
+572
+00:25:04,593 --> 00:25:07,255
+any state-changing API to the presentation layer.
+
+573
+00:25:07,255 --> 00:25:08,917
+That red line is super important.
+
+574
+00:25:08,917 --> 00:25:10,798
+It's like the, we called it the great firewall.
+
+575
+00:25:10,798 --> 00:25:12,920
+You've got to be really careful how you cross that boundary.
+
+576
+00:25:12,920 --> 00:25:16,563
+Ideally, you let commands in, you let state out,
+
+577
+00:25:16,563 --> 00:25:18,665
+and there's no other way to interact with the sim.
+
+578
+00:25:18,665 --> 00:25:21,607
+You need to run the simulation at a fixed update rate.
+
+579
+00:25:21,607 --> 00:25:23,148
+So you want to make sure that you're
+
+580
+00:25:23,692 --> 00:25:26,134
+you're running commands at a predictable interval
+
+581
+00:25:26,134 --> 00:25:28,235
+and the interval is the same on every computer,
+
+582
+00:25:28,235 --> 00:25:29,336
+the commands you run at each tick
+
+583
+00:25:29,336 --> 00:25:30,477
+are the same on each computer.
+
+584
+00:25:30,477 --> 00:25:33,378
+No floating point numbers,
+
+585
+00:25:33,378 --> 00:25:36,641
+because FPUs are prone to optimizing things
+
+586
+00:25:36,641 --> 00:25:40,223
+in ways that cause differences in the low order bits.
+
+587
+00:25:40,223 --> 00:25:41,824
+So we wanted to be able to do cross play
+
+588
+00:25:41,824 --> 00:25:44,906
+between different architectures and AMD Intel,
+
+589
+00:25:44,906 --> 00:25:47,207
+32-bit, 64-bit, and not have things diverge,
+
+590
+00:25:47,207 --> 00:25:48,668
+so we didn't trust floating point numbers.
+
+591
+00:25:50,105 --> 00:25:55,068
+which then has a side effect of throwing away all kinds of other stuff like PhysX,
+
+592
+00:25:55,068 --> 00:25:58,769
+like Unity, pretty much all of Unity because its transforms are all floating point.
+
+593
+00:25:58,769 --> 00:26:03,212
+Basically, the simulation has to be sort of very pure and clean
+
+594
+00:26:03,212 --> 00:26:05,193
+and in order to remain deterministic.
+
+595
+00:26:05,193 --> 00:26:06,894
+So no Unity here.
+
+596
+00:26:06,894 --> 00:26:08,414
+Unity up here, great.
+
+597
+00:26:08,414 --> 00:26:09,175
+Not so much in the sim.
+
+598
+00:26:10,868 --> 00:26:12,589
+How do we get this to work?
+
+599
+00:26:12,589 --> 00:26:13,770
+What do we do?
+
+600
+00:26:13,770 --> 00:26:15,270
+Here's our Visual Studio solution.
+
+601
+00:26:15,270 --> 00:26:19,472
+The simulation, there's a whole lot of projects altogether.
+
+602
+00:26:19,472 --> 00:26:20,412
+I think we have 36, it says.
+
+603
+00:26:20,412 --> 00:26:24,293
+The main, the core of the game was bbi.game.
+
+604
+00:26:24,293 --> 00:26:27,615
+That was the simulation layer.
+
+605
+00:26:27,615 --> 00:26:30,716
+Bbi.unity.game was kind of the Unity presentation layer.
+
+606
+00:26:31,478 --> 00:26:33,999
+And the dependencies are very different.
+
+607
+00:26:33,999 --> 00:26:36,421
+If you look at the references from each of those projects,
+
+608
+00:26:36,421 --> 00:26:39,482
+the simulation layer is referencing bbi.core,
+
+609
+00:26:39,482 --> 00:26:42,404
+which was some useful helper utilities we had,
+
+610
+00:26:42,404 --> 00:26:45,986
+and bbi.game.data, which was a small assembly
+
+611
+00:26:45,986 --> 00:26:50,188
+containing data types, and .NET system, and that's it.
+
+612
+00:26:50,188 --> 00:26:51,269
+Over on presentation land,
+
+613
+00:26:51,269 --> 00:26:52,709
+we've got all kinds of stuff in there.
+
+614
+00:26:52,709 --> 00:26:54,930
+There's NGUI and Playmaker and Unity Engine,
+
+615
+00:26:54,930 --> 00:26:55,931
+which doesn't appear in the sim,
+
+616
+00:26:55,931 --> 00:26:58,853
+and then all of our other project references.
+
+617
+00:27:01,385 --> 00:27:25,467
+So by separating assemblies, we kept it more clear what belonged where by setting up the references properly. We made sure that you couldn't accidentally call unity from the same because it's not even in scope so visual studio won't let you do it. Another thing we did a lot was a lot of the stuff in the game assembly uses what's called internal scope. So I don't know how familiar you guys are with C sharp, but basically internal scope means you can only call it from within the same assembly.
+
+618
+00:27:25,961 --> 00:27:28,542
+So that way you can effectively have something that's public for the SIM,
+
+619
+00:27:28,542 --> 00:27:29,963
+but out of scope for the presentation.
+
+620
+00:27:29,963 --> 00:27:34,124
+So you can't, someone on presentation side can't accidentally call into that SIM piece.
+
+621
+00:27:34,124 --> 00:27:41,247
+There's always sort of these like deep call stack threads where you have an API on the SIM,
+
+622
+00:27:41,247 --> 00:27:44,548
+say the SIM controller that you intended to be called from presentation
+
+623
+00:27:44,548 --> 00:27:46,709
+and then later you accidentally added more stuff
+
+624
+00:27:46,709 --> 00:27:49,810
+and it dives way down into the SIM and calls something it's not supposed to.
+
+625
+00:27:49,810 --> 00:27:52,872
+So you've got to make sure that doesn't happen and get rid of it as it comes up.
+
+626
+00:27:54,301 --> 00:27:55,881
+Tim Ford used a neat expression the other day
+
+627
+00:27:55,881 --> 00:27:56,901
+when he was talking about Overwatch.
+
+628
+00:27:56,901 --> 00:27:58,402
+He talks about digging a pit of success.
+
+629
+00:27:58,402 --> 00:28:01,062
+Like basically, make it easy to do the right thing.
+
+630
+00:28:01,062 --> 00:28:04,763
+So put your programmers in a place where they sink down
+
+631
+00:28:04,763 --> 00:28:07,043
+into the thing that works.
+
+632
+00:28:07,043 --> 00:28:08,443
+So by setting up things in this way,
+
+633
+00:28:08,443 --> 00:28:10,344
+it was pretty easy not to screw up,
+
+634
+00:28:10,344 --> 00:28:12,684
+was basically what we were trying to achieve
+
+635
+00:28:12,684 --> 00:28:13,824
+with our project architecture.
+
+636
+00:28:13,824 --> 00:28:17,705
+Multithreading I wanted to touch on.
+
+637
+00:28:17,705 --> 00:28:20,025
+Unity uses a ton of threads internally
+
+638
+00:28:20,025 --> 00:28:22,086
+for all of its rendering, physics, audio,
+
+639
+00:28:22,086 --> 00:28:23,406
+asset loading, et cetera, et cetera.
+
+640
+00:28:24,112 --> 00:28:26,495
+But it only gives one to us as C sharp developers.
+
+641
+00:28:26,495 --> 00:28:27,275
+We get one thread.
+
+642
+00:28:27,275 --> 00:28:29,057
+Everything's running on that one thread.
+
+643
+00:28:29,057 --> 00:28:30,799
+All the monobehavior updates are on that thread,
+
+644
+00:28:30,799 --> 00:28:33,682
+et cetera, et cetera.
+
+645
+00:28:33,682 --> 00:28:34,763
+However, we're in C sharp.
+
+646
+00:28:34,763 --> 00:28:37,165
+We can create new threads.
+
+647
+00:28:37,165 --> 00:28:40,909
+So for us, we create a new thread for the simulation.
+
+648
+00:28:40,909 --> 00:28:44,512
+Again, because Unity is single threaded in their.
+
+649
+00:28:44,954 --> 00:28:46,095
+I don't know if it's debugged.
+
+650
+00:28:46,095 --> 00:28:48,937
+Definitely in the editor, there's thread guards
+
+651
+00:28:48,937 --> 00:28:51,818
+against calling a Unity API from the wrong thread.
+
+652
+00:28:51,818 --> 00:28:53,179
+So this actually had a side benefit
+
+653
+00:28:53,179 --> 00:28:56,761
+where by putting the simulation into another thread,
+
+654
+00:28:56,761 --> 00:28:58,863
+we were pretty much prevented from calling Unity
+
+655
+00:28:58,863 --> 00:28:59,923
+even if we tried really hard.
+
+656
+00:28:59,923 --> 00:29:04,787
+Also, being multi-threaded comes with its own set
+
+657
+00:29:04,787 --> 00:29:07,168
+of pain points and conventions and guidelines,
+
+658
+00:29:07,168 --> 00:29:08,569
+as I'm sure you're well aware.
+
+659
+00:29:08,569 --> 00:29:11,030
+So by putting presentation and simulation
+
+660
+00:29:11,030 --> 00:29:12,631
+in separate threads, it made it that much harder.
+
+661
+00:29:13,131 --> 00:29:15,092
+Like you really had to scrutinize how things
+
+662
+00:29:15,092 --> 00:29:16,133
+were coordinating between them.
+
+663
+00:29:16,133 --> 00:29:17,554
+So multi-threading actually, again,
+
+664
+00:29:17,554 --> 00:29:20,996
+encouraged the divide and helped keep things separated.
+
+665
+00:29:20,996 --> 00:29:22,157
+And we had some other threads too,
+
+666
+00:29:22,157 --> 00:29:24,599
+but the SIM one was the main one.
+
+667
+00:29:24,599 --> 00:29:26,300
+The original idea was to take advantage
+
+668
+00:29:26,300 --> 00:29:27,560
+of CPU performance, obviously,
+
+669
+00:29:27,560 --> 00:29:30,362
+and squeeze out as much CPU as we could.
+
+670
+00:29:30,362 --> 00:29:31,903
+But it had some of these interesting
+
+671
+00:29:31,903 --> 00:29:34,285
+architectural side effects as well that were beneficial.
+
+672
+00:29:34,285 --> 00:29:39,929
+How do we make the SIM run deterministically?
+
+673
+00:29:39,929 --> 00:29:41,570
+Here's a quick overview of
+
+674
+00:29:42,240 --> 00:29:44,802
+presentation layer, feeding in some commands.
+
+675
+00:29:44,802 --> 00:29:47,543
+The command scheduler is deciding which
+
+676
+00:29:47,543 --> 00:29:49,124
+SIM tick each command is going to run on
+
+677
+00:29:49,124 --> 00:29:51,666
+and putting those into a buffer accordingly.
+
+678
+00:29:51,666 --> 00:29:54,627
+So here you've got the simulation running over
+
+679
+00:29:54,627 --> 00:29:55,788
+at a specific tick rate.
+
+680
+00:29:55,788 --> 00:29:57,369
+It's got commands queued up.
+
+681
+00:29:57,369 --> 00:30:01,731
+And this is happening on every player's machine.
+
+682
+00:30:01,731 --> 00:30:06,434
+The schedulers are communicating over those pipes.
+
+683
+00:30:06,915 --> 00:30:09,376
+And as long as we have commands from every player,
+
+684
+00:30:09,376 --> 00:30:11,317
+by the time we get to the tick we want to execute,
+
+685
+00:30:11,317 --> 00:30:13,017
+so tick K or whatever, we need to make sure
+
+686
+00:30:13,017 --> 00:30:15,238
+we have a command packet from each player.
+
+687
+00:30:15,238 --> 00:30:16,479
+You'll see a couple no-ops in there,
+
+688
+00:30:16,479 --> 00:30:17,359
+so in this particular tick,
+
+689
+00:30:17,359 --> 00:30:19,160
+player two didn't do anything in that tick.
+
+690
+00:30:19,160 --> 00:30:20,860
+That's fine, but we still need to know
+
+691
+00:30:20,860 --> 00:30:21,761
+that they didn't do anything,
+
+692
+00:30:21,761 --> 00:30:23,402
+so we have this sort of empty command packet
+
+693
+00:30:23,402 --> 00:30:24,182
+to represent that.
+
+694
+00:30:24,182 --> 00:30:27,683
+So once everyone's got all the commands,
+
+695
+00:30:27,683 --> 00:30:29,064
+you'll notice that player three
+
+696
+00:30:29,064 --> 00:30:30,885
+doesn't have as many commands as player one.
+
+697
+00:30:30,885 --> 00:30:33,085
+That's okay, as long as he catches up in time
+
+698
+00:30:33,085 --> 00:30:33,986
+for tick K plus one.
+
+699
+00:30:34,617 --> 00:30:36,458
+So the commands can be kind of flying over the pipes
+
+700
+00:30:36,458 --> 00:30:39,779
+in the background while we're executing the commands
+
+701
+00:30:39,779 --> 00:30:40,539
+for the current tick.
+
+702
+00:30:40,539 --> 00:30:43,880
+On the sim tick, we execute all the commands,
+
+703
+00:30:43,880 --> 00:30:47,421
+we run a bunch of entity processors
+
+704
+00:30:47,421 --> 00:30:48,821
+to update the state of the sim,
+
+705
+00:30:48,821 --> 00:30:52,742
+and then we feedback game state and events
+
+706
+00:30:52,742 --> 00:30:54,722
+to the presentation layer.
+
+707
+00:30:54,722 --> 00:30:57,483
+Again, these are queued up on a per tick basis.
+
+708
+00:30:57,483 --> 00:30:58,623
+So the presentation.
+
+709
+00:30:59,672 --> 00:31:01,393
+Sort of doesn't care what tick things happen,
+
+710
+00:31:01,393 --> 00:31:03,374
+but it also, it does a bunch of interpolation
+
+711
+00:31:03,374 --> 00:31:04,894
+and things like that, so it needs to know
+
+712
+00:31:04,894 --> 00:31:06,835
+that the state at a certain tick
+
+713
+00:31:06,835 --> 00:31:08,536
+and the state at the following tick,
+
+714
+00:31:08,536 --> 00:31:09,716
+and then when it goes to render it,
+
+715
+00:31:09,716 --> 00:31:12,317
+sort of needs to know where it is in between those ticks.
+
+716
+00:31:12,317 --> 00:31:14,078
+Also the events, it was sometimes important to know
+
+717
+00:31:14,078 --> 00:31:16,899
+definitely what order the events happened in,
+
+718
+00:31:16,899 --> 00:31:18,260
+but also what tick they happened on,
+
+719
+00:31:18,260 --> 00:31:19,720
+so we'd have a little packet of events
+
+720
+00:31:19,720 --> 00:31:21,721
+to go with each SIM tick update.
+
+721
+00:31:23,798 --> 00:31:27,140
+We'd also, the state of the game at each tick
+
+722
+00:31:27,140 --> 00:31:29,382
+would be checksummed, and we'd use those checksums.
+
+723
+00:31:29,382 --> 00:31:31,563
+Those would be communicated around the network,
+
+724
+00:31:31,563 --> 00:31:34,905
+and if two players, if their state diverged,
+
+725
+00:31:34,905 --> 00:31:36,005
+the checksums would differ,
+
+726
+00:31:36,005 --> 00:31:37,666
+and we'd throw up a horrible screen
+
+727
+00:31:37,666 --> 00:31:40,428
+that we never wanna see saying the game is desynced.
+
+728
+00:31:40,428 --> 00:31:42,109
+You know, please send your logs to the developer
+
+729
+00:31:42,109 --> 00:31:43,070
+and curse their name forever.
+
+730
+00:31:43,070 --> 00:31:45,611
+Desyncs were actually pretty rare.
+
+731
+00:31:45,611 --> 00:31:47,192
+We were pretty fortunate, I think in part
+
+732
+00:31:47,192 --> 00:31:48,753
+due to the way we set up the architecture
+
+733
+00:31:48,753 --> 00:31:49,793
+and kept things pretty clean.
+
+734
+00:31:50,914 --> 00:31:53,834
+We kept thinking we'd do like hierarchical checksums
+
+735
+00:31:53,834 --> 00:31:55,354
+and debugging tools to help analyze
+
+736
+00:31:55,354 --> 00:31:57,395
+and figure out exactly what desynced,
+
+737
+00:31:57,395 --> 00:31:59,955
+but I think we literally had like four or five desync bugs
+
+738
+00:31:59,955 --> 00:32:01,956
+over the course of development, so it wasn't a big deal
+
+739
+00:32:01,956 --> 00:32:03,416
+and we didn't invest in that tooling.
+
+740
+00:32:03,416 --> 00:32:08,917
+All of this has been done before too.
+
+741
+00:32:08,917 --> 00:32:10,997
+So 2001, there's an awesome Gamasutra article
+
+742
+00:32:10,997 --> 00:32:13,498
+from the guys who did Age of Empires
+
+743
+00:32:13,498 --> 00:32:15,638
+about lockstep deterministic RTS games,
+
+744
+00:32:15,638 --> 00:32:18,799
+command scheduling, all the rest of it.
+
+745
+00:32:20,292 --> 00:32:22,292
+We pretty much followed their model.
+
+746
+00:32:22,292 --> 00:32:23,872
+We do some stuff, I'm not sure if they did,
+
+747
+00:32:23,872 --> 00:32:25,713
+like we have an adaptive scheduling horizon,
+
+748
+00:32:25,713 --> 00:32:28,273
+so if the internet starts going to hell
+
+749
+00:32:28,273 --> 00:32:31,194
+and we're frequently not getting all the commands we need
+
+750
+00:32:31,194 --> 00:32:34,995
+for a given tick, we can schedule further into the future.
+
+751
+00:32:34,995 --> 00:32:38,416
+And so we take on some additional latency in that case,
+
+752
+00:32:38,416 --> 00:32:40,436
+so it's gonna be longer between issuing a move order
+
+753
+00:32:40,436 --> 00:32:42,156
+and seeing the vehicle move,
+
+754
+00:32:42,156 --> 00:32:43,577
+but at least you're not gonna be hiccuping,
+
+755
+00:32:43,577 --> 00:32:45,877
+waiting for those command packets to come in.
+
+756
+00:32:45,877 --> 00:32:46,897
+And then if the network improves,
+
+757
+00:32:46,897 --> 00:32:48,758
+we can bring the scheduling horizon back down again.
+
+758
+00:32:49,982 --> 00:32:53,544
+But other than that, I think the guys pretty much did it all like 15 years ago.
+
+759
+00:32:53,544 --> 00:32:56,905
+Okay, floating point numbers.
+
+760
+00:32:56,905 --> 00:33:01,727
+This was a kind of an annoying part of building the sim.
+
+761
+00:33:01,727 --> 00:33:06,809
+Because floating point math is pretty handy and there's a lot of stuff you'd like to use it for.
+
+762
+00:33:06,809 --> 00:33:08,850
+We decided it was necessary to go with fixed point.
+
+763
+00:33:08,850 --> 00:33:11,851
+I talked to a friend of mine who works at Intel on chip design.
+
+764
+00:33:11,851 --> 00:33:15,532
+He said it's getting more and more likely for FPUs to do different things, not less likely.
+
+765
+00:33:15,532 --> 00:33:18,373
+There is an IEEE standard for how floating point should work.
+
+766
+00:33:18,946 --> 00:33:23,109
+But a lot of the time, the BIEEE standard bit
+
+767
+00:33:23,109 --> 00:33:24,109
+gets turned off on an FPU
+
+768
+00:33:24,109 --> 00:33:25,850
+because you get a little more performance out of it.
+
+769
+00:33:25,850 --> 00:33:27,431
+And then you may get different lower order bits.
+
+770
+00:33:27,431 --> 00:33:30,073
+You may get different not a NAND result,
+
+771
+00:33:30,073 --> 00:33:32,374
+or not a number results.
+
+772
+00:33:32,374 --> 00:33:34,015
+So we ended up deciding to take the plunge
+
+773
+00:33:34,015 --> 00:33:35,636
+and convert all of our math to fixed point.
+
+774
+00:33:35,636 --> 00:33:39,199
+So we wrote our own deterministic fixed point math library.
+
+775
+00:33:39,199 --> 00:33:41,080
+And I've talked about no unity dependencies,
+
+776
+00:33:41,080 --> 00:33:41,880
+no third party floats.
+
+777
+00:33:43,356 --> 00:33:45,397
+You can make fixed point numbers, you know,
+
+778
+00:33:45,397 --> 00:33:47,198
+look and feel a lot like floating point numbers.
+
+779
+00:33:47,198 --> 00:33:49,060
+You can still declare them as simple variables.
+
+780
+00:33:49,060 --> 00:33:50,841
+You can initialize them with constants.
+
+781
+00:33:50,841 --> 00:33:52,542
+You can add them, whatever, do operators.
+
+782
+00:33:52,542 --> 00:33:55,664
+Here's a little bit of what that looks like.
+
+783
+00:33:55,664 --> 00:34:01,388
+Our fixed point numbers were a pretty simple struct
+
+784
+00:34:01,388 --> 00:34:02,329
+that wraps a 64-bit long.
+
+785
+00:34:02,329 --> 00:34:05,091
+See if I can show that here.
+
+786
+00:34:05,693 --> 00:34:08,375
+So here's the actual long value that we're representing.
+
+787
+00:34:08,375 --> 00:34:10,516
+We're using this field offset trick
+
+788
+00:34:10,516 --> 00:34:13,078
+to split the long into its upper and lower parts,
+
+789
+00:34:13,078 --> 00:34:14,799
+because some operations like multiplication
+
+790
+00:34:14,799 --> 00:34:17,682
+are easier to do if you've got access to those pieces.
+
+791
+00:34:17,682 --> 00:34:20,404
+But it's kind of like a C++ union,
+
+792
+00:34:20,404 --> 00:34:22,225
+that data is on top of each other,
+
+793
+00:34:22,225 --> 00:34:25,387
+so it's all the mraw lower and mraw upper,
+
+794
+00:34:25,387 --> 00:34:28,209
+just aliases for the upper and lower part of the raw value.
+
+795
+00:34:30,115 --> 00:34:31,836
+Here I'm showing fixed operator plus.
+
+796
+00:34:31,836 --> 00:34:34,958
+This is how you overload operators in C Sharp.
+
+797
+00:34:34,958 --> 00:34:37,359
+And so this is doing the addition operation
+
+798
+00:34:37,359 --> 00:34:38,759
+on two fixed point numbers.
+
+799
+00:34:38,759 --> 00:34:42,661
+You can see some extra logic in there to handle overflow.
+
+800
+00:34:42,661 --> 00:34:44,162
+If you're building a fixed point math library,
+
+801
+00:34:44,162 --> 00:34:47,623
+you need to decide, are you gonna go as fast as possible
+
+802
+00:34:47,623 --> 00:34:49,444
+and leave it up to the user of the math
+
+803
+00:34:49,444 --> 00:34:50,985
+to deal with edge cases,
+
+804
+00:34:50,985 --> 00:34:52,986
+or are you gonna deal with the edge cases yourself
+
+805
+00:34:52,986 --> 00:34:56,708
+and be diligent about infinity and not a number
+
+806
+00:34:56,708 --> 00:34:58,388
+and divide by zero and all the rest of it?
+
+807
+00:34:58,938 --> 00:35:07,262
+We aired on the side of handling all the edge cases and later regretted and wish we'd gone for pure performance.
+
+808
+00:35:07,262 --> 00:35:19,269
+And I think next time around what we probably do is make all the simple math operators be as quick as possible and then have slow precise versions of things for the occasional time when you actually care about infinity.
+
+809
+00:35:19,269 --> 00:35:22,531
+I'm also showing a conversion operator here.
+
+810
+00:35:22,531 --> 00:35:23,712
+The this guy at the bottom.
+
+811
+00:35:25,285 --> 00:35:28,466
+is how you convert from an integer to a fixed point number
+
+812
+00:35:28,466 --> 00:35:29,666
+using this implicit operator.
+
+813
+00:35:29,666 --> 00:35:31,767
+Implicit means you don't need a typecast,
+
+814
+00:35:31,767 --> 00:35:34,127
+which is how I got it to work on the previous page
+
+815
+00:35:34,127 --> 00:35:35,328
+of just saying x equal 42.
+
+816
+00:35:35,328 --> 00:35:38,048
+And so it's gonna take that integer value,
+
+817
+00:35:38,048 --> 00:35:39,149
+shift it up into the right range,
+
+818
+00:35:39,149 --> 00:35:40,809
+and then give you a fixed point number.
+
+819
+00:35:40,809 --> 00:35:43,650
+Our representation was 32.32,
+
+820
+00:35:43,650 --> 00:35:45,710
+so we had 32 bits of integer, 32 bits of fraction.
+
+821
+00:35:45,710 --> 00:35:49,551
+So the biggest number we could represent was
+
+822
+00:35:51,355 --> 00:35:54,697
+2 to the 31, which sounds like a pretty big number,
+
+823
+00:35:54,697 --> 00:35:57,538
+but the square root of 2 to the 31 is 46,000.
+
+824
+00:35:57,538 --> 00:36:01,040
+And if that number sounds familiar,
+
+825
+00:36:01,040 --> 00:36:04,281
+we had maps that were so big that the square distance
+
+826
+00:36:04,281 --> 00:36:06,522
+between two points on the map was too big a number
+
+827
+00:36:06,522 --> 00:36:08,063
+for our fixed point numbers to represent.
+
+828
+00:36:08,063 --> 00:36:11,125
+And that's a problem because in game code,
+
+829
+00:36:11,125 --> 00:36:12,465
+you often use square distances
+
+830
+00:36:12,465 --> 00:36:13,886
+because why would you do a square root?
+
+831
+00:36:13,886 --> 00:36:14,186
+That's stupid.
+
+832
+00:36:16,095 --> 00:36:19,396
+So in this particular case, the fact that we implemented infinity properly
+
+833
+00:36:19,396 --> 00:36:24,258
+sort of saved us because then you'd always have, you know, if my weapon range
+
+834
+00:36:24,258 --> 00:36:27,919
+is 300 meters and my distance to target is infinity, then of course, 300 meters
+
+835
+00:36:27,919 --> 00:36:31,580
+is less than infinity, sorry, 300 squared is less than infinity.
+
+836
+00:36:31,580 --> 00:36:32,580
+So we're golden.
+
+837
+00:36:32,580 --> 00:36:38,842
+Um, but yeah, we kind of wish we'd done maybe, um, 48 bits of
+
+838
+00:36:38,842 --> 00:36:40,262
+integer and 16 bits of fraction.
+
+839
+00:36:40,262 --> 00:36:43,003
+And then we could have had way bigger numbers and 16 bits of fraction
+
+840
+00:36:43,003 --> 00:36:43,743
+should still have been plenty.
+
+841
+00:36:46,597 --> 00:36:48,058
+Did it work?
+
+842
+00:36:48,058 --> 00:36:49,578
+So if you look at our game on Steam,
+
+843
+00:36:49,578 --> 00:36:51,378
+we do Windows, we do Mac, we do 32-bit,
+
+844
+00:36:51,378 --> 00:36:53,279
+we do 64-bit, we do AMD, we do Intel,
+
+845
+00:36:53,279 --> 00:36:58,580
+and we haven't had any reports of people going out of sync
+
+846
+00:36:58,580 --> 00:37:03,942
+because of, anyway, processor architecture, which is great.
+
+847
+00:37:03,942 --> 00:37:05,522
+Our EP is particularly proud
+
+848
+00:37:05,522 --> 00:37:07,923
+that we got Mac versus PC cross-play working,
+
+849
+00:37:07,923 --> 00:37:09,003
+because he used to work at Relic,
+
+850
+00:37:09,003 --> 00:37:09,963
+and they could never figure that out.
+
+851
+00:37:09,963 --> 00:37:10,283
+Was it necessary?
+
+852
+00:37:14,467 --> 00:37:17,510
+We had very few cases to prove
+
+853
+00:37:17,510 --> 00:37:19,432
+that floating point divergence would have been an issue,
+
+854
+00:37:19,432 --> 00:37:22,615
+but there was one interesting one that came up
+
+855
+00:37:22,615 --> 00:37:25,037
+where we were getting desyncs between 32-bit
+
+856
+00:37:25,037 --> 00:37:26,658
+and 64-bit systems right at the start of game,
+
+857
+00:37:26,658 --> 00:37:28,200
+and what was going out of sync
+
+858
+00:37:28,200 --> 00:37:30,382
+was the position of a resource point.
+
+859
+00:37:30,382 --> 00:37:33,485
+And it turned out what had happened was that
+
+860
+00:37:33,485 --> 00:37:36,527
+we gave the designers a way to place resource points
+
+861
+00:37:36,527 --> 00:37:38,709
+in a scene in Unity, and so of course,
+
+862
+00:37:38,709 --> 00:37:40,571
+Unity is positioning that as a transform.
+
+863
+00:37:41,732 --> 00:37:44,152
+and not just a transform with three numbers in it,
+
+864
+00:37:44,152 --> 00:37:46,933
+but a transform with like eight matrices in it.
+
+865
+00:37:46,933 --> 00:37:48,413
+And for some reason, the designers took
+
+866
+00:37:48,413 --> 00:37:50,074
+a whole resource field and rotated it
+
+867
+00:37:50,074 --> 00:37:52,174
+by like 53 degrees or something.
+
+868
+00:37:52,174 --> 00:37:56,535
+So there is a non-identity transform down that hierarchy,
+
+869
+00:37:56,535 --> 00:37:59,076
+and the math that was being done was coming out different
+
+870
+00:37:59,076 --> 00:38:00,816
+on 32-bit systems and 64-bit systems.
+
+871
+00:38:00,816 --> 00:38:02,637
+The resource point was landing
+
+872
+00:38:02,637 --> 00:38:04,077
+in a slightly different place on the map,
+
+873
+00:38:04,077 --> 00:38:05,477
+and then our checksums were going out of sync
+
+874
+00:38:05,477 --> 00:38:07,318
+because the thing wasn't in the same place
+
+875
+00:38:07,318 --> 00:38:07,878
+on different games.
+
+876
+00:38:09,371 --> 00:38:13,314
+What we ended up doing about it was kind of doing in a cheeseball floating point
+
+877
+00:38:13,314 --> 00:38:16,756
+quantization on the resource point position before we fed it to the sim and
+
+878
+00:38:16,756 --> 00:38:21,360
+that worked. In theory even the quantization could have gone wrong
+
+879
+00:38:21,360 --> 00:38:25,663
+depending what exact floating point numbers we had. In practice it got us out
+
+880
+00:38:25,663 --> 00:38:30,386
+of the hole. What we would do in future is position those things using
+
+881
+00:38:30,386 --> 00:38:32,728
+fixed-point numbers in the first place and just give designers a way to edit
+
+882
+00:38:32,728 --> 00:38:34,890
+the fixed-point numbers in Unity.
+
+883
+00:38:37,537 --> 00:38:41,159
+Performance, how do we make all this run fast enough?
+
+884
+00:38:41,159 --> 00:38:44,762
+Our min spec machine was a relatively modest 32-bit system
+
+885
+00:38:44,762 --> 00:38:47,003
+with three gigs of RAM.
+
+886
+00:38:47,003 --> 00:38:48,244
+Performance was an issue.
+
+887
+00:38:48,244 --> 00:38:52,407
+It's not the absolute buttery smoothest experience we'd like,
+
+888
+00:38:52,407 --> 00:38:54,969
+but we got to a pretty good place.
+
+889
+00:38:54,969 --> 00:38:57,491
+A big part of it was using pretty aggressive level
+
+890
+00:38:57,491 --> 00:39:00,413
+of detail settings for the presentation layer.
+
+891
+00:39:01,750 --> 00:39:03,652
+Because presentation doesn't need to be synchronized,
+
+892
+00:39:03,652 --> 00:39:04,774
+we can sort of dial it way back,
+
+893
+00:39:04,774 --> 00:39:06,495
+and as long as the player still knows what's going on,
+
+894
+00:39:06,495 --> 00:39:07,156
+then it's great.
+
+895
+00:39:07,156 --> 00:39:13,223
+And of course, you wanna be able to let the hardcore people
+
+896
+00:39:13,223 --> 00:39:14,304
+go up to like 4K or whatever,
+
+897
+00:39:14,304 --> 00:39:17,527
+and try and max out every possible system.
+
+898
+00:39:18,147 --> 00:39:19,349
+Most of this is pretty standard stuff
+
+899
+00:39:19,349 --> 00:39:20,411
+that would show up in any game.
+
+900
+00:39:20,411 --> 00:39:22,776
+There's a couple interesting ones.
+
+901
+00:39:22,776 --> 00:39:25,040
+So the decal system, again, we had kind of a budget
+
+902
+00:39:25,040 --> 00:39:27,003
+on how many decals we could draw
+
+903
+00:39:27,003 --> 00:39:30,309
+and gave the user a setting to control how many decals
+
+904
+00:39:30,309 --> 00:39:31,251
+to help with performance there.
+
+905
+00:39:32,774 --> 00:39:39,177
+We also had a physics option, so because our physics is aesthetic, we can turn it off and
+
+906
+00:39:39,177 --> 00:39:43,098
+what that would mean is the wheel colliders would get turned off and the vehicles would
+
+907
+00:39:43,098 --> 00:39:46,380
+just kind of be in a fixed pose and they'd sort of slide around.
+
+908
+00:39:46,380 --> 00:39:49,941
+We normally use that for the really low LOD ones that are off in the distance so you really
+
+909
+00:39:49,941 --> 00:39:53,783
+couldn't tell the difference, but by adjusting this quality setting you could kind of pull
+
+910
+00:39:53,783 --> 00:39:56,364
+in how far away that started happening.
+
+911
+00:39:56,878 --> 00:39:59,419
+and save a bunch of work on the animation blending
+
+912
+00:39:59,419 --> 00:40:01,199
+and the wheel colliders and things like that.
+
+913
+00:40:01,199 --> 00:40:02,880
+So that helped with performance.
+
+914
+00:40:02,880 --> 00:40:03,900
+Of course, we tried to make everything run
+
+915
+00:40:03,900 --> 00:40:05,020
+as fast as we could.
+
+916
+00:40:05,020 --> 00:40:07,941
+So I mentioned the terrain chunking system
+
+917
+00:40:07,941 --> 00:40:09,781
+and the culling of the decals and things like that.
+
+918
+00:40:09,781 --> 00:40:12,102
+But once we squeezed out all the performance we could,
+
+919
+00:40:12,102 --> 00:40:13,542
+we turned to quality settings.
+
+920
+00:40:13,542 --> 00:40:16,963
+I want to talk a bit about C Sharp as well.
+
+921
+00:40:16,963 --> 00:40:20,264
+I'm guessing a lot of people here
+
+922
+00:40:20,264 --> 00:40:23,284
+are probably C++ programmers more than C Sharp.
+
+923
+00:40:23,284 --> 00:40:24,945
+Who thinks C++ is better than C Sharp?
+
+924
+00:40:24,945 --> 00:40:25,325
+Show of hands.
+
+925
+00:40:26,735 --> 00:40:28,156
+Who thinks C Sharp is better than C++?
+
+926
+00:40:28,156 --> 00:40:28,516
+Okay, fight!
+
+927
+00:40:28,516 --> 00:40:32,800
+All right, I know there's some skepticism around C Sharp,
+
+928
+00:40:32,800 --> 00:40:36,603
+and rightly so.
+
+929
+00:40:36,603 --> 00:40:38,144
+By performance, I really mean memory,
+
+930
+00:40:38,144 --> 00:40:39,885
+because that's where we usually found performance
+
+931
+00:40:39,885 --> 00:40:41,407
+to be an issue with C Sharp,
+
+932
+00:40:41,407 --> 00:40:45,710
+and that's mostly what I'm gonna concentrate on.
+
+933
+00:40:45,710 --> 00:40:47,612
+C Sharp uses managed memory,
+
+934
+00:40:47,612 --> 00:40:49,653
+so you can do things to create new objects,
+
+935
+00:40:49,653 --> 00:40:50,794
+but you can't delete them,
+
+936
+00:40:50,794 --> 00:40:52,396
+and all the C++ programmers cringe,
+
+937
+00:40:52,396 --> 00:40:53,557
+because that just sounds really dirty.
+
+938
+00:40:55,512 --> 00:40:56,973
+The C Sharp programmers are like,
+
+939
+00:40:56,973 --> 00:40:58,113
+hey, don't worry about it, it'll be fine.
+
+940
+00:40:58,113 --> 00:40:59,754
+That's what Microsoft would have you believe.
+
+941
+00:40:59,754 --> 00:41:02,735
+This fancy, shiny garbage truck
+
+942
+00:41:02,735 --> 00:41:04,416
+is the .NET garbage collector.
+
+943
+00:41:04,416 --> 00:41:05,556
+He's super high tech and modern.
+
+944
+00:41:05,556 --> 00:41:06,717
+He can do all kinds of cool stuff.
+
+945
+00:41:06,717 --> 00:41:08,918
+He can collect more garbage in an hour
+
+946
+00:41:08,918 --> 00:41:10,798
+than you would imagine.
+
+947
+00:41:10,798 --> 00:41:13,920
+Unfortunately, Unity is on an older version of C Sharp,
+
+948
+00:41:13,920 --> 00:41:17,181
+and they have an older garbage collector.
+
+949
+00:41:17,181 --> 00:41:18,221
+Here's old man Boehm.
+
+950
+00:41:18,221 --> 00:41:20,222
+He's going around picking up the trash for the week.
+
+951
+00:41:21,906 --> 00:41:23,047
+There's a good reason for that.
+
+952
+00:41:23,047 --> 00:41:25,769
+Unity has done a lot of custom work on their version of Mono
+
+953
+00:41:25,769 --> 00:41:28,590
+because they've got it running on like 6,000 different platforms.
+
+954
+00:41:28,590 --> 00:41:32,253
+So they're a long way behind the master branch.
+
+955
+00:41:32,253 --> 00:41:34,374
+It's kind of cool that they're on GitHub
+
+956
+00:41:34,374 --> 00:41:36,675
+and you can see just how far behind they are
+
+957
+00:41:36,675 --> 00:41:38,597
+and how much extra work they've done.
+
+958
+00:41:38,597 --> 00:41:41,298
+I know they've got plans to kind of upgrade to a newer version of Mono
+
+959
+00:41:41,298 --> 00:41:42,719
+and bring in the new garbage collector,
+
+960
+00:41:42,719 --> 00:41:43,800
+so we can look forward to that.
+
+961
+00:41:43,800 --> 00:41:46,962
+But in the meantime, too much garbage is always a bad idea.
+
+962
+00:41:46,962 --> 00:41:49,643
+You don't want to do this no matter how good your garbage collector is.
+
+963
+00:41:49,643 --> 00:41:50,824
+So, what can we do?
+
+964
+00:41:51,481 --> 00:41:53,543
+How can we avoid generating garbage in C Sharp
+
+965
+00:41:53,543 --> 00:41:54,884
+and avoid allocating memory
+
+966
+00:41:54,884 --> 00:41:56,526
+and therefore help things run faster?
+
+967
+00:41:56,526 --> 00:42:01,391
+We spent a lot of time with the Unity profiler,
+
+968
+00:42:01,391 --> 00:42:05,095
+which has a column showing how much memory is allocated
+
+969
+00:42:05,095 --> 00:42:07,017
+as you're going through each stage.
+
+970
+00:42:08,706 --> 00:42:16,152
+We often found that the amount of memory allocated was very highly correlated with the performance or lack thereof of a given system.
+
+971
+00:42:16,152 --> 00:42:21,857
+And so we generally got in the habit of focusing first on reducing memory allocations, ideally to zero,
+
+972
+00:42:21,857 --> 00:42:26,001
+and then looking at the raw performance if there were still things that were too slow.
+
+973
+00:42:26,425 --> 00:42:28,465
+I think what's probably happening under the hood
+
+974
+00:42:28,465 --> 00:42:30,446
+is that the bone garbage collector
+
+975
+00:42:30,446 --> 00:42:32,786
+is chewing through a bunch of memory
+
+976
+00:42:32,786 --> 00:42:35,047
+and then coming back quite a bit later to reclaim it.
+
+977
+00:42:35,047 --> 00:42:35,907
+And so in the meantime,
+
+978
+00:42:35,907 --> 00:42:37,867
+you're basically killing your cash constantly
+
+979
+00:42:37,867 --> 00:42:41,988
+if you're allocating new objects.
+
+980
+00:42:41,988 --> 00:42:43,948
+So I've got a few little C sharp tips and tricks
+
+981
+00:42:43,948 --> 00:42:45,329
+to kind of help with managing memory.
+
+982
+00:42:45,329 --> 00:42:48,329
+Collection capacity.
+
+983
+00:42:48,329 --> 00:42:50,270
+If you want a list of things,
+
+984
+00:42:50,270 --> 00:42:51,950
+you create a new list of things,
+
+985
+00:42:51,950 --> 00:42:53,270
+you add some things,
+
+986
+00:42:53,270 --> 00:42:55,271
+you add a bunch more things.
+
+987
+00:42:55,271 --> 00:42:56,011
+And at some point,
+
+988
+00:42:56,695 --> 00:42:58,536
+you're gonna allocate beyond,
+
+989
+00:42:58,536 --> 00:43:01,299
+you're gonna add an item beyond the capacity of that list.
+
+990
+00:43:01,299 --> 00:43:03,800
+The default reallocation strategy in .NET
+
+991
+00:43:03,800 --> 00:43:06,823
+is to take the array that's backing that list,
+
+992
+00:43:06,823 --> 00:43:09,004
+allocate a new array that's twice as big,
+
+993
+00:43:09,004 --> 00:43:11,546
+and then copy over the old array into the new array,
+
+994
+00:43:11,546 --> 00:43:16,510
+and then drop the old array into the garbage collector.
+
+995
+00:43:16,510 --> 00:43:17,651
+16 was my guess.
+
+996
+00:43:17,651 --> 00:43:19,332
+I think the default capacity is 16.
+
+997
+00:43:19,332 --> 00:43:20,033
+When you hit 16, it doubles to 32.
+
+998
+00:43:20,033 --> 00:43:21,754
+When you go beyond 32, it doubles to 64, et cetera.
+
+999
+00:43:23,677 --> 00:43:25,318
+So again, if it's not 16, it might be 10.
+
+1000
+00:43:25,318 --> 00:43:25,799
+It might be 8.
+
+1001
+00:43:25,799 --> 00:43:27,440
+It depends on the implementation,
+
+1002
+00:43:27,440 --> 00:43:28,120
+but regardless.
+
+1003
+00:43:28,120 --> 00:43:31,162
+If you know how many things you need ahead of time,
+
+1004
+00:43:31,162 --> 00:43:32,142
+or you can put an upper bound on that,
+
+1005
+00:43:32,142 --> 00:43:35,324
+you're always better pre allocating it to that size.
+
+1006
+00:43:35,324 --> 00:43:36,405
+So now I can add the 17 things
+
+1007
+00:43:36,405 --> 00:43:38,366
+and there won't be any allocation.
+
+1008
+00:43:38,366 --> 00:43:41,548
+You may need to over allocate in order to do this,
+
+1009
+00:43:41,548 --> 00:43:44,030
+but it's probably worth it because you're better off
+
+1010
+00:43:44,030 --> 00:43:46,151
+allocating once at your Max
+
+1011
+00:43:46,151 --> 00:43:47,872
+than continuously allocating and reallocating.
+
+1012
+00:43:50,112 --> 00:43:51,953
+Also consider writing your own collection classes.
+
+1013
+00:43:51,953 --> 00:43:53,675
+Like you could write a version of lists
+
+1014
+00:43:53,675 --> 00:43:56,036
+that has a forced capacity and can't exceed it.
+
+1015
+00:43:56,036 --> 00:43:58,978
+It's basically an invalid operation to go over the end of it.
+
+1016
+00:43:58,978 --> 00:44:01,720
+We did a bunch of stuff like that.
+
+1017
+00:44:01,720 --> 00:44:02,861
+Temporary lists, quite often you find
+
+1018
+00:44:02,861 --> 00:44:04,402
+you want a little temporary collection of things
+
+1019
+00:44:04,402 --> 00:44:06,944
+that you can then hand off to some method
+
+1020
+00:44:06,944 --> 00:44:08,885
+to do stuff on those things.
+
+1021
+00:44:08,885 --> 00:44:10,687
+Here's the obvious way to do it.
+
+1022
+00:44:10,687 --> 00:44:12,708
+And of course, you're setting your max capacity
+
+1023
+00:44:12,708 --> 00:44:13,749
+because you know better.
+
+1024
+00:44:13,749 --> 00:44:16,190
+So you allocate your list, you add a bunch of stuff,
+
+1025
+00:44:16,190 --> 00:44:16,971
+and then you do things.
+
+1026
+00:44:17,779 --> 00:44:18,960
+but you had to allocate a new list,
+
+1027
+00:44:18,960 --> 00:44:19,861
+and that's gonna take memory,
+
+1028
+00:44:19,861 --> 00:44:21,202
+and when you go out of scope in this method,
+
+1029
+00:44:21,202 --> 00:44:22,983
+you're gonna drop that list into the garbage collector.
+
+1030
+00:44:22,983 --> 00:44:25,845
+One thing we ended up doing quite a bit
+
+1031
+00:44:25,845 --> 00:44:27,466
+was this kind of dirty trick of having
+
+1032
+00:44:27,466 --> 00:44:32,349
+static temporary lists that we would
+
+1033
+00:44:32,349 --> 00:44:34,190
+add some things to,
+
+1034
+00:44:34,190 --> 00:44:36,091
+we'd perform the operation on the group of things,
+
+1035
+00:44:36,091 --> 00:44:37,392
+and then we'd clear the list when we're done with it,
+
+1036
+00:44:37,392 --> 00:44:38,533
+and leave it for the next method
+
+1037
+00:44:38,533 --> 00:44:39,553
+that needs a list of things.
+
+1038
+00:44:39,553 --> 00:44:42,836
+Obviously, there's issues if, deeper down your call stack,
+
+1039
+00:44:42,836 --> 00:44:44,577
+they wanna do things with things as well,
+
+1040
+00:44:44,577 --> 00:44:46,158
+and they start reusing your temporary list
+
+1041
+00:44:46,158 --> 00:44:47,298
+that you're in the process of using.
+
+1042
+00:44:48,185 --> 00:44:50,188
+You'll generally get like an invalid operation
+
+1043
+00:44:50,188 --> 00:44:51,570
+as you attempt to iterate the list
+
+1044
+00:44:51,570 --> 00:44:54,094
+if you're modifying it at the same time.
+
+1045
+00:44:54,094 --> 00:44:55,356
+So again, it's a little bit dirty,
+
+1046
+00:44:55,356 --> 00:44:58,140
+but it's a way of avoiding allocations.
+
+1047
+00:44:58,140 --> 00:44:59,482
+You get a one-time allocation instead.
+
+1048
+00:45:01,168 --> 00:45:03,750
+I put this little comment here.
+
+1049
+00:45:03,750 --> 00:45:07,431
+If you're looking at this line where we clear the list
+
+1050
+00:45:07,431 --> 00:45:09,592
+and you're wondering if that reset the capacity
+
+1051
+00:45:09,592 --> 00:45:12,773
+we said initially, you can either test it and see.
+
+1052
+00:45:12,773 --> 00:45:14,934
+You can also go look at the Microsoft reference source,
+
+1053
+00:45:14,934 --> 00:45:16,815
+which is a really handy way of looking at what's going on
+
+1054
+00:45:16,815 --> 00:45:18,416
+under the hood in a lot of .NET collections.
+
+1055
+00:45:18,416 --> 00:45:21,657
+You could also, I guess, go on GitHub and look at Mono,
+
+1056
+00:45:21,657 --> 00:45:23,738
+because that's probably what you're actually running.
+
+1057
+00:45:23,738 --> 00:45:27,279
+Anyway, having source to the .NET framework is pretty cool
+
+1058
+00:45:27,279 --> 00:45:29,060
+and helps you learn some stuff and is really good for.
+
+1059
+00:45:29,741 --> 00:45:32,282
+educating yourself on how to build your own collections.
+
+1060
+00:45:32,282 --> 00:45:32,582
+Object pools.
+
+1061
+00:45:32,582 --> 00:45:36,985
+So instead of allocating and freeing objects all the time,
+
+1062
+00:45:36,985 --> 00:45:39,506
+just pre-allocate a bunch of them and reuse them.
+
+1063
+00:45:39,506 --> 00:45:43,268
+Super important in Unity, if anyone's a Unity developer,
+
+1064
+00:45:43,268 --> 00:45:44,748
+you're probably well aware,
+
+1065
+00:45:44,748 --> 00:45:47,130
+instantiating a prefab has a bunch of costs to it
+
+1066
+00:45:47,130 --> 00:45:49,471
+as Unity creates those objects and gets them bound in
+
+1067
+00:45:49,471 --> 00:45:51,372
+and hooked into the engine.
+
+1068
+00:45:51,372 --> 00:45:54,733
+If you instead just pre-instantiate an instance
+
+1069
+00:45:54,733 --> 00:45:56,174
+of that prefab and then disable it
+
+1070
+00:45:56,174 --> 00:45:57,935
+and then enable it when you want to use it,
+
+1071
+00:45:57,935 --> 00:45:58,575
+that's much better.
+
+1072
+00:45:59,659 --> 00:46:03,563
+But you can use this concept for other C Sharp object types as well.
+
+1073
+00:46:03,563 --> 00:46:06,065
+It's nothing Unity specific about it.
+
+1074
+00:46:06,065 --> 00:46:07,086
+Just make sure to clean stuff up
+
+1075
+00:46:07,086 --> 00:46:09,328
+before you put them back in the pool.
+
+1076
+00:46:09,328 --> 00:46:11,770
+Here's a quick little framework of what an object pool might look like.
+
+1077
+00:46:11,770 --> 00:46:12,691
+So you have a couple of lists.
+
+1078
+00:46:12,691 --> 00:46:14,573
+You pre-allocate them to a max capacity.
+
+1079
+00:46:14,573 --> 00:46:17,456
+One list is what's available. One list is what's in use.
+
+1080
+00:46:17,456 --> 00:46:19,137
+And you give an API for reserving objects
+
+1081
+00:46:19,137 --> 00:46:20,158
+and returning them to the pool.
+
+1082
+00:46:20,913 --> 00:46:23,094
+And I mean, this is just bare bones.
+
+1083
+00:46:23,094 --> 00:46:26,856
+You may need like some extra stuff around, you know,
+
+1084
+00:46:26,856 --> 00:46:29,397
+predefined callbacks on what to do at cleanup time
+
+1085
+00:46:29,397 --> 00:46:31,398
+on those objects and stuff.
+
+1086
+00:46:31,398 --> 00:46:32,998
+But it gives you an idea of how this might look.
+
+1087
+00:46:32,998 --> 00:46:39,261
+This line of code has a bunch of problems.
+
+1088
+00:46:39,261 --> 00:46:45,243
+How many objects are being allocated here?
+
+1089
+00:46:45,243 --> 00:46:46,104
+Here's the API.
+
+1090
+00:46:46,104 --> 00:46:48,385
+So string.format takes a format string
+
+1091
+00:46:48,385 --> 00:46:50,145
+and then an open-ended list of parameters.
+
+1092
+00:46:51,164 --> 00:46:52,177
+There's actually.
+
+1093
+00:46:53,826 --> 00:46:57,829
+One allocation to box X, X is an integer,
+
+1094
+00:46:57,829 --> 00:47:00,351
+but string.format wants objects.
+
+1095
+00:47:00,351 --> 00:47:02,533
+In .NET, everything is an object,
+
+1096
+00:47:02,533 --> 00:47:03,594
+except you gotta be careful,
+
+1097
+00:47:03,594 --> 00:47:06,135
+because any value type, which is to say,
+
+1098
+00:47:06,135 --> 00:47:09,338
+primitives like integers and floats, or any struct,
+
+1099
+00:47:09,338 --> 00:47:10,959
+in order to treat it as an object,
+
+1100
+00:47:10,959 --> 00:47:12,961
+you need to take it off the stack,
+
+1101
+00:47:12,961 --> 00:47:14,822
+allocate a little blob of space in the heap,
+
+1102
+00:47:14,822 --> 00:47:16,063
+create a pointer to point to it,
+
+1103
+00:47:16,063 --> 00:47:17,824
+so that you now have a reference type you can deal with,
+
+1104
+00:47:17,824 --> 00:47:19,366
+and that pointer is now the reference
+
+1105
+00:47:19,366 --> 00:47:21,347
+you can pass into an API that wants an object.
+
+1106
+00:47:22,213 --> 00:47:25,476
+So you had to take that X that was sitting on the stack,
+
+1107
+00:47:25,476 --> 00:47:28,818
+allocate four bytes of memory off the heap,
+
+1108
+00:47:28,818 --> 00:47:31,160
+copy the 42 into it, and then take that as a reference
+
+1109
+00:47:31,160 --> 00:47:32,501
+and pass it into string.format.
+
+1110
+00:47:32,501 --> 00:47:36,305
+There's another allocation for the params object array.
+
+1111
+00:47:36,305 --> 00:47:39,487
+It's a temporary array that if you look at the,
+
+1112
+00:47:39,487 --> 00:47:43,170
+you can disassemble .NET code really easily.
+
+1113
+00:47:43,170 --> 00:47:45,692
+So you can look at an ILSpy or something like that
+
+1114
+00:47:45,692 --> 00:47:46,433
+and see what's going on,
+
+1115
+00:47:46,433 --> 00:47:48,435
+and you'll see that temporary allocation of an array.
+
+1116
+00:47:49,038 --> 00:47:51,379
+copying of the object reference into the array
+
+1117
+00:47:51,379 --> 00:47:53,900
+and then passing the array to the API.
+
+1118
+00:47:53,900 --> 00:47:57,521
+There's gonna be another allocation
+
+1119
+00:47:57,521 --> 00:47:58,562
+because under the hood,
+
+1120
+00:47:58,562 --> 00:48:00,423
+string.format is gonna call toString on X,
+
+1121
+00:48:00,423 --> 00:48:02,664
+so that's gonna allocate a temporary string
+
+1122
+00:48:02,664 --> 00:48:03,524
+representing the string 42.
+
+1123
+00:48:03,524 --> 00:48:06,645
+And then of course, you're making a new string,
+
+1124
+00:48:06,645 --> 00:48:08,286
+so you're gonna have to allocate that as well.
+
+1125
+00:48:08,286 --> 00:48:10,327
+With unsafe code,
+
+1126
+00:48:10,327 --> 00:48:12,368
+you can do some fancy stuff with string pooling,
+
+1127
+00:48:12,368 --> 00:48:13,929
+but it's tricky to get it to work right,
+
+1128
+00:48:13,929 --> 00:48:15,929
+so mostly just be careful with strings.
+
+1129
+00:48:19,066 --> 00:48:19,966
+This is a little bit better.
+
+1130
+00:48:19,966 --> 00:48:22,087
+So instead of using string.format,
+
+1131
+00:48:22,087 --> 00:48:23,087
+if you're just doing something simple,
+
+1132
+00:48:23,087 --> 00:48:26,248
+you could just concatenate strings instead.
+
+1133
+00:48:26,248 --> 00:48:28,929
+And if you call toString yourself,
+
+1134
+00:48:28,929 --> 00:48:30,449
+then there's no need to box X,
+
+1135
+00:48:30,449 --> 00:48:33,090
+because the compiler knows that you're calling toString
+
+1136
+00:48:33,090 --> 00:48:33,550
+on a value type,
+
+1137
+00:48:33,550 --> 00:48:35,991
+so it can just go ahead and do the right thing.
+
+1138
+00:48:35,991 --> 00:48:37,551
+You're still gonna call X.toString
+
+1139
+00:48:37,551 --> 00:48:38,932
+and allocate that temporary string,
+
+1140
+00:48:38,932 --> 00:48:40,372
+and then create the new string S,
+
+1141
+00:48:40,372 --> 00:48:42,513
+but it's a lot better than the previous slide.
+
+1142
+00:48:42,513 --> 00:48:45,974
+So I mentioned boxing.
+
+1143
+00:48:45,974 --> 00:48:48,335
+There's a number of things you can do to avoid boxing.
+
+1144
+00:48:51,176 --> 00:48:52,537
+Here's the sort of canonical example.
+
+1145
+00:48:52,537 --> 00:48:53,977
+You've declared a value type.
+
+1146
+00:48:53,977 --> 00:48:55,737
+You've got a structure.
+
+1147
+00:48:55,737 --> 00:48:58,378
+It's gonna be a value type sitting generally on the stack,
+
+1148
+00:48:58,378 --> 00:49:01,258
+but when you pass it to an API that wants an object,
+
+1149
+00:49:01,258 --> 00:49:02,839
+you need to do the boxing operation,
+
+1150
+00:49:02,839 --> 00:49:05,319
+allocate it on the heap, copy it, get the reference,
+
+1151
+00:49:05,319 --> 00:49:07,100
+pass the reference to the API.
+
+1152
+00:49:07,100 --> 00:49:10,300
+So this will be boxing here.
+
+1153
+00:49:10,300 --> 00:49:12,901
+So you think, okay, no problem.
+
+1154
+00:49:12,901 --> 00:49:14,841
+Maybe if I use an interface, it'll be cleaner
+
+1155
+00:49:14,841 --> 00:49:16,341
+and objects are kind of dirty anyway.
+
+1156
+00:49:16,341 --> 00:49:17,222
+It's like Void Star.
+
+1157
+00:49:18,936 --> 00:49:24,218
+I'm going to declare an interface that has a size getter and a name getter.
+
+1158
+00:49:24,218 --> 00:49:26,519
+I'm going to have my struct implement the interface, which is fine.
+
+1159
+00:49:26,519 --> 00:49:29,600
+Structs can implement interfaces, no problem there.
+
+1160
+00:49:29,600 --> 00:49:34,482
+I'm going to change my API to take an I thing, but it still boxes.
+
+1161
+00:49:34,482 --> 00:49:39,024
+Because I thing, when the compiler is compiling that method do the thing,
+
+1162
+00:49:39,024 --> 00:49:43,046
+it doesn't know that I thing is going to be a struct thing.
+
+1163
+00:49:43,046 --> 00:49:45,407
+So it's going to assume that it's a reference type and treat it accordingly.
+
+1164
+00:49:45,965 --> 00:49:47,625
+and you're effectively gonna have to box your struct
+
+1165
+00:49:47,625 --> 00:49:48,546
+in order to call that API.
+
+1166
+00:49:48,546 --> 00:49:51,947
+There is an escape hatch though.
+
+1167
+00:49:51,947 --> 00:49:54,288
+If you do this, you can use generics
+
+1168
+00:49:54,288 --> 00:49:56,909
+and say that you're gonna do the thing
+
+1169
+00:49:56,909 --> 00:49:58,270
+on a thing of type T,
+
+1170
+00:49:58,270 --> 00:50:00,391
+where that type implements the interface you want.
+
+1171
+00:50:00,391 --> 00:50:04,292
+So because you put the where constraint on there,
+
+1172
+00:50:04,292 --> 00:50:05,553
+the code in the do the thing method
+
+1173
+00:50:05,553 --> 00:50:07,994
+can treat it as an I thing, and the API will work.
+
+1174
+00:50:08,967 --> 00:50:10,628
+And because you've used the generic,
+
+1175
+00:50:10,628 --> 00:50:13,890
+when the compiler compiles the call to do the thing
+
+1176
+00:50:13,890 --> 00:50:16,532
+with a struct thing, it knows that you need to be able
+
+1177
+00:50:16,532 --> 00:50:17,993
+to handle that particular value type,
+
+1178
+00:50:17,993 --> 00:50:20,134
+and it will emit code to handle struct things
+
+1179
+00:50:20,134 --> 00:50:21,935
+in the do the thing call.
+
+1180
+00:50:21,935 --> 00:50:24,557
+So you're trading off, you're generating a bit more code,
+
+1181
+00:50:24,557 --> 00:50:26,278
+but it's probably not that much,
+
+1182
+00:50:26,278 --> 00:50:29,520
+and you're not having to box your struct things
+
+1183
+00:50:29,520 --> 00:50:30,901
+in order to pass them to the API.
+
+1184
+00:50:34,246 --> 00:50:37,147
+Enumerators get some special treatment.
+
+1185
+00:50:37,147 --> 00:50:40,089
+C-sharp programmers like to say for each thing in things,
+
+1186
+00:50:40,089 --> 00:50:43,010
+do a bunch of stuff on the thing.
+
+1187
+00:50:43,010 --> 00:50:46,031
+How many allocations to do for each?
+
+1188
+00:50:46,031 --> 00:50:48,492
+In this case we're allocating over a custom collection type,
+
+1189
+00:50:48,492 --> 00:50:50,833
+so the answer is it depends.
+
+1190
+00:50:50,833 --> 00:50:52,694
+How did my collection implement IEnumerable?
+
+1191
+00:50:54,736 --> 00:50:56,317
+Here's sort of the standard way.
+
+1192
+00:50:56,317 --> 00:50:57,538
+You might have a private class
+
+1193
+00:50:57,538 --> 00:50:59,280
+that implements your enumerator.
+
+1194
+00:50:59,280 --> 00:51:00,481
+You've got your getEnumerator method
+
+1195
+00:51:00,481 --> 00:51:03,964
+that's satisfying the IEnumerable interface,
+
+1196
+00:51:03,964 --> 00:51:07,406
+and you're just returning a new instance of that enumerator.
+
+1197
+00:51:07,406 --> 00:51:09,608
+However, let me back up.
+
+1198
+00:51:09,608 --> 00:51:11,109
+So here you've allocated a new class,
+
+1199
+00:51:11,109 --> 00:51:12,070
+so clearly you're allocating.
+
+1200
+00:51:12,070 --> 00:51:14,432
+Every time you do a forEach, you're gonna allocate.
+
+1201
+00:51:14,432 --> 00:51:16,374
+So you're thinking, okay, I don't wanna do that.
+
+1202
+00:51:16,374 --> 00:51:18,315
+What if I make my enumerator a struct?
+
+1203
+00:51:18,315 --> 00:51:20,677
+Then it's a value type and it won't get allocated.
+
+1204
+00:51:20,677 --> 00:51:21,158
+That's fine.
+
+1205
+00:51:22,225 --> 00:51:24,466
+but you're gonna box when you return it as an interface
+
+1206
+00:51:24,466 --> 00:51:27,606
+because of the reasons we just talked about.
+
+1207
+00:51:27,606 --> 00:51:30,507
+What you can do instead is have a method called
+
+1208
+00:51:30,507 --> 00:51:36,168
+getEnumerator that returns a myEnumerator that is a struct.
+
+1209
+00:51:36,168 --> 00:51:38,689
+And this doesn't directly satisfy IEnumerable,
+
+1210
+00:51:38,689 --> 00:51:40,189
+so you're gonna need a couple other overloads
+
+1211
+00:51:40,189 --> 00:51:41,809
+to keep that guy happy and make the compiler
+
+1212
+00:51:41,809 --> 00:51:43,330
+compile your code.
+
+1213
+00:51:43,330 --> 00:51:45,470
+But there's a technique called duck typing,
+
+1214
+00:51:45,470 --> 00:51:47,911
+which is an optimization in the C Sharp compiler
+
+1215
+00:51:47,911 --> 00:51:49,411
+where when they're compiling a foreach,
+
+1216
+00:51:49,953 --> 00:51:51,613
+They'll look at the thing you're iterating over,
+
+1217
+00:51:51,613 --> 00:51:53,793
+and if it looks like an enumerable
+
+1218
+00:51:53,793 --> 00:51:55,034
+and it quacks like an enumerable,
+
+1219
+00:51:55,034 --> 00:51:56,434
+then by God, it must be an enumerable
+
+1220
+00:51:56,434 --> 00:51:57,614
+and we'll let you enumerate it.
+
+1221
+00:51:57,614 --> 00:52:01,095
+So they'll recognize that there's an optimization
+
+1222
+00:52:01,095 --> 00:52:02,955
+they can take, they can grab the struct enumerator
+
+1223
+00:52:02,955 --> 00:52:06,656
+and iterate over that and avoid the boxing.
+
+1224
+00:52:06,656 --> 00:52:10,836
+Unfortunately, if you've declared your collection
+
+1225
+00:52:10,836 --> 00:52:14,277
+by the interface, the compiler no longer knows
+
+1226
+00:52:14,277 --> 00:52:16,197
+that you're iterating over this custom type
+
+1227
+00:52:16,197 --> 00:52:18,438
+that has that custom enumerator,
+
+1228
+00:52:18,438 --> 00:52:19,498
+and it can't duct type anymore.
+
+1229
+00:52:20,986 --> 00:52:21,746
+which makes you sad.
+
+1230
+00:52:21,746 --> 00:52:25,469
+I'm gonna give a super quick look
+
+1231
+00:52:25,469 --> 00:52:27,270
+at our Entity Component System,
+
+1232
+00:52:27,270 --> 00:52:29,372
+and this is gonna be unsatisfyingly brief,
+
+1233
+00:52:29,372 --> 00:52:30,773
+and it probably deserves a talk of its own.
+
+1234
+00:52:30,773 --> 00:52:33,074
+But there were a couple talks earlier in the week
+
+1235
+00:52:33,074 --> 00:52:34,155
+that mentioned Entity Components,
+
+1236
+00:52:34,155 --> 00:52:36,597
+so I wanted to mention it as well.
+
+1237
+00:52:36,597 --> 00:52:38,998
+And it also puts together a lot of the C Sharp lessons
+
+1238
+00:52:38,998 --> 00:52:41,200
+I've just been talking about.
+
+1239
+00:52:41,200 --> 00:52:43,121
+So our Entity Component System,
+
+1240
+00:52:43,121 --> 00:52:45,142
+we used it in the simulation layer.
+
+1241
+00:52:45,142 --> 00:52:47,104
+It's somewhat analogous to game objects
+
+1242
+00:52:47,104 --> 00:52:48,205
+and components in Unity,
+
+1243
+00:52:48,205 --> 00:52:49,125
+so it's kind of like,
+
+1244
+00:52:49,588 --> 00:52:54,451
+Unity game objects and components are the presentation equivalent of the entity component system,
+
+1245
+00:52:54,451 --> 00:52:57,212
+but in the game we're not using Unity so we can't do that.
+
+1246
+00:52:57,212 --> 00:53:00,514
+We also have the, we do it a bit more,
+
+1247
+00:53:00,514 --> 00:53:05,337
+I guess purely, so entity component system rather than having update methods on components.
+
+1248
+00:53:05,337 --> 00:53:09,300
+We leave the state in the components, we pull the behavior into processors
+
+1249
+00:53:09,300 --> 00:53:12,541
+and we run processors over entities that meet constraints.
+
+1250
+00:53:12,541 --> 00:53:15,603
+So this is a genuine bit of code out of our code base where we.
+
+1251
+00:53:16,285 --> 00:53:19,088
+We query the entity system to get all the components
+
+1252
+00:53:19,088 --> 00:53:21,050
+that have the position component,
+
+1253
+00:53:21,050 --> 00:53:22,251
+that have a mover component,
+
+1254
+00:53:22,251 --> 00:53:24,653
+that do not have a mobile component,
+
+1255
+00:53:24,653 --> 00:53:25,414
+which might have been,
+
+1256
+00:53:25,414 --> 00:53:27,916
+they may have been stunned by an attack or something.
+
+1257
+00:53:27,916 --> 00:53:29,198
+Do not have the death component,
+
+1258
+00:53:29,198 --> 00:53:33,061
+because we had a bunch of pain around making units die,
+
+1259
+00:53:33,061 --> 00:53:34,743
+and we had to throw a component on there at some point
+
+1260
+00:53:34,743 --> 00:53:37,466
+in there to avoid a bunch of other processing.
+
+1261
+00:53:39,045 --> 00:53:42,706
+For all the entities that satisfy those constraints,
+
+1262
+00:53:42,706 --> 00:53:46,447
+do the movement process, which looks something like this.
+
+1263
+00:53:46,447 --> 00:53:48,747
+So we have a static class for the movement processor.
+
+1264
+00:53:48,747 --> 00:53:50,087
+It's got no internal state.
+
+1265
+00:53:50,087 --> 00:53:52,548
+It's got a static method that processes entities,
+
+1266
+00:53:52,548 --> 00:53:54,668
+and that method can get components off the entity
+
+1267
+00:53:54,668 --> 00:53:56,028
+and do stuff with those components.
+
+1268
+00:53:56,028 --> 00:54:00,269
+So this is kind of the flavor of what it looks like.
+
+1269
+00:54:00,269 --> 00:54:02,529
+How it's implemented.
+
+1270
+00:54:02,529 --> 00:54:03,349
+Our entities are structs,
+
+1271
+00:54:03,349 --> 00:54:05,070
+and they basically just wrap an ID.
+
+1272
+00:54:05,070 --> 00:54:06,650
+All they really are is an index
+
+1273
+00:54:06,650 --> 00:54:08,490
+into some bookkeeping data in the entity system.
+
+1274
+00:54:09,425 --> 00:54:15,447
+Basically this stuff here, so we've got this struct collection was a thing we wrote that allows you to
+
+1275
+00:54:15,447 --> 00:54:20,129
+add and remove structs from an array without actually moving anything around and keeping track of what's free and what's not free.
+
+1276
+00:54:20,129 --> 00:54:22,850
+So we had custom collections in there, custom iterators, etc, etc.
+
+1277
+00:54:22,850 --> 00:54:29,372
+We pre-allocate to the max number of entities in the system, which I think we shipped with 5,000 was our max.
+
+1278
+00:54:29,372 --> 00:54:31,893
+I don't know what we actually had anyway, probably several thousand.
+
+1279
+00:54:34,871 --> 00:54:36,091
+What else?
+
+1280
+00:54:36,091 --> 00:54:38,712
+The entity query is also a struct to avoid allocating,
+
+1281
+00:54:38,712 --> 00:54:43,493
+and it does this duck typing friendly
+
+1282
+00:54:43,493 --> 00:54:45,214
+struct enumerator trick that I talked about.
+
+1283
+00:54:45,214 --> 00:54:48,254
+And anyway, all the pieces kind of come together
+
+1284
+00:54:48,254 --> 00:54:52,055
+that the basic plumbing of the entity system,
+
+1285
+00:54:52,055 --> 00:54:53,136
+once you've initialized it,
+
+1286
+00:54:53,136 --> 00:54:55,596
+there's basically no additional allocations required
+
+1287
+00:54:55,596 --> 00:54:56,737
+to use the entity system
+
+1288
+00:54:56,737 --> 00:54:58,337
+other than what you might be doing yourself
+
+1289
+00:54:58,337 --> 00:55:00,898
+in terms of whether or not you pulled components
+
+1290
+00:55:00,898 --> 00:55:01,478
+and that kind of thing.
+
+1291
+00:55:01,990 --> 00:55:04,873
+but the core of the system itself is pretty tight
+
+1292
+00:55:04,873 --> 00:55:06,895
+and doesn't allocate memory.
+
+1293
+00:55:06,895 --> 00:55:08,777
+It's also pretty quick.
+
+1294
+00:55:08,777 --> 00:55:11,619
+We end up iterating through the entire entity system
+
+1295
+00:55:11,619 --> 00:55:13,581
+probably a couple dozen times per frame,
+
+1296
+00:55:13,581 --> 00:55:15,723
+which we always thought would be a problem
+
+1297
+00:55:15,723 --> 00:55:18,826
+we'd have to come back to, but it kind of worked out.
+
+1298
+00:55:18,826 --> 00:55:20,268
+Ah, so much code.
+
+1299
+00:55:20,268 --> 00:55:26,213
+All right, so in summary, just a few quick key takeaways.
+
+1300
+00:55:27,015 --> 00:55:28,676
+Some people sort of criticize Unity games
+
+1301
+00:55:28,676 --> 00:55:29,977
+for looking all a bit the same.
+
+1302
+00:55:29,977 --> 00:55:32,199
+I think that's unfair criticism.
+
+1303
+00:55:32,199 --> 00:55:34,661
+I think really it's up to all of us as creatives
+
+1304
+00:55:34,661 --> 00:55:36,802
+to kind of take the engine we're working with
+
+1305
+00:55:36,802 --> 00:55:37,963
+and make things look amazing.
+
+1306
+00:55:37,963 --> 00:55:41,286
+And I think Unity is just as capable of other engines
+
+1307
+00:55:41,286 --> 00:55:43,227
+as doing awesome stuff if you've got the right content
+
+1308
+00:55:43,227 --> 00:55:45,049
+and the right shaders and the right techniques
+
+1309
+00:55:45,049 --> 00:55:46,110
+to really push it to the limit.
+
+1310
+00:55:46,110 --> 00:55:48,652
+Deterministic simulation.
+
+1311
+00:55:48,652 --> 00:55:50,613
+I know there've been some experiments
+
+1312
+00:55:50,613 --> 00:55:53,956
+to actually state sharing from an authoritative server.
+
+1313
+00:55:54,960 --> 00:55:56,581
+But we concluded that deterministic sim
+
+1314
+00:55:56,581 --> 00:55:58,684
+is still kind of state of the art for RTS multiplayer
+
+1315
+00:55:58,684 --> 00:56:00,426
+and the best way to do things.
+
+1316
+00:56:00,426 --> 00:56:02,268
+There's some challenges there around anti-cheat,
+
+1317
+00:56:02,268 --> 00:56:06,192
+because if you're effectively trusting all the clients,
+
+1318
+00:56:06,192 --> 00:56:08,134
+and so we're thinking about ways of kind of,
+
+1319
+00:56:08,134 --> 00:56:11,518
+maybe we run some of the simulation on a server
+
+1320
+00:56:11,518 --> 00:56:13,080
+and leave most of it on the client.
+
+1321
+00:56:13,080 --> 00:56:14,682
+Haven't quite cracked that yet.
+
+1322
+00:56:15,845 --> 00:56:17,846
+And I think C Sharp is pretty much ready
+
+1323
+00:56:17,846 --> 00:56:18,887
+for AAA game development.
+
+1324
+00:56:18,887 --> 00:56:20,629
+It's definitely taken the world by storm
+
+1325
+00:56:20,629 --> 00:56:22,270
+in mobile development.
+
+1326
+00:56:22,270 --> 00:56:25,673
+I think it's now got a place on console and PC as well.
+
+1327
+00:56:25,673 --> 00:56:28,335
+There may be some diehard C++ programmers in the room
+
+1328
+00:56:28,335 --> 00:56:30,116
+and you're free to disagree with me.
+
+1329
+00:56:30,116 --> 00:56:32,638
+C++ clearly has its place too.
+
+1330
+00:56:32,638 --> 00:56:35,100
+But C Sharp is actually getting to a pretty good spot
+
+1331
+00:56:35,100 --> 00:56:37,062
+and you can do some pretty neat stuff with it.
+
+1332
+00:56:37,062 --> 00:56:38,002
+So thanks to everyone at Blackbird.
+
+1333
+00:56:38,002 --> 00:56:40,725
+I certainly didn't do all this myself.
+
+1334
+00:56:40,725 --> 00:56:43,147
+There were a ton of people involved in making it all happen.
+
+1335
+00:56:43,672 --> 00:56:48,637
+Thanks to Gearbox for supporting us in our development.
+
+1336
+00:56:48,637 --> 00:56:51,700
+The people we referenced and other people we didn't
+
+1337
+00:56:51,700 --> 00:56:53,061
+whose techniques we took and built upon.
+
+1338
+00:56:53,061 --> 00:57:02,370
+And thanks to you guys for coming
+
+1339
+00:57:02,370 --> 00:57:04,292
+on a Friday afternoon and watching.
+
+1340
+00:57:04,292 --> 00:57:05,433
+So we're just about out of time,
+
+1341
+00:57:05,433 --> 00:57:06,995
+but I think, hope we can take a couple of questions.
+
+1342
+00:57:06,995 --> 00:57:07,595
+Yeah, go ahead.
+
+1343
+00:57:08,025 --> 00:57:21,625
+So I know that planetary annihilation used a different technique for ensuring the same state on different clients, where they transmitted curves over the net and then set the time step. Did you look at using that or was that?
+
+1344
+00:57:21,803 --> 00:57:24,503
+We did consider it, and when I showed you
+
+1345
+00:57:24,503 --> 00:57:27,524
+the way we compute curves across waypoints,
+
+1346
+00:57:27,524 --> 00:57:30,044
+we basically have a sort of an analytic solution
+
+1347
+00:57:30,044 --> 00:57:31,625
+for where units are gonna be in the future.
+
+1348
+00:57:31,625 --> 00:57:33,905
+So in theory, we could take that set of curves,
+
+1349
+00:57:33,905 --> 00:57:35,165
+pass it off to the presentation layer,
+
+1350
+00:57:35,165 --> 00:57:37,366
+and let it just interpolate its way along there.
+
+1351
+00:57:37,366 --> 00:57:39,586
+The biggest problem we found with that
+
+1352
+00:57:39,586 --> 00:57:41,727
+was not that that didn't work, it did,
+
+1353
+00:57:41,727 --> 00:57:44,507
+but that when units got into close proximity
+
+1354
+00:57:44,507 --> 00:57:48,128
+and high combat, their immediate short-term goals
+
+1355
+00:57:48,128 --> 00:57:50,148
+were changing so rapidly that we were constantly
+
+1356
+00:57:50,148 --> 00:57:51,088
+sending new curve data.
+
+1357
+00:57:51,432 --> 00:57:52,953
+and so we weren't getting the optimization
+
+1358
+00:57:52,953 --> 00:57:53,774
+we would have liked out of it.
+
+1359
+00:57:53,774 --> 00:57:55,615
+I'd definitely like to know more
+
+1360
+00:57:55,615 --> 00:57:57,716
+about how Planetary Annihilation
+
+1361
+00:57:57,716 --> 00:57:58,856
+did all their stuff under the hood,
+
+1362
+00:57:58,856 --> 00:58:02,479
+because I think they're the ones who've come closest
+
+1363
+00:58:02,479 --> 00:58:04,940
+to doing what I've just said isn't the best way to do it.
+
+1364
+00:58:04,940 --> 00:58:06,681
+Leave the head, put on a blog post
+
+1365
+00:58:06,681 --> 00:58:08,702
+that goes into some detail.
+
+1366
+00:58:08,702 --> 00:58:09,703
+Okay, cool, yeah, I'll check it out, thanks.
+
+1367
+00:58:09,703 --> 00:58:16,387
+Is it possible for divergence to be introduced
+
+1368
+00:58:16,387 --> 00:58:19,188
+because the client simulations triggered GC
+
+1369
+00:58:19,188 --> 00:58:19,728
+at different times?
+
+1370
+00:58:21,507 --> 00:58:22,367
+Sorry, for what to?
+
+1371
+00:58:22,367 --> 00:58:23,348
+For divergence or desync.
+
+1372
+00:58:23,348 --> 00:58:25,790
+For the simulation to diverge because of...
+
+1373
+00:58:25,790 --> 00:58:29,252
+Garbage collection triggered at different times.
+
+1374
+00:58:29,252 --> 00:58:30,272
+Oh, it wouldn't cause divergence.
+
+1375
+00:58:30,272 --> 00:58:30,733
+It would cause...
+
+1376
+00:58:30,733 --> 00:58:37,156
+Basically, we've got the simulation thread and the presentation thread
+
+1377
+00:58:37,156 --> 00:58:38,978
+running independently.
+
+1378
+00:58:38,978 --> 00:58:43,300
+And so, if the simulation doesn't meet its deadline,
+
+1379
+00:58:43,300 --> 00:58:44,781
+it's bad, but it doesn't really matter.
+
+1380
+00:58:44,781 --> 00:58:46,202
+Basically, we can catch up.
+
+1381
+00:58:46,202 --> 00:58:49,904
+So, if one tick of the sim takes twice as long as it should,
+
+1382
+00:58:49,904 --> 00:58:50,404
+then it's good.
+
+1383
+00:58:50,882 --> 00:58:52,603
+As long as on average we're under the deadline,
+
+1384
+00:58:52,603 --> 00:58:53,903
+we'll be able to catch up again.
+
+1385
+00:58:53,903 --> 00:58:56,125
+And the commands will just queue up in the meantime.
+
+1386
+00:58:56,125 --> 00:58:59,407
+And then we'll kind of grab them quickly and catch up.
+
+1387
+00:58:59,407 --> 00:59:02,128
+We did have some problems where a prolonged period of being
+
+1388
+00:59:02,128 --> 00:59:04,490
+too slow would then accumulate a lot of commands.
+
+1389
+00:59:04,490 --> 00:59:06,971
+And then you get this weird little racy thing happening
+
+1390
+00:59:06,971 --> 00:59:09,353
+where units would slow down and then they'd suddenly
+
+1391
+00:59:09,353 --> 00:59:10,933
+speed up again.
+
+1392
+00:59:10,933 --> 00:59:12,534
+So definitely you don't want to be missing your deadline too
+
+1393
+00:59:12,534 --> 00:59:12,855
+much.
+
+1394
+00:59:12,855 --> 00:59:13,755
+But if you miss every now and then,
+
+1395
+00:59:13,755 --> 00:59:14,516
+it's not the end of the world.
+
+1396
+00:59:14,516 --> 00:59:14,936
+Any other questions?
+
+1397
+00:59:20,914 --> 00:59:21,926
+Okay, thanks guys.
+

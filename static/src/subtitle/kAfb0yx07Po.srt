@@ -1,0 +1,1968 @@
+1
+00:00:05,194 --> 00:00:05,955
+I'm Vesa Paakkonen.
+
+2
+00:00:06,155 --> 00:00:07,895
+I work as a senior tools programmer at Remedy.
+
+3
+00:00:08,576 --> 00:00:10,556
+Today I'm going to talk about how we improved the overall
+
+4
+00:00:10,596 --> 00:00:13,117
+design of our internal tools framework during
+
+5
+00:00:13,137 --> 00:00:13,857
+the past few years.
+
+6
+00:00:14,818 --> 00:00:16,778
+So a few words about Remedy first.
+
+7
+00:00:16,979 --> 00:00:19,760
+You might know us from games such as Max Payne, Alan Wake,
+
+8
+00:00:19,880 --> 00:00:20,560
+and Quantum Break.
+
+9
+00:00:21,260 --> 00:00:23,901
+We're based in Espoo, Finland, and we currently have about
+
+10
+00:00:24,581 --> 00:00:25,101
+150 employees.
+
+11
+00:00:25,562 --> 00:00:29,043
+We're working on two games, P7, which is our own IP, and
+
+12
+00:00:29,063 --> 00:00:30,984
+on our first FPS, the single player
+
+13
+00:00:31,004 --> 00:00:31,944
+campaign for Crossfire 2.
+
+14
+00:00:35,037 --> 00:00:38,260
+So it's always important to know the reasons behind decisions
+
+15
+00:00:38,300 --> 00:00:39,281
+leading up to a design.
+
+16
+00:00:39,422 --> 00:00:40,963
+So I'm going to start with a bit of background
+
+17
+00:00:41,003 --> 00:00:42,085
+of the problems we faced.
+
+18
+00:00:42,665 --> 00:00:44,768
+After that, I'm going to dive into what I actually
+
+19
+00:00:44,788 --> 00:00:47,090
+mean by workflow-driven design and how
+
+20
+00:00:47,130 --> 00:00:49,293
+we build our current tools framework around that concept.
+
+21
+00:00:49,853 --> 00:00:51,996
+So let's start by looking at what
+
+22
+00:00:52,036 --> 00:00:54,238
+we had when the production of Quantum Break started.
+
+23
+00:00:55,908 --> 00:00:58,450
+Here's our world editor, or WET, as we call it,
+
+24
+00:00:58,610 --> 00:00:59,931
+in all of its MFC glory.
+
+25
+00:01:00,892 --> 00:01:03,654
+It is a monolithic application originally built for Alan Wake,
+
+26
+00:01:03,734 --> 00:01:05,995
+and it has been our most important tool ever since.
+
+27
+00:01:06,816 --> 00:01:09,218
+But the tool has become quite outdated, not only due
+
+28
+00:01:09,238 --> 00:01:12,100
+to its UI, but also due to the technical depth, which has
+
+29
+00:01:12,160 --> 00:01:13,221
+caused several big problems.
+
+30
+00:01:15,142 --> 00:01:16,884
+One of the biggest problems is probably something
+
+31
+00:01:16,924 --> 00:01:19,265
+that is familiar to most of you, changing the simple things
+
+32
+00:01:19,366 --> 00:01:21,427
+regarding opening a level, as well as exporting it,
+
+33
+00:01:21,547 --> 00:01:23,028
+making the iteration speed unbearable.
+
+34
+00:01:25,672 --> 00:01:28,373
+Due to the monolithic design, the code
+
+35
+00:01:28,393 --> 00:01:30,634
+had become so tangled that it was virtually impossible
+
+36
+00:01:30,654 --> 00:01:32,814
+to determine what kind of effects even seemingly
+
+37
+00:01:32,854 --> 00:01:33,794
+small changes would have.
+
+38
+00:01:34,515 --> 00:01:37,715
+It heavily uses singletons, so modifying the state in one
+
+39
+00:01:37,755 --> 00:01:40,056
+panel could cause undecided side effects in all of them,
+
+40
+00:01:40,156 --> 00:01:41,617
+possibly causing a lot of regression.
+
+41
+00:01:43,237 --> 00:01:45,438
+And because all the code was so tightly coupled,
+
+42
+00:01:45,498 --> 00:01:48,118
+it meant that even the most basic test would
+
+43
+00:01:48,158 --> 00:01:50,379
+have required initializing the whole application, which
+
+44
+00:01:50,699 --> 00:01:53,100
+makes any kind of test difficult to write and slow to run.
+
+45
+00:01:54,917 --> 00:01:58,338
+So we did not want to continue using MFC, just imagine that.
+
+46
+00:01:58,938 --> 00:02:01,259
+So we decided we're going to build the new tools with
+
+47
+00:02:01,279 --> 00:02:02,879
+something more modern, and ultimately
+
+48
+00:02:02,939 --> 00:02:03,999
+ended up with WPF.
+
+49
+00:02:04,940 --> 00:02:08,081
+As a lesson learned from WET, we wanted the new tools to be
+
+50
+00:02:08,121 --> 00:02:11,602
+completely plugin-based to prevent the new code from
+
+51
+00:02:11,642 --> 00:02:13,723
+becoming a similar monolithic mess.
+
+52
+00:02:14,783 --> 00:02:17,564
+And because we were building tools from scratch, we wanted
+
+53
+00:02:17,624 --> 00:02:19,484
+to reuse existing functionality as much as
+
+54
+00:02:19,544 --> 00:02:21,565
+possible by hooking the new tools, both
+
+55
+00:02:21,585 --> 00:02:22,485
+for the engine and WET.
+
+56
+00:02:24,049 --> 00:02:25,629
+So this is the high level architectures
+
+57
+00:02:25,649 --> 00:02:28,190
+we came up with for our .NET tools and the plugin system.
+
+58
+00:02:28,370 --> 00:02:29,890
+There are shared C Sharp libraries
+
+59
+00:02:29,910 --> 00:02:31,471
+that can be used in different applications.
+
+60
+00:02:32,171 --> 00:02:33,371
+There are different plugins providing
+
+61
+00:02:33,411 --> 00:02:35,791
+different panels and background services.
+
+62
+00:02:36,872 --> 00:02:39,592
+And finally, there is a simple bootstrapper executable
+
+63
+00:02:39,632 --> 00:02:41,593
+that loads plugins for a given workflow based
+
+64
+00:02:41,613 --> 00:02:42,653
+on a configuration file.
+
+65
+00:02:43,913 --> 00:02:45,653
+For example, for machine editing workflow,
+
+66
+00:02:45,693 --> 00:02:47,674
+we loaded asset browser, property editor,
+
+67
+00:02:48,054 --> 00:02:49,214
+and live editing functionality.
+
+68
+00:02:49,974 --> 00:02:52,415
+For timelines, we also needed curve editor and timeline
+
+69
+00:02:52,455 --> 00:02:52,695
+editor.
+
+70
+00:02:54,099 --> 00:02:55,641
+And for Screenplaylay workflow, we
+
+71
+00:02:55,661 --> 00:02:56,942
+had completely different plugins.
+
+72
+00:02:57,683 --> 00:02:59,644
+So let's have a look at the probably simplest workflow
+
+73
+00:02:59,684 --> 00:03:01,846
+we had during quantum break, editing mesh properties.
+
+74
+00:03:03,988 --> 00:03:06,411
+Here we have the asset browser and a property editor
+
+75
+00:03:06,571 --> 00:03:07,552
+to edit the current selection.
+
+76
+00:03:07,712 --> 00:03:09,113
+You can see that the contents of the panel
+
+77
+00:03:09,153 --> 00:03:10,575
+change when the user selects an asset.
+
+78
+00:03:11,555 --> 00:03:14,018
+And if the user wants to view multiple meshes simultaneously,
+
+79
+00:03:14,158 --> 00:03:17,301
+he can open another property editor panel, which by default
+
+80
+00:03:17,341 --> 00:03:18,342
+follow the same selection.
+
+81
+00:03:19,453 --> 00:03:21,555
+So the user must use the lock feature
+
+82
+00:03:21,615 --> 00:03:23,976
+to lock one of the panels while having the other panel
+
+83
+00:03:23,996 --> 00:03:25,177
+to continue the follow selection.
+
+84
+00:03:26,398 --> 00:03:26,859
+Simple stuff.
+
+85
+00:03:30,301 --> 00:03:32,023
+And for comparison, here is a quick look
+
+86
+00:03:32,043 --> 00:03:33,524
+of what the timeline editing looked
+
+87
+00:03:33,564 --> 00:03:34,485
+like during quantum break.
+
+88
+00:03:34,525 --> 00:03:35,946
+It required a few more panels.
+
+89
+00:03:38,107 --> 00:03:40,409
+And the thing to note here is that the asset browser panel is
+
+90
+00:03:40,489 --> 00:03:42,811
+actually the only one that's common for the mesh
+
+91
+00:03:42,831 --> 00:03:43,552
+editing workflow.
+
+92
+00:03:43,592 --> 00:03:45,093
+The property panels are completely
+
+93
+00:03:45,113 --> 00:03:47,955
+specific to timelines as well as the hierarchy and the timeline
+
+94
+00:03:47,995 --> 00:03:48,175
+panel.
+
+95
+00:03:49,163 --> 00:03:50,464
+I'll get back to that soon.
+
+96
+00:03:51,425 --> 00:03:54,087
+So all in all, the approach to use .NET tools
+
+97
+00:03:54,127 --> 00:03:55,247
+was a success for Quantum.
+
+98
+00:03:56,088 --> 00:03:57,989
+The development speed improved, and thus we
+
+99
+00:03:58,009 --> 00:03:59,690
+could ship better tools with better UX.
+
+100
+00:03:59,910 --> 00:04:02,832
+It also made it easier to make them look significantly better.
+
+101
+00:04:03,653 --> 00:04:05,754
+And the plugin framework allowed easy unit testing
+
+102
+00:04:05,794 --> 00:04:06,755
+of individual systems.
+
+103
+00:04:07,856 --> 00:04:09,417
+So naturally, we wanted to continue
+
+104
+00:04:09,457 --> 00:04:12,439
+building new functionality on top of our WPF tools,
+
+105
+00:04:12,559 --> 00:04:14,860
+and ultimately enable us to replace WED.
+
+106
+00:04:17,145 --> 00:04:20,327
+But there was major design flaw with this plug-in-based loosely
+
+107
+00:04:20,347 --> 00:04:22,367
+coupled design due to how the panels communicated.
+
+108
+00:04:23,308 --> 00:04:25,228
+When the selection changed in the asset browser panel,
+
+109
+00:04:25,309 --> 00:04:26,969
+it sent a message through a multicast system
+
+110
+00:04:27,009 --> 00:04:30,911
+called a mediator to avoid tight coupling between the panels.
+
+111
+00:04:32,531 --> 00:04:34,452
+The mediator forwarded the message to any panels
+
+112
+00:04:34,472 --> 00:04:36,633
+that were listening to a given message,
+
+113
+00:04:36,793 --> 00:04:39,074
+and those panels were responsible for determining
+
+114
+00:04:39,134 --> 00:04:39,734
+how to handle it.
+
+115
+00:04:40,855 --> 00:04:41,975
+In the case of the property editor,
+
+116
+00:04:42,575 --> 00:04:44,136
+it was responsible for deciding if it
+
+117
+00:04:44,176 --> 00:04:45,917
+should change the selection, keep it, or clear it.
+
+118
+00:04:47,260 --> 00:04:49,401
+And you could have any number of panels in different states
+
+119
+00:04:49,421 --> 00:04:50,421
+handling the same messages.
+
+120
+00:04:50,681 --> 00:04:54,163
+So let's have a look at a concrete example of the problem
+
+121
+00:04:54,203 --> 00:04:56,825
+that occurred when we added new panels for mesh editing
+
+122
+00:04:56,845 --> 00:04:59,446
+workflow to allow users to edit physics definitions.
+
+123
+00:05:02,387 --> 00:05:04,088
+First of all, you can see that it's
+
+124
+00:05:04,168 --> 00:05:06,430
+very cumbersome to open new panels individually
+
+125
+00:05:06,570 --> 00:05:07,850
+if they don't happen to be open yet.
+
+126
+00:05:09,031 --> 00:05:10,932
+And when the user opens the panels,
+
+127
+00:05:11,012 --> 00:05:13,273
+they are empty because they haven't received any selection
+
+128
+00:05:13,313 --> 00:05:14,033
+changed messages.
+
+129
+00:05:24,604 --> 00:05:26,946
+And now user has to manually reselect the mesh
+
+130
+00:05:26,986 --> 00:05:28,707
+to get some content to the new panels.
+
+131
+00:05:31,750 --> 00:05:36,293
+And now the user can finally select the node in the FBX.
+
+132
+00:05:39,595 --> 00:05:41,317
+So let's take this even a bit further.
+
+133
+00:05:41,377 --> 00:05:43,098
+Now the user wants to edit the materials as well.
+
+134
+00:05:43,719 --> 00:05:44,759
+Let's see how that goes.
+
+135
+00:05:46,100 --> 00:05:47,341
+So there's yet another panel.
+
+136
+00:05:47,561 --> 00:05:48,342
+Let's drag it there.
+
+137
+00:05:53,206 --> 00:05:54,086
+We change the color.
+
+138
+00:05:58,845 --> 00:06:00,747
+And now we want to check out the texture as well.
+
+139
+00:06:06,592 --> 00:06:07,793
+Yay, we got another panel.
+
+140
+00:06:12,837 --> 00:06:14,499
+And as last step, now the user wants
+
+141
+00:06:14,539 --> 00:06:16,700
+to check out some other material using the asset browser.
+
+142
+00:06:16,841 --> 00:06:19,283
+So he searches for a specific material.
+
+143
+00:06:26,499 --> 00:06:29,101
+Selects it, and boom, the mesh selection is gone
+
+144
+00:06:29,121 --> 00:06:30,702
+because he forgot to use the lock.
+
+145
+00:06:32,764 --> 00:06:35,246
+So just looking at fumbling with the panels.
+
+146
+00:06:40,791 --> 00:06:42,472
+Just looking at the video is painful enough,
+
+147
+00:06:42,492 --> 00:06:45,175
+so you can probably imagine our users going something
+
+148
+00:06:45,195 --> 00:06:45,435
+like that.
+
+149
+00:06:47,994 --> 00:06:50,516
+So that's just the tip of the iceberg.
+
+150
+00:06:50,576 --> 00:06:52,137
+There are plenty of other problems as well.
+
+151
+00:06:52,597 --> 00:06:54,739
+The loosely coupled design and the subsequently growing
+
+152
+00:06:54,779 --> 00:06:56,740
+number of panels caused a mental load that was simply
+
+153
+00:06:56,780 --> 00:06:57,560
+too big to manage.
+
+154
+00:06:57,901 --> 00:06:59,462
+It was simply too easy to make mistakes.
+
+155
+00:07:01,323 --> 00:07:03,544
+You could argue that the design also gave the users quite a
+
+156
+00:07:03,564 --> 00:07:05,486
+lot of flexibility in terms of how they
+
+157
+00:07:05,526 --> 00:07:06,947
+set up their workflows.
+
+158
+00:07:07,827 --> 00:07:09,768
+But that would essentially mean that you need a team of
+
+159
+00:07:09,809 --> 00:07:11,390
+super users and not mere mortals.
+
+160
+00:07:14,029 --> 00:07:16,051
+It was also very difficult to read information on the screen
+
+161
+00:07:16,071 --> 00:07:17,312
+when the number of panels increased.
+
+162
+00:07:17,632 --> 00:07:19,693
+Here you can see that it's not immediately obvious that
+
+163
+00:07:19,713 --> 00:07:21,014
+there are three separate assets here.
+
+164
+00:07:21,755 --> 00:07:26,498
+Mesh, material, and a texture.
+
+165
+00:07:27,439 --> 00:07:30,141
+Also in this version, some panels did have locks and
+
+166
+00:07:30,181 --> 00:07:32,143
+source control statuses, while the others did not.
+
+167
+00:07:34,182 --> 00:07:35,462
+It didn't feel right that we would
+
+168
+00:07:35,542 --> 00:07:37,482
+duplicate the same information for all the panels
+
+169
+00:07:37,542 --> 00:07:38,383
+involving the same mesh.
+
+170
+00:07:38,623 --> 00:07:40,703
+If we introduced locks to all of them,
+
+171
+00:07:41,223 --> 00:07:43,364
+the users could really suit themselves in the foot
+
+172
+00:07:43,424 --> 00:07:46,324
+by mixing locked states on different panels representing
+
+173
+00:07:46,504 --> 00:07:47,845
+different parts of the same asset.
+
+174
+00:07:50,145 --> 00:07:51,966
+All the panels had business logic inside them
+
+175
+00:07:52,186 --> 00:07:53,366
+because they had to work individually
+
+176
+00:07:53,386 --> 00:07:54,526
+due to the loosely coupled design.
+
+177
+00:07:55,386 --> 00:07:57,547
+Here are three examples of panels that resemble each other
+
+178
+00:07:57,967 --> 00:07:59,387
+but is having different business logic,
+
+179
+00:07:59,527 --> 00:08:02,248
+causing us having to maintain three different versions.
+
+180
+00:08:03,348 --> 00:08:04,970
+The property editor followed asset selection
+
+181
+00:08:04,990 --> 00:08:07,952
+and handled writing to disk, as well as source control
+
+182
+00:08:07,992 --> 00:08:08,472
+operations.
+
+183
+00:08:10,514 --> 00:08:12,355
+Physics definition editor followed the selection
+
+184
+00:08:12,395 --> 00:08:14,957
+of an FBX hierarchy and also handled saving and source
+
+185
+00:08:14,977 --> 00:08:15,737
+control operations.
+
+186
+00:08:17,118 --> 00:08:18,439
+And then there were quite a few editors
+
+187
+00:08:18,660 --> 00:08:20,301
+that simply followed some other selection,
+
+188
+00:08:20,361 --> 00:08:22,923
+like timeline events or nodes in a node graph.
+
+189
+00:08:26,116 --> 00:08:27,517
+This got several general problems.
+
+190
+00:08:27,637 --> 00:08:29,077
+One of the first, for example, was
+
+191
+00:08:29,117 --> 00:08:31,258
+that if there were two panels editing the same data
+
+192
+00:08:31,338 --> 00:08:33,179
+with only one of them writing data to the disk,
+
+193
+00:08:33,619 --> 00:08:35,780
+closing the one writing the data would essentially
+
+194
+00:08:35,800 --> 00:08:37,601
+mean that your data never got saved,
+
+195
+00:08:38,262 --> 00:08:40,062
+and user could just keep on editing
+
+196
+00:08:40,242 --> 00:08:45,005
+and never realize that his changes are not there.
+
+197
+00:08:48,606 --> 00:08:50,647
+We had around 10 different variations of property
+
+198
+00:08:50,667 --> 00:08:53,569
+editor at one point, and it was very confusing to the users
+
+199
+00:08:53,729 --> 00:08:55,630
+because they didn't behave similar to each other.
+
+200
+00:08:56,960 --> 00:08:59,023
+This also meant that the development cost got higher
+
+201
+00:08:59,083 --> 00:09:01,167
+after adding new variations, because in the worst case
+
+202
+00:09:01,187 --> 00:09:04,251
+scenario, some changes had to be made in each of them, and
+
+203
+00:09:04,311 --> 00:09:05,513
+each of them had to be tested.
+
+204
+00:09:05,833 --> 00:09:07,936
+It also virtually prevented any reuse of the business
+
+205
+00:09:07,956 --> 00:09:09,599
+logic, because it was tied to the UI.
+
+206
+00:09:13,106 --> 00:09:15,187
+And adding more panels just added more complexity.
+
+207
+00:09:15,347 --> 00:09:18,068
+Here's an example of us adding a behavior tree editor.
+
+208
+00:09:18,668 --> 00:09:20,849
+If we just start with one panel for editing the graph
+
+209
+00:09:21,049 --> 00:09:22,250
+and one for editing and selection,
+
+210
+00:09:22,290 --> 00:09:23,570
+everything works relatively fine.
+
+211
+00:09:23,970 --> 00:09:25,171
+But one of the first requirements
+
+212
+00:09:25,211 --> 00:09:27,112
+we got from the users was that they
+
+213
+00:09:27,152 --> 00:09:29,813
+want to be able to edit multiple graphs simultaneously.
+
+214
+00:09:30,613 --> 00:09:32,253
+So how would we make that work technically?
+
+215
+00:09:33,602 --> 00:09:35,944
+In case of two graphs, should the node property panel
+
+216
+00:09:35,964 --> 00:09:36,925
+listen to both of them?
+
+217
+00:09:37,606 --> 00:09:39,447
+What about if we have two node properties?
+
+218
+00:09:39,487 --> 00:09:41,849
+Should the user's manually hook them up with a specific graph?
+
+219
+00:09:42,450 --> 00:09:44,091
+And the situation would get even worse
+
+220
+00:09:44,232 --> 00:09:46,514
+if the users would want to have some completely different
+
+221
+00:09:46,594 --> 00:09:49,977
+asset types open simultaneously as the number of panels
+
+222
+00:09:50,017 --> 00:09:51,258
+would just keep on increasing.
+
+223
+00:09:53,540 --> 00:09:54,781
+So something had to be done.
+
+224
+00:09:55,756 --> 00:09:58,056
+The problems and successes during quantum
+
+225
+00:09:58,276 --> 00:09:59,977
+gave us the basis for creating design goals
+
+226
+00:10:00,577 --> 00:10:02,517
+for reworking the architecture.
+
+227
+00:10:03,177 --> 00:10:05,138
+Most importantly, we need a better structure
+
+228
+00:10:05,538 --> 00:10:07,858
+for the application, so we're not solving the same problems
+
+229
+00:10:07,978 --> 00:10:09,318
+in multiple similar use cases.
+
+230
+00:10:10,539 --> 00:10:11,319
+Context sensitivity.
+
+231
+00:10:11,599 --> 00:10:14,399
+We wanted our users to be able to use the tools right away,
+
+232
+00:10:14,579 --> 00:10:16,720
+just like an asset, and they'll say relevant things.
+
+233
+00:10:17,360 --> 00:10:18,660
+This was also a technical goal.
+
+234
+00:10:18,720 --> 00:10:20,740
+It should be easy to determine in the code
+
+235
+00:10:20,780 --> 00:10:23,461
+what the current state is, what has been changed, and so on.
+
+236
+00:10:25,102 --> 00:10:27,122
+We wanted to keep the flexibility of the plugin
+
+237
+00:10:27,142 --> 00:10:30,423
+system so we could easily modify the set of the panels
+
+238
+00:10:30,483 --> 00:10:31,803
+and services that we show the users.
+
+239
+00:10:32,244 --> 00:10:34,784
+We're easily able to unit test them.
+
+240
+00:10:35,224 --> 00:10:38,745
+And in addition, we wanted to be able to have game-specific
+
+241
+00:10:38,805 --> 00:10:39,125
+plugins.
+
+242
+00:10:40,466 --> 00:10:43,067
+And finally, we should be able to reuse the UI controllers as
+
+243
+00:10:43,107 --> 00:10:45,407
+much as possible to provide consistent look and feel.
+
+244
+00:10:47,368 --> 00:10:47,488
+So.
+
+245
+00:10:48,216 --> 00:10:53,020
+It was very clear that the main observation was that the
+
+246
+00:10:53,100 --> 00:10:56,182
+biggest mistake was writing the business logic inside the
+
+247
+00:10:56,202 --> 00:10:58,444
+panels that apply rules to specific workflows.
+
+248
+00:10:59,024 --> 00:11:02,147
+We clearly needed something to glue together different parts
+
+249
+00:11:02,207 --> 00:11:02,727
+of the workflow.
+
+250
+00:11:06,430 --> 00:11:09,533
+And this is from where the term workflow-driven design
+
+251
+00:11:09,573 --> 00:11:09,933
+comes from.
+
+252
+00:11:10,934 --> 00:11:13,456
+The application should model the workflows in some way,
+
+253
+00:11:13,656 --> 00:11:15,557
+and that should be responsible for setting up
+
+254
+00:11:15,637 --> 00:11:16,978
+all the relevant things for the users
+
+255
+00:11:17,058 --> 00:11:19,640
+by configuring the panels, enabling the background
+
+256
+00:11:19,660 --> 00:11:22,202
+services, and exposing the workflow-specific commands.
+
+257
+00:11:23,783 --> 00:11:25,904
+By reusing the same panels in multiple workflows
+
+258
+00:11:25,944 --> 00:11:27,965
+by injecting any custom behavior to them,
+
+259
+00:11:28,046 --> 00:11:30,407
+we can significantly improve the code reusability as well
+
+260
+00:11:30,447 --> 00:11:31,268
+as the user experience.
+
+261
+00:11:32,611 --> 00:11:34,673
+And most importantly, this design
+
+262
+00:11:34,733 --> 00:11:37,615
+allows the domain experts, like AI or animation programmers,
+
+263
+00:11:38,035 --> 00:11:40,157
+with intimate knowledge of the specific workflows
+
+264
+00:11:40,197 --> 00:11:43,079
+to concentrate on modeling the behavior of the workflow.
+
+265
+00:11:44,340 --> 00:11:45,762
+This improves things significantly
+
+266
+00:11:45,902 --> 00:11:47,303
+as the tools team can concentrate
+
+267
+00:11:47,763 --> 00:11:49,705
+on building the framework and the UI controls,
+
+268
+00:11:49,765 --> 00:11:52,327
+while the domain experts who work closely with the users
+
+269
+00:11:52,387 --> 00:11:53,448
+write the actual business logic.
+
+270
+00:11:54,461 --> 00:11:58,002
+It also means that experts rarely have to dive into any WPF details,
+
+271
+00:11:58,822 --> 00:12:02,463
+as those are handled in the panels and controls provided by the framework,
+
+272
+00:12:02,543 --> 00:12:04,724
+lowering the learning curve to build new tools.
+
+273
+00:12:06,104 --> 00:12:08,725
+So, with these points in mind, we started concepting the UI
+
+274
+00:12:08,765 --> 00:12:12,086
+to get a clearer picture of how we could design the architecture of the new system.
+
+275
+00:12:12,506 --> 00:12:14,866
+Let's look at a video of a recent build of our tools,
+
+276
+00:12:14,886 --> 00:12:17,347
+which is quite close to the original UI design we had.
+
+277
+00:12:19,959 --> 00:12:23,181
+Here you can see three different node editors built by AI,
+
+278
+00:12:23,521 --> 00:12:25,182
+rendering, and animation teams.
+
+279
+00:12:26,202 --> 00:12:28,083
+You can see that the tools are now context aware.
+
+280
+00:12:28,383 --> 00:12:31,005
+Selecting an asset opens a new tab with relevant panels
+
+281
+00:12:31,045 --> 00:12:31,485
+inside them.
+
+282
+00:12:32,205 --> 00:12:33,826
+And you can see that the source control status
+
+283
+00:12:33,866 --> 00:12:36,328
+is now shown clearly in the top right corner.
+
+284
+00:12:37,228 --> 00:12:39,949
+Now we're using the same property editor everywhere.
+
+285
+00:12:45,932 --> 00:12:47,693
+Let's go back to the mesh example one more time.
+
+286
+00:12:48,677 --> 00:12:53,622
+Now you get all the relevant panels open when the mesh is opened.
+
+287
+00:12:54,482 --> 00:12:55,423
+You can open a material.
+
+288
+00:13:00,728 --> 00:13:02,910
+You can easily browse through the different materials.
+
+289
+00:13:04,772 --> 00:13:07,354
+And if you go to the texture, you can browse through those as well.
+
+290
+00:13:16,842 --> 00:13:18,643
+So let's move to the high level technical design.
+
+291
+00:13:19,204 --> 00:13:20,725
+From the previous video, we can easily
+
+292
+00:13:21,265 --> 00:13:22,426
+identify the following concepts.
+
+293
+00:13:22,987 --> 00:13:24,948
+The panels, the document hosting the panels,
+
+294
+00:13:25,068 --> 00:13:26,750
+and the data that is being read and written.
+
+295
+00:13:27,370 --> 00:13:29,572
+A naive implementation would look something like this.
+
+296
+00:13:30,493 --> 00:13:32,034
+Panels are assigned to some document,
+
+297
+00:13:32,214 --> 00:13:34,356
+and then the document handles reading and writing the data.
+
+298
+00:13:34,756 --> 00:13:36,337
+However, there are two major problems.
+
+299
+00:13:37,318 --> 00:13:39,360
+Now, because the panels need to know about.
+
+300
+00:13:40,227 --> 00:13:43,948
+The specific documents they are going to be used in,
+
+301
+00:13:44,068 --> 00:13:46,149
+we would not be able to reuse them
+
+302
+00:13:46,329 --> 00:13:48,629
+on other workflows which is against our design goals.
+
+303
+00:13:49,950 --> 00:13:51,710
+Also, we're mixing low-level concepts
+
+304
+00:13:51,850 --> 00:13:53,991
+like reading and writing data with the document, which
+
+305
+00:13:54,091 --> 00:13:56,812
+is clearly a UI concept, making it difficult for us
+
+306
+00:13:56,872 --> 00:13:58,612
+to use that code in other systems that
+
+307
+00:13:58,672 --> 00:13:59,832
+might not even have a UI.
+
+308
+00:14:03,293 --> 00:14:05,794
+The solution for the first problem is relatively simple.
+
+309
+00:14:06,522 --> 00:14:09,165
+We use dependency inversion to abstract out the document
+
+310
+00:14:09,225 --> 00:14:10,687
+with an interface to prevent coupling
+
+311
+00:14:10,707 --> 00:14:11,968
+with a specific implementation.
+
+312
+00:14:13,270 --> 00:14:14,512
+As for the second problem, we need
+
+313
+00:14:14,552 --> 00:14:16,714
+to create a new concept to abstract out
+
+314
+00:14:16,815 --> 00:14:17,916
+the details about the data.
+
+315
+00:14:18,477 --> 00:14:20,039
+We decided to call that a context.
+
+316
+00:14:20,960 --> 00:14:22,562
+It handles all the details about the data,
+
+317
+00:14:22,582 --> 00:14:24,344
+like where it's coming from, how it is saved,
+
+318
+00:14:24,444 --> 00:14:25,806
+as well as tracking any changes.
+
+319
+00:14:30,512 --> 00:14:32,994
+To summarize the concepts on a very high level, the document
+
+320
+00:14:33,054 --> 00:14:35,256
+is the UI layer describing how things are edited.
+
+321
+00:14:35,456 --> 00:14:37,799
+It works as a clue between the panels, commands, and the data.
+
+322
+00:14:38,439 --> 00:14:40,541
+The context, on the other hand, handles all the details
+
+323
+00:14:40,581 --> 00:14:41,743
+of what is being edited.
+
+324
+00:14:41,983 --> 00:14:45,286
+It abstracts out the details from the UI, allowing us to
+
+325
+00:14:45,326 --> 00:14:47,849
+reuse UI components with all kinds of different data.
+
+326
+00:14:48,509 --> 00:14:51,692
+Let's look at the two main cases, how all of this is put
+
+327
+00:14:51,732 --> 00:14:51,993
+together.
+
+328
+00:14:56,567 --> 00:14:58,347
+The simpler one is to configure panel
+
+329
+00:14:58,367 --> 00:15:00,609
+to always show the same piece of data in the same panel.
+
+330
+00:15:01,849 --> 00:15:03,210
+For example, in the case of meshes,
+
+331
+00:15:03,870 --> 00:15:05,451
+both the mesh properties and mesh viewer
+
+332
+00:15:05,591 --> 00:15:07,712
+are configured to always show the same data
+
+333
+00:15:07,752 --> 00:15:08,372
+of the same asset.
+
+334
+00:15:09,453 --> 00:15:11,474
+Properties panel always shows the full contents
+
+335
+00:15:11,534 --> 00:15:15,236
+of a metadata file, while the viewer panel shows
+
+336
+00:15:15,256 --> 00:15:16,016
+the mesh itself.
+
+337
+00:15:16,616 --> 00:15:19,698
+The FBX is read-only, while the metadata is editable.
+
+338
+00:15:22,619 --> 00:15:24,620
+Let's look at how the panel is configured to behave this way.
+
+339
+00:15:25,368 --> 00:15:27,528
+First, we need to configure the context to load the data.
+
+340
+00:15:28,468 --> 00:15:31,729
+We use some string ID to identify the piece of content,
+
+341
+00:15:31,849 --> 00:15:34,270
+and then we pass in a method that loads it.
+
+342
+00:15:34,770 --> 00:15:36,330
+Loading happens lazily, so if there's
+
+343
+00:15:36,670 --> 00:15:39,611
+no panel requesting that data, it's never read from the disk.
+
+344
+00:15:41,011 --> 00:15:43,272
+And now that the context knows how to read the file,
+
+345
+00:15:43,392 --> 00:15:46,072
+we can configure the document to host the property editor panel.
+
+346
+00:15:47,072 --> 00:15:50,613
+We use the same ID that we used to register content
+
+347
+00:15:51,193 --> 00:15:53,434
+to let the panel know which piece of data it should request
+
+348
+00:15:53,614 --> 00:15:54,774
+and show when it's opened.
+
+349
+00:15:57,235 --> 00:15:58,616
+The second case is a bit more involved.
+
+350
+00:15:58,956 --> 00:16:00,397
+Now the document will contain a panel
+
+351
+00:16:00,417 --> 00:16:02,618
+that changes its content based on user interaction.
+
+352
+00:16:03,479 --> 00:16:05,319
+Let's have yet another look at the mesh editing
+
+353
+00:16:05,380 --> 00:16:07,521
+and especially the physics definition properties panel.
+
+354
+00:16:10,082 --> 00:16:11,943
+When the user changes the selection inside the document
+
+355
+00:16:12,283 --> 00:16:14,304
+using either the FBX Heuric panel or MeshView panel,
+
+356
+00:16:14,544 --> 00:16:16,025
+the physics definition panel reacts to it.
+
+357
+00:16:16,305 --> 00:16:18,066
+Also note that the selection is synchronized
+
+358
+00:16:18,086 --> 00:16:18,966
+between all three panels.
+
+359
+00:16:24,947 --> 00:16:27,169
+So we start again with the context, knowing how to load
+
+360
+00:16:27,209 --> 00:16:27,569
+the data.
+
+361
+00:16:27,589 --> 00:16:29,930
+This is configured exactly the same way as in the previous
+
+362
+00:16:29,990 --> 00:16:30,370
+example.
+
+363
+00:16:31,431 --> 00:16:32,732
+But now there is a small problem.
+
+364
+00:16:32,912 --> 00:16:34,333
+We need to have an internal selection.
+
+365
+00:16:34,953 --> 00:16:37,234
+We cannot add a property to the mesh document, because
+
+366
+00:16:37,254 --> 00:16:39,155
+that would cause a tight coupling between the panels
+
+367
+00:16:39,295 --> 00:16:41,097
+and the mesh document implementation.
+
+368
+00:16:41,697 --> 00:16:43,818
+It would also make it more cumbersome to extend if the
+
+369
+00:16:43,858 --> 00:16:45,399
+number of internal selections would increase.
+
+370
+00:16:46,695 --> 00:16:49,457
+So the solution in this case was to introduce a concept
+
+371
+00:16:49,497 --> 00:16:51,898
+of components, which is very similar to components
+
+372
+00:16:51,938 --> 00:16:53,219
+in an entity component system.
+
+373
+00:16:53,780 --> 00:16:56,081
+We register a component responsible for requesting
+
+374
+00:16:56,121 --> 00:16:57,682
+the data and maintaining the selection.
+
+375
+00:16:59,103 --> 00:17:01,925
+Now, instead of depending on a specific document,
+
+376
+00:17:02,546 --> 00:17:05,308
+the panels can depend on a generic selection provider
+
+377
+00:17:05,328 --> 00:17:05,708
+component.
+
+378
+00:17:07,930 --> 00:17:09,471
+Now, the only thing we need to do
+
+379
+00:17:09,571 --> 00:17:10,832
+is to hook up the panels again.
+
+380
+00:17:11,292 --> 00:17:14,054
+Because the selection provider is such a commonly used
+
+381
+00:17:14,074 --> 00:17:15,435
+component, we made it simple to use.
+
+382
+00:17:16,227 --> 00:17:18,368
+We can just tell a panel to follow a selection with a
+
+383
+00:17:18,408 --> 00:17:20,729
+string ID, and it automatically starts to listen
+
+384
+00:17:20,769 --> 00:17:21,669
+to the selection provider.
+
+385
+00:17:21,789 --> 00:17:24,590
+And we tell the FBX hierarchy to load the FBX data and use
+
+386
+00:17:24,610 --> 00:17:26,871
+the given selection provider to set the selection.
+
+387
+00:17:30,532 --> 00:17:32,813
+The last problem we had to solve was tracking down the
+
+388
+00:17:32,833 --> 00:17:35,254
+changes from multiple sources, like from several different
+
+389
+00:17:35,314 --> 00:17:36,474
+files or from database.
+
+390
+00:17:37,275 --> 00:17:39,195
+It ended up being really simple, because with the
+
+391
+00:17:39,235 --> 00:17:41,116
+context, we already have a single point of entry.
+
+392
+00:17:42,029 --> 00:17:44,011
+to all the data, and we can easily
+
+393
+00:17:44,051 --> 00:17:45,912
+track all the changes without having
+
+394
+00:17:45,932 --> 00:17:48,234
+to know any details about the data itself
+
+395
+00:17:48,434 --> 00:17:49,935
+by using the observer pattern.
+
+396
+00:17:52,217 --> 00:17:54,739
+By aggregating a single stream of all the changes happening
+
+397
+00:17:54,779 --> 00:17:56,720
+in each different piece of content that
+
+398
+00:17:56,740 --> 00:17:58,582
+have been registered to it, we can easily hook up
+
+399
+00:17:59,763 --> 00:18:01,644
+not only panels that track the changes,
+
+400
+00:18:01,744 --> 00:18:03,105
+but additional systems as well.
+
+401
+00:18:03,325 --> 00:18:04,806
+For example, we can catch each change
+
+402
+00:18:04,846 --> 00:18:06,508
+to undo stack or live edit system
+
+403
+00:18:06,568 --> 00:18:08,289
+just by listening to that single stream.
+
+404
+00:18:12,846 --> 00:18:14,947
+So let's review the concepts once more.
+
+405
+00:18:15,167 --> 00:18:17,109
+The document is used to configure
+
+406
+00:18:17,129 --> 00:18:20,371
+the UI part of the workflow, while the context
+
+407
+00:18:20,451 --> 00:18:22,912
+is used to read, write, and track
+
+408
+00:18:22,952 --> 00:18:24,253
+the data used in the workflow.
+
+409
+00:18:25,034 --> 00:18:27,695
+So let's have a look at the final example, our screenplay
+
+410
+00:18:27,735 --> 00:18:29,897
+workflow that we created quite recently
+
+411
+00:18:29,977 --> 00:18:32,498
+and which really starts to show the benefits of this design.
+
+412
+00:18:34,608 --> 00:18:37,709
+Here we have the screenplay hierarchy and the screenplay
+
+413
+00:18:37,729 --> 00:18:38,010
+editor.
+
+414
+00:18:38,250 --> 00:18:40,030
+The really cool thing here is that the data is actually
+
+415
+00:18:40,070 --> 00:18:42,331
+stored in the database instead of on disk.
+
+416
+00:18:42,491 --> 00:18:44,512
+And the document context system abstracts it out
+
+417
+00:18:44,532 --> 00:18:47,133
+so we can reuse the panels, like the property panels,
+
+418
+00:18:47,273 --> 00:18:49,133
+as well as other systems like undo, redo.
+
+419
+00:18:53,395 --> 00:18:55,595
+Here the user wants to use the dialog lines on a cinematic.
+
+420
+00:18:56,356 --> 00:18:59,337
+So he uses an asset browser to open a timeline on disk.
+
+421
+00:19:00,297 --> 00:19:02,938
+And then he just tracks the dialog unit on it.
+
+422
+00:19:05,053 --> 00:19:07,854
+And that automatically creates tracks for each character
+
+423
+00:19:07,894 --> 00:19:09,294
+and new events for each dialogue line.
+
+424
+00:19:10,735 --> 00:19:12,456
+The user also wants to make some modifications
+
+425
+00:19:12,476 --> 00:19:13,176
+to the screenplay.
+
+426
+00:19:18,478 --> 00:19:20,699
+And this causes the corresponding event
+
+427
+00:19:21,799 --> 00:19:23,620
+in the timeline editor to be highlighted
+
+428
+00:19:24,360 --> 00:19:25,421
+because the duration changed.
+
+429
+00:19:26,401 --> 00:19:28,922
+User can now export the latest screenplay data
+
+430
+00:19:29,102 --> 00:19:30,943
+and then retime the event to match the source dialogue.
+
+431
+00:19:32,493 --> 00:19:35,054
+And I think this really validates this design
+
+432
+00:19:35,094 --> 00:19:36,394
+because there are two different workflows,
+
+433
+00:19:36,674 --> 00:19:38,455
+screenplay writing and building cinematics,
+
+434
+00:19:38,575 --> 00:19:39,935
+working almost seamlessly together
+
+435
+00:19:40,316 --> 00:19:42,436
+and within the same UI with the same controls,
+
+436
+00:19:42,636 --> 00:19:43,677
+even though the data is stored
+
+437
+00:19:43,737 --> 00:19:44,997
+and handled completely differently.
+
+438
+00:19:47,878 --> 00:19:50,279
+So, here are the biggest benefits we've seen so far.
+
+439
+00:19:51,860 --> 00:19:53,780
+Our productivity significantly increased.
+
+440
+00:19:54,080 --> 00:19:56,501
+It allowed other teams to work on their specific workflows
+
+441
+00:19:56,641 --> 00:19:58,522
+and thus we've managed to add more new workflows
+
+442
+00:19:58,542 --> 00:20:00,062
+to our .NET tools during the past two years
+
+443
+00:20:00,102 --> 00:20:01,203
+than we did during Quantum Break.
+
+444
+00:20:02,834 --> 00:20:05,475
+Context sensitive significantly reduced the fumbling
+
+445
+00:20:05,495 --> 00:20:06,075
+with the panels.
+
+446
+00:20:07,355 --> 00:20:09,316
+Now that the panels are grouped inside the documents,
+
+447
+00:20:09,356 --> 00:20:10,136
+the state is clear.
+
+448
+00:20:11,116 --> 00:20:12,637
+And reusing the same panels allows
+
+449
+00:20:12,717 --> 00:20:14,537
+to have better and more consistent UX.
+
+450
+00:20:17,298 --> 00:20:22,120
+As for the takeaway, start thinking the whole,
+
+451
+00:20:22,240 --> 00:20:25,201
+have a high level goal for your workflow, high level design,
+
+452
+00:20:25,281 --> 00:20:28,501
+before diving into details and solving problems one by one.
+
+453
+00:20:30,911 --> 00:20:33,214
+Clearly separate different layers of the application so
+
+454
+00:20:33,254 --> 00:20:36,477
+you can reuse and test the code.
+
+455
+00:20:37,438 --> 00:20:39,500
+And last, and most importantly, promote
+
+456
+00:20:39,561 --> 00:20:41,443
+reusability and empower other teams.
+
+457
+00:20:41,783 --> 00:20:44,466
+I strongly believe that as a tools programmer, the first
+
+458
+00:20:44,506 --> 00:20:46,849
+and foremost responsibility should be to empower other
+
+459
+00:20:46,889 --> 00:20:49,391
+people, may that be either end users or other programmers.
+
+460
+00:20:50,372 --> 00:20:50,633
+Thank you.
+
+461
+00:21:01,785 --> 00:21:02,745
+So, questions?
+
+462
+00:21:11,652 --> 00:21:13,973
+Thank you for your talk, really interesting stuff.
+
+463
+00:21:14,294 --> 00:21:22,359
+I was wondering how long did you, did your team work on the refactoring or just cutting
+
+464
+00:21:22,419 --> 00:21:27,143
+out the MFC and just switching and how did you sell it to the management?
+
+465
+00:21:29,279 --> 00:21:32,701
+We are still using the MFC application, but this is just
+
+466
+00:21:32,781 --> 00:21:36,603
+replacing the framework of the .NET tools, the loosely
+
+467
+00:21:36,643 --> 00:21:37,063
+coupled one.
+
+468
+00:21:37,803 --> 00:21:40,745
+And it took about half a year, about two people working full
+
+469
+00:21:40,785 --> 00:21:43,566
+time, to get all the bits and pieces of the
+
+470
+00:21:43,606 --> 00:21:44,707
+framework up and running.
+
+471
+00:21:45,407 --> 00:21:47,788
+And basically, we just solved it by saying that we're
+
+472
+00:21:47,808 --> 00:21:51,050
+spending now half a year, and then we're going to save like
+
+473
+00:21:51,630 --> 00:21:52,490
+three years later on.
+
+474
+00:22:06,781 --> 00:22:08,262
+Hi, great talk.
+
+475
+00:22:08,383 --> 00:22:10,425
+You mentioned the selection provider.
+
+476
+00:22:10,445 --> 00:22:12,407
+I was curious, can you elaborate more
+
+477
+00:22:12,467 --> 00:22:16,431
+on how things connect to these sorts of providers,
+
+478
+00:22:16,491 --> 00:22:19,173
+like how they know which provider they want to listen
+
+479
+00:22:19,314 --> 00:22:21,616
+to or how they publish to one?
+
+480
+00:22:22,297 --> 00:22:26,200
+So like I said, it's not really just the selection provider.
+
+481
+00:22:26,241 --> 00:22:27,302
+It's kind of this.
+
+482
+00:22:28,063 --> 00:22:30,924
+component system, that you can have any kind of component
+
+483
+00:22:30,964 --> 00:22:31,124
+there.
+
+484
+00:22:31,705 --> 00:22:33,145
+But in the case of SelectionProvider,
+
+485
+00:22:33,205 --> 00:22:35,546
+we just made it work with the same string ID.
+
+486
+00:22:35,606 --> 00:22:38,587
+So you give a panel the string ID,
+
+487
+00:22:39,267 --> 00:22:41,048
+and then you say that it should follow a selection.
+
+488
+00:22:41,388 --> 00:22:46,589
+And it just looks up a SelectionProvider component
+
+489
+00:22:47,089 --> 00:22:49,030
+from the document using that string ID
+
+490
+00:22:49,110 --> 00:22:50,290
+and automatically uses that.
+
+491
+00:22:51,511 --> 00:22:51,751
+Thank you.
+
+492
+00:23:01,345 --> 00:23:02,432
+I guess nothing else. Thank you.
+
