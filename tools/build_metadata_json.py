@@ -18,17 +18,17 @@ def getYoutubeTitle(yt : YouTube):
         # https://github.com/pytube/pytube/issues/1479
         exception_count = 0
         title = "<fetch_title_failed>"
-        while (exception_count < 100):
-            try:
-                title = yt.title
-                break
-            except:
-                print(f'fetch failed ({exception_count})')
-                exception_count += 1
-                try:
-                    stream = yt.streams.first()
-                except:
-                    print('issues accessing stream')
+        # while (exception_count < 100):
+        #     try:
+        #         title = yt.title
+        #         break
+        #     except:
+        #         print(f'fetch failed ({exception_count})')
+        #         exception_count += 1
+        #         try:
+        #             stream = yt.streams.first()
+        #         except:
+        #             print('issues accessing stream')
                     
         return title
 
@@ -49,15 +49,32 @@ for idx, file_name in enumerate(srt_files):
     yt = YouTube("https://www.youtube.com/watch?v=" + videoId)
     
     title = getYoutubeTitle(yt)
-    yt_length = yt.length
+    #yt_length = yt.length
+
+    file_metadata = full_file_path + ".meta"
+    print(file_metadata)
+    reviewed = False
+    reviewer = ""
+    if (os.path.isfile(file_metadata)):
+        try:
+            with open(file_metadata, 'r') as file:
+                srt_metadata = json.load(file)
+                if 'reviewed' in srt_metadata:
+                    reviewed = srt_metadata["reviewed"]
+                if 'reviewer' in srt_metadata:
+                    reviewer = srt_metadata["reviewer"]
+        except:
+            print(f"Can't load the {file_metadata} as a json file.")
+
 
     print(title)
     video_data = {
         "id": videoId,
         "title": title,
-        "length": yt_length,
+        #"length": yt_length,
         "subtitle": full_file_path,
-        "reviewed": False,
+        "reviewed": reviewed,
+        "reviewer": reviewer,
         "translation": {},
     }
     video_data_dict[str(videoId)] = video_data
@@ -85,7 +102,7 @@ for videoId, video_data in video_data_dict.items():
     video_json = os.path.join(json_directory, videoId + ".json")
     with open(video_json, "w") as outfile:
         json.dump(video_data, outfile)
-    print(f"Created {video_json}")
+    #print(f"Created {video_json}")
 
 with open(subtitles_json, "w") as outfile:
     json.dump(srt_list, outfile)
