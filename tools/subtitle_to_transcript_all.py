@@ -15,16 +15,20 @@ def write_transcript_file(filepath, transcript):
 def convert_srt_to_transcript(srt_content):
     subtitle_lines = re.split(r'\r?\n\r?\n', srt_content)
     transcript = ''
+    line_changed = False
     for line in subtitle_lines:
         if len(transcript) > 2 and transcript and transcript[-1] in '.!?':
             transcript += '\n'
+            line_changed = True
         text = re.sub(r'\d+\r?\n\d\d:\d\d:\d\d,\d\d\d --> \d\d:\d\d:\d\d,\d\d\d\r?\n', '', line)
         text = re.sub(r'<.*?>', '', text)
         text = re.sub(r'\r?\n', ' ', text).strip()
         if not text:
             continue
-        if transcript and transcript[-1] not in '.!?':
+        if transcript and transcript[-1] not in '.!?' and not line_changed:
             transcript += ' '
+        else:
+            line_changed = False
         transcript += text
 
     return transcript
