@@ -7,12 +7,13 @@ Please make sure to read the Pull Request Guidelines: https://github.com/dklassi
 ### What kind of change does this PR introduce?
 <!-- Check at least one. If you are introducing a new binding, you must reference an issue where this binding has been proposed, discussed and approved by the maintainers. -->
 
-- [ ] Bugfix
+- [ ] Bugfix (Just choose this if you're reviewing subtitles)
 - [ ] Feature
 - [ ] Resolve issue #___
 - [ ] Other, please describe:
 
 ### Checklist
+<!-- Not required for reviewing subtitle. -->
 - [ ] When resolving issues, they are referenced in the PR's title (e.g `fix: added transcript, closes #___, #___`)
 - [ ] I have added a convincing reason for adding this feature, if necessary
 
