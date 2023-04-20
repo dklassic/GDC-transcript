@@ -1,0 +1,215 @@
+So, hello and welcome. Today we're going to be talking about randomness in game programming.
+If game development is like baking pastries, then random numbers are the delicious cinnamon.
+I'm Dr. Kat, and I've been making games professionally for 34 years now.
+I'm also a game designer, so we'll be covering some design considerations as well as code samples today.
+It's good to be able to clearly understand and communicate what options you can provide to the designers on your team.
+And I know a lot of programmers are also involved in design, as I've always been.
+I kind of flip back and forth, but I found game programming pays better than being creative director a lot of places.
+Also, you're harder to fire.
+We have three parts to our talk today.
+First, I'm going to rush through some basic best practices, because I think a lot of you already know those.
+Then I'm going to cover how you can control result distributions with some example code from a live game I worked on.
+And finally, there's a set of tips and tricks, mostly focused around taking advantage of what recorded random number seeds can do for you.
+There's a few other ideas, too.
+I won't be explaining the code snippets very much because they're short and simple and we can cover more ground that way.
+So you can review the code and the funny animal photos later.
+These slides are all available at tinyurl.com slash pdc-random, like it says there.
+That'll be repeated again on the last slide.
+So, without further ado, let's get started.
+Best practices.
+The first thing I'm going to recommend is that you have your own pseudo random number generator code instead of using any random number function that's provided by your OS, a language, or platform API.
+There's multiple reasons for this.
+One is, you can't guarantee the quality of the randomness or the CPU efficiency if you don't know what's in the black box that you're calling that was provided to you. Some web browser JavaScript RNGs have very uneven distribution and you don't want to get stuck with junk like that.
+More importantly, if you use your own code, you can guarantee matching results on multiple platforms, giving the same starting seed.
+Even if you have to port your game to a different language, you can port the RNG math and still achieve this.
+That's very valuable, as it enables a lot of the tricks we'll be covering in part three of the talk.
+For the vast majority of games, I'm going to recommend XOR Shift 128+.
+I've been using something called Mersenne Twister for the last 20 years in a lot of my games.
+it's more than you need. This is fast, it's small, and it passes popular statistical tests like Big Crush. If you're trying to program professional quality encryption or maybe doing real money casino games, you might want to look at something fancier like Mersenne Twister. Otherwise, just use this little gem for everything and you should be fine. I do want to mention a couple of common mistakes to avoid. The big one is improper seeding.
+For most purposes, you want to seed your RNG once on game launch and never again.
+I've seen somebody seed the RNG before every request they made, at which point your quality is not equal to the quality of your RNG, it's equal to the quality of your seeding source. So don't be that guy.
+I recommend seeding from a high resolution system clock.
+Millisecond precision at least.
+If you can get it one that has microsecond or nanosecond precision, that's even better.
+Although milliseconds is really fine.
+If you only have a 64-bit timer, you'll notice this wants 128-bit seed value.
+You could put something in the high word like the date, or you can just put a second copy of the timer in there.
+That's fine.
+Some lower quality RNGs have a flaw where if you have a seed with a lot of zeros, like you stuffed a high word full of zeros, it can take a number of calls before they start producing results with variety to them.
+So it's a good habit to fill your whole seed up with some bits.
+Other common mistake that people make is very imperceptible in impact, but let's avoid it anyway.
+And again, if you ever go into real money gambling, you're going to have to do this right.
+I've done a little of that.
+In some high volume applications, this could actually matter in your game.
+If you have an RNG that's 16 bits or less, it can matter quite a lot more.
+So this is a common way you might take the output of an RNG and use it to roll an N-sided dice.
+It looks fine, the top one, doesn't it?
+But, you know, thousands of games do it that way, they get away with it.
+But imagine you're rolling 100-sided dice with a 16-bit RNG.
+So the numbers go up to 65535, and then you add your 1.
+So we're going to get 655 groups of 100 numbers, and one little group left over that goes from 1 to 36.
+So now our dice are slightly biased towards numbers from 1 to 36.
+So this second version here is just a nice clean way to fix that. It's almost always going to make only one call to your core RNG. Occasionally it'll make two and you'll probably never see three in your lifetime. So you're not paying a lot of CPU cycles to make this fix. And finally if you want to randomly reorder a list of things, like, I don't know, cards, here's the Fisher-Yates shuffle, also known as the Knuth shuffle.
+It does an optimal randomization in optimal O of N time.
+And if you think this code sample has a deck size of 60 because I like to play Magic the Gathering, well, you got me.
+You can use this for any type of result pool, of course.
+It doesn't have to be cards.
+You can find some more variants and info on Fisher-Yates on the Wikipedia link there.
+And the second link gives implementations in 104 different programming languages, because that amuses me.
+Our next section is entitled Controlling Your Distribution.
+Sorry I don't have a slide with that title. I ran out of pixels at the last moment, but I do have this slide.
+So, I'd like to introduce this topic with the story that inspired me to do this talk.
+Back when I was working on Ultima 5 at Origin, back in the caveman days, Lord British mentioned to me how the invisibility ring had worked in Ultima 4.
+Each turn of use, there was a 1 in 256 chance it would get used up and vanish.
+This way, he could give it a limited duration without having to use up a byte or two of storage for a duration value.
+Back in the days of 64K games, we were pretty serious about saving bytes wherever we could.
+He decided to do invisibility rings the same way in Ultima V, which I was working on with him.
+So I thought about this a little bit.
+Was this a case of carefully crafting the range of variation of gameplay experiences?
+Or was it a matter of finding a solution that was fairly easy to implement and seemed to be in the ballpark of the desired experience?
+You could easily figure out, oh, 1 in 256, the ring will probably last 100, 200, 300 turns, you know.
+Surely, surely it was the latter.
+Surely that's what he was thinking.
+I didn't ask.
+But given the minor importance of this one item in the game, this was a perfectly reasonable design approach.
+But being an inquisitive feline, I couldn't help but ask myself design questions about this, especially mathematical ones.
+How would you characterize the duration of invisibility rings in Ultima games?
+What other options could a game designer be given there if we wanted to put more work into it?
+Well, the simplest way to think about random results in a game is with averages.
+You could calculate the average number of turns this ring would last if you wanted to.
+I want to encourage all of you to believe, as I do, that averages suck.
+Abstractions that simplify reality can be useful to help us get an overview and understand a subject.
+But you can go too far with that.
+What if you tell your development team that the average payout of a mini-game is 7 coins?
+They're going to focus their imagination on what the player experience is like when they get 7 or something near 7.
+And you know, if you have a distribution that's somewhere close to a bell-shaped curve, that's not the worst way to think about it.
+But what if we have a flat distribution?
+Now the very low results and the very high results are common rather than rare.
+Some people would look at average plus standard deviation to get an idea of the game result.
+I'm sorry, but I think that still sucks.
+What if you have a distribution like this?
+Or like this?
+Or this?
+You could have a distribution where the average is 7, but the numbers 6, 7, and 8 never actually occur at all.
+So I recommend thinking instead about a distribution graph of your results of a random outcome in your game.
+Those can show you clearly what blend of experiences players are going to have when they run into a particular random element in your game.
+So I'd encourage you all to get comfortable with the charting options in your spreadsheet if you aren't already.
+So the, uh.
+The ultimate invisibility ring distribution of total turns of use before it expires is an exponential decay, just like our muon decay graph at the upper right.
+And I thought to myself, that's great if that's exactly how you want to sculpt your range of player experiences mathematically, but what if you wanted something else?
+Well, I knew what you would get from various combinations of dice rolls and other common mechanisms in real-world randomized games.
+We could simulate those.
+But since we're making software here, what about something more flexible?
+That's when it occurred to me, why not just draw the bar graph of the distribution pattern you want with a table of numbers and work backwards?
+Write a piece of code that looks at that table and generates random results in those exact proportions.
+Now you could have any style of probability distribution you want.
+Neat.
+So I promptly filed that idea away for the next 25 years and got back to finishing Ultima V.
+And then some squirrel invited me to give a talk in this math rack.
+I thought, well, I could give a nice talk on randomness and code up that idea I had in the 1980s.
+Then I realized the bonus games in 1UP Casino, which I've been working on the last two years, have exactly that code already written.
+I love saving time.
+So here it is.
+You'll note here I could just return the value of i rather than returning values of i if I wanted a continuous range of results like numbers from 1 to 6.
+Having a lookup table lets me have gaps in the range or, you know, whatever kind of result you want.
+I could also return a more complex object rather than an integer.
+To get a random floating point result, you might want to specify ranges of numbers in your table and then as a last step pick a random point within the interval you chose.
+Would be one way you could approach that.
+Or you could return a pointer to any kind of relevant game object that exists in your game.
+In our casino game, we use this logic to choose one of several sub-pools of bonus prizes, for instance.
+Now, this function is an example of what we call sampling with replacement.
+It's like picking multiple letters from a bag of 100 Scrabble tiles, putting your chosen letter back in after each pick, and then choosing again.
+That means the odds of each letter are exactly the same on every pick.
+The other obvious alternative is sampling without replacement, which is how actual Scrabble works.
+If you pick the Z tile on your first pick, the odds of a Z on the second pick are zero.
+You've taken it out of the bag already.
+That's how we actually pick our final set of prizes in 1UP Casino, after this picker has selected our sub-pool.
+When you play games with a deck of cards, that's generally sampling without replacement as well.
+Generally speaking, sampling without replacement gives you more consistent results as later picks will have a tendency to correct early variants back towards the mean. And unusual outliers like a scrabble hand of ZZZZZZZ are impossible. Choosing with replacement gives you both more short term variants and in the longer term it takes more trials before your player will have experienced all the possible items in the pool.
+It's common in choosing without replacement to keep going until the pool is exhausted and then generate a fresh copy of the pool, like reshuffling cards after the deck runs out.
+So, if you have 52 cards or 52 potions or 52 magic weapons, players will have seen them all after 52 picks.
+One-up bonus games fall somewhere in between.
+We give you three to five prizes out of a pool of 20, and then we generate a fresh prize pool for the next play.
+So you're not guaranteed to see the jackpot after just 20 plays.
+This is done with a simple Fisher-Yates shuffle.
+For sampling without replacement, you can iterate through the whole pool, or just the first n choices, and then reshuffle.
+Another nice use for a randomly sampled pool is random messages, such as tips and tricks, flavorful background, or whatever you like.
+In Ultima Underworld 2, I had Blog the Troll play a game called White Rock Black Rock with the player.
+While entertaining to his minuscule brain, it's a little dull for a typical human.
+I added 10 random you win messages and 10 random you lose messages to make it a little more entertaining.
+If I use sampling without replacement, you'd exhaust all the game's varieties after 10 wins.
+Or 10 losses.
+But trust me, it's very easy to win this game.
+If anyone likes, I'll play some White Rock, Black Rock with you in the lunch break.
+I have since, after 20 years of thought, simplified the game down to one rock, which I felt was a real design breakthrough for me.
+But you can ask me about that after the talk.
+So sampling with replacement gives a much larger number of plays before the player stops encountering new results.
+Note that this average number of trials is lowest if you give each choice equal probability.
+And it's higher if you bias it towards some choices and away from others.
+But they'll see less short-term variety if you use a bias pool.
+The main problem here is the very real chance of seeing the same message twice in a row, which often feels bad.
+The nice little variant I use for blog the troll is sample or the replacement, but re-pick if your choice matches the last choice you made.
+You can generalize that and say re-pick if you match any of the last n elements chosen.
+Some games will feel better with n equals 2 or 3 rather than n equals 1.
+Anyway, this is fairly easy to code, so I will leave that as an exercise for the viewer.
+Before we move on to our last part, I have a grab bag of terms you can Google if you don't already know them.
+I imagine you'll know a lot of these already, but if you spot some new ones, then enjoy.
+I wanted to list random walk as drunkard's walk, by the way, the name I learned it by.
+But apparently somebody wrote a novel with that title and ruined Google for everyone.
+Anyway, having a better grasp of the range of likely results of a random walk is helpful for doing good randomness design, so it's worth learning about.
+And if you're interested in combinations and permutations, Nathan will be discussing those in his talk.
+It's either 210 or 240.
+I'm not sure I have the right time written down here.
+Squirrel will check for me. 210.
+OK, I did write it down wrong.
+He tells me he's got a cool ranking algorithm to present as well.
+That's in the same room here.
+And speaking of statistical significance, I feel the amount of time and effort it's worth spending on randomness design for a given element of your game should be related to factors such as how often the event occurs, how high is the variance, and how big is the impact of the different results.
+Know how to choose your battles wisely.
+And now it's time for fun with seeds.
+Okay, I told you at the start, only seed your RNG once.
+Now I'm going to tell you when to break that rule.
+Because RNG seeds are secretly one of the most powerful forces in the universe, if you're a true Jedi seed master.
+Example one, how long do invisibility rings in Ultimate 4 and 5 tend to last with optimal gameplay?
+Well, I don't have to give you a distribution graph to avoid the evils of averages on this one, because the answer is forever.
+What's that, you say?
+Before using the invisibility ring to get through a tough battle, a hardcore player saves the game.
+If the ring expires, reload the save.
+Play it again.
+Hope for better dice rolls.
+You never save the game when you have an expired invisibility ring, and you just never have to find another one.
+You never use that thing up.
+Solution? Save the RNG seed in your save game file.
+When people load a save game, take that saved value, reseed your random number generator.
+Now, if they saved a game where they were four steps away from their invisibility ring expiring, they're going to load a game where they're still four steps away from it expiring.
+Of course, if players can vary the flow of random numbers to different game systems by saying, oh, I'm going to make zero, one or two attacks before I take my next step of movement, then they can cheat around that. So you might want to have multiple RNGs in a game where that might be an issue.
+One for player attacks, one for monster attacks, one for invisibility ring expires and so forth.
+Of course, if you think this is a cool trick for your players to be able to do, you can deliberately build it into your system that, oh, I'm going to reseed my RNG every time they load a save game so they can have a chance at a different result.
+That's a valid design decision also.
+So that's a small trick.
+Procedurally generated content is a big one.
+The old dungeon crawler, Tellengard, figured out what each square of the dungeon had in the way of walls, doors, magic fountains, traps, and stairs by taking the X, Y, and Z, aka dungeon level, combining them into a seed, and then calling the RNG to generate what was in that square.
+This let the game put an enormous dungeon into even the 8K version.
+Yes, there were 8K games back in the early days, where the map remained constant.
+If you left an area and came back, you'd find the same thing there again.
+But there was no storage space required.
+And the designer only had to design and tweak their content generation algorithm, rather than laying out enormous amounts of map data by hand.
+A more current example of seeded procedurally generated content would be the upcoming No Man's Sky, where they have a whole enormous galaxy that multiple players can explore and find the same things at every planet consistently and repeatedly.
+Of course, you'll want a separate dedicated RNG for world generation, apart from the one you lose for combat results and loot and such.
+On a simpler level, I used an XY-seeded algorithm for Fricadia, my online game, plug plug, Guinness world record holder.
+So it's to keep large patches of grass and trees from looking too monotonous.
+We're a user-created content game, one of the first, and I didn't want to require all players to hand scatter all the extra grass and tree shapes to make their maps look good.
+Or count on them to do so, so that other players wouldn't see boring maps that our users made.
+So I made our map plotter call this random sort function.
+I wasn't as good at function naming back in the 1990s, I will freely admit.
+You'll also note I coded this to require power of two values for the range parameter.
+You can use modulus rather than a bitwise and to fix this in my code here.
+For historical reasons, I left that intact for you all.
+In my defense, in 1980s 8-bit CPUs, bit masking was a much cheaper CPU operation than division, and old habits die hard.
+So here is before and after photos to show you how many pounds of boredom were shed by this simple piece of code.
+Another thing I do in Fricadia is to keep the level map synced up, even when modified by player written scripts in real time, by just sending instructions to every client indicating scripting line 87 just triggered.
+Do that stuff.
+If that section of scripting contains random effects, I send the current seed to every client in that same packet.
+That way I know they'll all get the same random results as the server and all the other clients.
+Everyone stays in sync, and a large amount of interesting changes to the map can happen in an identical way for every player with a very small amount of bandwidth used.
+Another great use of random number seeds

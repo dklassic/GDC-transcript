@@ -1,0 +1,905 @@
+Thank you all for coming to my talk on Spider-Man.
+There's a lot of ground to cover today, so I'm gonna go really fast.
+You will be super stressed out if you're trying to take pictures of every slide.
+Fear not, I will put them at the URL.
+Sit back, relax, do not panic.
+Also, remember to send in those e-mails so I can get on a deck of cards.
+And if you have anything that beeps, silence it.
+Today I'm going to talk about the biggest game we ever made, our biggest city, our most populous city, the greatest responsibility we've ever faced.
+And, well, you know.
+Insomniac Games is two studios, one in California, one in North Carolina.
+We are about 250 people across multiple projects.
+Spider-Man took us three years to make.
+The engine we used began life more or less on Fuse.
+It has been used on two open world games, Sunset and Marvel's Spider-Man.
+But one of them is a much more open world than the other.
+Our Marvel's Manhattan is about five and a half kilometers from north to south.
+And that's not the only thing that's bigger.
+Basically everything was bigger about Marvel's Spider-Man.
+Our source assets, about 3.3 terabytes, 335 gigabytes of textures, 151 gigabytes of models, 150 megs of source code, somehow.
+And that is several times larger than Sunset Overdrive.
+So today I'm going to break down one frame for you I'm going to talk about how we built the city how we stream the city how we fit it on disk how we fill the Street something else best place to start at the beginning. I'm sorry the whole story would take forever to get through So I'm just gonna talk about these five rigs We stepped on and the best place to start is at the beginning. So three two one All right, let's break down a frame.
+30 frames a second, 33 milliseconds a frame.
+PlayStation 4 has six CPU cores, so we have a main thread, a render thread, and four workers.
+We render a frame behind the CPU.
+Of course, I'm lying.
+We can share half of the CPU with the operating system.
+We use that for the loader.
+And we render more like one and a third frames behind the sim because we do our post-processing at the start of the frame.
+I'll get back to it.
+And instead of having four workers, we actually have three tiers of priority times four workers.
+And we also have audio on its own threads, which we let run wherever it needs to because it needs to interrupt things or else it pops.
+Here's our frame, 33 milliseconds.
+The top one is the main thread.
+The second one is the render thread.
+The bottom two are a low and high priority worker thread that share the same CPU.
+And sorry.
+And let's start with the main thread.
+So the first thing that the main thread does for about two to five milliseconds a frame is deal with streaming.
+We are either loading assets or getting rid of assets or initializing assets or like spawning actors or getting rid of actors.
+We're always doing something because spawning everything that needs to be active when you come into a block takes many, many milliseconds.
+It's too much to do in one frame.
+So we just amortize that work.
+Also, I learned yesterday that God of War people have a very interesting way of dealing with this.
+So you should go look at their talk in the vault.
+It's the pipeline one, I think it's called.
+We spent about 10 milliseconds on gameplay logic spread across five threads.
+Spent about six milliseconds on physics and audio, also across multiple threads.
+The end of the frame on the main thread is taken up with making stuff ready for the render thread to draw up the next frame.
+So we have like a double buffering where we copy the state of the scene out for it to draw.
+We also do like our last skinning and our occlusion at this point.
+RenderThread picks up all that buffer from the previous frame and basically submits draw calls as fast as it can, renders the models, the shadows, all that thing, spends about six milliseconds on GUI because scale form.
+And then if it has any time left over at the end of the frame, it joins in on the workers, just does occlusion like anything else.
+Obviously, on some frames it has more leftover time than on other frames.
+Here's all of our other threads in priority order.
+Audio gets first crack, of course.
+We have a high priority and a low priority tier on our workers.
+The reason for that is we have a bunch of jobs that take a long time but can start early.
+But then while they're running, occasionally urgent things need to step in and interrupt them.
+For example, during gameplay, there are some skeletal animation that we have to do right away because if it's like a locator at the end of the hand of somebody who has a gun or something.
+So if we use a cooperative multitasking model, it would be this big palaver where we have to cut the big job up into little pieces and do all the synchronization.
+But by simply having a high priority tier and a low priority tier of threads, the process scheduler does the work for us.
+Let's skip ahead.
+So, I'm whipping through this, but when you go back and see it on the vault, you tech vampires can see all of our timings and numbers.
+I.O. is always ready to run.
+It's waiting for bytes to come off the disk.
+As they come in, it decompresses them as fast as it can.
+Once they're ready, they're ready.
+It sends it off to the main thread to initialize.
+It's a best effort, and we just deal with stuff loading at variable times.
+All right, what about that additional third of a frame behind?
+So like I said, the main thread ends its frame by submitting the scene over to the render thread, which draws it.
+The GPU executes those calls as they come in.
+At the end of its frame, it says, I'm done rendering models, meshes, textures, anything that relies on an asset.
+So the main thread can go ahead and unload all that stuff.
+which means there's a whole bunch of churn at the Asset Heap at the beginning of the frame.
+Like, we're moving things around, getting rid of things.
+So it's not safe for the render thread to start issuing draw calls in anything that might touch an Asset, because those pointers might invalidate.
+So we had this big bubble on the GPU for a significant part of the project until suddenly somebody at Spark noticed, well, there is some work that the GPU can do that doesn't depend on Meshes or Models or Textures, just on the pixels already on the screen.
+And of course, that's post-processing and tone mapping.
+So...
+The GPU is ending its frame when the CPU is beginning it.
+That's like color correction.
+Let's look at the GPU frame in Razor.
+We use a deferred rendering model.
+That means we put the polys up in the buffer and then go around and light them later.
+I've mixed up the pixel shaders and the compute shaders in this graphic because we don't really distinguish them.
+They're both small programs that run in the GPU and make graphics.
+What's the difference?
+On the asynchronous compute pipeline, the first half of the frame we do our water simulation, which is fast Fourier, it is like, our waves are actually waves, and screen space reflection and ambient occlusion happens like vaguely somewhere in the second half of the frame.
+Why those things?
+So on our last game, global illumination ran on async compute.
+And async compute is this miracle thing, right?
+It's zero cost.
+Stuff just runs in the background.
+You don't have to worry about it until it doesn't fit anymore.
+And then all of a sudden, there is a cost, because you're synchronizing on this asynchronous thing.
+So that got too big, so we moved it over to the regular compute pipeline, which made room for reflection and ambient occlusion.
+Why those things?
+They happen to be the things that fit.
+It's just a juggling act.
+Now, I'm showing you the end product here, but we were way over frame for a long time.
+And for once, I don't have any fancy optimization tricks, because we did them all on the last project.
+So this was just a long slog of going through every component and making it better, doing the micro-optimizations, most importantly, trying to make things more concurrent.
+We had a lot of concurrency before, but there was locking.
+It wasn't efficient.
+We made it better.
+Concurrency is hard in our engine.
+Creating actors isn't thread-safe for us.
+Creating components isn't thread-safe for us.
+Creating event handlers isn't thread-safe for us.
+Allocating memories.
+Also, we have a batch component update model, which means that we do all the animation components in the world, and then all the A components in the world, and then all the movers in the world, and then all the sound in the world.
+So we have a really good way of saying which classes of component come after which other classes.
+So we can say that movers always come after AI.
+But we don't have a good way of ordering individual actors within that component class.
+So if two AIs are running at the same time and they're trying to read data on each other's AI components, that data may be changing.
+If they're both moving, then they literally step on each other.
+So in those cases, we couldn't fend them out.
+But.
+If we had components that didn't touch other component classes, we could run all of the pedestrian components in one thread while we ran all of the sound components in another thread, for example.
+Those jobs would be huge, but they would be huge in parallel.
+In fact, for some of our components, we said, do they need to be components at all?
+A bunch of them, like the pedestrians in particular, we just turned them into this big global system.
+We took that work away from the actor because then it can have a very big, simple for loop.
+And it just does all the things.
+And there's no stepping on each other.
+And there's no.
+There's no ordering problems.
+Again, it ends up being this gigantic job, but four gigantic jobs at the same time.
+So, that's the TLDR.
+In addition to all that, we had to do level of detail very aggressively.
+I don't just mean geometric level of detail, although that matters for skinning, but also just things that are farther away.
+We had to go through a lot of work to make them think less, tick less, shut stuff off as soon as it's out of camera.
+On the other hand, this old model that we've been using for years of the main thread and the render thread in workers, it's fine.
+It's fine. It's still good, right?
+We come to the first moral of the story.
+Simple is good.
+I mean, we could have done the cooperative multitasking.
+It really would have just complicated things.
+Also, the LOD thing, before I leave it, it was a continuing struggle for us because the game is so big, stuff keeps falling through the cracks.
+For example, here's the body on Dr. Morgan Michaels.
+On the left, we have the cinematic asset, which is 90,000 triangles.
+On the right is the gameplay asset, which is 5,000 triangles.
+Can you tell the difference at this distance?
+All right, there is a gameplay scene that uses him.
+Would you like to guess which LOD we used for?
+a while. Yeah, there he is in all his 90,000 polygon glory.
+Obviously the fix for this is simple once we found it, right? We just fixed the LOD distance. But this happened over and over again.
+Somebody modeled cars that had these beautifully detailed motors and animation on them. The hood never opens.
+So...
+I'm like, there's no lesson here other than just that it's a continual struggle and you have to stay on top of it.
+Especially for a project this big. Let's keep going.
+All right, we built this city on mostly Houdini.
+Manhattan's pretty big, and our team was not that much bigger.
+So for the details, go see Santiago's talk seven hours ago.
+Well, go find it on the vault.
+The overview is we divided Manhattan into districts, neighborhoods, each of which was tiles which are like a couple of city blocks and every one of those are stacked up zones.
+A zone is just our atom of streaming.
+It's a list of seen objects and the assets that go with them.
+The TLDR is that Houdini made a whole bunch of stuff relevant to this talk are the streets, the ground, and the buildings.
+The thing is, after Houdini exported the final art for the building, well, its notion of the final art for the buildings, we then, of course, have to go and do it by hand, because you can never just procedurally adjust everything, I mean, you can never count on the procedurality.
+However, we also used Houdini to make the markup for a lot of stuff, the navigation, in particular, the traversal markup, like the swing points and the ledge grabs and all that stuff, and that depends on the final position of the geometry, right?
+Like the artists go in and they push around a skylight, and now we have to fix that markup.
+So we needed a process where we could procedurally make art, edit it by hand in the level editor, and then feed it back into Houdini for it to do the markup.
+Here we got lucky.
+Our common data interchange format for levels and entities and a bunch of stuff is JSON.
+Why JSON?
+Because a few years ago, we had this dream of getting into web development.
+And we decided.
+We decided to try to write our tools, our level editor in particular, as Chrome apps.
+We backed off of that idea for reasons that you can see in Andreas' talk in the vault and Ron's talk tomorrow, but the short of it is that because all those things were written in JavaScript, JSON was a natural format and we stuck with that.
+For example, this means that Houdini doesn't have to emit any kind of complicated binary asset.
+We don't have to teach it how to do anything complicated.
+It just emits prefabs as JSON objects.
+And for us, a prefab is just this structure that we copy and paste into the level automatically in the builder.
+And our prefabs contain actors, and models, and decals, and other prefabs, all of which are other JSON objects.
+So this was super useful for the tech artists and for custom gameplay systems.
+Every scripting language can read JSON without trouble.
+So we kind of lucked into this very easy way to move things between different kinds of tools.
+Also, it let us write new builders for new kinds of asset pretty easily.
+Crime, like mugging, it's a first class asset in our game.
+because Houdini could make that prefab and then we had a special crime builder that went through all the crimes in the world and then offline computed the data structure with a tree that knows how to spawn them under what conditions so that the crime system in the game didn't have to go digging through the level and enumerating all the volumes.
+Like that was a small optimization, but the point is, writing these kinds of custom gameplay builders for custom things specific to this game was super handy.
+Some numbers about our Houdini.
+It takes like seven hours to generate just the ground.
+Every one of the overlays, like the traffic, the props, the crimes, the vignettes, all that, about 40 minutes each.
+Better part of the day to regen the city if we have to, not counting lighting.
+We have 8,300 buildings, 350 storefronts, 3,000 random crimes, 3,000 vignettes.
+That's stuff like traffic accidents.
+544 roads and 1,200 alleys, which of course, we need in a game because we have to have crime-infested alleys for crime to take place in, but by contrast, the real Manhattan has one, two, three, four, five, six, seven. Seven alleys in lower Manhattan. If you have seen movies shot in New York and ever wondered like, why do alleys in New York look the same? It's the same alley, Cortlandt Alley in Chinatown.
+That's the only one you can film in. TLZR.
+This whole shtick of creating procedural content, editing it by hand, and loading it back in, it's fine.
+It's cyclic and annoying, but because we had this convenient format, it was much less annoying than it could have been.
+And then go see Santiago's talk for the rest, because we've got a lot of stuff to do.
+We come to moral number two, fit the tech to the context.
+Because we control the format of all of our data, we were able to create custom gameplay builders for stuff that was super specific to this game, like I said, crimes, traffic, the ambient vermin system.
+All of this was stuff that is specific to making a game set in Manhattan, but it was cool.
+Oh, also if you care about the art, go see Hickey's talk tomorrow.
+Let's keep going.
+♪ Fire, fire ♪ All right, let's beat this up a bit.
+All right, so.
+We go at breakneck pace through the city, and that's a lot to stream.
+So let's talk about our streaming technology.
+Actually, I've done that in this room before.
+So you can go take a look at that.
+The gist is that we tessellate the city into regular polygons.
+Regular polygons in a plane, you have three choices, rectangles, triangles, and hexes.
+On Sunset Overdrive, we went with hexes.
+Hexes are definitely the right way to go if you're making a streaming city game.
+You definitely don't want to go with a rectangular grid, because then you end up with these long streets that are from one side of the city to the other.
+And there's nothing including...
+Ugh.
+Yeah, you know what? It's fine. It's fine.
+They were never hexes.
+It's just, like, a point and a radius.
+And when you're within the radius of the point, we load all the zones that are associated with that point.
+So if you arrange your points like this, it's a hex grid.
+You arrange them like this, it's a rectangular grid.
+Whatever.
+Let's talk about Washington and Mercer.
+Here is the ground plane.
+We divided the environment art up into multiple zones on sunset because we had multiple actors working on them at the same time.
+Here, Houdini did the heavy lifting for us, so all the art's in one zone.
+Gameplay zone overlaid on top of that, mostly navigation and script hooks.
+We also have an overlay for stuff that is different at different times of day or different points in the plot.
+So for example, daytime at the beginning of the game, we have a hot dog cart.
+At nighttime, it's a closed hot dog cart.
+At the end of the game, it's a post-apocalyptic hot dog cart.
+Traffic global zone for the entire city, because it's less than a megabyte and might complicate things.
+Ditto the pedestrian grid, ditto the pedestrian spawner volumes, ditto a whole bunch of stuff.
+So here's everything that stacks up to make tile M34 go.
+So like I said, we decided to build our city on a grid.
+Well, no, Alexander Hamilton did, but that's the city that we have.
+So, on a rectangular grid, typically about nine tiles loaded.
+The one you're standing on, the eight that are adjacent.
+If you're close to a border, it's more like 12.
+If you move from one to the other, three tiles are now adjacent.
+Three we can toss overboard, so we load them in.
+Move diagonally, it's five and five, still fine.
+Missions, random crimes, and basketball games and stuff like that.
+are also zones, the only difference is the ground tiles load when you're within a geographical point, missions load when script tells them to load.
+And because of that, they can poke out geographically, like car chases obviously go right across the city.
+Some system we had in Sunset, pretty simple.
+We didn't really complicate it, works fine.
+Streaming that can keep up with the player is a much bigger challenge on Spider-Man, though.
+So the Sunset Overdrive character moved at about 30 miles an hour, whereas Spider-Man is possibly the only human being who can move through Manhattan at 70 miles an hour.
+And the tiles in Marvel's Spider-Man were slightly bigger.
+And because we're on rectangles, we might have to load five instead of three.
+OK, so now we can figure out how long do we have to load a tile, and how many bytes big can the tile be.
+32 meters per second, 128 meters by, gives us a little under a second to load each tile.
+It's not a lot.
+However, we really only need the three tiles that are ahead of you.
+You're not going to the ones on either side.
+And if you decide to turn and go to the ones on either side, it takes you about a second to do that.
+So we have enough time to go and pull the switcheroo.
+All right, so we don't have to load five tiles.
+We only have to load three.
+It's one and a third seconds.
+That's more time.
+Of course, ground tiles are not the only thing coming off the disk.
+Audio is streaming.
+Missions are streaming.
+You might be recording a video.
+You might be streaming your game up to Twitch.
+Also, did you know that you can replace the hard drive in your PlayStation without voiding the warranty?
+Which is neat, right?
+Bigger hard drive.
+Some people use not very good hard drives, so we had to come up with a min spec.
+And yada, yada, yada.
+The budget we came up with was 20 megabytes per tile.
+That's as much as we could confidently stream with all of the other stuff that was happening.
+That includes geometry, terrain, actors, nav, decals, shaders, and most but not all of the textures.
+The very highest tier of textures, we stream on demand when you get close to them.
+In this video, I've replaced the high MIPS with solid red so you can see them coming in and out.
+About 700 megabytes of memory given over to them, but they're always churning.
+It's about 360 textures.
+All right, in 2015, we looked at a tile, a random one in Hell's Kitchen.
+By the way, why is Hell's Kitchen always this crime-infested neighborhood in comic books?
+It has not been that way in years.
+The worst robbery I've ever seen in Hell's Kitchen is what Mickey Spillane's bar charges for a martini.
+Anyway, I'm kidding.
+It's actually very affordable.
+28 megabytes was what we had in 2015, which is more than 20.
+So we started to ask, well, we don't want to cut content, because then the game will look grody.
+So what else can we postpone?
+Because if we load all those 20 megabytes up front, and then you stop moving, we're wasting bandwidth.
+Nothing is coming in.
+So do we need all the stuff up front?
+Like I said, we have multiple MIPS for every texture, like everyone.
+And we delay the biggest two MIPS.
+And we obviously have to have the lowest, the smallest MIPS loaded in when you come into the tile.
+Otherwise, the buildings are all solid color.
+But what about the ones in the middle?
+Do we really need those right away?
+Yeah, it turns out when you're going really fast, everything is blurry.
+So, like, I actually, I took out the middle MIPS in this screenshot.
+Can you even tell the difference?
+So that gave us two budgets for the tile, 20 megs up front and then 20 megs of detail that we load when you're not going at a breakneck pace.
+So when you slow down, if you stop moving, we pull in all that stuff.
+So we introduced this idea in 2016.
+But then the next spring, we saw there's a whole bunch of other detailed stuff that we can also postpone, like storefronts.
+We have these lovingly modeled cafes with tables and baristas and customers.
+You're never going to see it from five stories up.
+So we can wait until you're on the ground and not running around or not swinging around.
+to load all that stuff in.
+So in this video, on the top left is our delay loading pipeline.
+While I'm swinging at maximum speed, nothing really comes in because it doesn't have a chance.
+But the moment I stop moving, boom, look at all those textures and potted plants.
+It's about 12 megs a second just of delay loaded assets.
+So by procrastinating half the tile, we got our base zone down to 20 megabytes, mostly by saving space on textures, which gave us more room for models, materials, and what we call zone, which is like script and actors and terrain and collision.
+This is another place that our handcrafted, artisanal, bespoke engine worked for us.
+We changed the idea of what a level was for this specific game.
+Manhattan came with a very specific challenge, and we were able to change the notion of what even loading means for this specific problem.
+And we will probably do something different for a game that doesn't have this problem.
+While I'm talking about streaming, we originally hoped to have a game with no load times ever.
+We could, given this technology, use a bunch of air locking and movie magic to completely hide transitions, even for coming from an exterior space into an interior space that is instanced.
+So here's an early example of that, the Fisk mission, coming in from Broadway, going into an interior tower.
+Bottom right's what you see in the game, pulling the debug camera out.
+What are we doing?
+Getting rid of that city as fast as we can.
+Here comes the Fisk interior.
+Twice the size, 100 meters in the sky.
+And lock down the airspace.
+Yuri, you OK?
+If he makes it out of that building, we're going to lose him.
+Camera cropping hides the dirty work.
+Do your thing.
+Yes.
+He's the dick, Willie.
+Coming into the exterior building.
+Heads up.
+All units, head down.
+Heads up.
+Lighting change.
+Hey, where are you going?
+And we're inside.
+Yeah, seamless, right?
+Really cool.
+Took us a month to do.
+If we did everything like this, we would still be making the game.
+So we bit the bullet and said load screens.
+Oh, also, if you've wondered why we have some unskippable cut scenes, they're not cut scenes.
+They're animated load screens.
+So, that's what it took to fit into the streaming budget, but getting it onto disk was another story.
+Like I said, Marvel's Manhattan, a little bit more than six times bigger than Sunset City.
+Sunset Overdrive came on one disk.
+Does that mean that we would need to come on, like that's a really big box to take home.
+So let's back off, let's look at one of the technologies that we used on Sunset to speed up loads, which is duplication.
+We relied really heavy on duplicating assets.
+And the reason for that is a disk is a spinning mechanical device of momentum.
+And the best way to get good bandwidth out of that is to have a consistent read size and never seek, never move that head back and forth.
+It is often better to, if you have a piece of data you don't need, sandwich between two pieces of data that you do need, to read over the thing you don't need and then throw it out than it is to seek.
+So very simple, we can find all the assets that a zone needs.
+And then if asset B is needed by both zones X and Y, we just put it on the disk twice because we didn't know which one you'd load first, and we didn't want to move that head back and forth.
+So here's where we were in 2017.
+We decided to finally measure how big our package was.
+44 gigabytes, which is about 90% of a Blu-ray, and we had not yet made 90% of the game.
+Where does this number come from?
+Well, we've got 700 tiles in the city.
+That's not even counting the interiors and the raft.
+And 40 megabytes a tile, like we just said.
+So that works out to 28 gigs.
+This was our budget per tile.
+However, like, when we're talking about lighting up there, that's one time of day.
+And contrary to popular belief, the sun does set on Manhattan.
+In fact, we have four times of day.
+Daytime, sunset, nighttime, and overcast.
+That's four times the lighting data.
+That gets us up to 40 and a half gigs right there.
+What's missing from that number?
+Well, those detailed textures, the characters, the cinematics, the animation, basically most of the game.
+So with that added in, we are at about 67 gigabytes, which is more than one Blu-ray, but less than two.
+We could chip on two disks, right?
+We considered it.
+Raise your hand if you like games that come on two disks.
+It kind of stinks, right?
+Because swapping disks for installs and knowing if it's a digital download.
+I live in Burbank.
+It's like a three-day download for me.
+And even when you're developing, installing that gigantic package onto your dev kit every time you want to get timings, huge pain.
+So let's back off the duplication thing.
+So on the left are the assets that we duplicate, on the right are assets that we do not duplicate.
+Remember how I said for the middle MIP textures, we wait until the disk is quieted down and then read them.
+That means we have time enough to seek the drive head over there, so we unduplicated those, saved us a couple gigabytes.
+Anything bigger than four megabytes, we just arbitrarily don't duplicate that, because, well, because it's big.
+And anything that was duplicated more than 400 times, anything that appeared in more than 400 places, again, a disproportionate cost on the disks, we unduplicated those.
+Besides, if they're in every other tile, they'll probably always stay in memory until you go to an interior.
+Oh, like, if you're wondering what we had in more than 400 tiles, you know, usual New York stuff, like pavements and bushes and piles of trash.
+Because New York.
+We duplicate about 56,000 assets.
+They would add up to a gigabyte if we didn't duplicate them.
+But with duplication, it's 11 gigabytes of space on disk.
+So it's about a 10 gigabyte cost for the duplication, which is a price we pay for faster loading.
+We also considered switching to a better compressor than LZ4.
+It's fast, but it's not the compressiest.
+But it has a bunch of nice properties.
+It's byte-wise.
+You can interrupt it.
+It's really compact in memory.
+Nothing else we tried compressed that much better that it was worth doing away with LZ, except for textures, obviously, which use lossy compression.
+Jazz hands.
+Simple's good.
+But that doesn't mean that we couldn't rearrange our assets so that they compressed better.
+For example, models at that point in the project took about seven and a half gigabytes of disk space.
+So we figured, can we at least get them to compress better?
+So we looked at our biggest model, Peter Parker's body, 100,000 triangles, about 4.86 megabytes.
+After an intensive weight loss program, we got him down to 3.2 megabytes.
+The details here, I put them in the appendix because they're gaudy, but I want to talk about the one thing that made the biggest difference, which is in the index buffer, that's the thing that says for every triangle what verts add up to that triangle.
+We moved towards storing every index there as a delta from the previous one, because 72 usually comes after 71 and is then followed by 73.
+So our buffer ended up with these long strings of just ones repeated over and over again.
+which is exactly what LZ4 compresses really well.
+It's basically a glorified run-length encoder.
+So it was mental how much this one change did for our compression.
+We actually thought there was a bug in our measurement code.
+So here, this is a graph of our package size across March and April 2018.
+The y-axis is zeroed at 45 gigabytes at one blu-ray So all the orange bars represent how much over target we are You can see it getting bigger and bigger and bigger and you can see the point where we put in our model Optimizations for that and for like a bunch of other stuff and like that's like five gigabytes just from better compression So maybe huge difference Lighting. Lighting is big.
+Our lighting model uses two terms.
+A diffuse term, which is like incident light, and a specular term, which is basically an environment map that we use for gloss and reflection.
+I'll get back to the specular term.
+Let's talk about the diffuse term first.
+We call them light grids, because essentially there's just a farm of computers that divides the city into a grid and marches down it with an incident light meter, takes a picture in every direction.
+so that if there's a brick wall to my right and there's a concrete wall to my left, I know when I'm standing in that block that the light coming from over here is a little bit redder.
+We just store that information for every voxel in the city.
+That is our ambient light solution.
+So, all right, we're cutting the whole city up into cubes and voxelizing it.
+Yeah, it turns out that empty sky does not cast a lot of bounce light.
+There's not much up there to bounce anything, so we just stopped capturing cells that were not near anything, and that saved an embarrassing amount of memory.
+For the details, go dig up X-Ray's talk that he did a couple hours ago.
+After all that, the budget for a tile was determined not by streaming bandwidth, but how much space we had on disk.
+It came in at just under 12 megabytes, which is way less than 20.
+So we now have a lot more room to stream stuff in.
+Like, we've got bigger mission overlays, and we can have more of those high-MIP textures churning in and out, and we can do more audio.
+And of course, like I said, we paid for this by putting more seeks on the, like, by adding more seeks to our loading.
+So some of what we saved in space, we paid for in speed.
+which is our third moral of this talk, revisit speed space trade-offs.
+Our choice to duplicate assets in previous games was based on our having not a lot of CPU time, but having a whole lot of slack disk space.
+On this project, we realized, belatedly, disk space was at much more of a premium, and we actually had a little bit more slack on the CPU because we'd optimized other stuff a little bit better.
+So we had to basically recalculate that trade-off in the context of this specific game.
+If you're wondering what's on the disk, it's this.
+The interesting thing here is every one of our localizations is about a gig and a half, which is why we had to have multiple SKUs for different regions.
+It's just we literally could not fit all the languages on the same disk.
+In retrospect, a better compressor would have let us fit maybe one more language on the disk, but still not all of them.
+Let's keep going.
+Although what would we do if we did?
+We would d Jenpotional, and in particular, we would do a seaters drive.
+If we had tickets, we'd put them up completely, in front of those seats, we'd be able to go in from every location, and you'd be able to just set out for pick one locations for which we wanted to go in.
+I would actually definitely take the seat dramatically and not change anything.
+So if we did give you a spot when you started, it would be worth it.
+Rendering New York is kind of a deal.
+It's big, it's shiny, it's full of stuff that's moving around, and you can see everything from the top of the Empire State Building.
+Rendering could be multiple talks in and of itself.
+Luckily, Digital Foundry has done one of them for me.
+They've done this amazing video just from looking at the retail product.
+Yeah, so go see that.
+I want to talk about a couple of things that we changed for this specific project from our previous one.
+So remember when I was talking about loading tiles, obviously there's more city out there that you can see.
+So what's loaded out there?
+So we have a single low res zone.
+It's the background for the entire city.
+It's loaded all the time.
+You can see it from everywhere.
+And it's about 110 megabytes of models and 85 megs textures.
+Now I'm about to start using the word imposters.
+Just to warn you, it is not the same way that everybody else means imposter, which is the thing where you render a model onto a billboard and then show the billboard.
+For us, an imposter is like this super low, optimized shader piece of geometry.
+Because it's confusing to me, too.
+If you can think of a better name, please tweet it, Abdul.
+You can come up with something better.
+For us, an imposter is a lightweight scene object.
+The minimum that we need to render something, basically a transform, a mesh, and some flags.
+Our imposters are automatically generated from the full res geometry by the zone builder.
+They are essentially like super decimated things.
+It loads up the final version, like the full res version of the building, simplifies it, decimates it, takes a picture of it from every side to create a cube map.
+We project the cube map onto the imposter to create the illusion of detail.
+And that's that.
+All of the textures go into a big atlas per block.
+It's about 4K tops.
+And because they're so simple, we don't need a bunch of information for this texture that we would need in other things.
+For example, the imposters don't have any UVs per phase.
+It's just pixels per meter.
+So we just know how many pixels to go down in the texture map.
+We have an axis-aligned city.
+So we don't have to store normals.
+and basically it's just smaller.
+However, we do need to store a high, sorry, stream a high-res version of that atlas when you get close, because you can tell even at a distance.
+Also, flat, diffuse textures in that super simple shader are not always enough.
+Some stuff is emissive, especially in the city.
+Some stuff is reflective.
+We have those neat windows that you can see inside.
+So for that, we have a notion of a high quality imposter, which is just an initial model with a little bit smarter shader tacked onto the side of the building when you get close enough.
+All right, not everything is an axis-aligned bounding box.
+Trees are notoriously not box-shaped.
+Also, stuff like water towers, AC units, stuff like that, they really affect the silhouette of a building.
+And you can notice them from very far away if they're missing.
+On Sunset Overdrive, our solution to this was to just mark these things as always loaded.
+All the water towers in that game were loaded all the time because there weren't many of them.
+We have 600,000 of them in Manhattan.
+And the minimum that we need to store just the instance data for a rendered model, I'm not talking about the geometry, just like its position and all that stuff.
+The minimum is 384 bytes per each of them, which would be 230 megabytes of memory, which is more than our entire gameplay heap.
+Obviously not going to fly.
+So we decided to come up with something called Hibernates on this project to save on the runtime cost of those things.
+We still have the mesh loaded, but by storing only the bare minimum, because these things are not going to animate when they're at that distance.
+We don't need any clever shaders on them at that distance.
+The player obviously can't interact with them at that distance.
+So we can get away with storing only 40 bytes through using a bunch of trickery, like all of these things are associated with a city block, so we don't need an absolute position for them, it can just be an offset in the middle of the block, fits into a 16-bit fix point.
+And when you get close to them, we basically swap out the hibernate with the full instance with all the animation and the stuff.
+All told, 600,000 hibernating objects takes up 24 megabytes of memory at runtime, and the geometry is really just 13 megabytes because it's mostly the same water tower and fire escape.
+All right, so, TLDR in the background, let's review.
+We use billboards and low-poly models in the distance for Brooklyn, Queens, Bronx, New Jersey, you know, all the boroughs.
+The skybox is an ordinary skybox.
+Imposters are, as I've said, the high-quality imposter is stuck on.
+Those are the hibernates.
+Everything else is not background.
+Once again, this is all about fitting the tech to the context.
+This whole notion of hibernates is because Manhattan has the water towers and the antennas and the billboards and those weird fire escapes that you bolt to the side of the building.
+They're a very specific solution for this very specific product.
+Oh yeah, specular lighting, forgot about that.
+So it would have taken 8 gigabytes to put on disk.
+Our specular model is based on something we call envprobes.
+Env because they're environment maps, and probes because they're locations that you put throughout the city.
+The, we build environment maps like anyone does.
+We go to every one of those probe locations, load up the level, take a picture in all six directions, bake it into a cube map.
+Then when you need to do reflection, you just look at the cube map instead of actually reflecting.
+Let's step back a moment and ask, why do we do it this way?
+If you wanted a reflection, we could just re-render the scene from the point of view of the reflective surface and then clone that onto the surface.
+The reason that we do environment maps in the industry in general, is to speed things up.
+We do that offline for all the world, and then just load that when we need to reflect something.
+But could we maybe create a little bit of runtime to get back a lot of disk space?
+The answer is yes.
+We decided to calculate our environment maps.
+kind of at runtime.
+We have 64 of them in memory.
+It's like a cache.
+If, as you're swinging through the city, we ditch the ones that you've left behind, if there's a nearby one that doesn't have an environment map on it yet, every frame where we have spare time, we will pick one face from one probe and render that face.
+Because we only need to use the background geometry for our environment maps, animating things are not captured in our environment maps, it takes about a millisecond to render one of the faces.
+So six of them and then two mips, it's 12 successive frames to populate an environment map.
+You'll never notice.
+And after all that, they take zero bytes of disk space.
+Let's talk about animation.
+Writing your memoirs? Don't forget the hyphen between spider and man.
+Get the chopper ready. I won't be long.
+So as you can see, the visual fidelity target for our facial animation is very different from our previous games.
+On Ratchet, we could get away with using skeletal animation for the faces because that was a deliberate part of the aesthetic, right?
+We wanted that kind of friendly cartoon look.
+But on Marvel's Spider-Man, we used facial capture for almost all of our cutscene performances.
+the thing where you've got the camera, and the dots on the actor's face, and you record them acting.
+The bodies and some of the head are skeletal animation, like the jaw and the eyelids and stuff like that.
+But the really fine detail, like the movement of the muscles and the creases and the wrinkles in the skin, it's very hard to do that just with skeletal animation.
+So for that we decided to use morphs, and to get it right we needed between 600 and 800 morphs per character, which is a lot of morphs to composite at runtime, so we decided to do all the morphs offline and then just stream verts at runtime.
+We'll do the joins, but then we'll like the vert offsets from that.
+Ended up actually being less than two megabytes a second, so we thought it was crazy talk at first, but it ended up being okay.
+To get there, we worked with a couple of partners, 3Lateral scanned our actors for us, very high quality textures, really nice models, rigged the faces for us with 240 joints.
+And in the case of Peter Parker, 620 blend shapes.
+So there's the joints going, there's the blend shapes for the really fine stuff.
+And then you put them together, you can get basically any expression you need out of them.
+Cubic motion then took the recorded performances and worked out what combination of joints and morphs and so on would get the animated face to the same position as the actor's face.
+So from that, we can figure out how much bandwidth we'll consume to stream these faces.
+Every one of our faces is about 18,000 verts.
+I'm not counting the bodies and the hair and the whatnot, just the face that we're doing the vert streaming on.
+So from that, we can work out our bandwidth per face metric.
+Peter Parker's face, 18,375 verts exactly.
+So of course, we're going to store three vectors per vert, positioned in the normal for the lighting.
+Three floats per vector at 30 frames a second is 20 megabytes a second.
+How about no?
+Turns out, skin does not move more than about a centimeter from your face while you're still alive.
+So we can get away with using fixed point notation for them.
+10 bits for every component, 30 bits per vector.
+Also, the normal and the tangent, right?
+Like, what if I told you there was something called a cross product that you could use to work at the normals just from the positions?
+Why do we store normals and tangents in meshes and textures at all?
+It's to save on run times, because calculating all that stuff would be redundant.
+Except in this case, the bandwidth was really the scarce thing, and we actually had a lot of CPU time left over, because there's not a lot of sim going on during a cutscene.
+You're not swinging to the city, nobody's...
+AIing at you so we ended up just as a Really as a compression tactics strong streaming just the positions and doing the normals and tangents at runtime That gets us down to two megabytes a second with careful arrangement LZ gets us down to half a meg per second per face Here's the format every frame And a screened animation first has all the joint positions for all the characters, followed by all the vert positions for all the characters that vert screen.
+We do the structure of arrays thing, so that's like all the x components for everyone, and all the y components for every vector, and then all the z components, because it compresses better that way.
+Also, we delta compress these things, so...
+For frame two, every vert position, it's not the absolute position, it is the difference from its position in frame one, because most verts actually don't move from frame to frame, which means we have these long runs of zeros, which LZ4 eats up.
+Obviously this makes scrubbing really annoying, but the player doesn't scrub.
+Oh, also, like, the problem with this is that there's a zillion places for things to go wrong.
+All you need is a single off by one error, and it's just this total horror show of like, Joints are verts and verts are joints.
+Also, if you have a black spot on a character's face, what's going on there?
+Is it missing?
+Is it missing from the mesh?
+Is it the wrong position?
+Is the lighting wrong?
+I'm not going to talk over this.
+Yeah, so somewhat belatedly, we realized we needed a tool where we could render just one streamed face in an app of its own and then point.
+Why did I do this?
+Point at a single polygon and say, you poly, what's all the math that made you?
+Once again, we revisited our speed and space trade-offs.
+A lot of the things that we've done in cinematics previously were based on the assumption that CPU was scarce and disk space was plentiful.
+That became not the case on this project, and especially not for bandwidth.
+So we realized we could actually spend more CPU to make up the space.
+Let's talk about populating the city.
+All right.
+Our original plan for pedestrians is that they were just window dressing, not interactive.
+You would just see them from up above.
+So we could get away with some simplifications.
+Of course, here's the problem.
+Yeah, so in 2015, we realized that was not going to fly.
+The number of pedestrians we began with was not enough to fill out the streets.
+It made them look really weird when they weren't responsive to the world.
+They needed to look diverse, because that's kind of New York's thing.
+And they needed to interact with Spider-Man when you were down there.
+So our original, original prototype just had actual AIs, bots that we drove around the world for pedestrians.
+And they can run 30 of those at once.
+And we needed a whole lot more than 30.
+After a whole bunch of chicanery, we got it up to about usually more than 1,000 pedestrians on screen at a time.
+I'm going to spare you the details on that one because it's been discussed at GDC before many times.
+2015, apparently the year of the crowd at GDC.
+So there's a bunch of great talks.
+What?
+Did someone say something?
+So you can go dig those up.
+The one thing I do want to show you is how aggressively we LOD.
+So in this video, I've left the LOD pivot back there, and I'm pulling the debug camera without updating anything.
+We stop animating the pedestrians the moment they're off camera to save on skinning.
+Also, when you get beyond a certain distance, they are not peds at all.
+They're just like these totally unanimated, unskinned, creepy sack people things.
+Because they're like four pixels tall, you'll never see the difference.
+We can save all the time on skinning.
+It's just enough movement so that they don't look like they're static.
+you could have probably used billboards.
+Also, we realized kind of late in 2017 that window dressing isn't enough.
+If the peds aren't interactive, they don't invite you to spend time on street level and see all the cool stuff we put down there, and it seems really robotic and weird if they don't acknowledge you.
+And also people just enjoy messing with the peds and seeing them interact.
+So.
+Late in the game, we came up with a couple of interactions for them to do.
+The low-intensity ones were simple.
+You just go down there, and they would do a canned behavior, take pictures of you, call mom, wave, whatever.
+Also, we noticed it was kind of weird if you hit the punch button while facing a pedestrian and took a roundhouse at their face, and they didn't react.
+So we just replaced the animation.
+Kind of became a thing.
+We also came up with some more high-intensity interactions.
+Every so often, we body-snatch a pedestrian and turn them into a full AI.
+Then they perform one of the few canned interactions when you walk up to them and hit the triangle button.
+In some cases, it's a synchronized animation.
+In some cases, they'll point out, like, crimes or collectibles for you.
+In some cases, they're in cahoots with one of the villains, and you get close, and they're like, ha-ha, I work for Fisk.
+You're going down, Spider-Man.
+Just to give you a little bit of surprise and variety on the streets.
+So looking back, it's the classic GDC story.
+We should have started on this soon.
+No, no, we did.
+We had this from the beginning.
+We knew that we needed this.
+We just had the wrong prototype.
+And once we realized we needed more, we just kept iterating on that one prototype rather than going back and rebuilding it from the beginning.
+So we had like this full AI thing, and then we just kind of like added those non-skin things on top of it.
+We never went back and built a system from the ground up that had better concurrency, a real crowd sim.
+We would have liked more unique interactions.
+Really the lesson I want to communicate here is if you put a human being in the game, the player's going to try to interact with them, and you just can't fool yourself that they won't.
+One last thing that I want to talk about before we get into Q&A is to talk about Photo Mode.
+And the most important thing I can say about Photo Mode is that programmers undervalue it.
+But the success of Photo Mode is not a tech story.
+It is a social story.
+It was a story of basically like Stone Soup at Folktale, where everybody comes and contributes.
+And it made a much bigger difference than we suspected at the beginning.
+So we began working on Photo Mode about five months before ship date.
+But we did a lot of work in those five months.
+And our original plan was something very simple, just basically so we could claim that we had done photo mode.
+Basic 3D camera, some controls, rotate the camera around, and some stickers.
+All right, well, where are we getting the stickers from?
+So we had the little social media display in the pause menu.
+So we just grabbed the textures from that and used those as stickers.
+And this was a stroke of luck, because those things have a specific aesthetic that immediately encouraged other texture artists to come along and start contributing their own stuff, other characters in the books.
+And it's a comic book, right?
+We can start throwing in the onomatopoeia and some speech bubbles.
+And OK, what if you take a sticker, but instead of it being opaque in the middle and transparent everywhere else, what if it's transparent in the middle and opaque everywhere else?
+And that's where frames came from.
+And then someone looked at that one movie poster from that one movie with a superhero taking a selfie and said, how about we have selfies?
+Yeah, selfie mode is a thing.
+And that's when people really started to see themselves in the product.
+Because people, when we were even developing, just loved taking selfies of themselves with the content that they had made and bugs that they encountered.
+And when people were doing that on the team, they started to see opportunities for themselves to contribute.
+Like an animator said, I can make Spider-Man make funny faces.
+And a lighter said, it's not that hard to put a light on the locator and get a selfie light.
+And a shader artist said, yeah, you know, with just some simple color lookup tables, I can totally make a whole bunch of photo filters.
+Behind the scenes, it's really simple.
+We just duck out the gameplay character, replace it with the cinematic character, drive an aim matrix with the thumbsticks, have different poses on the cinematic character, depending on whether you were standing or perching or running.
+The camera's attached to the locator.
+There's no fancy.
+OK, I mostly just wanted to show you this video.
+But it turned out to be a huge promotional win for us to have this in from day one.
+Photo mode is an intrinsically creative thing.
+People want to express themselves in our game and then immediately to share it with their friends.
+And the sharing with their friends was a really nice thing.
+And if we had done photo mode as a DLC, weeks later, it would have been cool.
+People would have gone on Twitter and said, look at this photo mode thing from the game from last month.
+But for us, because we had it in day one, it hit right at the peak of the hype trend.
+Like right as our advertising spend went in, this stuff was all over Twitter.
+So it made a huge difference for our launch momentum.
+We were kind of nervous about photo mode at first, because we thought people would take pictures that made the game look bad.
+But it's not a problem.
+One, people like the silly photos.
+And two, no one cares.
+So here's the morals.
+Simple is really good still to this day.
+Fit the tech to the context.
+I was talking about the context of our specific engine, but really anything you're doing.
+Re-evaluate the specific game that you're making and build the tech around that.
+That's why we have programmers on teams.
+Nothing has to be completely generic.
+Continually revisit the speed and space trade-offs.
+We had to.
+think over all the choices that we had made on previous projects for the specific context of a city that has everything that Manhattan does.
+And if there is no fun, then what is even the point?
+We are toy makers for a living.
+If you're not having at least a little bit of fun making the game, you're not going to find creative ways to contribute it, and you're going to have a hard time putting fun into the game.
+So I am the one up here talking, but this talk was a team effort, so here's everyone who contributed.
+Mostly I just punched it into PowerPoint.
+I really want to thank Sony and Marvel for letting us play with their toys and make this game.
+And I super duper want to thank my talk advisor, Andreas, who carried me across the finish line and the start line.
+And he just carried me.
+And thanks to everybody at Insomniac who actually made the game that I'm talking about.
+Oh yeah, we're hiring.
+Please applaud.
+All right.
+Appendix.
+Appendix.
+For those of you watching on video, get your pause button ready.
+Here's the numbers.
+Bam.
+All right, Q&A.
+He'll be fine.
+People can line up while this is going on.
+Like, I put these in while people were milling around.
+All right, I actually have something.
+All right, thank you.
+What's the funniest glitch, like the things that are displayed here, that you personally have encountered in this game?
+I put them up there.
+Which of them do you like the most?
+Oh, the one where the guy gets punted over the girders into the distance.
+It gets me every time.
+It's like a football goal.
+It's good.
+It's good.
+Yeah, also, we got a Brooklyn bridge, but no Brooklyn.
+Yeah, we were off by one on the model index.
+Seriously, come on.
+I have another question.
+Ask a question.
+So as the second clip demonstrated, through the game there are a lot of characters that get knocked off buildings.
+I wondered if you wanted to...
+I expect that being able to show Spider-Man wasn't just knocking people hundreds of feet to their death was part of the design.
+Do you want to talk about some of the challenges that came about trying to save those people?
+So the question is, Spider-Man knocks a bunch of people off the buildings, how do we keep them from dying?
+The challenge, basically the reason that they don't die is Spider-Man doesn't kill people gratuitously.
+And to make them not die, we simply just do a rake, like when they're going over, we do rake casts in all directions, find the nearest vertical surface and just stick them to that.
+It's really simple.
+Thanks.
+Oh, sorry.
+Hi.
+First, thanks for the great talk.
+On the slide that you mentioned the vertices, all the compression, and you needed specific tools, would you be able to talk a bit more about those tools and what was needed, what was really interesting in that sense?
+Oh, the debug tool?
+Yes.
+OK, so we have a notion of a viewer app which loads basically just the engine but none of the gameplay.
+It's just enough to view models in game.
+And we can turn a bunch of stuff on and off in that to test specific engine features.
+So essentially what we did there is we just can pick a single animation, stream the animation, and get a whole bunch of diagnostics on all the math that's going into making the face.
+From that, it's really just, we have a mouse selector, you can click a polygon, and then it just freezes the stream, and then just shows all the calculations that happen from the decompression through the lighting, through the normals, through the tangents, to make that poly happen.
+Thank you.
+Hi.
+So you mentioned about the fitting tech to context.
+And right now, game engines like Unity, Unreal are used for several things.
+But I was wondering if you have any thoughts on when it's a good trade-off to start investing in your own technology for your own game engine, and when it's a good time to start investing in that.
+The question is, when is it a good time to start investing in your own engine?
+That is a philosophical question that I'm not sure I can answer for you.
+I mean, the short of it is when you have enough of space on your payroll to write your own engine, and when you know what you need from your engine.
+A very small engine is a lot easier to build than a big one if you're making a very specific game.
+I guess this fits the text of the context again.
+I don't know if I have an answer for you on that one.
+I'm sorry.
+Yeah, no worries.
+Thanks.
+All right, you.
+Because it's a platform exclusive and very much 100% likely to remain so, how beneficial was it to know that you were just using that platform's profiling tools for optimization?
+And is that different from other projects?
+It is super useful when you're optimizing to know that you have a fixed platform.
+That is like the advantage of consoles over developing on PC.
+Also both of the console makers have really good profiling tools.
+They're different, but they're both awesome in their own ways.
+So I mean I guess that's the answer is relying on the tools that the platform maker gave us was absolutely fine because they were very good.
+Did I answer your question sufficiently?
+I think so, thank you.
+So you are a studio making multiple games at the same time, but you fit your engine completely to the game, so how does that work out, because then you need to strip out everything for the next game, or just the game where you're prototyping on has to just live with what you do?
+So, we, that is an excellent question.
+We have this notion, we have sort of tiers, right?
+We have a core engine, we have the gameplay code, and then we have this notion of like a shared library, which is the thing that sits in the middle.
+We work on engine features, and they just grow by accretion.
+So when an engine feature becomes available to one game, it becomes available to all of them.
+So the core stuff, like the Hibernate renders, are actually going to end up in some of the other games just because it's conveniently there.
+We do need to be very cautious about when we release the engine to which projects so that we don't inadvertently break the projects.
+But we do make sure that the same engine and the same tools go out to all the projects eventually so that they're on the same game.
+Because the streaming system is probably very specific, probably used by the other things.
+Yes, I mean, so if we mark the zones that they're loading within a geographic space, then it's like streaming like I've shown you here.
+If you mark them so that they're loaded by script, it's the exact same thing.
+We're using the exact same streaming logic.
+It's just it's not happening all the time.
+And you may notice that our games stream more and more as this technology becomes conveniently available to every project.
+Another small question is that you have everything set up that just fits with the tiles and things like that.
+Did the game designers all of a sudden want to like put a cutscene on the other side of the world and they just have to stream and doesn't fit in memory or you were just like very strict and it's not possible?
+So I addressed this in the sunset overdrive talk.
+The gist of it is we have to be careful not to set cut scenes in faraway locations unless we can load in a very small cyclorama behind them, basically load in a set quickly enough for that cut scene to work.
+However, once we're in that little thing with the narrow camera, we can hide all kinds of ills while we're streaming the world around it.
+Sorry, one last.
+So you duplicate MIPS on everything, and you put that into things.
+When you, for example, make a texture change, what is the iteration time then?
+Because you need to rebake everything?
+To bake an individual texture is seconds.
+Yeah, but you need to rebake then all the basically tiles loading that data.
+Oh, I see what you're saying.
+So we have two ways of loading assets, basically, that we use during development.
+The stuff that I showed you is like the final package version when we're trying to optimize it.
+We can also loose load files.
+In fact, we have a thing where for the most part, when you're editing assets on your PC, the PC is actually running a little service, a little web server, that when the game goes to load assets, it actually hits that web server on your PC.
+The reason we do that is so that if you change an asset, it updates in the game immediately.
+Okay, thank you.
+All right, thank you.
+Excellent talk, excellent game, but I have to ask, why did you derez the puddle?
+All right, so if you don't know what he's talking about...
+There was a scene that we showed in our E3 trailer that had this big old puddle in it.
+And then when we showed that same scene in the final trailer, that puddle was not there.
+And the internet lost its mind because they thought we had taken out reflective puddles for performance reasons.
+So we gave this really confused answer then because nobody actually knew why this was.
+I had to do an investigation to figure it out.
+I talked to like 14 people and got a whole bunch of different answers.
+But I finally got to the bottom of it.
+Are you ready?
+We switched from hand painting them to procedurally putting them in.
+It's just too much of a pain to paint all the puddles in.
+That's it.
+It's a different procedural seed.
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Oh yeah, so traffic.
+We had a really simple traffic system.
+Basically pedestrians and wheels.
+So in our system, we don't have any global navigation.
+So every car just looks immediately ahead of itself and then stops if something is in the way.
+And pedestrians don't look before crossing the street.
+So the realism is amazing.
+We have, at any given time, about 180 cars driving, of which 25 are actually moving and the rest are stuck in traffic.
+So again, realism.
+And parking is really hard in Manhattan.
+That's it.
+Oh, sorry.
+Can you watch the blooper reel again?
+Only if there's no other questions.
+You know what, we'll do it while people are coming up if they have any other questions.
+Oh, come on.
+This is a super naive question, but I'm really curious like you said that you guys did this awesome streaming tech for this You know early on in production where he gets into the interior and everything is seamless. Everything is brilliant It took a whole month calendar month. I assume of Development time it seems like with all that technology you built. Why was why did it take so long?
+So it's essentially to do all the nitty gritty.
+The question is, why did it take so long to set up the interior transition in the Fisk base?
+The answer, it's not like a tech thing.
+It's just the content of framing the cinematic carefully and being really careful about the budgets because we're still limited by how much we can get off the disk when we're loading stuff in.
+And balancing the things and making the art the right size so we can load it in.
+Long story short, it's just a continual balancing act and spinning that plate was a bit of a pain.
+Where we're going, we don't need roads.
+See ya.
+Oh, there's one more.
+Yep.
+So when you were dealing with moving out and like derusing the people so they didn't have really nice textures on them, what did you have to do for cars?
+Did you also do that since the cars do look really nice in game?
+The, yes, so the cars LOD less than the pedestrians do, simply because we didn't have the programming resources to do it quite as much.
+It's okay though because the cars aren't skinned to the same level and they're just less poly.
+They do disappear, the one thing that they do is like the moment they're out of view and they go around a corner, we just like move them back in from someplace else.
+Oh, one other thing with the cars is, so a car, an actual car chase would obviously not be possible in Manhattan.
+You'd get like three blocks.
+So whenever there's a car chase in progress, we actually look ahead on the spline where the car chase goes and just despawn all the cars there.
+The chase can actually happen.
+OK, so when the car goes around a corner, you just remove it so you don't have to worry about it moving around and all that?
+OK, thanks.
+Just a quick question.
+When you're looking at Manhattan from far away, are you simulating any kind of traffic or pedestrian?
+Like if I'm looking right down the road all the way across multiple streaming levels?
+Okay, so the question is, how much of the traffic in the PEDs do we stream from far away?
+The pedestrians, like I showed you, it's the little sack people within a few blocks away.
+The traffic is simulating out as far as you can see, and that's one of the reasons why we didn't LOD the cars down so much.
+So you're simulating like the whole city, basically?
+Well, no, we're simulating like the whole street that you can see ahead of you, right?
+If something is obscured into the sides, like we're not simulating the traffic left to the left and right when we're doing that.
+As soon as you turn, those cars come into existence.
+Thank you very much.

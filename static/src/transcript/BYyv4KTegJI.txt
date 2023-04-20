@@ -1,0 +1,440 @@
+All right, hi.
+I'm David Bolo.
+I'm the lead engineer for core gameplay and animation on Gears of War.
+In this talk, it's a programming talk.
+I'm gonna present a new approach to animation transitions that we developed during Gears of War.
+I'll describe, first I'll kind of start off with the high-level intuitions and the motivations behind our approach.
+And then we're gonna dive down into some mathematics and break it down in detail.
+And then we'll come back up from that, and I'll show a bit of how we integrated the technique into our existing game engine.
+Before we get into all that, though, let's take a quick look at what Gears of War is all about.
+So as you can see from the video, there's a lot going on.
+Gears of War is a fast-paced game, and our characters are frequently switching between different kind of actions, shooting, running, chainsawing enemies in half, all that good stuff.
+Of course, when we switch to a new action, we also need to naturally transition to a new animation state, and so that's kind of what this talk is about.
+Before we started Years of War 4, we were doing these transitions kind of the traditional way which is with a crossfade blend, so let's take a look at a little bit about that.
+So traditionally, when we're transitioning from one animation state to another, we...
+run a crossfade blend between the two poses from our two states.
+So we run our kind of source state and then we start a new target state and then we, for the duration of the transition, we run a crossfade between those two states.
+So we keep evaluating both the source and the target during the transition and we kind of ramp from the showing mostly the source to mostly the target, right, where we're blending the actual joint angles and translations.
+Now when we think about optimizing this kind of thing, often we're focusing on optimizing the blend step.
+And there's lots of things we can do there.
+We can do math optimizations.
+We can do memory optimizations, cache optimizations, all sorts of good things.
+For gears at least, the biggest cost is not actually the crossfade transition itself, but rather the fact that we're evaluating both the source and target states during the transition.
+And for us, each of those states is much more expensive than the simple blend cost itself or the simple crossfade cost itself.
+So I've got a little kind of tiny snapshot of what one of the pieces of one of our animation graphs looks like.
+In reality, it's actually much bigger than that.
+And we're doing lots of things where we'll be playing multiple animations, we'll be layering things on top, we'll be applying aim offsets for the gun, which involves evaluating more animations and layering them on top, we'll do procedural head look at, a bunch of other procedural things.
+So there's a lot going on in each of those states.
+So all of that dwarfs the cost of the actual crossfade transition.
+Now, if we're lucky, we only have a few active transitions at any one time.
+So in this kind of picture, I'm showing that there's four characters going and three of them are just doing their regular thing and then one of them is transitioning.
+And so the cost really during that transition for this particular frame is equivalent to five characters worth of animation, right?
+Four normal characters and this one guy is transitioning, so his cost is double because he has to evaluate both the source and target states.
+But in the worst case, everybody transitions at the same time.
+And that effectively doubles your animation cost for the frame.
+And for gears, this worst case happens all the time.
+And in fact, it happens in a bunch of really important times.
+So for example.
+in a player versus player match.
+At the start of the match, everybody's kind of doing their various loadout type animations, getting themselves equipped.
+And then as soon as the match starts, everybody does this mad dash to strategic locations on the map.
+And so we have, and this is all running at 60 frames a second, so we have five players on each side, so ten players total, and they all transition at once.
+So at that moment, we have...
+10 players that are costing as much as 20 players because we have to evaluate all of their source animations and all of their, or sort of source animation states and all of their target animation states.
+So it gets quite expensive.
+So we asked ourselves, can we do better?
+And there's an observation we made here, which is that real humans don't do these crossfade plans.
+This is a construct we've made up for video games and I guess film too.
+So real humans don't crossfade, but they do have inertia.
+And an easy way of kind of picturing that is, imagine that I'm waving to you, and I want to go from this waving state to just having my arm down.
+If I do a crossfade blend, then as I'm waving and I do this transition, the wave kind of bleeds into the going down.
+Real people don't do that, right?
+And in fact, fun exercise is if you try and do this, try and keep the period of the wave down while you reduce its amplitude.
+It's really hard.
+So what would really happen is you wave, and then you just bring your arm down.
+And my arm doesn't come straight down in that case.
+It kind of shot out because my wave was, when I chose to do this transition, my wave was kind of heading that way.
+So the inertia of my hand kind of carried it down and then comes down.
+So I guess the takeaway really here is that, oh, they're having a more exciting talk than us.
+The takeaway here is that we don't blend, right?
+We do this kind of momentum-preserving transition.
+And so the idea we came up with is, hey, let's just get rid of these transitions, right?
+They're expensive, and then I've just kind of made this case that they don't quite match reality, and so we'll do that, great, that solves our performance thing.
+Right now, instead of it during the transition, we're evaluating two things, now we're just evaluating one thing, everything's great, except, of course, we still have all these discontinuities.
+So at the moment where we transition from the source to the target, we're gonna have this big pose mismatch, and that's obviously not acceptable.
+But the idea then is, can we fix these discontinuities with some kind of magical post-process?
+So that's what we're talking about, is transitions as a post-process.
+So let's make this a little bit more specific.
+So in this picture, and I'm going to take a moment to explain my notation here, because we'll work with this picture for a little bit.
+But I'm showing the blue pose, which is the pose you're coming from, transitioning to this gold pose.
+The blue pose there, I've shown this blue line, and it ends at the dot when we start the transition.
+And then the gold pose is starting at this dot and continuing on.
+And you can see there's a gap between the dots, right?
+So that's representing this pose difference that we're trying to get rid of.
+And if we just, if we look at the guy on the right and we kind of look at it as an actual animation, right, if we have no transition, then you just get a pop, right?
+And that's obviously not acceptable.
+In our game, so this is a kind of a weapon mirror transition in our game, these play actually much faster so that all of these videos are showing at quarter speed.
+But anyway, you can see this discontinuity and that's what we wanna solve.
+So what we wanna do is we wanna find something that's gonna fit from the old pose to the new pose and be kind of smooth and continuous and pleasing.
+and give us a result that looks kind of like the ghost image here, right?
+So we're going from this discontinuous input and then the output is this nice smooth ghost image.
+And we identified three primary goals while we were starting to think about how we could try to solve this.
+These were kind of important rules that we didn't want to break.
+So the first one is to respect the original animation.
+What I mean by that is that during the transition, obviously we need to change things up.
+We know we're going to...
+do something to make the input be continuous.
+But when we're not transitioning, we need to leave the animation exactly as the animators authored it.
+That both to kind of respect their artistry, but also for a game like Gears, there's important gameplay implications, right?
+The muzzle of the gun needs to be in the right place when I'm firing, otherwise if it's in the wrong place while I'm moving around, then the bullets come out and might hit some obstacle that I don't want it to hit.
+Obviously we want the result to be believable and pleasing in some kind of way and really we took that to mean that it should be kind of smooth and momentum preserving.
+And this last one I call stay on model, but what I really mean here is kind of don't get out of the space of poses that are your inputs.
+An important example here and kind of the one we focus on is to eliminate overshoot, right?
+So if I have a pose and another pose and I want to go between them, I want the result to sort of, in some intuitive sense, to stay between those poses and not go beyond kind of that range that they're defining, because that could lead to, you know, a natural hyper extension of arms or crashing through the body and other undesirable effects.
+So our first idea, and I call this idea number zero both because we didn't actually implement it, but also because I'm a programmer, I count starting from zero.
+So this first idea is that we apply a filter to the output stream.
+So you can imagine something like if you have a powered ragdoll in your game, your powered ragdoll could be kind of driving towards all these poses.
+During the moment of transition, the poses will be discontinuous, but because the powered ragdoll has limits to, has a certain amount of inertia to it and has limits on the drive strength.
+then the result of the powered ragdoll will still be kind of smooth.
+But the problem is that introduces lag, it's difficult to tune, and that lag in particular is really important because then during a high-speed movement, for example, that isn't during a transition, so it's just animated that way, the ragdoll might be lagging there and might deviate, and then that kind of breaks the whole respect the animation principle that we had, right?
+So your gun might not be in the right place, and it might not be matching what the artist intended.
+So the first real idea we tried was this pretty simple idea, and it's basically to blend from the, or I should be careful with the use of blend here, but to fade out from the pose difference between the source and the target.
+So we want to take the difference between those two poses and ease that out over time.
+Going back to our picture, that gives us a graph kind of like this.
+And you can see that the poses are continuous now.
+So the blue line and the gold line are connected, but you can see that there's a sort of a kink in sort of near the where we start the transition where it's not continuous and slow, right?
+There's this velocity discontinuity.
+And if we look at the result of that in the actual character animation, you can see the poses are themselves continuous.
+So there's no frame where you see a jump, but obviously you see this kind of unnatural slowing down and then speeding back up.
+of the animation, so that's no good.
+So the second idea is kind of this natural extension of the first one, which is to say, all right, well, the problem with the first one is that we didn't have this velocity continuity.
+So what if we remember, as well as remembering the actual pose difference, we remember the velocity from the original pose.
+And we can calculate that by just doing finite differences, right?
+We remember the previous pose and the previous pose and take the difference between those, divide by time, that gives us our velocity.
+And so then this curve we're gonna fit is gonna match not only the difference, but match this initial velocity.
+So when we tried this, we chose to use a fifth order polynomial as this curve we're going to interpolate.
+And we kind of drew that from some biomedical literature where they basically observed that when people were moving, they tended to move this way.
+And that gets us something that's smooth.
+And it ends up where we want it to end up.
+So that's great.
+But as you can see, it dips below that zero line there.
+And that's overshoot.
+And when we look at the actual animated result, we see that the gun dips way down before coming back up.
+So again, better than what we had, but it has this overshoot, and we don't want to do that.
+So then we took that idea a bit further and we said, okay, well can we do something to limit that overshoot?
+And the interesting thing about the fact that earlier we used this sort of fifth order polynomial was that we have an extra degree of freedom to play with.
+We've got this acceleration term now that we can pick to be whatever we want.
+And in the previous idea, we simply said the acceleration to be, the initial acceleration to be zero and that kind of gives us something like a smoother step, right?
+But we can make a different choice for that, and what we experimented with was this idea of setting the initial acceleration, so a zero there, to kind of resist overshoot, and basically by setting it to give a zero jerk at the end.
+And jerk is the derivative of acceleration, so it's the rate of change of acceleration.
+So when we tried that, we got a pretty good result.
+And when we look at that in motion.
+We get that.
+So that worked out pretty well, and we made up a name for that.
+So we call it inertialization because it preserves inertia of the incoming motion, and because I like making up new words for things.
+My phone now, when it autocorrects, it knows that word because I use it enough.
+So let's look a bit more into the details of initialization and sort of start to build up this curve kind of in a more formal mathematical sense.
+So we want to construct this fifth order curve that's gonna kind of go between the blue dot and the yellow dot there.
+We know that at the end of our curve, because we're adding this curve onto the target pose, what we're doing to the curve itself is we're basically driving it to zero.
+So we want the final conditions of the curve to be that the.
+the actual curve itself is at zero, its velocity is zero, and also its acceleration is zero so that it's kind of this smooth saddle.
+At the beginning, we know we want to capture our pose difference, so kind of worried about my notation here, but basically blue guy, right, is our old pose, and I've kind of shown him as blue guy minus one, meaning he's the first previous pose, and then sort of gold guy is our initial target pose.
+So we capture that pose difference.
+As I said, we also want to capture the velocity difference, so we do that by taking the difference between the two poses.
+And through all of this, I'm kind of explaining it in terms of sort of a single scalar value, right, a single floating point value.
+A bit later in the talk, I'll get into how do we generalize this to vectors and quaternions, because obviously we want to use this on character joints.
+So we compute our velocity there with finite differences.
+If...
+I should mention too that for here I'm always showing X0 as being positive, just to keep the explanation simple.
+Obviously if it was negative you could just flip everything over, so you could negate all the inputs and negate all the outputs and you get the same result.
+So to keep the explanation simple, I'm going to say from here on out that X0 we assume to be positive.
+For the velocity, so if the velocity coming in is negative, great, that's basically what I've shown here, right?
+It's heading towards zero.
+If the velocity is positive, it's heading away from the pose that we're trying to get to, and that would cause overshoot, or actually would cause undershoot.
+So we don't want that, and so in that situation, we just clamp the velocity to be zero.
+Now that obviously gives us a bit of a velocity discontinuity in that case, but we prefer that over overshoot because we don't want to end up sort of crashing through the model or breaking joints or anything like that.
+So if the velocity is positive, we set it to zero.
+If it's negative, we just use the expression that I've shown there.
+We then compute our initial acceleration, and this is basically the equation to give you your initial acceleration such that, as I mentioned, the jerk is zero at the end there.
+So this acceleration is to resist the situation where the velocity is heading down too aggressively, too quickly towards the zero line.
+So intuitively, that means we want our acceleration to be positive, because it's fighting this incoming negative velocity.
+If the acceleration ends up being negative, then...
+So the way to think about that is that the math has worked out that we're kind of helping our velocity, and we don't really need to do that, right?
+The whole idea is to kind of resist the motion.
+So in that situation, we just set the acceleration to be zero.
+All right, so velocity, always negative, acceleration, always positive.
+So once we have all of these things, now we basically have our initial conditions and our ending conditions, and we're gonna kind of fit this to this fifth order polynomial.
+Just plug that into your favorite math package.
+and you end up with this.
+And so really, the key thing here, right, is that at the bottom right, we see this kind of equation for XT, right?
+So that's gonna tell us what is the value of X over time, and we're gonna add that onto our target pose as we're going and that'll kind of get us our continuity.
+So, so far so good, but I'm gonna come back to overshoot for a moment.
+For all the examples that I've used so far, they're actually taken from real data from our game.
+So the animation that I was showing there is sort of this mirror transition from a right-handed weapon grip to a left-handed weapon grip, transitioning to our idle stance.
+And for the particular joint that I'm showing, the actual values are kind of this 1.2 and a velocity of negative 12.6, and we have a spline of 0.5, and that gives the curve that I'm showing.
+So those are all kind of real values.
+But what happens if we push things further, right?
+What happens if we say, let's make this velocity ridiculous, right?
+Let's play the initial animation even faster and see what happens.
+Does it still hold up?
+And unfortunately, the answer is no.
+So we get back to having overshoot.
+Now in practice, this almost never happens for us.
+So we could have stopped here and I think we would have been fine.
+But we really wanted to enforce this guarantee of no overshoot just so that we knew we were always safe.
+And then if we wanted to tune some animations to play hyper fast.
+that we'd be okay.
+Not just hyperfast, too.
+If we have a really long blend time, then to hit kind of that zero mark, it's gonna go further, right?
+It's got kind of more time to kill, so it's gotta do something in between, and so it's gonna dip below.
+And that idea actually there of that it relates to time is important because that's actually how we fixed it, is we say if we're gonna get in one of these situations where it's still gonna overshoot even after all the other work we've done.
+We're gonna take the time and we're just gonna kinda nudge it to the point where that doesn't happen.
+And so then that solves all of our cases and you can even kind of picture this limit case where if the incoming velocity is negative infinity, well it's coming straight down, but if you set your time to zero, sure you're gonna slam into your target, but you won't overshoot and so that's really important.
+So how did I come up with that 0.3 in this slide?
+So I won't actually get too much into the math.
+I'll just give you the answer, which is basically that.
+So we take the original requested time, and we're going to take the lower of that, or this negative 5 x0 over v0.
+Just to give you a bit of a quick hand-wavy explanation so you sort of believe me, I mean, other than it does work, but it is really, I'm setting the uh...
+I'm setting all of the routes to kind of happen at that time. So I'm figuring out what is the time where they all kind of cross zero and then basically using that.
+And then I kind of feed that back in. So you actually do that step first and then you go back and you compute all of your initial acceleration.
+So here's where you want to pull out your cameras, take a picture of this.
+This is basically all of the math on one slide.
+And really the order of steps here is you're going to take your X zero and your V zero, you can then use that to figure out your adjusted time, T one, plug that in to get your A zero.
+Obviously remembering all of the or zero parts, right?
+We want our V zero to be negative, our A zero to be positive.
+And then you're going to evaluate it with the stuff on the right hand side.
+So that's really the construction for a single floating point value, or a single scalar value.
+Now let's talk about vectors and quaternions.
+So we represent all of our joints with their translation as a vector and their rotation as quaternions.
+We don't currently actually initialize scale, but if you were you could just do it as a vector as well.
+So let's start with talking about vectors.
+So the obvious choice with vectors, right, it's pretty easy, you say, oh, okay, I'm gonna take my X, Y, and Z, and I'll just initialize each of them independently, and there we go, I'm done.
+that turns out to actually not be very good, not give very good results.
+And the reason for that is because we're potentially gonna be messing with time.
+And so if one of the axes is kind of approaching very quickly and the other ones aren't, then we're gonna adjust time for one of these but not for the others.
+And so you're gonna get this case where one axis now completes before the other one and you kind of get this unnatural motion.
+And a different intuition about it too is that we don't really want to kind of have any preference for any particular set of axes, right?
+The choice of coordinate frame ideally shouldn't matter, so the fact that it would show up in kind of this first formulation is not something we want.
+So instead what we do is we observe that what we're really trying to do is eliminate this difference between poses.
+And you can think of the difference in two parts.
+There's a direction part to it and a magnitude part.
+The direction is constant.
+The magnitude is the part that we want to eliminate.
+Once we get the magnitude to zero, then we're good.
+So that's really what our approach is.
+We decompose our vector into direction and magnitude, and then we just initialize the magnitude away.
+So let's dive into that in a bit more detail.
+So we start off, and again I'm kind of continuing with my pictorial notation here, we start off by taking the x0 as kind of this initial pose difference, so we capture that from our target pose versus the previous pose.
+We know we're going to want to compute our velocity, so we're going to need kind of this previous, this x-1, so we're going to compute that that way, where we look at the previous previous pose versus our target pose.
+And then we're going to do this decomposition where we're going to take that vector quantity and we're going to decompose it into its direction, its unit direction, and its magnitude.
+So here I'm showing x0 without the arrow is the magnitude, right?
+Where I'm just taking the magnitude of the vector.
+Now, an obvious choice for how to do that for x minus 1 would be to kind of repeat that same operation, right?
+Just decompose x minus 1 into its direction and magnitude.
+But that's actually not quite right in a bit of a subtle way because what's important for x minus 1 and for our velocity calculation isn't the velocity in kind of an absolute sense, but it's the velocity along the same direction that I'm amortizing away, right?
+That's the difference that I want to get.
+So really what I want to do is a projection.
+So I'm going to take the x minus one vector and I'm going to project it onto this kind of unit vector in that same direction.
+and get the magnitude along the lines of that direction.
+So that means that if x minus one were not lined up, sort of the difference of x minus one were not lined up with the difference of x minus zero, then I only care about the part that's in the same line because that's what I'm gonna be adding back to my pose.
+We then compute the velocity from finite differences, which is pretty simple.
+It's just take the difference between the two values.
+And now we're dealing with scalars, so this is really easy.
+And of course, divided by our delta time.
+And then every frame, we're going to add that back onto our target pose.
+So we're going to basically say that the vector result of this calculation is the scalar XT projected back onto this direction vector that we remembered from the beginning.
+And we do, for us, we do all of this in local space, but really, just like with a traditional blend, you can sort of choose your spaces to give you different kind of effects that you might want.
+When we look at quaternions, it's a pretty similar construction.
+Rather than decomposing onto kind of a direction and a magnitude, we're going to decompose a quaternion onto the axis of rotation and its angle, and then we can just initialize the angle.
+That's, again, a scalar quantity, right?
+Similar construction to before, except now we're using quaternion math.
+we're going to take our quaternion and we're going to extract its axis and we're going to kind of remember that as our arrow X zero and we're going to then...
+to extract the angle and remember that as our actual initial x0 that we're going to apply the initialization math to.
+And just like with vectors where I was saying we needed to project to be onto the same direction, we want to do the same thing for quaternions too.
+So in this case what we want is we want to find the angle around that same rotation axis.
+So the math behind that's tricky.
+Fortunately, smarter people than me have figured it out.
+This particular one comes from a paper from Ken Shumake from way back in 94.
+If you're interested more kind of how to do these, this is called swing-twist decomposition.
+So you can just Google or Bing, I guess, for swing-twist decomposition.
+And then now we're back and sort of working with scalars, so we can compute our velocity from finite differences as before.
+And then when we apply this back to our output pose, we're going to take that kind of inertialized scalar value, and we're going to take the axis that we remembered, construct a quaternion from sort of axis and angle construction, and then layer that onto the original pose, so the original unfiltered pose.
+catch my breath after a bunch of math, and then we can move on to a comparison of blending versus initialization in some of the properties.
+So when we look at, this is kind of a recap of a bit of how I started the talk, but when we compare blending, traditional kind of crossfade blending versus initialization, right, with crossfade blending, we're evaluating both the source and target during the transition, and as I mentioned, kind of making the case for this, that's expensive, right?
+It gives us this variable frame cost, and because we are working with these fixed budgets, we need to kind of accommodate for that, so we end up.
+in the cases where we're not transitioning, having all of this kind of wasted room because we had to accommodate the case where we are transitioning. And that's really because the source and target are both expensive.
+with inertialization, we're only evaluating the target during the transition, as well as, of course, the actual inertialization math, but that's pretty cheap.
+So the cost of any given frame is fixed.
+It doesn't matter if we're transitioning or not.
+And that's this huge advantage, because now, we can kind of use up our full buffer without really, you know, our full budget, I should say, without really needing to give us much headroom to allow for transitions, because during transitions, it costs the same as when we're not transitioning.
+There's some other advantages, too.
+when with a traditional blend during the actual or sort of traditional crossfade blend during the actual crossfade we're evaluating both of these states at once.
+If those are parametric states, so say we're driving a gun angle or a head look at target, we have to be driving that still for both the source and the target.
+And sometimes that can get really tricky, especially if the thing that we were using to drive the source is no longer meaningful.
+So for example, let's say I'm doing my head look at and the thing that I was looking at with my head ceases to exist or I no longer wish to look at it.
+Well.
+I can't just stop driving that if I'm feeding the source, something has to go into there if it's this parametric animation, so I have to maybe do tricks to remember where it was and kind of always have these last values and keep kind of plugging that in.
+So it's a lot of complexity in bookkeeping.
+With inertialization, I just don't worry about it.
+I say, okay, well, the thing you're looking at is not there anymore, so I'm gonna take you out of the looking at things state and I'm gonna transition you to this new state and I don't worry about it because you're not evaluating the source anymore.
+And of course there's this qualitative difference, and this is kind of what I was miming a little bit earlier in the talk, and that's not just me miming, it actually ends up being true.
+So you can see there that on the blend, you see the wave kind of bleeding through during the transition, and so you can kind of get some unnatural artifacts.
+And any kind of periodic motion to something less periodic or with a different period, you get some of these kind of artifacts.
+With a conventional transition, often what you do is you try to tune your transition time to be less than a period and then it doesn't matter as much.
+But that means you've got to do all of this kind of fiddly work, whereas with initialization, it just kind of works.
+So let's talk a little bit about how we actually implemented this in Gears.
+Gears Awards based on the Unreal Engine 4, sort of a customized version.
+We really broke down the work into three parts, and the nice thing about this is each of these three is actually pretty easy.
+So there's this concept of an inertialization node, right, this is gonna be the thing, or some kind of filter, right, this is gonna be the thing that's running near the end of your frame and is saying, and basically doing the inertialization math that I presented, right?
+It's getting this discontinuous input stream, and it's gonna apply the math to it and give you a continuous stream on the output.
+We need to be able to actually tell that node when to trigger an inertialization, so we need some kind of hooks into the animation system so that when the animation system actually wants to transition to a new state, it can notify and say, hey, please inertialize me now.
+And then there's some code hooks we can do too that make life a little bit easier as well, and I'll get to that in a moment.
+So the inertialization node itself, in our case, as I said, we're using Unreal, so it's kind of this...
+sort of a data flow graph for poses.
+So we basically add this node pretty late in our graph and we evaluate it then and the input is this discontinuous pose stream and then the output is the initialized pose stream.
+And if we dive into that a little bit deeper.
+What we're doing is when a new inertialization is requested, we remember the pose difference across all of our joints in both vectors and quaternions.
+We remember the initial velocities as well.
+We remember the requested inertialization durations, that's kind of the T1, and then we start our timer at T0.
+And then every frame...
+We're just gonna update t with our delta time.
+We're gonna evaluate that initialization curve, right, that x of t curve, and we're gonna add that onto our joints.
+And then this part's important.
+We're gonna then remember the output pose in a pose history buffer so that if someone were to request an initialization again, we're gonna use that history of poses to do the actual X0 and V0 calculations, right?
+So in my earlier slides, that was the blue poses.
+It's kind of our remembered pose history.
+And it's important that we capture the output pose and not the input pose, because that way when we request another initialization, if one was already in progress, we can kind of completely discard all of our knowledge about the previous initialization, because it's already factored into that output pose.
+So again, we're just kind of saying, okay, we had this output pose.
+Don't know how we got there, but we're getting to something different and there's a discontinuity, I need to fix it, no problem, I just take that difference and carry on.
+So outputPose part is important.
+As for the actual hooks for requesting an initialization or triggering an initialization, with Unreal it's pretty simple.
+Unreal has this notion for its regular blends and all of the nodes that do any kind of blending in their animation system.
+They tend to expose this blend curve type, so you know whether you're doing a...
+to ease in, ease out, or some linear blend or whatever.
+We just made up a new blend curve type, which we call inertialization.
+And then when a blend is requested with this curve type, we actually sort of request the actual inertialization to the node that's kind of later in the system, so we kind of pipe that message through.
+And then we zero the blend time.
+not the blend time that we're passing to the initialization, but the blend time that would kind of carry through through this irregular node, right?
+So if it's an unreal blend node, it's got this blend time, but we sort of right then and there inject a zero, and it says, oh, okay, great, I'm done my blend, I don't need to do any work, I'll just pass through the target pose unchanged.
+So kinda, we trick it.
+And then I mentioned that there were some code hooks and we found it useful to expose this ability to request initialization to our actual code.
+We don't use it in too many places, but it's nice to eliminate other types of discontinuities and that's kind of my segue into a little sort of section on tips and tricks.
+And I got a picture of duct tape up there because I kind of like to think of this as, you know, our animation duct tape.
+Every once in a while something's kind of not quite right and you're like, oh wait a minute, I've got some duct tape, I can just go kind of wrap it around and it's all fixed.
+Never been better.
+So I'll give a few examples of that.
+So this first example, so in Gears of War one of the things you can do is called a roadie run, it's basically the sprint.
+and when you sprint, you always face your direction of movement.
+So if you are sidestepping, and then you hit the rotary button, you trigger the sprint, then what your character does is he kind of instantly pops to face your direction of movement so that the direction of movement is right, and then he kind of does his sprinting thing after that.
+So in Gears 3, that was basically the end of the story.
+The character would have this sort of facing pop.
+It wasn't too noticeable.
+The camera tends to move around at the same time, but it was there.
+For Gears 4 we wanted to eliminate that, but we didn't want to affect any of the gameplay.
+So we want to keep basically everything else the same.
+And so what we actually do is we still snap the character's rotation at the start of the sprint, but we request this inertialization.
+And so what that does is even though the character's doing something discontinuous, the pose itself is continuous.
+So, if you look at the images on the bottom there, the first three images are of me just sort of side-strafing normally, and then the remainder are me in the sprinting state.
+It's unfortunately a bit hard to see on this projector, but there's kind of a green circle underneath.
+And the green circle shows the character's actual orientation.
+And you can see for those first three frames, you can't really see the arrow because it's pointing up and it's underneath the character.
+But all those subsequent frames, the arrow's pointing to the right.
+So that's actually the character's kind of movement capsule instantly rotating.
+But you can see that the pose that you get is still continuous because we instantly rotate the capsule but then we request this inertialization and it says, okay, yeah, there's a discontinuity here.
+Sure, it's just a discontinuity in the root, the rest of the pose, well, actually, I mean, I guess we're also changing poses.
+But.
+For these purposes, it's this discontinuity in the root, and then inertialization just takes care of that.
+So it was kind of this one line change once we had the system in place, and instant duct tape makes things better.
+Another example that I find interesting is how we deal with our locomotion inputs.
+So when you're driving your character around, we don't actually directly feed your joystick or even your velocity inputs into the blend space of motion, because our game is really responsive, so that velocity can actually be pretty twitchy.
+So what we do is we just filter it a little bit and then that kind of gives you some nice, nice sort of posing on the output.
+But of course, because we're filtering that, if you do a sudden change in direction, then the filtered value can actually get a little bit further from, or a little bit too far from where you want to be and you don't want to kind of stay in this, you know, sidestepping when you want to be going forward or something like that, right?
+It doesn't affect the actual movement of your character, but it affects the posing and it gives a lot of foot slide.
+So what we do in that situation is we just snap it to the new value when we detect that it's too far out of line, and then we inertialize, which takes care of the pose difference.
+So that gives us kind of this fluid pose, even with twitchy inputs.
+And then lastly, and this is a call out to last year, my colleague Steve Dickinson gave a talk at GDC about motion warping.
+I won't get into his talk.
+But one of the key things about that is that you had to remember these warping kind of landmarks that you're placing in the world.
+So it's quite a bit of bookkeeping.
+If we transition from one warped animation to another warped animation, and we were doing this with a crossfade blend, we have to keep track of both of those pieces of bookkeeping, and that's a lot of bookkeeping.
+So this is really nice. We actually don't even support that in our engine because there's kind of no need.
+We only have this one for each character.
+We only have one set of warp points, these kind of landmarks.
+But it works because we only ever have one active warp at a time.
+If we're transitioning, we just do the initialization, and so we're not remembering the old state.
+And that's kind of it.
+There's a lot of other examples.
+I won't go into all those.
+So I want to thank you very much for listening.
+And I want to thank the people at the coalition back home for working hard on all this stuff.
+If you'd like to join the people of the coalition back home, we do have some positions open.
+And give us a shout.
+Thanks very much.
+And there's nobody in the room after us, so we have a couple minutes for questions before we get kicked out if you'd like, and otherwise I'd be happy to chat with people outside as well.
+Yeah?
+Hello.
+Hi.
+Very interesting talk.
+Thank you.
+Question about, I might have glossed over this answer because there was a lot of stuff happening and, you know, I kind of lost track, but you'll be able to clarify I'm sure.
+lot of this stuff seems to, for me, we have an equivalent of this in our engine, which is essentially an A stop B stop transition and using whatever type of transition you decide to use between them. There's a bunch of different algorithms. This one sounds like a pretty powerful one. And I'm seeing a lot on what has been shown in terms of how to deal with stopping your A clip and going to the B clip.
+Your B clip seems to assume that you have no velocity.
+Do you guys store velocity to use for each one of your clip beforehand or?
+No, so that's a good question.
+We don't actually factor in, or we don't consider the velocity of sort of the B clip.
+mainly because we don't want to have to kind of evaluate, we don't want to have to kind of store all the velocities ahead of time, and we don't want to have to evaluate two frames of the B-clip to kind of know what the velocity would be.
+It turns out in practice that doesn't actually matter, and in the...
+sort of visually, and the reason for that is if the velocity of the B-clip is very low, so the B-clip is kind of fairly idle, then obviously it doesn't matter because it's close to zero anyways.
+If the velocity is very high, then it's an animation with a lot of motion to it.
+And so for gears especially, that's typically the start of some kind of pretty powerful action.
+And we actually want to give instant feedback of, hey, you're starting to do something.
+We wouldn't want to muddy that out too much.
+So in those very dramatic changes, people seem less sensitive to problems around velocity because there's so much energy being expended anyways.
+I think what people visually pick up on is these unnatural expenditures of energy.
+But if you're already expending energy because it's this kind of high energy move, then the fact that it's not quite perfect from an energy point of view, you don't really notice.
+Okay, so essentially you guys didn't feel like that was a problem that should be attacked because there was no impact.
+Right. And one thing that's kind of a useful tip along with that is that we tend to end our A-clips, I guess sort of the source...
+states while they're in motion.
+And I mean, I think that's actually kind of good advice for regular crossfade transitions too, but it means that then you get a case where, sort of like in my gun example, you know, where the gun's heading towards this target and then we stop and it kind of just continues that momentum.
+Whereas if we'd had that animation play all the way out to a settle, and then it had to transition to another pose that's not quite matched, then you get this kind of like, I came to a stop, and then I'm starting and stopping again, and that looks a bit funny, so it's always, you know, basically for us, it just means cut it early, and that's great because it gives you control back sooner too, right?
+So, just good practice.
+Thanks for the answer.
+Yeah, thank you.
+This is sort of related, but when you calculate the X zero, I'm assuming that's based on sort of your target blend time.
+like the initial T1, and then you're recalculating T1 later potentially, which would...
+Yeah, I see. So X0 is just the difference between the poses?
+Right.
+So it doesn't actually factor into time?
+But what if you don't have a locked pose? What if you're like, it's a moving target, so if you...
+Oh, I see.
+Yeah, so we're calculating it at the moment of sort of the instantaneous frame of the transition.
+Oh, I see.
+And then from then on, we're amortizing that way, but on top of the moving target.
+So the movement of the target kind of shows up right away or contributes right away.
+Gotcha.
+Okay, thanks.
+Most of your examples looked like they were for kind of gameplay, action, upper body sort of motion.
+Have you tried using this sort of thing for locomotion transitions or things like transitioning into a cinematic?
+Yes, we use it everywhere actually.
+So it works really well.
+Works reasonably well with the feet and do you factor phase into it or timing is as well?
+So we have a separate system that kind of automatically matches phase for us.
+Yes.
+not as fancy as some of the kind of motion matching methods, but it does a really good job and it's really cheap and fast. So we use that, that kind of gets us in, you know, it's kind of true of any kind of transition, the closer you are to your, you know, between your poses, the better result you're going to get. So by doing the phase match, we are always transitioning into into kind of match leg phases and then we get pretty good results. Right, and then you apply this on top.
+Yeah, and you can actually, like when I mentioned about the animation node kind of being at the end, it doesn't have to be right at the very end.
+So we, for example, run our IK solve afterwards, which means that we're doing this in IK space.
+Yeah, I was going to ask about that as well.
+One of the major issues with transitions in general is just the linearity of all the joints moving at the same time and things like that.
+Do you feel like this starts to address that?
+Because each joint effectively has its own inertia and blends effectively differently, right?
+Offsets the blend for each joint.
+Do you feel like that?
+Yeah, exactly.
+We are both sort of me personally, but also our animators seem really happy with the quality they get out of it.
+So that's always kind of the real test.
+Yeah, yeah, of course.
+Thank you.
+Thanks.
+OK.
+I think we've got to wrap up, but I'm happy to chat with you outside if you want.
+Thank you.

@@ -1,0 +1,412 @@
+This talk is Building Zeta Halo, and it's about how we scaled up our content creation tools, workflows, and best practices to build the largest halo ever.
+My name is Kurt Digert.
+My pronouns are he, him.
+I'm lead environment technical artist at 343.
+And my name is Mikael Nelfors, pronouns he, him, and I'm a technical art director at 343 Industries.
+Yeah, so first I'll walk you through what we're gonna talk about today.
+First, we'll go over a bit of history, both the cultural and technological history of 343, so you can see a bit about where we're coming from.
+Then I'll talk about, or we'll talk about what our goals were for Halo Infinite.
+Then we'll talk through a few of the things We built to achieve those goals. We'll talk about the mass painter system, the terrain system. We'll talk about the HLOD system. We'll talk about a few procedural content creation tools and workflows that we developed.
+And finally, we'll go through our content scalability system. So first I'll hand off to Michael to talk you through the history.
+Yeah, so as some of you guys might know, 343 industry was started by Microsoft back in 2007 to take over Halo production from Bungie.
+And Halo Infinite is the fourth of the studio's Halo FPS games.
+And if we look at the campaign, specifically about campaign in the previous Halo games, they've all been very linear.
+unique and handcrafted.
+They used very specialized workflows that were destructible and time-consuming.
+For example, there was no terrain system to speak of or really any procedural techniques to fill out the world.
+And they only really targeted one single platform.
+So when we started talking about Halo Infinite and what we needed to do, we quickly realized that this was not scalable.
+So some of the goals we set out for ourselves when we started planning for this was we knew we had to support large open playable spaces. That meant we had to improve our iteration speed and stability which meant that we wanted to invest in modular workflows so we could fill the world with more variety. Procedural workflows so we could make more content than ever before.
+and non-destructive so we could make it faster. And this time around, we were going to have to be multi-platform. We were no longer on a single platform. We had to support nine-year-old hardware with the Xbox One up until the high-end PC. You will hear us talk a little bit later in the talk where we refer to low spec, that is, we mean Xbox One and low-end PC, and when we say ultra spec, that's a high-end PC. And to give you an idea of kind of what challenge we, how big of a challenge we had here, On the left side here, you can see a top down of all our campaign levels for Halo 5.
+And on the right side, you can see the main campaign island we had.
+And if you would add these Halo 5 levels on top of the campaign island, it covers about 10%.
+So we really had to do something to be able to fill this world with enough content.
+So now I'm going to hand off to Kurt, that's going to talk about the first of those improvements that we spent time on.
+Yeah, so first I'll talk about the mask painter system.
+So as Michael mentioned, we invested in modular workflows for Halo Infinite.
+The example here is a wall that's built out of different configurations from the same set of modular pieces.
+So one of the goals of the mask paint system was to help us tie those together visually, for example, by painting a rust streak that runs across multiple modular pieces.
+But we also wanted the mass painter system to be able to create the illusion of more variety by being able to paint different variations of our non-modular pieces.
+We knew we wanted the mass painter to be, what you see is what you get.
+We wanted to be able to paint on the actual assets and the actual levels and the actual lighting situations and see the material update in real time.
+which was about improving our iteration time.
+We also wanted the mass paint system to be non-destructive and art directable, again, to help us to iterate quickly.
+One interesting goal of the mass paint system is we didn't want to introduce any additional popping with it.
+And finally, we needed it to be affordable, both in terms of memory and runtime performance.
+So the design of the mass paint system. One of the first decisions we made was to go with texture based masks, rather than vertex colors to drive the material blends.
+One of the main reasons for that was vertex color based material blending systems, you can get pops between the geolots. The shape of a rust patch, for example, can shift by a surprising amount in between geolots.
+So as soon as we decided to go with texture based masks, we knew that memory was going to be something we're going to have to keep an eye on.
+So we built a lot of features into the system to keep that under control.
+The artists specify the resolution of each mask they paint.
+They usually pick 64 or 128.
+We also built tools to audit that content afterwards to catch the few giant masks that inevitably slipped through the cracks.
+Also, we didn't want to mask paint unique masks onto every placement of every asset.
+We sort of only wanted to paint enough to create the illusion that everything was unique.
+So we built some tools around setting up what we called variants and reusing them whenever possible to minimize how many masks we needed.
+So in the end, it wasn't as much memory as we were worried to do texture-based masks.
+It was on average in campaign about, 60 megs worth of mass textures loaded on ultra spec and about 37 megs of mass textures on low spec.
+And our napkin math was that if we'd have done it with vertex colors instead of with textures, it would have been about 10 megs of additional memory.
+So the mask painting system we've built, you can go to the next slide, is it's fast, it's WYSIWYG.
+we can paint across multiple meshes simultaneously.
+Here you can see an example of using it in an actual level.
+The panel on the bottom right shows the names of the layers that are exposed to an artist.
+So they can paint on any number of those at the same time or on different meshes at the same time and get fast workflows.
+Over here, you can see some of our variant-oriented stuff.
+we're painting on the same mask on two different doors.
+And then we set up a new variant here so that that door is unique.
+Can jump to the next slide.
+So part of the mask paint system is the shader interface that reads those masks.
+We started out with, we had layered shaders on previous Halo games that sort of, we evolved that layered shader along with the mask painting system.
+But where we eventually landed is we were not tied to use a specific uber shader for all of our mask painting, we could annotate any texture in any shader is mask paintable, including in our shader node graph system. So here you can see what the interface for that looks like.
+To set up a texture sampler and a shader node graph is mask paintable and the spot where you type in the names for the layers. So that unlocked some cool special cases for us.
+For example, here we set up the opacity texture on this river is mass paintable, which allowed us to very quickly fine tune the blend between that river mesh and that waterfall mesh in a way that wouldn't have been possible before.
+So a little bit about the implementation of the mass paint.
+It runs in the GPU.
+It pretty much has to be as fast as it needs to be.
+Paint operation is a draw.
+It draws the mesh.
+And the vertex shader uses the mass paint UVs instead of the positions as the positions to stamp the mesh down into the mass texture.
+We also need a projection from world space to breaststroke space, which is calculated from the camera transform in the mouse position.
+We support an undo-redo step as part of our non-destructive workflows goal.
+The way undo is implemented is we play back, we go back to the beginning of the paint session and play back every stroke in the session except for the last one, which is another reason why the actual paint operation needs to be so fast.
+And the undo stack itself just stores that transform from world space to brushstroke space so that we can play it back when the camera is somewhere else.
+So I mentioned we use the mass paint UVs instead of the position.
+Originally, we used lightmap UVs for that because it was a unique unwrap that we had to have for a different reason that was already there.
+But partway through the development of Halo Infinite, we abandoned 2D lightmaps in favor of volumetric lightmaps.
+So at the time, the only thing we needed that UV set for was mass painting.
+So we started to optimize it to do things like enlarge the shells that we intended to paint on and shrink and overlap the shells that we didn't intend to paint on.
+But that ended up being a bit of a problem for us later on when we ended up needing that UV set for other things. For example, the HLOG material composite that I'll talk a bit more about later.
+So that's the mass paint system.
+Now I'll hand back to Michael to talk about the terrain system.
+Yeah, so looking back at the previous Halo games, like I mentioned, there was no terrain system and it was very destructible.
+So if you're looking at the terrains, they were actually just unique assets, nothing specific about them.
+They were generated, they were made in Maya, ZBrush.
+run through world machine and then import it as a regular object.
+They had a very limited number of material layers.
+So if you wanted to have, say, one biome with a set of materials in one end of a map and then another in the other side, you would have to do a lot of extra work.
+The masks had to be painted or generated by DCCs.
+There was no way of doing it in the level and in context and see it directly.
+And they had to be optimized by hand.
+All right, that we still used it to great effect.
+Just going to show some examples back from Halo five of the terrains that actually was made with this, which for the time worked really well, but.
+If for example, on this map, Attack on Sanctum, this is what the actual terrain mesh looks like.
+And it was actually split up into multiple sections so we could LOD it properly.
+And if you look at every single hole you see there, all those triangles were deleted by hand by an artist every iteration, just because they were covered by rocks or other placement.
+So to get perf back, they deleted them by hand.
+And you can see how much of a time sink this was.
+So we could not continue like this.
+So some of the goals we set out for ourselves, again, we wanted to what you see is what you get to speed up our iteration speed.
+We needed to support small to large landscapes, small like something like live fire from Halo Infinite, which is a small arena map, 120 by 120 meters, to something as large as our campaign island, which is seven and a half by seven and a half kilometers.
+it needed to support multiple users working at the same time so we don't lock up files and or areas and that includes being able to paint down materials, get physics material with effects and sound, getting ground cover generation procedurally with it and it needed to be non-destructive and platform scalable. So where we ended up was very inspired by Far Cry and the talks by Horace and Sarah Dawn and It's the design we went with is a tile height map.
+It is quadruple based and as the player moves around, tiles of appropriate size and resolution are generated and loaded into memory in virtual textures.
+And you can see on this, hopefully it's not lagging as much as for me.
+You can see on the screen here, when we're moving around the squares that are flashing by, is when we are requesting these new tiles to get generated and we're switching to them.
+And each of those tiles contains height, physical-based shading inputs like albedo and roughness, and things like wetness and micro displacement.
+And to scale performance and memory, we scale the distance of when we are generating and switching these, as well as how many of these virtual texture tiles that we do per frame.
+And the geometry we render at runtime for the terrain is basically just a grid of birds, one per heightmap texel.
+So the terrain geometric detail further from the camera is tied directly to the amount of heightmap data that is loaded into the virtual texture.
+That was true until we wanted to add more detail into this.
+So we added a feature we call micro-displacement.
+And we take the blended heights from our material layers and offset the vertex positions, basically, to get more detail.
+And we are really only subdividing our grid of verts even further.
+to get that detail.
+And this is something we also can control per platform.
+And even though our artists refer to this as tessellation, it's actually not hardware tessellation.
+It turned out that it was faster for us to just subdivide it further and continue with the kind of tech that we were using already.
+And now I'm going to take a step back and kind of look at the overall of how the terrain system works.
+These are basically the high level parts of our system, and it's really divided up into two sections.
+We have an offline section and a run time section.
+And in the offline section, everything is run really by masks.
+So we have our height maps or masks or user-created masks that are then fed into two sets of graphs.
+And we're going to talk a bit more about these graphs in a bit.
+So we have something we call a sculpting graph that controls the geometry of our terrain.
+And we have something we call the surfacing graph that controls our materials and ground cover.
+This then gets optimized for runtime, so we optimize the masks and logic.
+to get it into a format that's faster.
+And then that is what we were seeing in that video earlier, where we were requesting the various tiles and that gets generated into the virtual textures, as well as masks that are used for our runtime ground cover.
+And the virtual texture also goes into a random material.
+So the artist has the ability to do additional things that are not supported in a virtual texture per se.
+Things like if they wanted, say, sand blowing across the train or small ripples in water puddles, those kinds of things they can do in there.
+And we, although we did actually end up with two modes of our Terrain system.
+What I just described was our runtime version, which is a compiled HLSL.
+For edit time, we run the entire thing live. It skips the optimization step and the virtual texture. And this was basically because we wanted what you see is what you get. So we wanted the fastest possible iteration time. And we, but still needing the fast runtime. The downside with this turned is that we ended up with slightly divergent code paths, which has caused some issues with bugs with inconsistencies. And we also add a cost of compiling when we commit an edit, which can be get a bigger for if the level is really big. And this is something that we are looking into how we can improve in the future and get down to just one while still retaining the fast edit and fast run time.
+But now we're going to talk about the graphs.
+And I'm going to first hand off to Kurt that's going to talk about our sculpting graph.
+Yeah, so as Michael mentioned, the sculpting graph is the one that controls the geometry of the terrain.
+So originally it didn't do a whole lot except take the height maps that the artist sculpted with our sculpting tools and generate a normal map from that.
+But pretty soon we started to add a visual flare to the terrain that we could apply in a non-destructive way to that height map the artist sculpt.
+So a bit about the sculpting graph.
+It runs offline in the runtime terrain case.
+The results of the sculpting graph are saved out as textures on disk, but we also support the ability to run the sculpting graph in real time for our WYSIWYG edit mode.
+The sculpting graph is implemented as a render graph, which is basically a way that we built to expose the ability to do node-based graphics programming to content teams.
+So if you jump to the next slide, we can look at an example sculpting graph.
+Let me see what it does here.
+So we're doing stuff like we're getting the surface for the height map, getting the bindless index for that height map.
+We're allocating a temporary buffer here and plugging in that bindless index, putting that into a constant buffer and feeding it to this dispatch compute shader node here.
+So as you can imagine, this exposes a ton of power to the content teams, but it's also, you know, it's pretty easy to do things like cause TDRs in here.
+So we definitely had to work closely with rendering as we built these guys.
+So some of the things we built with this, one of the first ones was our road system.
+The way this works is the artist can place Bezier spline control points in the world, which have settings on them like width and opacity and falloff.
+Those Bezier spline control points are verts in a draw call in the sculpting graph, which then has a geometry shader stage that evaluates the spline and breaks it up into quads.
+It also does a blur pass along the spline to mitigate some of the stair-stepping artifacts we could get in extreme cases.
+You can see this checkerboard pattern here.
+So another thing we do in our roads, we can output textures from the Sculpting Graph other than just height maps that can then be, we can make an arbitrary number of inputs to the surfacing graph later on. So we use this to do things like make a mud material show up in these tire tracks in a texture that's mapped along the spline and make the high points have a grass texture on them. The next thing we built in the sculpt and graph was the terrain volume system, which conceptually is like a layers in Photoshop for the terrain system.
+Where this came from originally was we had one artist responsible for sculpting the terrain inside of the base that you can see here.
+And different world artists were responsible for the terrain that the base happens to be on top of.
+And we needed a way for all those artists to work at the same time without fighting to check out the same set of files.
+So the way terrain volumes work is in the sculpt graph, it's a draw call that draws a quad aligned with the volume.
+down into the terrain's height map and other input masks like the biome mask and the road mask.
+And there's also an opacity mask on the volume that the artist can fine-tune separately.
+Another thing we do in the sculpting graph is we made ourselves a hook so that we can go off and do things in Houdini that are a bit more fiddly and subject to iteration than our native terrain features.
+So we use this as a spot to run an erosion sim in Houdini and bring it back into the terrain, as well as what we call macro textures, which are things like normal maps that have interesting bumps in them and interesting color shifts in the albedo to just provide a little bit more breakup for that.
+Finally, another thing we do in the sculpting graph is we have this idea of wetness.
+So...
+The wetness is kind of like another height map that describes where the water table is.
+We use this to do things like create the appearance of mud around the edges of the lake instead of just dirt. So in the sculpting graph, rather than carry around another 16-bit height map, we compress this relative to where the terrain heights surfaces and write it, we write it into the terrain's virtual textures, which we can then, we can sample that later on from anywhere.
+For example, here you can see a rock is sampling into the terrain's virtual textures to decide where to draw that wet material change along itself.
+Yeah, so that's the sculpting graph.
+Now I'll hand back to Michael to talk a bit about the surfacing graph.
+Yeah, so as I mentioned earlier, just reiterates sculpting graph, controls to geometry, the surfacing graph that I'm gonna talk about now is the materials and ground cover on the train.
+And the surfacing graph really consists of three different parts.
+So you have here, what's highlighted here is the inputs, which are masks, and they are either masks coming from the sculpting graph that Kurt just mentioned, or they are masks that are created by the artists that they want to do something specific with.
+So they have control to add an arbitrary number of masks.
+Then on our right side, we have outputs.
+And the outputs are either material layers, which are discrete single material layers that has like color information, normal, height, and physics material, or they are placements.
+And placements are either procedurally generated ground cover, or we have some limited support also for audio and effects.
+And then in the middle, we have our node-based rule system.
+This is where the artist has full control to do whatever they really want with the mask to get the result thereafter.
+So they can combine the masks, subtract them from each other, kind of.
+If they want, like Kurt was mentioning, if you have a gradient in a mask, you can tell it to blend in a certain material in the first part of that gradient.
+So we go from rough gravel to finer sand.
+All those kinds of things is in the artist's hands.
+And I just want to show a quick example of it.
+This is me in edit mode, in our edit with the wig mode, playing around with just with some of our ground cover.
+So we have full control over spacing, size, what type it is, so we can just switch it on the fly.
+And that goes for both the, like the ground cover as well as materials.
+So it makes it really fast for our artists to work with and figure out kind of what is the look that they are after.
+And this works, of course, with everything, all the sculpting tools and painting tools, just like it should do.
+And so if we're sculpting, everything follows along and the rules that are applied.
+And something that our artists used a lot was that they created what they call bio-masks, which drives a whole lot of things.
+So instead of painting individual masks, they added so they have the ability to switch out all the materials and all the ground covers just by painting into one type of mask instead. And all that control, also control over how the UI looks in terms of names of masks and grouping and all that is controlled in the surface and graph by the artist. So we want it to be as much as possible controllable by them so they can set it up in the best way possible for them to work.
+And you might have seen it in that video, it's flashed by, but this is just an example of how big something...
+It kind of grows very quickly and for the campaign island, which is our biggest level, that graph grew quite a lot. So we had a total of 22 input masks, 53 ground cover placements, and 65 different material outputs, as well as 24 audio and 19 effects placements. So...
+At the same time, give them the power, but also make sure to keep track of what's going on so they don't go overboard.
+And that kind of concludes what we want to talk about on the terrain side.
+I just want to end with showing some of the examples from what the team were doing with this tech.
+And we're, honestly, I'm just blown away what they were able to do because it's new to the studio, but it didn't stop them.
+And I'm curious to see what they do in the future with it.
+And now I'm going to hand over to Kurt that's going to talk about some of the other improvements we did and he's going to start with HLODS.
+Yes, so we did build HLODS for previous Halo games, but that was very much a manual process and we knew from day one that it was never going to scale up for Halo Infinite.
+We also knew that we tend to have high fidelity assets so We talked about the mask painting system.
+That generally means the pixel shaders for a lot of our geometry carries around four layers that it blends together in real time.
+We have a number of other heavy pixel shader features like sampling into the terrain's virtual textures or triplanar mapping or relaxed cone step mapping.
+We also tend to have pretty heavy geometry.
+In the top image here, you can see our...
+LOD0 geometry. In particular, those repeating teeth are difficult to reduce with regular LOD methods.
+So we were attracted to the SimplyGone Remesher as a way to solve both of those problems. It has the ability to bake geometric detail, like those teeth, to texture detail in the HLODs, which you can see in the example HLOD below.
+It bakes all of our shaders down into a single set of textures for the HLOD, which, by the way, we did have to fix a few bugs there that we created for ourselves by over-optimizing the mask paint UVs, because the HLOD material composite needs that same UV set to bake the textures down for us.
+So we knew when we started out with HLODs Low spec was where we would need the GPU savings the most.
+But we also knew that low spec was where we would have the least amount of memory to spare.
+In fact, we didn't even really know how much memory we could use on HLODs.
+We had an idea that we were going to try to fit into 100 megs of content memory for HLODs.
+But in any case, we knew that balancing all of those conflicting needs was going to be tricky.
+So the way we approached it was we built a lot of controls into the HLOD system.
+So we have controls for each HLOD around reduction and remeshing settings.
+We have controls over which meshes are included or excluded from HLODs.
+We can place HLODs manually as volumes at any level of the hierarchy.
+And we also have a system that...
+automatically subdivides the world into a grid of HLODs at any level of the hierarchy.
+And we have a lot of multipliers for things like quality and switch distance that we can tune on each individual HLOD.
+So once we built all those controls, we started out iterating to try and figure out where the best balancing point was just by trial and error. And I think we learned some interesting things along the way.
+Originally, we anticipated we were going to need to exercise a lot of control over exactly which meshes are allowed to go into an HLOD and which aren't to try to keep the memory cost down and the quality up.
+But what we discovered is the Simplygon remesher does such a great job of deciding for you what to include and what to leave out of the remeshed mesh it builds.
+So we were able to.
+pretty much just throw everything at Simplygon, give it one quality setting that we tune per HLOD, and let Simplygon figure out what to keep.
+With one minor caveat, that if you throw everything, everything at it, it tends to, you tend to run out of memory.
+So in a few cases, we had to split HLOD volumes up into two smaller HLOD volumes, which is a relatively straightforward fix.
+We also anticipated we would need to specify texture resolution and geometric quality, really fine tune that on a per HLOD level.
+But again, what we found was that that single Simplygon remesher quality setting did a fantastic job of Simplygon just figured out for us how much textures that needed to use for each HLOD.
+We talked a bit about modular workflows earlier. So we had a modular workflow of sorts for rocks, which is that we had six or seven rock meshes that we built our cliff walls and things by kit bashing together, which is a good workflow for the artist because it's fast. You can get a high quality result, but it has an unfortunate consequence that you end up with a lot of rock geometry that's between two rock placements or hidden under the ground that you can't see but you still have to pay for.
+So we had hoped to be able to use the simply gone remeasure to turn those into a single efficient shell, which it does do, but we didn't have enough memory to be able to apply that technique to all the rocks in the world.
+So where we ended up for H love setup is we tend to have one parent H lot around base or point of interest. You can see the parent HLOD for prison on the bottom left here.
+Underneath that parent volume in the hierarchy are a number of child HLOD volumes.
+And the main reason we do that is that it allows us to push a lot of quality into those child volumes, which allows us to switch to them surprisingly close to the camera on low spec to get GPU savings.
+But then when we're a little bit further away, we can switch to that parent HLOD and stream out the child HLODs so we don't have to pay for that memory all the time.
+So I mentioned we had an idea that we could fit all our HLODs into 100 megs of content memory.
+But interestingly, at the end of the trial and error process where we ended up was more like 300 megs of memory budget on HLODs.
+So that's the HLOD system.
+Next I'll talk a bit about some of our procedural content creation tools.
+I mentioned in the sculpting graph that we have hooks to do things in Houdini for the terrain.
+So the way we interface with Houdini is we have a Python API to read and write our game data files directly.
+And we can invoke that API from Houdini, which ends up looking like, it looks like just loading the map in Houdini.
+It knows where the terrain is.
+It knows where all the rock placements and the tree placements are.
+And from there, we can do a number of things, like run an erosion sim or generate our terrain macro textures for some interesting bumps and breakup.
+We use a similar setup to generate flow maps for our river shader.
+We load the world with the river banks and the rocks and the mesh that's the surface of the river into Houdini and then run a fluid sim.
+and bake the results of that back out to a texture that the shader uses for the river.
+We have a similar system for our hex placements. The hexes is the grid of hexagonal metal forerunner columns that's the substructure of the ring. So the world artists place those red boxes in the map and then Houdini loads the map that sees the red boxes.
+And it has a number of rules to generate those hex placements on the right grid with the right spacing, with the right randomness along their tops, and feeds it back into a custom rendering system that we have for the hexes in the engine.
+And I mentioned that we had to give up on our idea of HLODing all of our rocks.
+So one mitigation we had for all of that hidden geo that we still had to pay for was we we had a tool to non-destructively slice the rocks into pieces in Houdini.
+And the benefit of that is we're able to use our runtime visibility culling system, and it's able to hide some portion of those meshes that are completely hidden by the ground or other meshes.
+And it doesn't do a perfect job, but it was certainly better than nothing to save us some runtime performance there.
+So that's our procedural content creation tools.
+Next I'll hand back to Michael to talk a bit about scalability.
+Yeah, so as we mentioned in the beginning, the previous Halo games were only really targeting one platform.
+So they had some scalability built into the engine at that point, which is basically the progressive resolution system that scales the game resolution based on performance as well as a throttling system that scales back certain features like LOD distances also based on what the performance is.
+But they were very few scalable systems.
+Some parameters were exposed, some were hard-coded, but overall it was very hard to outdirect, it was very hard to have an overview of what's going on, and it was very limited.
+So we went into this knowing that we needed a very flexible system that supported multiple hardware specs.
+like I mentioned at the beginning, we have to support Xbox One, which is nine-year-old hardware by now.
+So it needs to be very extensive.
+We wanted it to be data-driven, and we opted for that we wanted manual tuning for this.
+And several reasons for it.
+One of them, we wanted to have content and art direction be able to make decisions where to sacrifice visual quality on specific platforms to get back CPU, GPU, or memory.
+But also because of the amount of time it takes for an automated system to get things right, how to get it the results that you're after, how it should know what to choose versus something else. And we were not in the, we didn't feel like we were at the place where we wanted to.
+do that kind of choice.
+So we opted for manual tuning.
+That's still, we knew that that will still make time, take a lot of time, but it meant that we had control over what we changed.
+And this would also be able to, we should be able to look at that data now when we have released and talk about, can we do this automatically in the future?
+So this kind of just helped us.
+get in the mindset of what we needed to do.
+So what we kind of ended up with is what we call scalability presets.
+So on the left side, you can see all the various features, high-level features where we have scalability built into our engine now.
+And there's multiple settings in these, and they usually had multiple.
+presets within themselves as well, usually a low, medium, high and ultra.
+And on the right side, you can see a high level version of this is how we could define what is the settings for each of these features that we're using for, in this case, Xbox Series S. So it's using, in this case, a mix of medium and high.
+And like I mentioned, there was multiple settings within each of these categories.
+So for geometry, we had, for example, we could skip LEDs per platform or scale our LED render distances.
+Or for something like shadows, we control the resolution of our shadow maps.
+Do we use contact shadows?
+Those kind of things.
+And it was a mix.
+Some of these settings were global for the entire game.
+And in some cases, we had it so we could do it per level.
+And how the engine used this to kind of get us to a frame rate where we needed to be was that we had our scalability presets so they are automatically applied on console but on PC you choose them. If we don't hit our frame rate then we still have a progressive resolution system kicking in and this will start scaling the resolution down to try to get to where the frame needs to be. If we still don't hit frame rate at this time on the GPU throttling kicks in.
+But the difference this time around is that throttling is actually tied to our scalability presets.
+So when we set up the geometry, the multipliers for how to scale back our geometry, we have a high and a low value.
+So the high value is what's used when the game is not trying to scale it back further, and the low value is how close we allow it to scale back at a maximum.
+And the idea around both the progressive resolution and the throttling system is that these are a buffer that are used when the game is throwing things that you can't really predict.
+When you don't know how many enemies are going to shoot at you at any given point.
+So this is kind of how we try to maintain Perf even though those kind of situations happen because usually that's when you least, you won't notice it as much.
+But overall the scaleability presets should take us to Perf on a various platform on their own.
+And I mentioned it takes time to get to this and there is no special sauce. Really, we were using regular performance reviews with our various content teams and engineers to kind of look through it while we were at. We did build a lot of automation and data gathering into our process.
+We have daily or a play test or we have nightly run-throughs where we get data into Power BI, where you can see trends.
+This is an example of a high-level report where we can see where we are on the GPU.
+on the various parts of the island. And this kind of helps us to identify if there are regressions and if we need to go and look at specific areas. So we then, and then deep diving into those and having a conversation about what do we do is that either optimizing content or is this some scalability we need to apply because this is a problem all up.
+And lastly, I just want to show some examples from Halo Infinite, where we kind of what the differences are between the various specs.
+These are taken on PC, so there would be a resolution difference if I would run on console, but otherwise it's the same.
+And you definitely can see that for running this on an Xbox One, we have to scale back our LED distances and our sky quality and those kind of things have to go.
+But overall...
+the overall look of the game is still consistent throughout.
+And on something like on an interior, you see much less of the geometry differences, but more in a volumetrics and lighting.
+And then lastly, this is of course also used on MP.
+On our MP levels, since they're smaller, we managed to keep a much more consistent look on the geometry side throughout the whole range.
+It's more noticeable, especially on a reflective map like this, that the reflections, the squeeze-based reflections was something we had to turn off to get our frame rate on Xbox One.
+And this kind of concludes what we wanted to talk about today.
+And we want to say thanks to everyone at 343 and all our partners, because we wouldn't be able to be here and talk about this without all their amazing work over the years.
+And while you're at GDC, please check out the other talks that 343 have here, everything from career development to programming and design.
+And.
+Please visit our website.
+We have lots of positions opening.
+Come build the future of Halo with us.
+And with that, we'll open up for questions.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Hi.
+Sure. Thanks for the talk.
+Um, so you sliced up your rocks in Houdini so that you could do like sub part culling on them.
+Did you end up having to pay extra draw calls for each of those parts?
+Or did you have a system that kept the different chunks of the rock as one draw call?
+Um, good question. Uh, so our engine is actually does a really amazing job of instancing and GPU submission. So, uh, It was more draw calls, but it doesn't. Well, it's not actually more draw calls. It would have been if we didn't have instancing so We did work closely with rendering about that plan before we put it into action and they were able to give us some sort of guidelines on how many chunks might be appropriate and we were careful to test it.
+Hope that answers your question. Yep. Thank you.
+As someone who's so heavily involved in tool development, were you privy to any of the decisions behind ultimately making this Halo an open world game as opposed to a more linear shooter?
+That was not really something that was on our level.
+So can't speak for that, sorry.
+Hi, I was wondering if you could talk about performance scaling that you had to deal with drive access and network.
+Did you have any type of scalability decisions that you made around those restrictions?
+So most of the stuff that we had to deal with was, I wasn't really involving those areas.
+So I, unfortunately I can't speak much for it. Ours were more, yeah, the content side scaling.
+So sorry, not able to answer that one.
+Hi. You mentioned briefly how you got, how you generate the cliffs on the levels by hand placing the sections of rocks and then just simplifying it and simply gone.
+Did you have a procedural process to place those cliffs on edges around the map? Or was everything handmade?
+It's mostly handmade. We have a few.
+a few things we do procedurally for that.
+But yeah, the cliffs are mostly handmade.
+Thank you.
+Thank you for coming out to talk.
+I was wondering what was probably the biggest challenge for making the procedural creation system?
+And if you were to re-approach that situation again, how would you do it a second time?
+Kurt?
+You want me to?
+You were more involved in that.
+Which, which procedural system. Are you referring to specifically, I guess, as a whole, the entire system as a whole.
+Yeah, I think, I think where I would go with that. There's a number of things you could say, but I think where I would go with is fine tuning the balance between The places where you need to really hand build stuff to get it to look exactly how you want versus the places where you want it to happen procedurally so that you can, you know, do it on a wide swath of the game and in preserving the ability to do both of those things where it's appropriate to do one course versus the other.
+So I think what's top of my mind about where we go next is just sort of revisit some of the assumptions we made about which parts of the world had to be hand-built.
+in which parts it's possible to procedurally build.
+Yeah, I would agree with that because a lot of it, especially for this project, this was a lot of new things for the teams as well.
+we like Kurt said, there was a lot of assumptions in how much hand tuning we wanted to do that.
+It kind of goes back to when we were talking about the rocks.
+That was a conscious decision that we rather hand tuning because we were after a very specific look.
+But I think now when we have a project that we can look back on, we have a lot of learnings.
+where we can revisit and see which of those things could we actually procedurally generate in the future. And I think we have a lot of opportunities there that we definitely should look at.
+Awesome. Thank you so much.
+Hello, great talk, thank you.
+I have a question about tools.
+You have 8 by 8 kilometers.
+So for example, for the train tool, do you have any issues with memory or performance when you have this kind of, let's say, unoptimized way, like edited it?
+On the edit side, you mean?
+Yeah, editor side, yeah.
+So yes, you can't, if you would try, you can't like load the entire terrain to edit it at any given point.
+So we had to restrict it in the sense of how big of a space you edit in our editor at any given time.
+So it will tell you when you try to load too much, too many of those terrain tiles.
+So yeah, definitely, with that size, you have to be able to split it up somewhere.
+I know it will.
+there's potential solutions with streaming techniques that we could look at for the future.
+But what the solution we ended up with, it kind of worked as well because most of the time we had multiple artists working at the same time and they could work in smaller sections. And if we wanted to do something really big where they had to affect the whole terrain, that was usually that they were generating something in a separate DCC like Houdini to get the simulation going.
+So it was less of a problem, but yeah, definitely on the bigger levels that that that happened to be a problem.
+Thank you.
+I was wondering if you could talk about any strategies you took on to limit popping or any type of loading artifacts as they're moving through the map.
+Let's see. So, so one thing we do is we have a lot of control over the the multipliers for the LOD transition distances for different types of things. So we try to, you know, we don't apply scaling settings uniformly to trees as we do to rocks as we do to hard surface. So one answer to that question is we expose a lot of tunability to exactly how we scale.
+Yeah, it's basically it's the teams themselves can define how granular they want to be able to set up the multipliers we have for the scaling on the various platforms.
+Other than that, I would say a lot of it was just iterating, a lot of iteration on trying to find something that works both perf and visually.
+And in some cases, that means going back and reauthor the LODs and seeing.
+like, what can we do to make this better? So it was both giving the flexibility on the technical side, but also a lot of iteration on the content side.
+If that answers your question.
+I had a quick question about the dynamic system that you use to create grass and change terrain and everything.
+Did it eventually, at runtime, just bake down into something static?
+Or were you able to use that during gameplay for things like destruction, or someone threw a grenade and killed the grass?
+We don't have a dynamic system like that currently.
+The ground cover is generated on the fly, but they are driven by masks that we don't change really.
+It's something that I would love to look into for the future, but not something we do.
+The only thing that's really affecting, we have a wind system and like grenades do a push through that to defect it, but we're not destroying anything, no.
+Before everyone runs out, we just wanted to say thank you very, very much for all of the people who stuck it out for the TechArt Summit in person, finally.
+So yeah, this has been Mary and Mary.
+So thank you, thanks to everyone for being here.
+Thank you to our CAs, our AV team.
+We really appreciate all the hard work you've put in today.
+Check out techartist.org if you are so inclined.
+And thanks for coming, everyone.
+Yeah.

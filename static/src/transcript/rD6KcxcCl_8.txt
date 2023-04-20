@@ -1,0 +1,579 @@
+So to introduce myself, I'm Stephen McCauley.
+I'm a technical leader at Ubisoft Montreal.
+And I'm sort of the lucky guy standing up here today with a speaker's badge that gets to talk to you about all the cool rendering stuff we did.
+But really, you know, we have a big team at Ubisoft Montreal, and a game like Far Cry 4 is so big that it's a real team effort.
+So I'm going to try and make sure that I call out all the guys who worked on all the features I'm going to talk about today.
+So I joined Ubisoft to work on Far Cry 3.
+And this is a game that came out in 2012.
+It was really great.
+We actually found that loads of people liked it.
+It got a 90% Metacritic score.
+And when you're working on a game that's sort of game design is really fun, and you have a thing of really cool gameplay loop.
+It's pretty awesome when you get the chance to make a sequel and do Far Cry 4 based on that.
+So it's really cool as a graphics team as well, we're able to stick with a lot of the same people.
+So we knew the strengths of our engine and our weaknesses, and we knew exactly what we wanted to do to improve the engine.
+And it's obviously some of these improvements I'm going to go through today.
+So Far Cry 4, if you don't know much about it, it's an open-world first-person shooter.
+World about 10k by 10k.
+It's pretty big.
+We have a day-night cycle, as you'd expect for an open-world game.
+And with anything that's kind of dynamic time of day, as a graphics programmer, there's kind of really no hiding place.
+And we're setting Kherat, because that's a country based upon Nepal.
+We had cross-platform and cross-generation development, so we shipped for five platforms at a time, which was pretty tough.
+I mean, our mandate as a graphics team was to lead on current gen on Xbox One and PlayStation 4, and try to keep the last-gen version the same as what we shipped on Far Cry 3, because it did a really good job.
+It kind of gave us a lot of constraints, because we had to keep the last-gen version kind of running, which kind of affected a lot of our decisions throughout the project.
+And at the end of the project, as was kind of inevitable, like when we had to go back and optimize a few little bits about the PS3 and the 360.
+But in the end that kind of meant we had a better product on the Nesti 3 on all platforms.
+But really given our mandate as a graphics team was to develop new features for the new consoles, I'm really not going to talk exclusively about that kind of work, but I might throw a few tidbits in about the PS3 and 360 along the way.
+So what areas did we improve?
+Well, we kind of looked at five areas.
+So materials, lighting, vegetation, and anti-aliasing, and terrain.
+So I'm gonna cover the first four today.
+I'm not gonna talk about terrain, because hopefully you were all in Kar Chen's excellent talk just beforehand in the opposite room.
+And he talked about the virtual texturing work he developed.
+And if you didn't see it, make sure you go and check out the slides.
+It was really awesome work.
+So let's get started with materials.
+So, on Far Cry 3, I did a talk at SIGGRAPH 2012, talking about how we did some PhysiciBase shading stuff.
+We kind of had glossiness and reflectivity material parameters, and we only had a monochrome specular.
+As a bit of a side rant, I've kind of noticed nowadays this kind of definition of physically based keeps kind of changing.
+Like what I kind of consider physically based back in 2012 is now the old way of doing things and physically based now means you know layered material editors and other fancy things.
+So maybe we should talk about more and less physically based. It might be a bit more accurate kind of term.
+So the goal from Far Cry 3 was that we wanted to improve the appearance of our metals because we only had this monochrome specular reflectance Didn't look very good We couldn't get colored specular and if you look at something like the kind of concept art for a place like Nepal You'll see loads of gold and kind of bronze that we really wanted to bring out And also in a first-person shooter, you'll find the weapons cover quite a large portion of the screen So you can get your weapons looking really nice. You have at least part of the screen. That's gonna look pretty awesome So, like everybody else, we looked at the Disney model, nothing too original here.
+We took the anisotropic GGX BRDF and corresponding Smith geometry term and just used a standard Lombertian diffuse.
+We didn't look at other diffuse models, such as the Disney model, but really, I really struggled to see it's worth the cost at this moment in time, though, yeah, we'll keep looking.
+And we ended up with four parameters in this zero to one range.
+Again, really important, keep all your parameters in zero to one for artist intuitivity.
+So glossiness, reflectance, metallic, and anisotropy.
+So Disney call reflectance specular, and they call glossiness roughness, or inverse glossiness roughness.
+We stuck with glossiness for legacy reasons, for keep the Far Cry 3 kind of naming the same.
+And really what I'm gonna go across is just stay on to that bit into how we did anisotropy, and how we did like a metallic.
+So.
+Looks like a mechanic parameter, hopefully you all know about this by now.
+So, it's pretty simple.
+So, if you have this single float value that you can blend for your specular reflectance, you just blend from a monochrome value to your diffuse albedo, which really is then a kind of a specular albedo.
+At the same time, you blend out your diffuse albedo to make sure you get no diffuse lighting and lots of cool colored specular lighting.
+Simple, and it works really, really great.
+What it means is you just need a single channel in your G-buffer for colored specular, rather than having to store a whole other kind of three colored terms.
+And actually this is great because we could use this feature then for the old gen consoles as well, which got rid of the specular reflectance, fixed it at 0.03, and replaced the value in the G-buffer with a metallic instead.
+If you do this approach, though, you do need to give your artist a little bit of training.
+Because the behavior of your kind of diffused textures, which are no longer diffused really, it kind of changes with that use of the metallic value.
+And it can be a little bit confusing for people.
+Like, you kind of notice you're developing, say, a weapon, and you've got like a metal...
+a knife blade and, you know, like a, say, wooden handle.
+We will find in the texture, the wood looks quite dark, but the metal's all going to be really quite high in that range.
+So your artist might kind of want to kind of adjust them and kind of make them closer together.
+But we gave them some good Photoshop color swatches to make sure they kind of didn't do that and had some good guidelines.
+And, you know, after a couple of weeks, they really caught on pretty well, and they did some awesome kind of work.
+We also introduced anisotropy to get cooler brush metals and also for certain types of cloth.
+So, see how the anisotropy parameter increases there, across those spheres?
+So let's look at the anastropic ggx distribution formula, which is kind of long and confusing.
+This is a bit scary, because if we actually break this down, and we look at what we have to store in our gbuffer, well, we need two glossiness terms, plus a normal, tangent, and binormal.
+And that's really confusing then, because we have to pack a full tangent space into the gbuffer, and yeah, like, that's gonna take a lot of values, we think.
+But actually, we can actually borrow some ideas from animation programmers.
+And they wrote some interesting papers from Crytek and also Nicholas Frickholm on the BitSquid blog about storing tangent space as a quaternion.
+And they've kind of mastered the packing kind of for this.
+They want to get animation down nice and small.
+So what we're going to store, we're going to store a quaternion 10.10.10.2.
+We're going to store the three smallest components and they're in the range minus one over root two to one over root two, because if they're any bigger, they would be the biggest component.
+So we just need to do that.
+And that's great, because you can just pack those into zero to one range and we have to get more precision.
+And we also stored in that W component the index of the component we've dropped, the 0, 1, 2, or 3.
+You might be thinking, well, can't you just get away with storing X, Y, and Z in, say, 11, 11, 10, getting a bit more precision out, and reconstructing the W?
+Well, it turns out it doesn't work. You kind of lose a lot of precision, so you really need to actually drop this bigger component and reconstruct that one.
+And it turns out it's not too bad.
+You can kind of find the biggest component.
+It's actually only five instructions.
+If you use some kind of GCM-specific tricks.
+So it's kind of like a major access problem.
+So you already actually have the kubemap face ID instruction where you can just use that to get the major access out of the X, Y, and Z.
+And the max three to quickly help you get to whether the W is any bigger.
+And I'll put all the code for packing and unpacking quaternions in a G-buffer in the appendix to these slides.
+So you can go check all that out later when I release the slides next week.
+Um, what's the quality like?
+Well.
+I kind of worked out it's about quality equivalent to about a naive packing of normals and 888.
+You do get a bit of faceting on smooth surfaces, and we're kind of lucky on Far Cry, we don't really have that many smooth surfaces.
+But if your game is kind of like that, you might want to look again.
+I mean, overall, I mean, the problems you're going to get, you're going to have problems again, with what I said, the quality of the normals, they could be a bit higher.
+I do think there's a bit more research to be done here, whether we can use those 10 bits a bit better to distribute the kind of values better, to get precision where it's needed.
+You also can only store orthonormal tangent space.
+Now, that's actually so bad, because actually we don't have orthonormal tangent space for normal maps in Far Cry.
+But what we construct for the actual anisotropic shading is orthonormal.
+So you can kind of make those two different tangent spaces, and it actually works out okay.
+It might be a problem if you want to do something like lean mapping, which is kind of our initial plan, but we weren't, so that's okay.
+Obviously we'd like to make the speed of the packing and unpacking a little bit quicker, but you know, it never really came up much in our profiling once we optimized it.
+The main problem really we had was how to blend decals, because obviously now once you're doing something like a quaternion, you can't just do some simple alpha blending.
+So we only supported one layer of decals, and that was an art kind of restriction, and we had to kind of read back the current normal quaternion buffer, and then reconstruct things from that.
+What was cool though is actually how it worked well is with the virtual textures because all our decals on the terrain were stored in a virtual texturing.
+So it wasn't actually a problem for us at all on that. It was only on kind of buildings.
+It was kind of a nice thing about two different techniques working together and if our game was all like virtual textured, it kind of meant this problem went away for us.
+Um, for reflections, well, it's a little bit trickier.
+We'd love to do important sampling or something into a key map to get some awesome results, but we can't.
+So I'm kind of really grateful, actually, to, um, it was Matt Patino who brought, uh, Don Reavy's article in, I think, a GPO, GPU Pro 1 or 2, to my attention, about, uh, doing some, like, anisotropy and deferred shading.
+He just did a simple trick to distort the, uh, reflection vector in a different direction.
+And actually, you know, it's not perfect, but it looks pretty good.
+So, you know, on the, uh, left, we've got non-anisotropy.
+In the middle is kind of what we had originally, where we had this anisotropic highlight and anisotropic reflection, which is a bit kind of broken.
+And then on the right we have what happens when you actually do this little trick for the anisotropic reflection.
+Again, it's kind of not perfect, but you know, it's kind of a hell of a lot better than doing nothing at all.
+I really like showing pictures of these knives, I think our weapons team did an awesome job, and you know what, they used anisotropy everywhere, they loved it.
+And it's kind of really interesting, because it solved a problem we had on Far Cry 3, where these guys, this weapons team, they keep coming up to us and say, we really want some fake specular on our weapons.
+And we kind of say, no, no, no, we want to be physically based, no fake specular at all.
+And then we gave them this anisotropy, and that complaint just completely went away.
+They always felt they saw some glint, or some kind of like, something interesting going on in the weapons.
+So it's kind of made perhaps this fake spec that they wanted after all was actually just brushed metal.
+That's actually what they were looking at.
+And now we've kind of replicated the real world a little bit better.
+We've supported a wider range of materials.
+They can get what they want.
+So next topic is going to be our lighting.
+So there's kind of three improvements we wanted to make.
+The first was kind of our sky occlusion system.
+We wanted to kind of increase the resolution of that and the system that Jeremy Moore worked on.
+We also had our environment maps, where we wanted to make sure that they could deal better with time of day changes.
+And that's something developed by Gabriel Lassonde.
+And finally, we looked at the indirect lighting.
+We wanted to kind of extend our range beyond this kind of loading ring we have, so further out to about far in the distance.
+And we wanted a faster update as well from Far Cry 3 to prevent flickering errors.
+So let's start with our sky lighting model.
+Well, we use the Bruneton sky model and the pre-term sun model.
+This is something that actually developed by Assassin's Creed Unity that we managed to take and it worked really well for us.
+We kind of really liked it.
+And once you've got the sky model, we just need to generate the lighting in third order spherical harmonics.
+So that's pretty cool.
+So, why we went to Far Cry 3 was that we had stored our skylighting in light probes along with our indirect lighting.
+The problem is that our indirect lighting was based on probes spaced at over 8 meters, which is quite low resolution and we thought, hey, GI is kind of a difficult problem to solve, so hey, why don't we just increase the sky resolution, that's something we can definitely do.
+So we started to separate out our skylighting, direct skylighting from the indirect lighting.
+And we did something, the simple trick I think a lot of games have done, Assassin's Creed, I think CryEngine has it in.
+We have this just top-down sky occlusion map generated from a height field over the entire scene.
+And we make sure we actually generate visibility and second-order spherical harmonics from this height field.
+So the high field is kind of rendered on demand, but it's not something we stream in.
+So our world is split into 64 by 64 meter sectors, and whenever a sector becomes visible, we're just gonna render the high field of that.
+It's really, really quick, means we have no streaming cost, and it means we get quite a high resolution as well of 25 centimeters per texel.
+And we kind of blur this then before we generate the SH of visibility.
+I mean the visibility is kind of quite simple to do.
+Let's just take an SSEO kind of style approach.
+We just need to sample our kind of blurred height field with a rotated Poisson disk, store the proportion of the visible samples, actually just sum the directions of the visible samples then to get the directionality out.
+Once we've got that, we've got the direction and we've got the visibility, we just need to convert that into spherical harmonics.
+So what we're gonna do is just create a spherical cap based upon the kind of the up normal and then we're just gonna rotate into the direction that we need.
+So how do we apply this?
+Well, what we're gonna do in the deferred lighting, we're gonna sample this kind of SH sky occlusion texture.
+We're gonna do some tricks.
+Obviously this is kind of 2D, and we actually need to kind of modify things based upon our height above the terrain.
+So remember crawl, we have actually a blurred height field.
+So if there's something at the terrain height, we're gonna have this full, use full SH occlusion.
+And then as we blend up to something in the height of the blurred height field, well, we're just gonna kind of fade out to something fully visible.
+Gives you something that looks kind of 3D.
+Then once you have the primary visibility direction from SH, we can just construct a bent normal out of that.
+And we just need to then sample our second order SH visibility and the third order SH skylighting in this bent normal direction and just multiply them together.
+And we did look at using SH product here, but we kind of found it was a bit low res, I think, in the end.
+So just here's some code, quick code to bending the normal.
+So you just need to get the primary direction out.
+Scale it based upon the kind of the zeroth band of the SH, and then add that into our existing normal and renormalize.
+So let's look at some pictures.
+So this is kind of a scene without sky occlusion.
+I mean, even so, I think it shows some nice stuff with having like kind of cool skylighting, right?
+Can you look at the buildings, you can see different kind of shades on different faces.
+Here's how it happens if you add the sky occlusion in.
+Everything starts looking a lot better.
+It's still perfect.
+I mean, you can't notice, you can actually have quite a harsh fall off.
+That was actually art directed.
+We had a few tweaks in there to get it looking for how art direction wanted.
+And what's really cool is when we added the bent normals in as well.
+And what you might see, if you look, say, around the building, just between the building and the ground, obviously you can see very disparate lighting.
+You add the bent normals in, it really softens that out.
+So, something like that.
+Doesn't look quite as good on the big screen as it does on the monitor.
+So look at the slides later and you'll see, but I'll do that again.
+So.
+Yeah, just kind of gives a little bit of softness, a little bit unifies everything a little bit more in the scene.
+And Art Direction really liked that because they felt that things, sometimes, where the buildings join the ground, just they felt that things didn't look quite right.
+So environment maps.
+So let's ask ourselves this question.
+So how can we get a single key map to have the right intensity at every single time of day?
+Um.
+Well, one idea, of course, is why don't we just relight our keymap every frame?
+So, what we need to do to do that, well, relighting is something we're kind of good at doing.
+We kind of store gbuffers in our deferred lighting.
+So why don't we do something like that for our keymaps, where what we'll do, we're going to bake offline keymaps and store, instead of a fully lit kind of thing, we're going to store a gbuffer.
+We're going to store an albedo and we're going to store a normal.
+Then what we need to do in our kind of frame, we're gonna insert those along with a kind of a real-time generated sky texture to fill in those black albedo pixels.
+And we'll insert that into a lighting path, light based upon our sun and our sky lighting.
+Then we need to take that and do our pre-filtering so we can have the BRDF, GRGX BRDF, they're built in there.
+And then we're gonna get a final relit key map as a result.
+So how do the lighting? Well, we do our sun and sky lighting without any shadowing or occlusion because this is a required depth buffer. We decided to kind of save the memory.
+I think in the future we probably want to add that depth of back in so we can get world position out and I think it would help, definitely help improve things.
+We also get the indirect lighting from the nearest probe and we normalize everything again with the luminance of the ambient term.
+On Far Cry 3 we were normalizing our keymaps by the color of the ambience.
+It turned out actually that introduced loads of banding and color distortion and just normalizing the luminance works a lot better.
+So, here's the results.
+What's really cool, you can obviously see we have a real-time sky.
+There's no clouds in there, but you could have some fancy clouds moving.
+But you can see the sun moving across the sky.
+You can see that kind of in the mountains there in the distance.
+You can see how the lighting's shifting on those.
+And of course, obviously, you can see how the ground changes lighting at different times.
+Obviously though, we need to talk about the filtering, because it's really important we do this.
+So what we're going to need to do for successive MIP levels, we need to sample our GDX distribution and do some importance sampling.
+Just on its own, it's a little bit kind of slow.
+It's really, really key to use a filter in importance sampling.
+It was done in GPU Gems 2.
+It turned out that I think Seb Lagarde and Charles Derousier at Dice had the same idea and they kind of talked about this before me at SIGGRAPH last year.
+We came up with the same thing. It's the right thing to do.
+I found it's really important to match your keymap faces together in your compute paths to better occupancy.
+Obviously, if you're doing a 4x4 keymap face and you're sending that individually to the GPU, you're going to have a lot of wasted performance.
+And also if your hardware supports it, it's really cool.
+You can batch NIP levels together as well.
+Then you're going to really fill the GPU up with work.
+Turned out that all this all was actually pretty quick.
+Oh, yeah, filtering results.
+There you go.
+It works.
+So yeah, really, really quick.
+So we had 128 by 128 key maps with HDR key maps.
+Lighting, again, really quick NIP generation, quick filtering, a little bit slower, but still really, really reasonable.
+We have bandwidth found here.
+David Cook from Microsoft has suggested that we look at using R11, G11, B10 formats that might help speed things up.
+That's true.
+If we can deal with that for the precision issues, I hope these times will go down a lot further as well.
+So indirect lighting, our third kind of lighting improvement we wanted to make for Far Cry 4.
+So we have started off with a really cool system.
+If you were at GDC three years ago, you might have seen Nikolai Stepanov and Mikhail Zhilobar talk about deferred radiance transfer volumes that they developed for Far Cry 3.
+So these were light probes placed at various points in the scene that stored radiance transfer information.
+We came to looking at what we wanted to do for this system.
+We had a number of goals.
+Again, with this limitation of being this kind of cross-generational game, we decided, right, we actually want to stick with the same light probe set for kind of last gen and current gen.
+We really wanted to extend the range of the indirect lighting out, because in Far Cry 3 it was kind of stuck at around, I don't know, 64 meters around the camera, and we really wanted that to go further, because you can really see that kind of destroying.
+And we really wanted to have faster updates as well, and moving all the CPU work onto the GPU.
+So here's an overview of what we do.
+So offline, we're going to bake some probes.
+And we're going to bake this, then we're going to store radiance transfer information in second-order SH.
+So that's going to be three 4x4 matrices.
+On the CPU, we're going to stream this probe data in.
+We're going to upload it to the GPU, and we're going to update our page table.
+On the GPU, we're going to calculate our radiance transfer, and then we're going to inject our probes into the clip map and sample the deferred lighting.
+So I'm going to step through some of these in a little more detail.
+So, our world, as I said before, is split into 64 by 64 meter sectors.
+And probes are stored in cells.
+In each cell we have a grid of 8 by 8 probes.
+So, we're going to bake our highest level data, so just the top level of probes, where we have one sector per cell.
+And then we're going to generate MIPS from that, so you have MIPS data, five levels of MIPS data.
+So what's in a cell? Well, it's a radiance transfer probe list.
+So it's 64 probes, again, in this 8x8 regular grid.
+We also need to store our SH probe list as well.
+So this is going to be the final probe.
+After they've gone through the radiance transfer, they've gone through this kind of relighting process.
+We need to store that as well, and that's done once per frame.
+We also need to store the dimensions of the cell.
+So what MIP level are we? What size is it?
+Where are you in the world?
+And obviously once we've got all these cells, the thing is, we can't have these kind of buffers stored individually in GP memory.
+We can't have like a buffer put just in one structured buffer for radius transfer probes per cell.
+Again, it's not going to be really slow because you're working on small sets of data.
+What we need to do is come from virtualization to have one big list.
+So, that's what we're going to do. We're going to allocate this big, thick, size list of cells.
+Um, and...
+We're going to break that into a fixed number of cells allocated for each MIP.
+So in our case, we have 80 cells in total, 5 MIP levels, and that's 16 cells per MIP.
+As we were saying, along using the virtual buffer stuff here, we're not using any PRT hardware, so don't worry about that.
+It's all done in software.
+So as a cell is streamed in on the CPU, well, if a free cell is available for that MIP level on the GPU, well, we're just going to allocate.
+If no cell is available, then we just need to discard a more distant cell.
+Then, as a cell is streamed out on the CPU, we always need to mark the cell as free on the GPU.
+It's pretty simple.
+And what's cool, because we have this big long virtual buffer list, we now can perform, like, the radius transfer all at once, really fill up the GPU.
+It's really, really quick.
+So just insert our sunlight and our skylight, take a list, and output some SH probes at the end.
+And these are the final probes we're going to use for lighting.
+So let's talk a bit about our page table.
+So each MIP level actually has a page table.
+And these are kind of spatially indexed in a 2D grid on the XY plane.
+And this kind of page table covers the entire world.
+What we're going to do on the CPU, we have all these page tables, MIP for MIP.
+And we're just going to combine them into one, kind of filling in all the gaps.
+So in the end, we have this kind of page table, which contains all the data for every cell in the world.
+So the final page table is 160 by 160 sectors, at the highest MIP-level resolution.
+And what do you need to do if you want to sample a light probe?
+Well, what you need to do, we just need to sample into the page table to find our index into the cell list.
+So what cell are we currently, uh, is our lighting data currently stored at?
+We don't care what MIP-level it is.
+From the cell, once we know what cell we're in, well, we can calculate from our world position what probe index in that cell we need to look at, and we just need to fetch the probe.
+Now, that's great and all, but obviously that's not going to have any filtering, especially not between MIP levels and not between individual probes, so it's not too great.
+And it's actually quite slow to do that lookup for every pixel on the screen, so we don't want to do that.
+So what we're going to do instead, we're actually going to inject our probes into a 32x32x5 clip map.
+So that's like a 32 by 32 texture array, five array levels, and obviously the same size because each 32 by 32 is covering a larger area in the world.
+And these are centered about the camera, and the three of these textures are so we can store the 12 SH coefficients we need.
+So to sample, in the end of the day, we just need to find what cascade our pixel is in.
+We just calculate the UVs for that pixel, for cascades, the current cascade, and also the next level cascade down.
+And we can sample both of them and just blend together based upon the distance.
+So let's look at kind of what performance we kind of have.
+So...
+Memory is pretty low, obviously.
+The page table is 25 kilobytes.
+Total cell memory is about 640k.
+And you're probably thinking, well, so you're doing an next-gen game.
+We've got all these massive loads of gigs of data to use.
+Why is your memory so low?
+Well, again, as I said, we're showing data sets between current gen and last gen.
+So actually, what we have from here, we actually managed to optimize our last-gen memory a lot.
+Actually, our lighting system, I think we saved two megabytes or so in total across the last-gen consoles.
+So obviously, people were very, very happy about that.
+Performance again, the radius transfer is really really quick and so is our injection into the clip map.
+And the full screen pass here, the full screen pass is actually what does our sky lighting.
+So all the sky occlusion stuff I showed you earlier, applying the third order, actually sky lighting and sampling the clip map and getting indirect lighting out.
+We store that in a separate buffer.
+That's ready in the final deferred lighting pass.
+So, what's great about this, we solved all our problems in Far Cry 3.
+We had faster updates because now we had no kind of CPU-GPU synchronization.
+It was all going to be done on the GPU, all the radiance transfer, rather than before.
+We had a much larger indirect lighting range because now we had all these MIP levels of the lighting data.
+We could go all the way into the distance.
+And we had a lot lower memory requirements, which as I just said was awesome for our last-gen consoles.
+Obviously this has quite a few quality issues.
+So we have low frequency lighting, like every eight by eight meters are kind of at best.
+And also temporarily as well, because kind of second order SSH spherical harmonics and radius transfer, it just doesn't really pick up enough data.
+And also finally, we don't have our local lights kind of taken into account.
+So these are things obviously we want to look at and kind of improve for the future.
+So, vegetation.
+Now, vegetation was actually one area that we decided to completely redo for next-gen consoles, given it's a really important part of our Cry game.
+So I want to give credit to Philippe Gagnon and Jean-Sebastien Gay for working on this system.
+And again, it was a completely different data set for our current-gen and last-gen builds.
+So really, we did two completely different sets of trees.
+Our goals developing this new system were, well, we want to improve our visual fidelity up close, and we want to get really close to trees.
+We wanted to get improved lodding in impostors, as those kind of trees then go further away.
+And we want to get some core simulation, a physics simulation done.
+So to explain what I'm talking about, well, vegetation can mean quite a few things.
+We've got trees, bushes, grass.
+Really, our new system only touched kind of these trees and these bushes.
+We didn't really look at the grass at all.
+So what we're going to do, we're going to create our trees using SpeedTree, and we're going to port them into the engine.
+We're not going to use anything like the SpeedTree runtime, we're just going to take the mesh data generated and port that in a format that we like.
+And how we actually built a tree consisted of this. A tree consists of a trunk and these leaf clusters.
+And once we have a lot of leaf clusters and put them on a trunk, we get a tree.
+And these are all kind of loaded individually, and we have three LODs for the trunks and three LODs for the leaf clusters before a tree becomes an imposter.
+What's really cool is how we do the leaf cluster LODing.
+What we're actually going to do, we're going to generate when we want to switch LODs offline, and I can calculate the percentage of each leaf cluster visible from 12 distances and nine viewpoints around the camera, around the tree.
+So let's take a look at this.
+So let's look in the left-hand image.
+This is what happens looking at the tree.
+The red is going to be your kind of LOD 0 clusters.
+The green is going to be your LOD 1.
+And your blue is going to be your LOD 2.
+And if you kind of move the camera around to fix the color-coding camera, and you sneak a look around the side on the right-hand image, what you're going to see is that, obviously, the clusters closest to the camera.
+or on the highest slot.
+And as they get further away, more and more occluded by the clusters in front, so they're gonna be using the lower lots.
+And obviously, of course, as the tree moves into the distance, everything's gonna turn blue here and you're gonna have the lowest lot in total before everything goes to an imposter.
+Simulation.
+So, we have all our physics and movement of the tree simulated on GPU.
+What we do there, we have our instance bones transformed into world space bones.
+So what's going to happen is we have a model bone list of all the models in the scene, and obviously a list of all our instances, tree instances in the scene.
+They're going to go into a computer-aided simulation, and we're going to spit out a much longer list then of all the world space bones for every tree, which goes into our vertex shader.
+And this is great, because it allows some really cool physics effects.
+So this is the first point where I try to play a video.
+So I can see when you're flying a buzzer and it comes down, I can see all the trees moving individually, um, you see bushes reacting to the buzzer, and you can see all the grass waving as well.
+For the grass, you apply, actually apply some kind of cheap water-like simulation to get that going as well.
+And this is really cool. Not many games, I think, have this kind of, uh, kind of effects.
+So, that's great for close to the camera.
+What happens when you get far away?
+Well, we want some cool things to generate some good impostors.
+What we're actually going to do, we're going to take screenshots of nine viewpoints around the camera, eight perpendicular to the tree and one top down.
+So when we have an imposter, we can easily blend, depending on our view angle, what the tree should look like.
+But we're going to go further than that.
+Because actually what we're going to do is take G-buffer kind of screenshots.
+We want to capture the albedo, the normals, and the material properties.
+And that gives us a lot of textures for a tree.
+And again, we're not going to stop there.
+We're going to add even more.
+We're going to add this kind of depth billboard effect.
+So we have one capture low res depth data as well during our gbuffer pass.
+And when we render our billboards, they're actually tessellated into a 16 by 16 grid.
+And we're going to displace our vertices to fit according to the original tree depth.
+Watching these screenshots is not so great, but this is the front view on the left and the side view is the same tree.
+As you can see, all the depth applied.
+I've been told this actually really helps a lot when a tree is lit from the side.
+And also when two tree impostors intersect.
+So, that gives a much better blending between them.
+So, it's worth doing this technique.
+And I'll give you a few benefits later as well, as I'll explain.
+I'm in the occlusion, standard thing everyone did, AO volumes.
+You've all seen this before.
+But it definitely has a benefit to our tree lighting.
+And let's give some scary looking vertex numbers.
+So for our rosewood tree on the right, we might see 170,000 vertices for the leaves.
+It's worth noticing here because we have our loading system, we're never going to render that many.
+It's only going to be like 80,000 max for that because of the loading that we do.
+Which allows us to have this kind of high detail.
+Of course it's also probably fair to say that I'm not going to let artists make a tree like that again.
+And performance, performance is actually pretty good as well.
+Our tree simulation, again, on compute, is like really, really quick.
+Um, and given for this scene, um, there's a lot of trees on the scene, have shadows about a millisecond, g-buffer about five and a half, rendering all this kind of alpha test geometry.
+It's pretty good.
+But obviously we like to optimize because trees are always expensive for everybody, everywhere.
+Um, visually however, I think vegetation is a really tricky thing to get right, because you know, there's loads of things we're not simulating, and, um, you know, like bounces between blazes of grass, or the light scattering between leaves.
+Um, what's really great is when you have some really cool technical artists, you can kind of come in at the end of the project and just kind of do a few little cool tweaks to get things looking cool.
+I'm going to share a few of those with you.
+So what they wanted is a kind of a per cluster, per leaf cluster, random color tint.
+So this is an example, the first color's green, second color's red, and we just generate tints varying between those two randomly.
+Really simple, really effective.
+And this is a bit of an extreme example, but you know, it's not too different to trees you might see in Vermont in the autumn.
+We also need to bring impostors to life.
+Because we had all this cool simulation up front, but then when we did impostors, they looked a bit flat and boring.
+So what are we going to do?
+Well, we just simulate some branch motion first by doing some per-vertex sine waves.
+This is great because we have those tessellated billboards that actually the vertices are going to move when the trees are going to shift a bit.
+And we just simulate them by smooth triangle waves as they did with Crytek many years ago.
+And we're also gonna add some per pixel noise as well from a texture to simulate leaf motion.
+So you have the branch motion from these big kind of distortions and then this little per pixel noise to fake this leaf motion.
+Works really well.
+Again, I'm gonna play this video.
+I'm not hopefully about to see the difference between the noise on and the noise off.
+If not, again, take a look offline.
+That's working pretty well.
+I think you can see that things look a lot more dynamic when the noise is on.
+So, our final topic of improvement today is anti-aliasing.
+Now, I hope you all saw Mahal Jobot's talk at SIGGRAPH last year, where he went into a big overview of all the anti-aliasing techniques we tried.
+So really, all the credit to this work goes to Mahal, and also all the difficult questions at the end, please.
+Yeah, so.
+What I'm actually going to present here is a strip down of that talk, and I'm going to talk about the things we actually finally shipped with.
+So really, this hybrid reconstruction anti-aliasing is looking at about three different techniques that we're going to apply together to get good anti-aliasing results.
+So the first is edge anti-aliasing.
+So this is pretty self-explanatory. You all know what this is, what MSA tries to deal with when you have these edges in your image.
+You also need to look at temporal anti-aliasing as well, because images move in time, so you've got this kind of third dimension you need to think about.
+And finally we have temporal super sampling.
+So obviously super sampling is when we take a big image and we're gonna down sample it to something smaller.
+We wanted to do that temporally, where we take different samples and alternate frames and use that to combine this big image that we're down sampling.
+So this is a bit of an overview of kind of how things are going to work.
+I'm going to go through this in a bit more detail.
+So you start with our current frame.
+It's going to go into our edge anti-aliasing.
+That feeds in along with our previous frame into the temporal supersampling and temporal anti-aliasing shader, which one outputs our final frame.
+And that then goes back, fed in again, our frame n-1 and our accumulation history buffer gets fed back in again to do all that final temporal supersampling and temporal anti-aliasing for the next frame.
+So edge anti-aliasing.
+Well, we've tried a lot of techniques.
+So, we looked at analytic edge anti-aliasing for alpha-tested geometry.
+We also really wanted to, what we really wanted to do was the coverage reconstruction anti-aliasing that Mahal presented at SIGGRAPH.
+And this gave us by far the best performance, but we had a lot of content issues with small triangles, so we actually couldn't do this.
+But I'd advise checking it out for your game.
+So we actually ended up with SMAA.
+This is just temporarily stabilized, and we had a normal depth and Luma predicated thresholding.
+So for the temporal super-sampling, so this is based on work done for Killzone Shadowfall.
+So what we're going to do, this is two-time super-sampling, so we're going to use the current frame and the previous frame for our two samples.
+The previous frame sample is valid, but only valid if the motion flow between frames n and n-1 is coherent, and also the color flow between frames n and n-2 is coherent.
+So we need to look at those two frames so they have the same subpixel jitter.
+That's going to prevent flickering.
+Except that we didn't actually do the frame n-2 stuff for Far Cry 4, and you can actually do, can see some flickering present in the game.
+And thanks for those who already pointed out to me this GDC.
+So again, what we're going to do, so let's go over these metrics again.
+So if we have this geometric metric, which is looking at a motion buffer to make sure that we kind of stick with the same geometry, we interpolate between the same geometric objects.
+So interpolating from our n-1 to our n-sample, the motion ends up being incoherent.
+And we're still going to do some kind of color metric on our n-1 sample.
+So, we're going to look at the color bounding box, about 3x3 neighborhood around our sample.
+If it's close to the mean, we take no new information.
+If it's close to the minimum max, we think we have new information, we want to accumulate that in.
+If it's outside this window, then we think it's probably a fluctuation, we should get rid of it.
+And just to visualize that.
+This gives a good graph of how we're actually doing things.
+Hopefully that kind of makes a bit more sense of the visual.
+So we accept things around the min and the max of these peaks.
+It's actually worth looking at.
+We didn't actually use the mean at the end.
+We actually used the center of the pixels.
+So also it's worth checking out Brian Karas' talk at G-Graph last year as well.
+He went over loads of things on these acceptance metrics.
+So definitely worth checking that out.
+So what we're going to do, we need to look at what samples we're going to use, what sample pattern we're going to use to maximize our two samples to get the best image out.
+So there's various sample patterns we can try.
+Let's take a look at what they are.
+Well, obviously just for a one-time centroid, well we're going to get some aliasing and you can see kind of the edge there.
+A standard one, if you kind of two times MSAA, is your two times rotated grid.
+Well, you know, it gets a bit better.
+There's actually some form of anti-aliasing there.
+It's not great.
+We could do two times quincunx.
+Now, quincunx is interesting because it optimizes pattern by kind of sharing corner samples between various pixels.
+So you have kind of three unique rows, three unique columns.
+But of course, this does introduce a 0.5 radius blur.
+Or we could look at doing something like four times rotated grid.
+Again, that would be four time samples, so we can't really afford that.
+But it does give a better looking result.
+But there is a better pattern, and that's actually this thing called FlipQuad.
+So it kind of combines these ideas in the 4x8 grid and also your kind of quincunx pattern.
+So, what happens, you have 4 unique rows, you have 4 unique columns.
+And it does also, like quincunx, have this kind of 0.5 pixel blur.
+But you can actually recover that in post-processing with Unsharp Mask.
+So it's actually going to be okay.
+Actually, we just used some comparison of actually some images.
+Well, it looks kind of as if, like, the flip quad is looking pretty as good as the 4x rotated grid.
+And if we look at some kind of studies, it kind of turns out that actually flip quad is probably the best of them all.
+Out of all the things we looked at. So let's go with that.
+So how is that going to work?
+All we need to do is split the pattern in half.
+So, on frame A, we're going to look at samples, say, 0 and 1, 2 and 3.
+And on frame B, we're going to look at...
+the red 0, 1, 2, and 3.
+And for, say, for pixel 0, then, all we need to do is average your 0, 1 in blue and your 0, 2 in red, and actually give us our kind of super-sampled image.
+There are obviously some tricks with this.
+It doesn't work out quite as easy as you hope, because what you need to do, you actually need to interpret your UVs as sample positions.
+You just use some HLSL interpolator modifiers.
+Of course, then you have the second problem where you have incorrect derivative calculations because your spatial distances between the rasterization samples differ.
+And that causes some quite bad problems because let's look at, say, frame A.
+Well, this is rendered with the correct MIP.
+And then what happens when we render with frame B, the ddx, ddy changes and we get this oversharpened MIP.
+And obviously if we're going to blend between those two, well, we're going to have a few issues.
+So what do we do? Well, we actually just need to...
+We could do a few things.
+We could do some mip-blob-bias clean frames.
+Seems a bit tricky.
+We could obviously try to do things manually ourselves, but that's going to be expensive and a bit of a pain.
+Actually, the thing we can just do is actually just reorder our samples and to make sure that these derivatives match.
+And it turns out that's pretty straightforward to do, and it works pretty well.
+So this is the same as before.
+Frame A still looks great.
+Haven't changed anything there.
+But for frame B, now everything looks pretty much the same as frame A, and that's great.
+Um, now, so the temporal anteater thing.
+So we actually temporally stabilize, um, like a load of our buffers.
+Takes up loads of memory, that's cool, we've got it all on next gen, right?
+Um, but, uh, actually really gives a really good image quality.
+So we look at the final frame buffer, the SMA, the screen space bent cones, motion vectors bloom, they're all temporarily stabilized.
+So, we have this history exponential buffer, and what we need to do is use a multi-sum of visual changes.
+So, make sure we only accumulate new important data into it.
+We actually use the same acceptance metrics I just talked about for the temporal supersampling.
+So, geometric metric to compare whether the motion vectors are the same, a color metric to compare which colors were in the same bounding box.
+So now we're doing this not only for N minus one frame, but we're gonna do it separately to our full history buffer.
+You might need to tweak those values separately though, to get some good different results.
+However, after all this, we're going to lose a bit of detail.
+We need some wider and more complicated kind of downsampling kernel.
+And also we have this kind of half-pixel blur from FlipQuad.
+So this is pretty okay actually.
+We just need to approximate a four-tap sync kernel by doing a half-pixel blur.
+Hey, we've already done that with a flip quad.
+And we actually need to do a half-pixel radius on sharp masking as well.
+And then to match our super-sampled resolution, because now our resolution is a lot higher than what it initially was, we just need to do a MIP bias on all textures.
+And overall, we have then some really high-quality anti-aliasing, and actually the performance is really, really good.
+SMA is a millisecond.
+And look at the kind of temporal flip quad plus the temporal anti-aliasing takes about 0.65.
+And combine that with the shaft mask as well, we've got 2 milliseconds then for all anti-aliasing.
+If we did the, managed to do the coverage reconstruction anti-aliasing, we'd probably get a little bit back off that.
+But again, something to look out for in the future.
+So what's the conclusions gonna come to?
+Well, first of all, let's show you a bit of a typical performance of a typical Far Cry scene.
+It's awesome doing a cross-gen game sometimes because this is well in frame.
+Thank you to all the artists who made good data.
+So, as I said, the RTK noticingly 2 milliseconds, about 3 milliseconds of post-processing.
+G-buffer is obviously the most expensive path followed up by lighting.
+And there's a few miscellaneous things in there as well.
+That's just our tree simulation and various kind of buffer copying.
+So, Far Cry 4, we managed to make some significant rendering improvements to our engine whilst maintaining a last-gen build.
+We added some anisotropic metallic materials, we added some higher fidelity sky occlusion and some indirect lighting.
+We added a whole new vegetation system, and finally we built a new anti-aliasing algorithm that gave us some high image quality at the end.
+Really, thanks to everyone on the Far Cry 4 team, but especially these guys who worked on things, like I mentioned in the presentation.
+A special thanks to Stephen Hill for all the conversations we've had about ACU and Far Cry 4, and to Julien Merceron as well for being the GDC advisor.
+I have a lot of references.
+Please check them out.
+They're all actually pretty good.
+They're worth your time.
+Does anyone have any questions?
+No one? Okay, you can come and talk to me afterwards if you need. Thanks again for coming everyone.

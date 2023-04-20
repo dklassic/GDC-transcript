@@ -1,0 +1,273 @@
+So many of you are here, biggest crowd I've, I've ever drawn. Uh, first things first, so it says Tatu Aalto lead graphics programmer, so that's not me, I'm Tomas Puha from Remedy.
+Um, Tatu is still in the airplane. This was him last night with the rest of the Remedy crew, they were stuck in Frankfurt so 2am San Francisco time we were going through this presentation so bear with me, I haven't had a lot of time. Time to rehearse but excited to represent the team. We got some really cool stuff.
+to show and discuss. And Tatu should be here if security and immigration and British Airways permits him to arrive at the end of the day so he can then answer questions a bit better than I can.
+All right, so let's go.
+So this is the roundabout topic, but as we all know, not really true.
+So what we're going to talk about here today is experiments with direct X-ray tracing in Remedies Northlight engine.
+A lot more exciting, right?
+OK, yeah, there you go.
+So, a little bit quickly about Remedy. So we're based back in Finland in Espoo, started in 1995.
+You might know us from Max Payne, Alan Wake and Quantum Break.
+And we used to be a single project studio, but now we're working on multiple projects.
+P7 and Crossfire, which is our first person shooter.
+And of course, since we're Scandinavian, we do do our own tech, kind of, because we're...
+started from the demo scene and all that.
+So we have a sizable team working on the engine and tools.
+OK, enough advertising about the awesome company I work for.
+So the agenda, what are we going to talk about here today?
+Well, I'm going to talk, you're going to listen, hopefully.
+So I'm going to give you a quick introduction to DirectX, ray tracing, then talk about area shadows, ambient occlusion, reflections, and indirect diffuse.
+OK.
+So.
+In order to explore, we created in the past couple of months this moody scene that's not from any of our games.
+It's a separate scene.
+And I'll start off with this demo and discuss the new technical aspects after it.
+So I'd recommend to keep an eye on how the pieces fit together, and especially how the different aspects of the lighting work.
+So we have audio, I hope.
+You Thanks for watching!
+All right, pretty cool, huh?
+OK, so video you just saw was captured from the engine with all the ray tracing effects enabled and with increased sample counts.
+So kind of high quality settings, if you will.
+I know that's a bit vague.
+So let's start with a very high level introduction on DirectX ray tracing.
+I will not go through the API in this presentation, but I'll try to give you some background on what you need to know before you can start shooting rays.
+So ray tracing API provides bottom and top level acceleration structures.
+The idea is that bottom level structure is constructed to hold geometry while the top level contains bottom level structures.
+Simple way to think about this is that each mesh should be a single bottom level structure.
+And top level tree is your scene that contains a bunch of bottom level structure instances with some transformation.
+First thing you're going to need is the bottom level structure for the static parts of your scene.
+In this picture, each red square represents bounds of a single bottom level tree.
+Building bottom level tree is very simple.
+In API, you'll have a function that takes normal directX GPU geometry and index buffers and returns bottom level tree built around the geometry.
+So in here, I have highlighted four instances of a small chair that you saw in the demo.
+These four chairs share the same geometry but have separate transformations.
+The mid-sized trees are small sofas.
+And the biggest ones are large, round sofas.
+In order to build a scene for ray tracing, you'll need to insert these bottom level structures into a top level structure.
+This is, again, a very simple thing to do.
+The API provides you a function that takes in a number of bottom level tree instances with transformations.
+So building a top level tree is fast.
+So you move static meshes every frame and then just build top level from scratch each frame.
+Supporting deformed geometry is a little bit more trickier, as the bottom level builder eats only static buffers.
+For us, the easiest way to support deformation was to create a simple compute shader that takes in geometry and skinning matrices and writes out deformed geometry.
+This is still very fast, as you can keep everything on GPU and just feed the output from the compute shader to the bottom level builder.
+And that's it.
+Now you can start shooting rays.
+I'll start off by showing a couple of examples you can try out with data only.
+Ambient occlusion. So ambient occlusion is purely visibility-based algorithm that can be easily tested out with ray tracing.
+Image you see here is taken by shooting four samples per pixel using cosine distribution.
+Maximum length of the rays is set to four meters and hits to the geometry are considered black and others white.
+This is added as direct replacement to what our screen space ambient occlusion outputs, so it is easy to compare results of different algorithms.
+So split screen, we got screen space ambient occlusion on the left side and ray traced ambient occlusion on the right.
+While the screen space technique does a pretty good job on grounding things, it's clearly lacking information.
+Screen space algorithms can't know what's outside the screen or behind the surfaces that are directly visible to the camera.
+Shooting rays is, of course, more expensive than looking up screen space depth.
+In our quick prototype, shooting a single ray with maximum distance of 4 meters cost roughly 5 milliseconds.
+The cost scales pretty much linearly, so shooting 16 rays for a full HD picture takes roughly 80 milliseconds.
+The picture you see here is shot with 16 rays.
+Finally, here you can see a picture with comparison of different ray counts.
+You should note that these are all taken with just our basic temporal anti-aliasing.
+I'm sure it would be possible to do a better job with filtering noise and you can't make it out very well in the image.
+There's a lot of noise on the left and far less on the right side of the image.
+All right, so moving on.
+Shadows.
+We implemented a path to replace sunlight cascaded shadow maps by shooting rays.
+If you happen to feel the shadows of the directional light into full screen buffer before actual lighting, it's very easy to just replace cascade map lookup shader with ray tracing kernel that writes into the same texture.
+Here you can see a comparison using shadow maps on the left side and ray tracing on the right side.
+In order to be fair, I didn't try to tune up the resolution on the shadow map, so this is just something we get out of the engine with the default settings.
+Anyway, the amount of detail you can gain with accurate shadows is pretty remarkable.
+In addition to accuracy, it's easy to do real area shadows with ray tracing.
+Clip here is using eight samples.
+Sampling pattern is basic blue noise that's changing between frames.
+For each sample on the pixel, we offset the same blue noise with Sobol sequence and wrap the values on disk.
+So here you can see a close-up of the same effect.
+As you can expect with ray tracing, the contact points are accurate, and you get a nice mix of sharp and soft shadows.
+While this is nothing new or radical on algorithm level, it's very cool to be able to go and look at your existing game scenes and content to see how much detail is lost without accurate shadows.
+And here's one more example.
+So looking at the amount of detail added to a simple scene like this makes you wonder if there's any sense to keep increasing the output resolution before we can sample lower resolution with good quality.
+So in the demo, the performance on shooting shadow rays is a bit better than with ambient occlusion.
+Even through the rays are longer, resolving shadow visibility is more coherent, low than AO.
+Getting something like this up and running with existing DX12 engine should take you something like a couple of days.
+I can say that it's definitely worth the effort, even if you are just going to use it as reference.
+So I've been talking about algorithms that can be implemented by knowing only visibility between two points in the scene.
+Going beyond visibility requires access to additional data.
+In this selection I'll quickly introduce how we expose geometry, materials, and lighting to be used in ray tracing kernels.
+On a geometry hit, the API provides you the intersection point in scene and triangle base.
+Other geometric properties than position you will need to read in manually and interpolate based on barycentric coordinate.
+This means that you will need to be able to access all your geometry from shader.
+New DirectX comes with a new binding API where you can set different resource bindings for each instance of a bottom level piece in the scene.
+So let's say I have two instances of a chair.
+Each chair has five pieces for different materials, like in the diagram on this slide.
+I can now define separate resource bindings for all the pieces, so in total, I have 10 resource binding records.
+Each of the records can then have a custom binding for vertex and index buffer, for example.
+It would be possible to bind material data using the same API, but just before starting DXR, we had completed a new material binding system that works also with basic DX12.
+By packing all the material parameters into a single buffer and reserving dedicated space on front of the descriptor heap, we could already do draw calls without additional bindings.
+This also means that we can access everything related to materials in a single shader call.
+Each index on this slide refers to a single material.
+Lighting happened to be pretty easy for us.
+Since quantum break, we have already had all the lighting data accessible to a single shader call.
+This means that we pack all the shadow and projection maps in a few atlases.
+We also keep the light parameters packed in buffers.
+That's it.
+Now we have geometry, materials, and lights exposed in a way that we can access everything in a single ray trace kernel.
+OK, so let's get into trying out reflections next.
+Am I, is the pace the right, not going too fast?
+Okay.
+Wrapped attention.
+Okay, so following section is dedicated to implementing reflections with ray tracing.
+I'll start up by quick comparison to our screen space technique and continue to visualizing how the previously introduced data bindings are used.
+As with the previous technique shown, we implemented ray traced reflections as a direct replacement to screen space technique.
+This way, it's easy to compare the results again.
+So here we can see the split-screen comparison with screen space reflections on the left side and ray tracing on the right side.
+This is screen space only.
+Reflection ray generation works the exact same way in both the screen space and ray trace technique.
+For each sample on the screen.
+You read properties of the surface from the geometry buffer.
+Then, based on smoothness, you pick a random direction from GGX distribution and transform it according to geometry normal.
+On screen space, we treat reflection ray as a 2D line from a point on screen to a point on edge of the screen.
+In order to figure out if the ray hit geometry, we take number of depth samples along the line.
+It's possible to miss features along the way due to holes in sampling and due to having access to only directly visible surfaces.
+Also the hit position can be outside of the screen.
+I don't have any backup solution in use on this picture.
+The most obvious fallback would be to sample some cube map when the ray hit is out of the screen.
+Okay, so getting back to ray tracing.
+So ray tracing doesn't miss any geometry that is out of the screen behind visible surfaces or due to lack of samples.
+On a geometry hit, we need to figure out radiance transmitted towards reflection ray origin.
+For this, we need to know the material and the lighting at the heat location.
+The XR provides the heat distance, position, and barycentric position within a triangle as in shader intrinsic.
+With this information, we can interpolate UVs from the geometry buffers exposed earlier.
+So the UVs at the reflection heat location will end up looking a mess like this.
+With UV and other data we can sample the rest of the material properties.
+Here you can see the diffuse albedo on the reflected surface.
+Next it's time to evaluate the lighting and combine the results.
+This is lighting at the reflected surface.
+We can now combine this and material with Fresnel term.
+And here's what the result looks like.
+This is reflection-only visualization.
+In order to get the final image, we combine this with diffuse and specular component of direct lighting.
+The final image. As you can expect with the techniques like this, the end result will have some amount of noise.
+We didn't have a lot of time to experiment with noise filtering, but I have a couple of image loops to visualize the problems.
+The following loops are taken from a bit harder lighting gaze and are using our basic temporal anti-aliasing.
+So this is the raw image you get when shooting a single reflection ray per pixel without any filtering.
+The lighting here is from sunlight.
+It's a pretty complicated, hard case as the lighting has high contrast and a lot of detail.
+As we all know, the variance in lighting decreases when shooting more rays per pixel.
+While shooting more rays for all the pixels is expensive, with ray tracing it's easy to pick a few locations to shoot more.
+It's almost free to shoot a couple more rays for the pixels that are over two times more bright than the white point in the image.
+In this loop you can see that we can remove most of the fireflies with just this.
+It would be interesting to see if we're using something more advanced like gradient domain sampling would get us.
+Yeah, you can, well, you can kind of make it up.
+So in the demo, we are also clamping the reflections that are over 10 times brighter than the white point on the image.
+This is of course a hack and it's not recommended you do this unless you're shipping.
+Great advice.
+While it would be perfectly possible to use ray tracing to resolve shadows at reflected surfaces, we use shadow maps for most of the lights in the demo.
+The only exception is sunlight.
+Since we use cascaded shadow maps with the sun, there is valid depth for only the pixels on the screen.
+Having to shoot a single shadow ray for the sun on every reflection ray almost doubles the cost of the reflections.
+OK, that's all about reflection, so we're going to look at the diffuse lighting next.
+So in this image, I have diffused global illumination interpolated from the volume texture.
+The approach you see here was implemented for quantum break and is in use by default in our Northlight engine.
+Voxel resolution of the GI data here is 25 centimeters.
+We combine the results with screen space ambient occlusion.
+As I showed you earlier, we have a path to replace screen space AO with a ray traced one.
+So let's have a look how that looks.
+So this is the same data combined with ray traced ambient occlusion.
+Results are better, but this still looks like ambient occlusion applied on top of volume data that doesn't have enough resolution for the case seen here.
+Instead of just shooting a lot of rays around to resolve indirect diffuse lighting.
+I'll be talking a bit about improving sampling of volumetric global illumination and resolving near-field global illumination.
+So let's quickly break this down with a few diagrams.
+Our pre-computed global illumination is stored in sparse volume texture.
+The grid on the screen represents the data.
+Each crossing contains indirect lighting data that has been calculated with path tracer.
+The blue shape on top of the global illumination volume is static geometry that we use for calculating the data.
+You can see that the dense parts of the GI volume are on the areas that overlap with geometry.
+In addition to static geometry, we have dynamic geometry.
+The smaller green piece in the middle of the picture is dynamic geometry.
+Dynamic geometry is not used in pre-calculation, so part of it resides on low resolution area of the volume.
+There are a couple of problems in using the lighting directly sampled from the volume.
+First, we'll miss the dynamic geometry completely.
+We've been relying on the screen space ambient occlusion to ground dynamic geometry to the rest of the scene.
+Second problem is linear filtering of the volume data.
+On the surfaces that are not aligned to volume, we get staircasing that can be quite visible due to low volume resolution.
+Finally, low resolution will cause the lighting to leak through the thin geometry.
+It's possible to try weighting the sampling so that it will leak a bit less, but ultimately, you are just moving the artifacts.
+Instead of sampling the volume directly on the surface, we can shoot rays and sample global illumination on the locations that didn't hit the geometry.
+Positions that are not on the surface are less likely to contain leaked light in our data.
+This will reduce leaking and results in smoother interpolation.
+Simplest thing to do when hitting geometry is to consider the sample black.
+This is pretty close to calculating ambient occlusion with a benefit that it helps with light leaking and results in better interpolation of the GI data.
+So let's take a look at the comparison between this and direct sampling of volume data with ambient occlusion.
+So this is the GI volume sample directly and combined with ray traced ambient occlusion.
+If you look at the table or a magazine on the bottom left corner of the image, you can clearly see that there is something wrong going on.
+By modifying the way we use the volumetric GI data, we can fix many of the issues that can be seen when using direct sampling.
+I'll toggle a couple of times back and forth and highlight the locations to look at.
+So direct sampling and ray traced AO.
+and ray traced gather.
+So this is other difficult location or example for volume data.
+Look at the dome on top of the scene that is made of thin geometry.
+So ray traced gather again.
+So on the previous example, we considered rays that hit any geometry to be black.
+Instead of darkening the image, we can do better and evaluate lighting and material like we did with reflections.
+So the same thing I showed you earlier.
+So here, I've added a single bounce near field global illumination.
+The accuracy on the first bounce is something that you couldn't easily store in limited size volume.
+Also, the indirect lighting read from the volume is better filtered that you could do with a few rays.
+This is the direct lighting that was used for the near field.
+This is direct lighting combined with indirect diffuse.
+And this is final lighting with specular.
+And this is the final image.
+All right, so summary.
+on this stuff. So easy access to state-of-the-art GPU ray tracing via DXR.
+Performance is getting there. Yes, that's vague.
+Easy to prototype algorithms that don't fit the rasterization and possible to combine with existing low frequency structures.
+And of course, shout out to the team back home in Espoo, or people on the plane right now that worked really hard on this demo in the last couple of months.
+Of course, thanks to the folks at Nvidia as well.
+This was a fun thing to do.
+Then the absolute necessary thing that Finland is an awesome country, and we are hiring at Remedy.
+It's not cold.
+It's all a lie.
+There's never a winter.
+And we can answer some questions, I can, but Tatu will be here by the end of the day, but write down that email and probably should have said in the beginning, so we have the entire slide deck with the notes and including the video on our website as I speak.
+So you can go check that out.
+Will we try to answer some questions or no?
+Yes? Okay. Well, thank you very much.
+And... ...
+... ...questions, please. ...
+... Hi.
+It looks really great, but I think the obvious question is that all the images are very noisy.
+So, did you think about applying some denoise filter?
+Yes, we didn't have too much time to explore denoising but that's a very good question and I think that for many of these effects a working and fast enough denoising solution is needed to ship something real.
+But there might be some use cases where you can go pretty far with only one sample per pixel as well.
+Could you use the microphone please?
+Is this hybrid for thin geo versus for volumetric ray traced?
+I see some god rays over there.
+I'm assuming those are ray traced.
+And probably the dome is geo direct rendered.
+Is it a combination of everything?
+Or is the full scene either volumetric, full scene is direct rendered?
+How does that work?
+Sorry if I understood completely.
+But the volumetric effects, the god rays you saw here, they are not ray traced.
+They are done with more traditional techniques.
+And same for the lighting effects that I see on the dome?
+What do you mean by the lighting effects?
+The lines and the actual blur that's being caused by those.
+Yeah, the bright lines drawn on the dome, yeah, they are just...
+They're not atmospheric effects, that's what I'm asking.
+Yeah, they are not ray traced.
+Hi, great talk. Thanks for all of this. I have a question based on the video you showed first.
+And we can see there is a lot of flickering and fireflies.
+And I was wondering if you tried the technique that you convert the normal buffer to a curvature buffer, and then modifying the roughness based on this curvature to having less fireflies like this one.
+because it happens on really smooth materials and when you have a really high curvature on smooth materials you have this kind of artifacts which is basically a specular aliasing and when you want to avoid this kind of stuff you can use the normal to curvature and curvature to roughness modification.
+Sorry for my question, it seemed to be not understood.
+Yeah, I'm sorry if I completely understand the question.
+Yeah, basically what did you try for avoiding specular aliasing?
+Basically there is a reasonable amount of flickering due to fireflies.
+We didn't do much more than what was described in the presentation, shooting additional rays on overprimed pixels and we did also experiment with some denoising solutions but they were not included in this video.
+When you try to do the reflections with a very limited rays per pixel, you get noise and fireflies.
+You have to do something about them.
+Okay, thanks.
+Okay, and we have this at the Nvidia booth, so you can go check it out.
+And really, if there's additional questions, please don't hesitate to email Tato and we'll make sure he'll get back to you.
+Thanks very much for your attention.
+Thank you very much.

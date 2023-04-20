@@ -1,0 +1,287 @@
+All right, yesterday we learned that I should have a picture of a cat.
+Unfortunately, today I'm only gonna show you dogs.
+Anyway, my name is Tobias Carlsen.
+I work at Microsoft, and today I'm gonna talk about Quarter Belt Locomotion.
+First, a little bit of background.
+For the past year or so, I've been working on Project FAG, which is about bringing a virtual pet to the Microsoft HoloLens.
+However, this is not a HoloLens specific talk, but some of our data will perhaps look a little bit peculiar, and that is because we're on the HoloLens.
+So as I said, we're going to talk about quarter-petal locomotion today, but not just any kind of quarter-petal locomotion.
+The kind of techniques I'm going to show you here today are techniques that you're mostly probably already familiar with.
+And these are also techniques that should work in any sort of real-time constrained situation, like a game or similar applications.
+So first, I'm going to show you a video of what Fang, our dog, actually looks like in a virtual environment.
+And this is essentially the aspiration of our talk.
+This is what we want to create in the end.
+So here we got Fang walking in his environment, and I hope you agree that that's realistic-looking quadruped locomotion.
+So how did we do this?
+First, we generate a smooth, realistic-looking path for the dog to follow.
+And as it turns out, the quality of the path is much more important for quadruped locomotion than it is for normal biped locomotion.
+And then we use a mixture of procedural and canned animations to create a realistic-looking locomotion pattern.
+At the end of this talk, I'm also going to cover a few tips and tricks that we found very useful when we implemented OrgQuadruped.
+And hopefully, you will find them useful as well.
+First, though, a word about pathfinding size.
+So we use a pathfinding radius on our dog that is roughly equal to half the dog's shoulder width.
+This allows the dog to path between obstacles that are quite close together.
+However, it also means that the dog needs to follow the path going forward or potentially backward along the path.
+It cannot move sideways or strafe along the path.
+This is obviously different from what we're used to with biped locomotion.
+where we just used the projected bounding radius on the ground of the character.
+And it doesn't really matter which direction the character is facing.
+He will always be able to fit in on the path.
+Normally, in situations with this.
+we need to take turn radius into account for the path we build.
+Fortunately for us though, our dog has a very good turning radius and because we do the smoothing post-processing step on our path, that removes all the sharp corners.
+And finally, as it turns out, in real-world situations, there just aren't any really, really nasty corners.
+So this is what the world looks like in the HoloLens.
+This is the kind of mesh that the HoloLens creates of the world.
+As you can see, it's quite noisy.
+If you squint a little bit, you may be able to notice that this is actually a living room.
+There's a TV in here, a sofa, and some other furniture.
+What's important to know about this mesh is that it's constantly being refined by the HoloLens.
+That means it's constantly changing on us.
+And even worse, there's nothing preventing the user from just turning around and looking in a completely different direction in which you have not looked before, or just walking into a different room, which means that all of a sudden, this mesh can grow very quickly, and we need to be able to create pathfinding data on the fly pretty much immediately.
+So the way we do that is we have a very simplified representation of the pathfinding data.
+It consists of a bunch of nodes, each has a position and a radius, and then they are connected through a minimal tree.
+This picture here on the slide shows an example of some geometry that we have covered with our pathfinding data.
+And you may think that it's a little bit unusual to use this kind of representation when we started off with a good mesh covering and representing the world we wanted to do.
+Why don't we use the NAND mesh?
+Well, the reason for that is, first of all, NAND meshes are expensive to compute, and the raw data that we have is not suitable for doing pathfinding on.
+And so this representation is very quick to compute, unlike the NAMM mesh, so that's one of the big benefits.
+The second benefit is that we can do search of certain spatial queries very effectively in this representation that would be much more expensive in a pathfinding mesh.
+So now we've got some pathfinding data, and we need to generate a path.
+So we start out by creating a rough path using A star.
+And then we optimize that path using string pulling.
+And at this point, this is generally where people would say, this is enough for my biped.
+And we have a good path.
+It's a very optimal path.
+And it will get us where we want to go.
+However, for a quarterped, these paths don't look very good.
+And I'm now going to show you a video of Fang following one of these biped-style paths.
+As you can see, the turns become very, very sharp, and that does not look very, very good.
+So, we need to deal with this.
+So, we need to create a better path, and the way we do that is that we smooth the path.
+But before we smooth the path, we need to subdivide the path.
+And the reason for that is once we have optimized the path, the path contains very few waypoints because it's an optimized path.
+We just take direct routes wherever we can.
+And the number of waypoints and segments of the path is essentially the resolution of the path that we have to work with when we smooth it.
+So this is the same motion, but with a smooth path.
+And as you can see, this makes a very large difference to how we perceive thanks motion.
+So we started smoothing the PATH using a physics-based model.
+What we would have was a collection of springs, torsion springs to even out the PATH, and linear springs to make sure that the PATH didn't really lose its shape.
+And then we would iterate over these springs as we simulate them.
+And where the springs came to rest, that would be our smooth path.
+Some of you may be already familiar with this technique.
+It's been used for creating racing lines in racing games.
+And this worked great for us most of the time.
+However, certain paths, usually a little bit longer, but not that much longer, like 10, 20% longer than our average path, would produce paths with kinks and knots in them.
+And even if we increased our number of iterations that we ran a simulation, even tenfold, these knots and kinks wouldn't necessarily be worked out.
+So we needed a better solution.
+And one of my colleagues, Mark Langrag, suggested that we should think of Pov smoothing as an optimization problem.
+And the good news about optimization problems is that there are plenty of well-known algorithms out there for solving optimization problems.
+Mark further suggested that we'd use Shambhala-Pock, or Shambhala-Pock's first-order primal dual algorithm.
+And this was a great suggestion.
+Shambhala-Pock was almost an order of magnitude more effective than the physics simulation.
+Just do two passes over the data per iteration.
+These are very simple passes, well-optimized code, no branching or anything.
+And also, a shamble pof worked well with constraints.
+And the reason why we're concerned with constraints is when we did this moving, we took each waypoint in the pof and assigned it to a pof-hungry node.
+And remember, the pof-hungry nodes had a position and a radius.
+So we said the waypoint was not allowed to be moved outside its corresponding pof-hungry node.
+This had two big benefits for us.
+First of all, it reduced the amount of movement for the waypoints.
+And that meant that we could find a good solution quicker because there were less dynamic things happening in our smoothing operation.
+And secondly, it allowed us to guarantee that the path that we created from smoothing was still a valid path because all the waypoints were on valid pathfinding nodes.
+So, getting back to optimization, so many optimization algorithms, they use deltas between their iterations, and sometimes even deltas of deltas.
+And if we were to move a waypoint back into a pathfinding node that had been moved outside during an iteration, that could create an infinite delta.
+So that would obviously spell troubles for your calculations.
+Shambhala Park does not have that problem, because it just works on the data it has with its current iteration.
+It doesn't keep any history.
+Now, as I said, Shambhala Park is an optimization algorithm.
+And what precisely it optimizes is the output of two functions simultaneously on a set of data.
+That set of data, in our case, is the path.
+Now, these functions are called objective functions, and in order for Shambhala Park to deliver on the promises that they make when it comes to effectiveness and time complexity, these objective functions are required to be convex.
+And because of that, we can no longer use the springs, so we need new objective functions.
+So the first objective function, its goal is to ensure that the smooth path doesn't deviate too far from the optimal path, because the optimal path is optimal, so that's good.
+But it's still not smooth.
+And the way we do that is that the first function trying to minimize the distance a waypoint has moved from its original position on the optimized path.
+So if we look at this picture, the gray line would be the original optimized path.
+and the black line would be where the path is now in its current iteration.
+And the green line then is the distance the waypoint has moved from its original position and that is what function 1 is trying to minimize.
+So if we look at an entire path, what function 1 is trying to minimize is the sum of all these distances that all the waypoints have moved away from the original optimal path.
+The second function is a little bit more complicated.
+So what we do is we look at the path segments that meet in our waypoints.
+So we look at the first path segment and then we copy it out like that.
+Take the second path segment and copy it out like that.
+Go back to the first one and put another copy out there.
+And then finally, the second one, we put the copy out there.
+So we create this rhomboid.
+Now what we're trying to do here with function two is minimize the height of that rhomboid.
+And the reason why that works is it minimizes the angle between the two path segments in this waypoint.
+And that is because if the two segments that meet at this waypoint would have facing in the same direction, the height of the rhomboid would be zero.
+And that is the optimal non-turning waypoint.
+Now, on top of that, because we use a square height rather than just the height directly, it is better to distribute any curvature that we do have to have in our path over multiple waypoints, rather than just collect them in one waypoint.
+And that is essentially the definition of a smooth path.
+So that is why we use the square.
+And again, if we look at the entire path, we build these rhomboids for all of the waypoints in the path.
+And then what Function 2 tries to do is minimize the sum of the square of those heights, which would be the green lines in this picture.
+So this is a screenshot from our pathfinding testing tool.
+And what I'm going to do next is show you 12 iterations of ShamblePock running on this path.
+This path has already been optimized and subdivided.
+So as you can see, the path started out looking a little bit crazy.
+But as the algorithm progresses, we get a smoother and smoother path.
+And eventually we end up with this, which is a nicely curved path at the end.
+So now we have a good path, and we need to follow it.
+However, we can't just follow the path just like we did do with bipeds.
+So normally, in biped path following, what we do is we take the character and move it along the path, and put it where it should be on the path on this particular frame, and then rotate it to face along the path, and then we're done.
+If we were to do that with a quarterped, it would look something like this.
+Not very good.
+So, the problem here is that only the root position of the dog is actually following the path.
+While the entire character needs to follow the path.
+In order to do that, we need to animate the spine.
+We started out by trying to use scanned animations, so we would have a bunch of animations with the dog's spine being bent more or less, and then we would blend them together.
+This, however, had a couple of problems.
+First of all, It didn't look very good when we were transitioning from a left to a right turn, or from a very sharp turn that suddenly straightened out.
+And secondly, it was very, very hard, if not near impossible, to get the blend parameter right so that we managed to put the dog on the path and not a little bit too far and a little bit too little.
+So what we ended up doing was procedurally animate the spine instead.
+This was something that we internally called SpineFlex.
+And because I'm so used to that, I'm going to call it SpineFlex here as well.
+So what SpineFlex is trying to do is to make the dog look like the entire dog follows the path.
+So the root position of the dog is placed between his rear feet.
+So they are oriented on the path and we go there.
+But we need to have the rest of the character sort of lead the root position on the path.
+And the way we do that is make sure that the front feet are also placed on the path.
+So to do that, the first thing we do is we figure out where the spine would end if it was perfectly following that path.
+That will give us a position, and then we try to figure out the direction from the root position to that position and compare that to the root position's direction.
+That gives us this angle V.
+Next, we look at the spine, and we assume the bones in the spine are of uniform length, and that we're gonna rotate them at a uniform angle.
+If we look at this illustration here, the blue lines there are our spine.
+We have four bones in our spines, and if you notice, they form a polygon, in our case a pentagon, because we got four bones, with the line from the root position to the target position on the path.
+Now this is interesting because we knew the angle V, and we also know the internal angles, or some of the internal angles of any pentagon that is convex.
+So we can set up this easily little equation and figure out how much we need to rotate each bone.
+The reason I'm showing you this is because this is clearly a very simple function to solve.
+So what we need to do in order to get SpineFlex working is only figure this one out and then rotate the bones.
+We don't need IK or any other complicated thing.
+How about SpineFlex is not enough.
+We need to lead with the head.
+Any character that is walking anywhere will look where it's going.
+On bipeds, it's very hard to see where you're looking, at least on a human, because a human's profile doesn't change much when it turns its head.
+If you don't look directly at the character's eyes, or you're very close to the character, you won't know where it's looking.
+With our dog, its head is sticking out quite far in front of its head, its body.
+So even at a glance, you can see where it's looking, so leading with the head becomes very important.
+And something that is worth noting is how far you're going to look ahead on the path with your head is dependent on the character's speed.
+The reason for this is that the character doesn't actually look a certain distance ahead, it looks a certain time ahead, and that's the time it needs in order to react to any obstacle appearing on the path.
+Another curious thing about SpineFlex.
+is that if you crank up the spine flicks, it starts changing how the character is perceived.
+When we turn up the spine flicks on our dog far enough, it starts to look more and more like a cat.
+Fortunately for us, dogs are still quite flexible creatures, so we could use a lot of spine flicks.
+But if you are going to work with a less bendy character, like a horse for instance, you may want to take this into consideration.
+Finally, If you ever try to play a full body animation, or even many partial body animations, on a character with a bent spine, you will very quickly realize that the results are horrific.
+So, it's great to have SpineFlex working when we're locomoting.
+but we really, really do not want to have it once we're done locomoting.
+So we need to be able to get in and out.
+So when we get into SpineFlex, we move the dog's front paws onto the path.
+Reason for that is we start our path finding from the root position, so the root is already on the path.
+And also, it's a very natural thing to just turn to see where you're going before you start moving.
+If we're lucky though, we don't need much spine flex in the starting, in which case we just use this in over the start walking animation.
+Getting out of the spine flex server, we need to do the very opposite.
+And the reason for that is that generally when we create a path, there's something at the end of the path that we're interested in, there's a target there.
+And when we're done locomoting to the end of the path, the dog's front paws and his head will be facing towards that target.
+So if we were to turn the front of the dog in order to straighten it out, we would turn away from the target.
+And that's not a good idea. So instead we slide out the dog's rear.
+And probably for the very same reasons, this is exactly what real dogs do in those situations.
+So now we come to the tips and tricks section.
+I'm gonna talk about local motion, animation footprints, and finally breadcrumbs and backtracking.
+So local motion is a system that was created by another one of my colleagues.
+His name is Todd Heckel.
+And it covers an area between standing still and moving that pathfinding doesn't do very well.
+So pathfinding is great for long distance locomotion.
+But when we want to do a short move or just a position adjustment, there's a significant amount of setup cost involved in the pathfinding.
+And it's not helped by us using SpineFlex.
+And then we have the start and stop animation, which has a limited range in which it will look good.
+So instead, we use this local motion system.
+And the way it's implemented is that we have a very a complicated blend node in our animation tree.
+And this blend node, or rather blend tree, contains multiple movement animations.
+And then we have a lookup table.
+So what we say is, I want the dog to have a particular relative position and facing to my current position and facing.
+What are the correct blend parameters to set?
+And we look them up, and we set them on the, animation graph, and then we just play the animation.
+So this is a local motion in action.
+As you can see, it's very flexible, contains a wide range of different movements, which would have been very difficult to do in normal pathfinding, if not impossible.
+So.
+Next, we've got animation footprint checking.
+So we don't have any collision with our world.
+So before we start playing an animation, we want to make sure that that animation can be successfully played and we don't move through any geometry, like walking through a wall or something like that.
+And so the way we do that is we project where the animation's trajectory will go.
+And then we test the position of certain key bones along that trajectory.
+In our case, we test the head, shoulder, and root bones.
+Unfortunately, we couldn't ask our animation engine about this data because it was a third party animation engine that definitely didn't tell us anything.
+So we had to recreate a significant portion of the animation engine outside the animation engine, which was a lot of work, but in the end, it turns out to be worth it.
+Apart from being able to just test our animations, we could use it as a stand-in for pathfinding for our local motion that I just showed you.
+And also, it allowed us to do other things in the area of examining certain animations.
+So, for instance, when we were locomoting and we needed to play a stop in animation to come to a halt, that was actually a blend of multiple animations.
+And the exact result of those animations and how they blended depended on the character's speed.
+and that meant that the distance we needed in order to stop was speed dependent.
+So we could use this system to figure out how far we needed in order to stop, and we could stop very precisely.
+So this is a video of Fang playing his rollover animation.
+Good boy, Fang.
+And this is the animation footprint checking of that animation from two different views.
+The white suers is his root position, the orange his shoulders, and the teal ones his head.
+As you can see, they do not intersect with any of the geometry here, so that is an animation that's safe to play in that particular position.
+Finally, we got breadcrumbs and backtracking.
+So.
+When the dog is out moving, because it can move into areas that are narrower than the dog is wide, it may find itself in an area where it cannot turn around.
+And this gets even worse if it happens to walk into a dead end.
+So in order to figure out, get out of this, we keep track of where the dog came from by dropping virtual breadcrumbs in the environment.
+And then if we ever find ourselves in a situation where we cannot get out of, we just reverse along the path of breadcrumbs until there's enough room to turn around.
+So this is a screenshot from our test environment.
+The green line here is Fang's current path.
+And the yellow dots behind them, if you can see them, is the breadcrumbs that he's dropped from previous movements.
+And this is a video of us telling Fang to walk into a dead end.
+And once he get in there, we ask him to go back out again.
+He realized there's not enough room, so he starts backing out.
+and eventually finds a spot where there's enough room to turn around, which he turns around, and continues on walking like normal towards his target.
+So, if you want more information, Microsoft is going to make the source code available online.
+At some point...
+This will happen at some point in the future.
+The date, I unfortunately do not know that today.
+It is most likely gonna be on GitHub, exactly where.
+There's also some information I don't have today.
+But keep your eyes open, it will turn up.
+If you have some questions, I believe we have a few more minutes for questions.
+And I will be available outside here.
+Or if you're too shy to speak up in this setting, you can email me for general questions.
+If you want to talk about shamble pock, you should email Mark Langerak.
+And if you want to talk about local motion, then Todd Heckel is your man.
+Thank you.
+Hi, is there a reason that you decided to put the root between the dog's rear legs instead of the front legs?
+It's partly a legacy reason, and partly this was because it turned out, regardless of where we put the root position, if we put it on the front paws, behind the rear paws, or in the center of the character.
+It gives us various problems.
+There's no perfect place to put it.
+And essentially, we ended up putting it between the rear feet because that gave us the least amount of problems.
+Hey, I'm Alex.
+Have you guys considered making two different spines, one for the front and one for the hind legs?
+Sorry, two different paws?
+Two different paths, yes, spines.
+So not the whole dog following it like a train.
+but rather having two different sets of paths.
+OK, so like if we had a train with two boogies on it, sort of thing going on.
+Well, the short answer is no, we did not consider doing that.
+And also, a dog, when it moves, the front of the dog and the rear of the dog does not move independently of each other.
+So I don't think that would necessarily look any good, though I'm just guessing right now.
+I got that. If you actually watch a dog move, or even a cat for that matter, they will often put their back foot right where their front foot left.
+And so they are following their own path. It's very, very, if anything it's a variation of just a degree.
+I have three dogs and three cats. I watch them walk a lot and this is cool.
+That was the moderate length version.
+Go ahead.
+How well do you think this would work for other animals, for example, like maybe rodents or elephants or horses or lizards or things like that that can squeeze into small areas?
+So I think this works in general well for any kind of quarterped that is.
+relatively well-known.
+I mean, we can come up with an alien that moves completely differently, and obviously everything is void here.
+But there are two issues.
+First of all, it's turning radius and the amount of spine flex.
+So if we have a limit in turning radius and spine flex, at some point we need to take that into consideration when we build a POF.
+So all the other stuff will work fine.
+I'm pretty confident about that.
+But at some point, you need to start doing POF finding that takes turning radius into account.
+And that is much harder than just doing normal A-star, unfortunately.
+And lucky for us, we could just skip that part.
+And I apologize to anyone who came here to figure out how to do that.

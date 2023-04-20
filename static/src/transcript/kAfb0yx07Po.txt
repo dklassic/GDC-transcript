@@ -1,0 +1,225 @@
+I'm Vesa Paakkonen.
+I work as a senior tools programmer at Remedy.
+Today I'm going to talk about how we improved the overall design of our internal tools framework during the past few years.
+So a few words about Remedy first.
+You might know us from games such as Max Payne, Alan Wake, and Quantum Break.
+We're based in Espoo, Finland, and we currently have about 150 employees.
+We're working on two games, P7, which is our own IP, and on our first FPS, the single player campaign for Crossfire 2.
+So it's always important to know the reasons behind decisions leading up to a design.
+So I'm going to start with a bit of background of the problems we faced.
+After that, I'm going to dive into what I actually mean by workflow-driven design and how we build our current tools framework around that concept.
+So let's start by looking at what we had when the production of Quantum Break started.
+Here's our world editor, or WET, as we call it, in all of its MFC glory.
+It is a monolithic application originally built for Alan Wake, and it has been our most important tool ever since.
+But the tool has become quite outdated, not only due to its UI, but also due to the technical depth, which has caused several big problems.
+One of the biggest problems is probably something that is familiar to most of you, changing the simple things regarding opening a level, as well as exporting it, making the iteration speed unbearable.
+Due to the monolithic design, the code had become so tangled that it was virtually impossible to determine what kind of effects even seemingly small changes would have.
+It heavily uses singletons, so modifying the state in one panel could cause undecided side effects in all of them, possibly causing a lot of regression.
+And because all the code was so tightly coupled, it meant that even the most basic test would have required initializing the whole application, which makes any kind of test difficult to write and slow to run.
+So we did not want to continue using MFC, just imagine that.
+So we decided we're going to build the new tools with something more modern, and ultimately ended up with WPF.
+As a lesson learned from WET, we wanted the new tools to be completely plugin-based to prevent the new code from becoming a similar monolithic mess.
+And because we were building tools from scratch, we wanted to reuse existing functionality as much as possible by hooking the new tools, both for the engine and WET.
+So this is the high level architectures we came up with for our .NET tools and the plugin system.
+There are shared C Sharp libraries that can be used in different applications.
+There are different plugins providing different panels and background services.
+And finally, there is a simple bootstrapper executable that loads plugins for a given workflow based on a configuration file.
+For example, for machine editing workflow, we loaded asset browser, property editor, and live editing functionality.
+For timelines, we also needed curve editor and timeline editor.
+And for Screenplaylay workflow, we had completely different plugins.
+So let's have a look at the probably simplest workflow we had during quantum break, editing mesh properties.
+Here we have the asset browser and a property editor to edit the current selection.
+You can see that the contents of the panel change when the user selects an asset.
+And if the user wants to view multiple meshes simultaneously, he can open another property editor panel, which by default follow the same selection.
+So the user must use the lock feature to lock one of the panels while having the other panel to continue the follow selection.
+Simple stuff.
+And for comparison, here is a quick look of what the timeline editing looked like during quantum break.
+It required a few more panels.
+And the thing to note here is that the asset browser panel is actually the only one that's common for the mesh editing workflow.
+The property panels are completely specific to timelines as well as the hierarchy and the timeline panel.
+I'll get back to that soon.
+So all in all, the approach to use .NET tools was a success for Quantum.
+The development speed improved, and thus we could ship better tools with better UX.
+It also made it easier to make them look significantly better.
+And the plugin framework allowed easy unit testing of individual systems.
+So naturally, we wanted to continue building new functionality on top of our WPF tools, and ultimately enable us to replace WED.
+But there was major design flaw with this plug-in-based loosely coupled design due to how the panels communicated.
+When the selection changed in the asset browser panel, it sent a message through a multicast system called a mediator to avoid tight coupling between the panels.
+The mediator forwarded the message to any panels that were listening to a given message, and those panels were responsible for determining how to handle it.
+In the case of the property editor, it was responsible for deciding if it should change the selection, keep it, or clear it.
+And you could have any number of panels in different states handling the same messages.
+So let's have a look at a concrete example of the problem that occurred when we added new panels for mesh editing workflow to allow users to edit physics definitions.
+First of all, you can see that it's very cumbersome to open new panels individually if they don't happen to be open yet.
+And when the user opens the panels, they are empty because they haven't received any selection changed messages.
+And now user has to manually reselect the mesh to get some content to the new panels.
+And now the user can finally select the node in the FBX.
+So let's take this even a bit further.
+Now the user wants to edit the materials as well.
+Let's see how that goes.
+So there's yet another panel.
+Let's drag it there.
+We change the color.
+And now we want to check out the texture as well.
+Yay, we got another panel.
+And as last step, now the user wants to check out some other material using the asset browser.
+So he searches for a specific material.
+Selects it, and boom, the mesh selection is gone because he forgot to use the lock.
+So just looking at fumbling with the panels.
+Just looking at the video is painful enough, so you can probably imagine our users going something like that.
+So that's just the tip of the iceberg.
+There are plenty of other problems as well.
+The loosely coupled design and the subsequently growing number of panels caused a mental load that was simply too big to manage.
+It was simply too easy to make mistakes.
+You could argue that the design also gave the users quite a lot of flexibility in terms of how they set up their workflows.
+But that would essentially mean that you need a team of super users and not mere mortals.
+It was also very difficult to read information on the screen when the number of panels increased.
+Here you can see that it's not immediately obvious that there are three separate assets here.
+Mesh, material, and a texture.
+Also in this version, some panels did have locks and source control statuses, while the others did not.
+It didn't feel right that we would duplicate the same information for all the panels involving the same mesh.
+If we introduced locks to all of them, the users could really suit themselves in the foot by mixing locked states on different panels representing different parts of the same asset.
+All the panels had business logic inside them because they had to work individually due to the loosely coupled design.
+Here are three examples of panels that resemble each other but is having different business logic, causing us having to maintain three different versions.
+The property editor followed asset selection and handled writing to disk, as well as source control operations.
+Physics definition editor followed the selection of an FBX hierarchy and also handled saving and source control operations.
+And then there were quite a few editors that simply followed some other selection, like timeline events or nodes in a node graph.
+This got several general problems.
+One of the first, for example, was that if there were two panels editing the same data with only one of them writing data to the disk, closing the one writing the data would essentially mean that your data never got saved, and user could just keep on editing and never realize that his changes are not there.
+We had around 10 different variations of property editor at one point, and it was very confusing to the users because they didn't behave similar to each other.
+This also meant that the development cost got higher after adding new variations, because in the worst case scenario, some changes had to be made in each of them, and each of them had to be tested.
+It also virtually prevented any reuse of the business logic, because it was tied to the UI.
+And adding more panels just added more complexity.
+Here's an example of us adding a behavior tree editor.
+If we just start with one panel for editing the graph and one for editing and selection, everything works relatively fine.
+But one of the first requirements we got from the users was that they want to be able to edit multiple graphs simultaneously.
+So how would we make that work technically?
+In case of two graphs, should the node property panel listen to both of them?
+What about if we have two node properties?
+Should the user's manually hook them up with a specific graph?
+And the situation would get even worse if the users would want to have some completely different asset types open simultaneously as the number of panels would just keep on increasing.
+So something had to be done.
+The problems and successes during quantum gave us the basis for creating design goals for reworking the architecture.
+Most importantly, we need a better structure for the application, so we're not solving the same problems in multiple similar use cases.
+Context sensitivity.
+We wanted our users to be able to use the tools right away, just like an asset, and they'll say relevant things.
+This was also a technical goal.
+It should be easy to determine in the code what the current state is, what has been changed, and so on.
+We wanted to keep the flexibility of the plugin system so we could easily modify the set of the panels and services that we show the users.
+We're easily able to unit test them.
+And in addition, we wanted to be able to have game-specific plugins.
+And finally, we should be able to reuse the UI controllers as much as possible to provide consistent look and feel.
+So.
+It was very clear that the main observation was that the biggest mistake was writing the business logic inside the panels that apply rules to specific workflows.
+We clearly needed something to glue together different parts of the workflow.
+And this is from where the term workflow-driven design comes from.
+The application should model the workflows in some way, and that should be responsible for setting up all the relevant things for the users by configuring the panels, enabling the background services, and exposing the workflow-specific commands.
+By reusing the same panels in multiple workflows by injecting any custom behavior to them, we can significantly improve the code reusability as well as the user experience.
+And most importantly, this design allows the domain experts, like AI or animation programmers, with intimate knowledge of the specific workflows to concentrate on modeling the behavior of the workflow.
+This improves things significantly as the tools team can concentrate on building the framework and the UI controls, while the domain experts who work closely with the users write the actual business logic.
+It also means that experts rarely have to dive into any WPF details, as those are handled in the panels and controls provided by the framework, lowering the learning curve to build new tools.
+So, with these points in mind, we started concepting the UI to get a clearer picture of how we could design the architecture of the new system.
+Let's look at a video of a recent build of our tools, which is quite close to the original UI design we had.
+Here you can see three different node editors built by AI, rendering, and animation teams.
+You can see that the tools are now context aware.
+Selecting an asset opens a new tab with relevant panels inside them.
+And you can see that the source control status is now shown clearly in the top right corner.
+Now we're using the same property editor everywhere.
+Let's go back to the mesh example one more time.
+Now you get all the relevant panels open when the mesh is opened.
+You can open a material.
+You can easily browse through the different materials.
+And if you go to the texture, you can browse through those as well.
+So let's move to the high level technical design.
+From the previous video, we can easily identify the following concepts.
+The panels, the document hosting the panels, and the data that is being read and written.
+A naive implementation would look something like this.
+Panels are assigned to some document, and then the document handles reading and writing the data.
+However, there are two major problems.
+Now, because the panels need to know about.
+The specific documents they are going to be used in, we would not be able to reuse them on other workflows which is against our design goals.
+Also, we're mixing low-level concepts like reading and writing data with the document, which is clearly a UI concept, making it difficult for us to use that code in other systems that might not even have a UI.
+The solution for the first problem is relatively simple.
+We use dependency inversion to abstract out the document with an interface to prevent coupling with a specific implementation.
+As for the second problem, we need to create a new concept to abstract out the details about the data.
+We decided to call that a context.
+It handles all the details about the data, like where it's coming from, how it is saved, as well as tracking any changes.
+To summarize the concepts on a very high level, the document is the UI layer describing how things are edited.
+It works as a clue between the panels, commands, and the data.
+The context, on the other hand, handles all the details of what is being edited.
+It abstracts out the details from the UI, allowing us to reuse UI components with all kinds of different data.
+Let's look at the two main cases, how all of this is put together.
+The simpler one is to configure panel to always show the same piece of data in the same panel.
+For example, in the case of meshes, both the mesh properties and mesh viewer are configured to always show the same data of the same asset.
+Properties panel always shows the full contents of a metadata file, while the viewer panel shows the mesh itself.
+The FBX is read-only, while the metadata is editable.
+Let's look at how the panel is configured to behave this way.
+First, we need to configure the context to load the data.
+We use some string ID to identify the piece of content, and then we pass in a method that loads it.
+Loading happens lazily, so if there's no panel requesting that data, it's never read from the disk.
+And now that the context knows how to read the file, we can configure the document to host the property editor panel.
+We use the same ID that we used to register content to let the panel know which piece of data it should request and show when it's opened.
+The second case is a bit more involved.
+Now the document will contain a panel that changes its content based on user interaction.
+Let's have yet another look at the mesh editing and especially the physics definition properties panel.
+When the user changes the selection inside the document using either the FBX Heuric panel or MeshView panel, the physics definition panel reacts to it.
+Also note that the selection is synchronized between all three panels.
+So we start again with the context, knowing how to load the data.
+This is configured exactly the same way as in the previous example.
+But now there is a small problem.
+We need to have an internal selection.
+We cannot add a property to the mesh document, because that would cause a tight coupling between the panels and the mesh document implementation.
+It would also make it more cumbersome to extend if the number of internal selections would increase.
+So the solution in this case was to introduce a concept of components, which is very similar to components in an entity component system.
+We register a component responsible for requesting the data and maintaining the selection.
+Now, instead of depending on a specific document, the panels can depend on a generic selection provider component.
+Now, the only thing we need to do is to hook up the panels again.
+Because the selection provider is such a commonly used component, we made it simple to use.
+We can just tell a panel to follow a selection with a string ID, and it automatically starts to listen to the selection provider.
+And we tell the FBX hierarchy to load the FBX data and use the given selection provider to set the selection.
+The last problem we had to solve was tracking down the changes from multiple sources, like from several different files or from database.
+It ended up being really simple, because with the context, we already have a single point of entry.
+to all the data, and we can easily track all the changes without having to know any details about the data itself by using the observer pattern.
+By aggregating a single stream of all the changes happening in each different piece of content that have been registered to it, we can easily hook up not only panels that track the changes, but additional systems as well.
+For example, we can catch each change to undo stack or live edit system just by listening to that single stream.
+So let's review the concepts once more.
+The document is used to configure the UI part of the workflow, while the context is used to read, write, and track the data used in the workflow.
+So let's have a look at the final example, our screenplay workflow that we created quite recently and which really starts to show the benefits of this design.
+Here we have the screenplay hierarchy and the screenplay editor.
+The really cool thing here is that the data is actually stored in the database instead of on disk.
+And the document context system abstracts it out so we can reuse the panels, like the property panels, as well as other systems like undo, redo.
+Here the user wants to use the dialog lines on a cinematic.
+So he uses an asset browser to open a timeline on disk.
+And then he just tracks the dialog unit on it.
+And that automatically creates tracks for each character and new events for each dialogue line.
+The user also wants to make some modifications to the screenplay.
+And this causes the corresponding event in the timeline editor to be highlighted because the duration changed.
+User can now export the latest screenplay data and then retime the event to match the source dialogue.
+And I think this really validates this design because there are two different workflows, screenplay writing and building cinematics, working almost seamlessly together and within the same UI with the same controls, even though the data is stored and handled completely differently.
+So, here are the biggest benefits we've seen so far.
+Our productivity significantly increased.
+It allowed other teams to work on their specific workflows and thus we've managed to add more new workflows to our .NET tools during the past two years than we did during Quantum Break.
+Context sensitive significantly reduced the fumbling with the panels.
+Now that the panels are grouped inside the documents, the state is clear.
+And reusing the same panels allows to have better and more consistent UX.
+As for the takeaway, start thinking the whole, have a high level goal for your workflow, high level design, before diving into details and solving problems one by one.
+Clearly separate different layers of the application so you can reuse and test the code.
+And last, and most importantly, promote reusability and empower other teams.
+I strongly believe that as a tools programmer, the first and foremost responsibility should be to empower other people, may that be either end users or other programmers.
+Thank you.
+So, questions?
+Thank you for your talk, really interesting stuff.
+I was wondering how long did you, did your team work on the refactoring or just cutting out the MFC and just switching and how did you sell it to the management?
+We are still using the MFC application, but this is just replacing the framework of the .NET tools, the loosely coupled one.
+And it took about half a year, about two people working full time, to get all the bits and pieces of the framework up and running.
+And basically, we just solved it by saying that we're spending now half a year, and then we're going to save like three years later on.
+Hi, great talk.
+You mentioned the selection provider.
+I was curious, can you elaborate more on how things connect to these sorts of providers, like how they know which provider they want to listen to or how they publish to one?
+So like I said, it's not really just the selection provider.
+It's kind of this.
+component system, that you can have any kind of component there.
+But in the case of SelectionProvider, we just made it work with the same string ID.
+So you give a panel the string ID, and then you say that it should follow a selection.
+And it just looks up a SelectionProvider component from the document using that string ID and automatically uses that.
+Thank you.
+I guess nothing else. Thank you.

@@ -1,0 +1,827 @@
+All right, it's about that time.
+If everybody could mute their phones and please fill out evaluations, that would be great.
+I'm gonna get started because in my dry runs, I filled the whole time, so I'm gonna try and finish early for questions.
+I'm Michael Stallone, I'm lead software engineer on the engine team at NetherRealm Studios.
+We ship Injustice and Mortal Kombat.
+What is this talk about?
+the how, why, and lessons learned from switching our network model from lockstep to rollback in a patch.
+This is not a rendering talk.
+I know it says eight frames and 16 milliseconds.
+I am not a rendering engineer.
+I will not be talking about the GPU.
+This is also not about the network transport layer.
+I won't really be talking about packet loss and how to cover it up, out of order packet delivery and that sort of thing.
+That's a thing that we're all doing.
+I'm just not gonna talk about that.
+We are not the first or only people to do rollback networking, but I haven't seen any GDC talks about it, so I thought I would give one.
+And this is mostly about our experience, the things that we went through when we did this.
+Maybe some of this is applicable to you guys.
+Just to give you guys a sense of the scope of what we were, the time we invested in shipping this thing was about four to 12 concurrent engineers for nine months.
+Roughly seven or eight man years of work for the initial release and then ongoing support is part-time work for about six engineers.
+Although by now all the engineers understand how this works and everybody gets to contribute.
+Our deadline was the Mortal Kombat X Game of the Year patch.
+Just some background terminology, things that I'm gonna end up saying throughout the presentation.
+Just wanted to make sure everybody was on the same page.
+RTT is round trip time.
+It's how long the packet takes to get from you to your opponent and back.
+Network latency is the one-way packet travel time just from you to your opponent.
+Net pause is the game is pausing due to having not received data in a while.
+And QoS is quality of service.
+It's a measurement of connection quality.
+And if you cross over the QoS boundary for some length of time, you'll be disconnected.
+A couple more.
+Input latency, this is basically what the entire talk is about.
+Injected delay between a button press and the engine response.
+You press a button, how long until the engine actually responds to it.
+The confirm frame, it is the most recent frame where you have input from all players.
+A desync, that is when both clients disagree about game state, leads to a disconnect.
+And dead reckoning.
+A super deep topic that is a very common networking model used in games all over the place and has been forever.
+I'm not going to talk about it a lot. There's a lot there.
+Rollback networking has similarities to Dead Reckoning.
+It's usually used in a server authoritative model.
+I'm not going to talk very much about it.
+Some basics. We are a hard 60Hz 1v1 fighting game.
+We do not drop frames.
+That leaves you 16.66 milliseconds per frame.
+That is the game tick.
+That is our render tick.
+Everybody is running at 60 hertz.
+Nobody's running at a reduced rate.
+We are a peer-to-peer game.
+This is core to this talk and our decision on the networking model.
+If you're server authoritative, your mileage may vary here.
+A network packet is sent once per frame.
+I only call that out because we have not unhooked our networking from our main thread.
+It is simply serviced at the top of the frame.
+We may unhook it next game.
+Standard networking tricks to hide packet loss.
+This is what I said before.
+There are plenty of people who make a career of this, handling packet loss, out-of-order packets, and all of that sort of stuff.
+I'm not gonna be talking about it, even though I keep saying it.
+Determinism.
+This is hugely important for us.
+I'm not sure how hugely important it is for everybody, but the vast majority of our game is bit for bit deterministic.
+We fence post many values at various points in the tick.
+Any divergence is a desync.
+This is the foundation that everything is built on.
+That means that when we run in development, every single bit of our thousands of fence posts in the game is exactly bit for bit identical.
+That means if you're doing floating point math, you're doing it in the right order on every machine, every time.
+That has a lot of implications, but the important part there is the game will play out exactly the same every single time, provided you've seeded your random stuff in the exact same way.
+The problem.
+The whole reason we switched our networking model.
+Our online gameplay suffered from inconsistent and high input latency.
+The players were not happy.
+We are a fighting game.
+That means that responsiveness is extremely important.
+and predictability is extremely important.
+People will execute a combo, they'll input a button or a string of button presses with a given cadence and expect that it works every single time.
+That's not how it worked prior to us switching network models.
+We had dynamic input latency, meaning that depending on your network latency that you were experiencing, the cadence of your button presses would change.
+This is bad for the players.
+I'm not going to talk about a ton of things on here.
+This is just an overall latency diagram.
+You press a button, the hardware injects latency, the operating system injects latency, we inject latency, input latency, and then we have one frame at 60 hertz for the game sim, our render thread, and our GPU present.
+So that's like an overall latency diagram.
+Lockstep.
+This is what we used previously before we switched over.
+This is very simple.
+but it's what we use for years.
+We only send gamepad data.
+We are not sending any game state at all.
+The game will not proceed until it has input from the remote player for the current frame.
+Input is delayed by enough frames to cover the network latency.
+Little diagram to show you how that works.
+Future frames are coming in from the right side there.
+And there's just frame by frame for each guy.
+On frame one, we get a pad input.
+Somebody's pressing X for frame eight.
+This is what I mean by lockstep.
+This is what I mean by input latency.
+That button that was pressed on frame one will be executed on frame eight.
+So if you look at Batman and Superman, they're not moving, right?
+They're just standing there because even though you press the button, we won't respond for seven more frames.
+Player two received this input on frame six.
+Still nobody moving.
+They will respond to this on frame eight.
+And they'll do it at the same time.
+The effect is pretty subtle, but Superman started to punch.
+So that's lockstep.
+That was lockstep with a seven frame input delay.
+Because we had dynamic input latency, that could vary.
+It could be five frames, it could be 15 frames, depending on the network latency you're experiencing.
+15 frames is extreme.
+The present.
+This is where we are today.
+Mortal Kombat X and Injustice 2 have three frames of input latency and support up to 10 frames, 333 milliseconds of network latency before pausing the game.
+The online experience is much improved and the players are happy.
+So it's three fixed frames of input latency.
+We do that to help cover network latency.
+It's, you know, if I haven't made it clear, it is constant, which means it is completely predictable to the players.
+And our previous title would fluctuate between five and 20 frames.
+The next question would be why 10 frames?
+This is a latency curve.
+This is the graph of a percentage of matches played at a certain RTT bucket.
+So on the left, the numbers or the labels are very, very small.
+But on the left, you have an extremely low latency connection.
+On the right, you have 300 milliseconds plus.
+You can see that the vast majority of matches are played under 300 milliseconds RTT.
+What's not actually shown here is there could be even one more bucket there for like, 300 to 333, and we capture that bucket as well.
+By supporting 333 milliseconds round trip time, we support over 99% of the matches that are being played.
+Quick definition or background on what rollback is, we only send pad data, that's still true.
+I keep calling that out because a lot of dead reckoning solutions will send a lot of game state back and forth.
+We don't, we just send pad data.
+The game will proceed without remote input, and when remote input is received, we will roll back and then simulate forward.
+Same diagram as before for lockstep, this time for rollback.
+Pretty please switch slides, all right.
+So yeah, this is the same thing, but with rollback networking.
+So on frame one, input is generated for frame four.
+The idea here is that we're seeing this with the same network latency that I showed you with the lock step.
+So the packet's coming across for frame 4.
+Player 1 already hit frame 4.
+So his Superman started punching.
+But player 2 doesn't know that yet.
+So he's not moving.
+By the time that gets received on player 2's end, it's frame 6 already.
+He's two frames behind.
+He just got data for frame 4.
+So frame 4 here is our confirmed frame.
+We have input from both players for frame 4.
+So we take that back to frame four.
+We would call that a rollback.
+That's a rollback or a restore to previous state.
+We'll simulate frame four, we'll simulate frame five, and we will simulate our real tick or our render tick frame six.
+We will do all of that within one frame's worth of time.
+That's 16.66 milliseconds, we'll simulate all those frames.
+Because we're supporting seven frames of rollback, that's eight total frames simulated in 16.66 milliseconds in our worst case.
+So both guys are doing the exact same thing.
+Superman is punching on both screens, and off they go, they're synced up.
+Little comparison between rollback and lockstep.
+Again, dead reckoning is another super common approach.
+Just don't have time to talk about all of them.
+Lockstep is very, very simple.
+Because input is delayed, you really don't have to do anything.
+You just play your game as normal.
+Every frame will start.
+You'll have input for every player.
+It's simple.
+It's visually smooth as well.
+You've delayed things so much that there's no hitch when you receive input.
+You don't have to go back.
+You won't glitch anybody's pose.
+Online and offline play looks identical.
+It is performant because you don't have to perform rollbacks.
+We had massive CPU overhead when we were performing lockstep networking.
+That's a very good thing.
+If you're not latency sensitive, lockstep is great.
+Robust.
+They're both robust, which seems a little silly to show you on the slide here.
+But our experience in the past with peer-to-peer dead reckoning solutions was that they weren't wildly robust.
+They were like, it was just constant whack-a-mole fixing problems.
+So once you've matured your rollback system and your whole engine is converted over, it's a very robust solution, same as lockstep.
+Low bandwidth, they're both sending only pad data.
+You don't have to worry about sending game state.
+So that's fantastic.
+Lockstep is not responsive at all.
+Rollback is responsive.
+It's the whole reason we switched.
+And this last line is not self-explanatory.
+Single frame latency.
+What this means is when we were in the lockstep approach, I said that your dynamic input latency could vary between five and 20 frames.
+If we waited for one of your frames to bog over the network or be delivered late, we would have to pause the game.
+In order to not do that, we would keep an eye on your RTT over the past several seconds, and we would change the amount of input latency we were experiencing.
+So you would basically rubber band your input latency over the course of a fight, which meant that a spike in your latency would actually persist for quite a while, impacting your input.
+That's not the case with rollbacks.
+For every packet sent, that is the only latency that matters.
+You will essentially, like if you did spike for one frame, drop enough packets that you bogged, you would immediately recover, assuming the packets started coming in again.
+Very relevant for wireless connections.
+What do we do first when we bit this thing off?
+The first goal was to get an idle character rolling back.
+Just two guys standing on a fight line doing nothing.
+We turned off almost everything, even essential things that we would have to use for shipping.
+We would turn off physics and IK and particles and the entirety of online, actually, which sounds kind of nuts, but we wanted to make it work locally before we hooked it up online.
+So we started doing serialization because we knew that was going to be the tentpole of this.
+Basically, you have to save every single frame and you have to be able to restore to those frames in order to roll back.
+And we had a debug mode called set rollback frames.
+I say seven because that was our decided number of rollback frames we would support.
+I guess as a point of clarity, I keep saying seven.
+Earlier I said we support 10 frames of latency.
+That's the three frames of static input latency plus the seven frames of rollback, which gets us the total of 10 frames.
+So this set rollback frame debug mode was something that we ran with constantly.
+Everybody did it.
+It was like the number one debug mode that we used from day one all the way till today.
+We still use it.
+I'm sorry.
+I really don't think I explained really what was going on there.
+The set rollback frame 7 is every single frame of the game will roll back seven frames and simulate forward.
+In the case of no divergence or no remote input from your opponent.
+Visually, this does nothing.
+Like, it looks like nothing has happened, even though you rewound seven frames and played them all back forward.
+So that's how you knew it was working, was nothing was happening and that was success.
+So a quick breakdown of the tick timeline.
+This is a diagram I'll use later in the talk.
+All I really want to call out here is we service our input and our online, like the network stuff, right up at the front of the frame.
+It's basically a fixed cost.
+A restore is restore to previous state.
+It's one of the first things we do in the frame in the event that you've detected that you have to roll back.
+The simulated frames are the ones that you simulate forward with a stripped down version of the game to get back to the current tick.
+And then we perform the real render at the end, the full tick with all procedural systems and non-gameplay affecting things.
+This is all one tick, right?
+If we're doing our job right, this takes 16.66 milliseconds and no more.
+So one of the things that I talked about was that we did serialization first.
+Serialization is a tentpole of this. I'm not going to talk about it a ton, but here's some.
+It's the rollback framework. It was a ring buffer sized to the rollback window, meaning it's a ring buffer with one entry per frame.
+We support 7 frames, so it's a 7 entry ring buffer.
+There's an object serialization interface.
+You can see it down on the bottom right.
+It's probably a little bit small.
+Just a basic virtual interface for some of the various edges that we have during serialization, saving, and restoration.
+There will be entries for object creation and destruction.
+This is a huge problem.
+If you go the rollback route, you have to handle rolling back to before an object was created and rolling back across the destruction edge as well.
+Done naively, this is going to create and destroy objects all the time.
+We only save mutable data.
+If something doesn't change, don't save it if at all possible.
+And it is not Delta-based, although maybe it should be.
+Restoration is the opposite edge.
+This is when we have to roll back and restore to previous state.
+We did this in parallel.
+Don't use shared pointer.
+Shared ownership for serialization purposes is really bad.
+Basically, you would have to have two concepts of ownership, both the shared ownership, but then a singular owner that is in charge of serialization.
+So we moved away from that.
+We just heavily moved towards using unique pointer for that sort of thing.
+The serialization restore edge was a simple load balancing and priority scheme.
+It was a large perf win compared to the single-threaded version.
+So at the very start of this approach, we were simply doing single-threaded restoration, and it was a small amount of work because we didn't know the full set of everything that we needed to restore, and it took about 1.3 milliseconds.
+At the end of it, I'm sorry, 2.7.
+After we parallelized everything, it went down to 1.3 milliseconds, and that was for twice as much data.
+Also, just a point of note, waking threads is slow.
+We're using condition variables.
+We found that to be slow largely on both platforms.
+That's something that we'll look into in the future, maybe keeping threads warm, maybe using simple spin locks.
+It's a very small amount of performance that we're losing there.
+We also have single-threaded post-serialization fix-ups.
+So after you've done the relatively naive or simple serialization restore work, we would do a virtual pass over to link up various pointers and systems that weren't amenable to being serialized.
+Maybe that's because it was an asymmetric serialization relationship where you would serialize the object, but you'd have other systems that you really didn't want to pay serialization costs for.
+So you would need to hook those guys back up.
+Yeah, bulk serialization and immutable data are hugely preferred.
+Yeah, mem copy all your stuff.
+or don't change it and therefore don't have to serialize it.
+I'm not gonna read all of this.
+It's object lifetime, the slides are here if you guys wanna pull down the deck after the fact.
+Deferred deletion and delete and recreate.
+You have two choices for your objects, object lifetime management.
+If you do deferred deletion, you don't really have to handle the creation and destruction of every object every time they die and you roll back across that boundary.
+Delete and recreate is what you get out of the box naively.
+It's, you'll just constantly delete and recreate your objects, which maybe I'm making that sound bad, like sometimes the basic approach is exactly what you need.
+Recreatables, this is another thing we did to avoid creating objects all the time.
+The gist of it was you would hash that object.
+And every time you rolled back and played through the creation edge again, you would check the hash of essentially the situation you were in.
+And if it was the same, you would reuse that object.
+This is great for sounds and particles.
+They can be non-deterministic, especially for GPU particles.
+And since they're non-deterministic, if we were to destroy, recreate, and re-simulate these guys, we would likely end up with a different result.
+What this would mean is this would be chronic, like visual popping.
+debatably audio popping if you're doing anything dynamic there as well.
+Recreatables, it's a relatively simple thing, but the concept was very powerful.
+Just the ability to hash an object and say, this is the exact same guy, don't remake it, don't re-simulate it.
+We saved a lot of performance this way.
+What about gameplay script?
+We have a proprietary script system called MKScript.
+It's C-like, this is what our designers work in.
+We did have to support FiberStack unwinding, FiberStack serialization, and objects on the stack that contain dynamic allocations were a pain.
+We wrapped them up in a type, we registered them, we cleaned them up separately, because the stack was just getting zeroed out.
+Rollback artifacts.
+This is one of the downsides of rollback networking.
+You will pop your visuals if the divergence is large.
+Divergence is usually minor.
+In fact, divergence usually causes no visual artifacts at all.
+Most of the time when you're receiving remote input from somebody, it doesn't actually affect your game.
+We treat all input as significant, and we will rollback every time we get data from the remote player.
+you may not have to if you have a more well-guarded input system that knows whether input is valid and gameplay affecting then you may not have to roll back all the time but since we need to support divergence and rollback every single frame of the game it doesn't really save us that much so I have a video coming up here with this it this is just a fight with rollbacks on an online fight.
+So I mean, see if you can pick it out.
+One of these players is local and one of these players is remote.
+So this match was played at the absolute top of our latency supported.
+So this match was played at like 320 milliseconds RTT.
+So basically any worse than this and we would QoS players and disconnect them.
+So Deadpool is the local character and Starfire is the remote player.
+So she's the one rolling back constantly.
+I'll play it one more time.
+She, if you look closely, she's got some glitchier motion than he does.
+And it has everything to do with her being 300 milliseconds behind.
+As you can see, most of the time it just doesn't matter.
+This is a terrible connection, and the game plays fine.
+As far as the players are concerned, it plays great.
+Visually, there are artifacts, but from an input standpoint, the game is smooth.
+How was performance?
+When we switched over naively, performance was terrible.
+It was really, really bad.
+Prior to switching over to rollback networking, we were idling at nine or 10 milliseconds on the CPU.
+After we did the rollback support, we initially idled at 30 milliseconds, remembering we have to fit into 1666 here.
+The headroom due to the console generation jump was gone.
+We'd been playing it fast and loose with our CPU resources since PS4 and Xbox One came out, and we had to pay the piper.
+So yeah, we had tons of free cores.
+This is just a quick capture.
+I'll have more like it.
+This is from our task graphing system, which I'll refer to as job graph, but this is just a performance dump of the various hardware threads and what was going on.
+Yellow is something that's called an exclusive resource, which is essentially anything with that exclusive resource cannot run concurrently.
+All of that empty gray space is free cores.
+We used some performance tools.
+I'm not sure what I can, I'm allowed to say, but Sony and Microsoft performance tools were incredibly valuable.
+We used them all day, every day.
+The job graph visualizer, which was the threading layout that you just saw, as well as a tree-like structure, which you'll see later.
+Rollback loop super pause.
+This was, we had a mode in the game that could roll back to the same frame over and over and over again.
+What we would do is we would set thresholds in the game that if you went above 16 milliseconds or 15 milliseconds, we would pseudo-pause the game and just roll back and re-simulate to the same frame over and over and over again to catch our bog scenarios, let you late attach a profiler and dig in.
+The pet profiler, there's other GDC talks about this, but basically it's a CPU profiling tool written in-house that allows you to set thresholds for various functions.
+And performance bots, so that we can see when bad things happened.
+This is that tick timeline from earlier.
+I'm gonna go break this down a number of times over the next couple minutes.
+This is a seven frame rollback on the ship version of Injustice 2 at idle.
+It's about 13 milliseconds.
+Same thing that you saw previously.
+I'm gonna break it down into various sections, which is our gameplay execution, our engine execution, and green for saving and restoring.
+This is 21 milliseconds.
+This is also the ship version of Injustice 2.
+It's a spike frame.
+This is where Green Arrow did a bad thing and he spiked out a frame and we actually shipped this.
+We probably fixed it later, but some spikes do make it through.
+I call out high thread contention.
+Basically, we usually do cooperatively multi-threaded work, but early on, we also have other things that are non-cooperatively multi-threaded like our render thread, our UI thread, and our audio thread.
+So they tend to bog us a little bit early in the frame.
+This particular spike is due to mesh spawning, particle spawning, particle attachment, and a whole bunch of gameplay processes that run.
+And I call out here, spikes can persist for eight frames.
+If you're doing something heavy here, like spawning a whole bunch of stuff and you're not cutting any corners to do that, you're gonna roll back and replay this frame up to, you might do that eight times, right?
+You might keep crossing this boundary and keep bogging your game for eight frames.
+This is one of the early captures from Mortal Kombat X.
+It's a 32 millisecond frame.
+I just wanted to call out that the first block is a fixed cost block.
+It's input processing and online handling.
+That doesn't change at all.
+We had our restore.
+It was single threaded and very heavy.
+The simulated frames, zero to six here, took up a large percentage of the overall frame, larger than what we shipped, obviously.
+And the real render tick is substantially similar to what it was before rollback networking.
+What I'm trying to call out here is the majority of our costs were in the simulation frames, not the final render frame.
+That one continued largely to be what it is today, and it's been optimized, but not necessarily systemically.
+It's about multiplicative wins.
+If you can do something that works for eight frames, you should do that.
+If you put in an optimization that only works for your render frame, your gains are commensurately smaller.
+Frame zero is the confirm frame.
+This is the frame that I received input from my remote guy and that's why I rolled back seven frames.
+We're gonna run our seven lightweight simulation frames and then one render frame.
+We'll render once at the end of this.
+Gonna break this thing down.
+Just blitted that across all of the different frames.
+Restore is a large green single threaded chunk there.
+First thing we did here, we turned off everything cool.
+Physics and cloth, raycasts, IK, particle effects, online, desyncs, we turned off everything.
+And I don't mean like, hey, we turned this off for purposes of development.
+What I mean is we run these systems only on the render tick or some of these only get run on the confirmed frame, but we only run them once per tick.
+Stop running them eight times, they're very expensive.
+So that reduces our engine tick on the simulated frames.
+You'll notice it doesn't touch anything on the rendered frame.
+Then some easy performance wins.
+Don't do string compares.
+Don't do things eight times like controller polling or garbage collection.
+Don't update certain systems or whole slews of objects.
+Our environment is not gameplay affecting.
+Don't update it eight times.
+And realistically, death by a thousand paper cuts.
+Tons of dynamic allocs, pointer chasing, or my personal pet peeve is walking sparse lists.
+This pattern happens everywhere.
+You've got these massive lists of objects and you're iterating over them to do work on 5% of them.
+You've got some virtual function that you're hitting on 100% of your objects that are actually, it's gonna do work on 5% of them.
+That's a thing.
+Bulk allocation and serialization of all of our anim nodes in the anim trees saved us a half millisecond.
+That was a nice win.
+And use your profiling tools.
+They will tell you what you're doing wrong.
+So the engine tick got even smaller.
+Game tick hasn't really changed and we haven't touched serialization yet.
+This is the more difficult performance wins.
+I'm not gonna read the whole slide to you guys.
+I will explain the promotable resimulation behavior because that doesn't explain itself.
+Basically, you would have objects that would be latent in the environment that are not gameplay affecting right up until they are.
+So instead of paying for them all the time, we would promote them only when needed.
+The thing to note there is you need to know that you're going to need them before you do, because if you wait too long, you're inside your rollback window, and that's not going to be coordinated on both machines.
+So you need to see this coming seven frames in advance.
+Frequently not an issue.
+Aggressive parallelization and graph optimizations.
+That is a heck of a bullet point.
+We spent a ton of time optimizing our task graph.
+And then, yeah, we async tick our UI and audio.
+Um, emitter parallelization's a big deal.
+Animation pre-sampling wasn't a huge win, but ended up being fairly painful to implement.
+Uh, job priorities, yeah.
+Makes our engine tick go faster.
+Still, like, obviously you're seeing this, and serialization is taking up a massive amount of time for us.
+So this is our task graph here.
+You're only as fast as your critical path.
+Initially, we had that graph that I showed you earlier.
+I keep calling it a graph.
+It's because this tool generates graphs that we'll see in the next slide.
+But the one on top here is a very sparse, very wasteful graph, and the one on the bottom is the one we actually shift.
+There's still a little bit of waste at the end.
+At the end of the day, you're only as fast as your critical path.
+This is just a capture of a full job graph tick.
+This is the render tick.
+We can dig in here and see if our dependencies are all meaningful and if all of this makes sense.
+All I really want to call out here is that our simulated graph is much, much simpler.
+There's much fewer actors, much less complexity.
+And, I mean, you can see how ludicrously sparse it is.
+The total time scale for that is, I think, half a millisecond to run one of the simulated frames.
+That's pretty normal.
+So, yeah, I mean, you can see we're largely bound by animation sampling there.
+So, about that threading.
+Thread contention's a real thing, as I mentioned earlier.
+Our non-cooperatively multi-threaded portions of the engine do conflict with the rest of our engine.
+They do slow us down a bit.
+Manage your priorities, manage your affinities.
+You want to stick on the same core.
+Don't oversubscribe your threads.
+Drop thread priority for low priority or latency-tolerant work.
+And be careful of priority inversion and starvation.
+That's kind of a no-brainer at this point, but starvation can sneak up on you.
+That's very much a thing.
+Threading primitives can cost more than they're worth.
+This is kind of another of my pet peeves.
+It's very common to insert basic threading primitives all over the place to guard critical sections of work.
+I'm a huge fan of our cooperatively multi-threaded system, the task graphing that we do, because it avoids all of this.
+And use move semantics to avoid unnecessary atomic operations.
+You don't want to increment and decrement this stuff, just move it.
+So our serialization time went way down.
+Do you have to save eight times?
+This was a big deal for us, we figured it out.
+You only actually have to save the confirm frame, you don't actually need to save every frame of your simulation.
+You can only ever roll back to a frame that you actually had input for everybody.
+What this does mean though, is you will, on average, roll back further than you technically had to.
+This is a great optimization for your worst case, but it makes your average case.
+better, sorry, your worst case gets much better, your average case actually gets worse.
+We just happen to not care because we have to fit into 16.66 anyway.
+So we heard our average case and we optimized for our worst case.
+So we pack it down, it's 12 milliseconds.
+Particle performance, they were special.
+Naive approaches were way too expensive.
+Particle systems were the largest cause of performance spikes.
+We solved this largely with heavy caching, reduced re-simulation, and cutting corners on serialization all over the place.
+We would do deferred async initialization of our particles, and we would automatically parallelize the emitters.
+Initially, that was manual.
+We would actually have an artist and an engineer sit down and break up the emitters into figuring out which ones could go wide.
+But it turns out you can just figure that out offline.
+We burned about 100 meg for a runtime cache of our particles.
+So that we don't runtime spawn our particles, it was just too expensive.
+These are the particle resimulation modes.
+In the initial rollout, our designers would have to flag every single particle they made with one of these modes.
+Either you resimulate always, in which case, in a 7 frame rollback, you'll actually resimulate these particles eight times.
+You would do this if.
+essentially if your particles couldn't support variable time steps.
+So in that case you actually had to simulate them every single time, every single frame to get a predictable result out the other side.
+Resim never, which is I'm only going to simulate you on the render frame.
+ResimPredictive, this was by far our most common mode.
+What it leverages is the fact that the particles generally support variable time steps.
+We would simulate twice, once on the confirmed frame and once on the render frame.
+What this effectively ends up doing is giving you this like midpoint thing where you're doing a seven frame rollback and you're gonna simulate the guy on frame three as well as on the render frame, giving you sort of a midpoint and an endpoint.
+so that you get predictable particle playback.
+This ends up becoming our default and we almost never opt out of it.
+And then resim not track, this is for stuff that gets spawned into the environment.
+We're never gonna undo it, we're just gonna let it go.
+This is the predictive particle cache.
+We call it the PPRS, but I don't remember what that stands for.
+So it's predictive ticking and serialization.
+It may cause visual discontinuities.
+The important part here is that what we do is we hash with really, really loose constraints on these particle systems.
+And the constraints are like, is the player in roughly the same spot and have you done roughly the same thing in the gameplay script?
+If so, let's reuse this guy, don't touch him, don't simulate him, don't serialize him.
+Asterix, that's not exactly true. We do put a special serialization buffer that sits on top of the rest of the rollback system for use here.
+If the particle simulation inputs match the cache entry, use the cache.
+This was extremely effective.
+It's a good template for areas that don't have to be perfect, where you can use this lightweight serialization and very loose hashing algorithm to figure out what is close enough.
+You can't do this for anything that your game actually relies upon.
+This is only for visual discontinuities or maybe audio.
+A quick video of.
+What I'm going to show here is I'm going to show particle systems on the local machine as well as on the remote machine, and you'll see some divergence here.
+You'll see things where we mispredicted.
+These are particle systems that are input sensitive.
+So as you're doing this move, you can, you know, press the right stick or something and cause the particle to do a different thing.
+I'll play this multiple times.
+So it's a little hard to see, but if you check it on the remote machine there, you'll see the laser mispredicts all over the place.
+So this is Firestorm, same story.
+This particle system is sensitive to your input.
+So you'll see that the remote player sometimes shows it as a distant move and then it corrects to be closer.
+This one you'll see almost no divergence.
+The reason for that is the input that actually mattered to the game occurred very early on in the lightning ball.
+Like he executed the move before the particle was ever created.
+So those two particles look basically identical.
+What I'm gonna show you coming up here is, that was with our PPRS, the predictive particle system with the separate state cache on.
+This is with it off.
+So that's with a particle system that can't, the reason that PPRS is saving us there is because it's reusing the exact same object instead of attempting to re-simulate it.
+If you re-simulate that object, that's what you get.
+It's because it can't...
+I'm flaking out, but the PPRS system there allows us to reuse that particle effect and keep the exact same visuals.
+It has a non-deterministic simulation, so when you actually re-simulate it the eight times necessary, you get a different result.
+So it's visually inconsistent.
+I'll do it one more time, because the first two there are a little bit hard to see.
+So it may go without saying, I'm showing all of these under massive latency, right?
+This is, these are connections that are right before our QoS cutoff, 300, 350 millisecond round trip time.
+So this one that's about to show here is a demonstration of why you have to reuse objects that simulate non-deterministically.
+So, checking our work.
+We thought we were in trouble.
+We were due to ship the game in a month or so, or the patch for the game, and we kind of thought we were screwed.
+We didn't think, like we were still bogging, and the problem was we had been so focused on set rollback frame seven.
+which was taking every frame in our game and running it with 7 simulated frames.
+We were basically running our worst case scenario every single tick because that was technically possible.
+Turns out that's actually not realistic at all.
+QA picked up the game and said, this is fantastic, you have to ship this.
+I know you guys think that your performance metrics are all wrong here and that you were bogging.
+They're like, this plays leaps and bounds better than any online experience for Mortal Kombat in the past.
+You have to do this.
+So basically our benchmark was completely wrong. We were so focused on 7 frames of rollback that it turns out a human button press cadence is like maybe 6 times a second, usually much less than that.
+So the number of times that you actually rollback 7 frames is really bad connections and only whenever your opponent presses a button and getting those scenarios to occur in the very few situations that would actually bog the game it turns out this is incredibly rare and it doesn't actually impact the actual player experience uh... we were still bogging occasionally and we were net pausing in our worst cases.
+So basically, as you reach the latency cap, if you hadn't received a packet inside the 333 milliseconds that we supported, we would have to pause the game.
+Turns out pausing the game feels terrible, right?
+It injects these herky-jerky moments where the game gets hitches, it does screw up your button cadence quite a bit.
+It turns out that actually just extending the frames a little bit.
+will smooth that out.
+So this is a slightly contrived example because this is injecting 34 milliseconds spaced out over 10 frames, which is actually more than we would ever do.
+The most we would inject is about two milliseconds per frame and we will only do this if you're right up at the top of our...
+latency curve right so I mean as you can tell we spent a ton of time optimizing for the worst possible case the vast majority of our matches never hit any of these cases and the game plays extremely smoothly. We were just so focused on the the worst possible experience that we spent a lot of time optimizing for that.
+We had all this internal data Q is telling us everything's great.
+But we were about to pull the trigger on a pretty large change to our code base in a game that had been live for nine months.
+So we ran a beta.
+We had about 20,000 users.
+The public was extremely happy about it.
+We were watching all the streamers play locally.
+And they were loving it, right?
+It was a big deal.
+And it really solidified our performance and network targets.
+Again, our benchmarks were all wrong.
+We were chasing the wrong thing.
+Curveball.
+Beta telemetry demonstrated unexpected results.
+Most matches had one player rolling back seven frames every single frame of the game.
+Ironically, it was the crazy benchmark we'd been chasing the entire time.
+Turns out we had a bug.
+I don't know that it was a bug, but it was something that had to be addressed.
+It was basically a performance feedback loop.
+Somebody would start rolling back 7 frames, which would occasionally bog them, which would cause their frames to take longer, which would cause them to bog more and constantly roll back at the maximum possible distance.
+So the players loved it anyway. That's that 95% people said this is awesome.
+We had a horrific bug that caused the absolute worst case scenario and it was still way better than anything we'd had before.
+What we did was we artificially slowed down the player who was ahead to get them back in sync.
+We kick this in any time somebody gets more than about a frame and a half ahead of the other player.
+And all you have to do is inject just a little bit of latency to get people to sync back up.
+Fine-tuning. We analyzed our rollback counts and we used spec saves to reduce rollbacks.
+Previously I'd said you only have to save the confirm frame.
+That's true, but that causes you to rollback further than maybe you have to.
+If you simulate forward and the input does not diverge, you get the remote input that you expected to get, if you had saved that frame, you could use it, meaning you don't have to roll back all the way.
+Now, the extreme of that is save every frame, but then our performance goes down again.
+So we have this spec save system where we will save the confirm frame. You have to do that in order to always have a consistent thing to roll back to.
+Save the simulation midpoint if we have time.
+We know we're going to have time because the performance is relatively consistent.
+If you're rolling back seven frames, you may not have time to save this midframe, but if you're rolling back maybe five frames, you can.
+Bias the save closer to the confirmed frame, which is actually further in your past.
+This makes it more likely to actually be confirmed by remote input.
+Basically saying, your prediction for remote input is more likely to match the less time that passes.
+Save at the end of the frame, if you have time.
+And thresholds are tweakable without patching.
+So we could slide these things around in a live environment and try and find what works.
+And these speculative saves reduce the total rollback count by 30%.
+So the reason.
+This gets a little bit complicated, but the speculative saves reducing rollback count kind of sounds a little non-intuitive.
+The main type of rollback that they were saving us from was what we would call it an RB2.
+It's a buffer exhaustion rollback.
+It's a, my confirm frame is about to fall off the end of my buffer, and that's the only thing I saved.
+Therefore, we have to roll back into the past to another frame where I actually have input for, save that guy, and then we're good.
+But I just performed a seven-frame rollback.
+even when no input diverged.
+You really want to avoid that if at all possible.
+What about all the desyncs?
+Yeah, we made our game a lot more complicated and therefore we had a whole lot more desyncs.
+Not running procedural systems ended up being a big cause of desyncs.
+Turns out our game code was reliant on a whole bunch of procedural things that we had turned off.
+IK being a main culprit there.
+Luckily, our tools got better.
+offline desync detection.
+Because we're deterministic, if we playback our pad input with the exact same network cadence, you get the exact same match.
+Meaning I actually don't need to be online in order to desync the game for debugging purposes.
+That's fantastic because not every developer wants to have two kits at their desk.
+People don't want to set up online sessions to reproduce this thing.
+Being able to do this with one kit was fantastic.
+We would capture the remote input with network delays.
+You could replay the match.
+And since you could replay the match every single time deterministically, you could also breadcrumb it after the fact.
+So you could inject new desync fence posts, new prints, whatever you want, and you could replay that match as many times as you needed to zero in on what your problem actually was.
+This was completely invaluable.
+That was our normal debugging process when a desync happened.
+It was, hey, give me the replay.
+I'm going to look at it locally.
+I'm going to take a look at my logs.
+If that's not what I want, I'm going to inject more debugging information and keep doing that until I find the problem.
+Final desync rate was less than 0.1%.
+I'm fairly certain it's actually less than 0.01%.
+So what a desync log looks like.
+It's nothing fancy.
+It's a text diff.
+So decent tools general distinct detection and logging which is basically what we just talked about the replay files I talked about this, but I just to mention it one more time it was incredibly valuable you don't get this unless your game is completely deterministic and to end.
+And a desync utility, which you can see the small screenshot there, the most useful thing that that gave us was we can grab desyncs from the wild.
+Any developer can click a button and go grab all of the desyncs that occurred in the past day or week from the wild.
+So when the game launched, everybody's sitting there clicking the give me all my logs, let's find out why the game's desyncing and fix that.
+And we got to respond very quickly because of that.
+We didn't have to wait on first party for that.
+And I just call out NRS soak.
+We soak online matches on every kit in the building, every night, desyncs get logged to an internal server, and we can debug it that way.
+So you catch a lot of this stuff way before it gets out into the wild.
+Some low-level lessons learned.
+Limit your mutable state.
+Handles over pointers, wherever performance allows.
+Handles are inherently a double bounce usually, it depends on your implementation, but they cost extra performance.
+But what they can allow you to do more easily than a pointer is basically if you're using a handle, when it comes time to fix something up post serialization, you basically don't have to.
+Also they can allow asymmetric rollback relationships where you have.
+An object that you're referencing via a handle and your system is not serialized, but the object is or vice versa.
+With a raw pointer, that's much harder to do.
+You end up having to have these strange post fix up calls where you go and fix up all the pointers in the whole wide world.
+Avoid shared ownerships of mutable resources.
+Again, this is what I talked about very early on.
+Shared ownership, you would end up having to inject another concept of like serialization ownership, which is super dirty and to be avoided.
+Avoid work in your constructors or destructors.
+Again, if you're preserving object lifetimes across these creation and destruction boundaries, you can't trust your constructors and destructors to trigger when they normally would.
+Lean on mem copies and buffer swaps instead of dynamic fixup.
+Yep, yep, do that.
+High-level lessons learned.
+This is a huge one. This is a big deal.
+This feels like, of course, this is the way it should work.
+Design your game systems to drive visual state, not depend on it.
+We have a whole bunch of code that says, tell me where my right hand is.
+Oh, you know, where is the head?
+And it does all of these things, and it's literally saying, tell me where the joint is.
+But if you stop running your procedural systems, those answers are all wrong.
+So we end up having to cut a whole bunch of corners to make all of those answers right.
+And if we had done a cleaner job up front of segregating these two systems, we'd be much better off.
+Design systems to update with variable time steps.
+It is extremely convenient when you don't have to run something eight times, and you can run it at intermediate points and still get effectively the same result.
+If you can update parametrically, that's even better because you probably only need to update once.
+Everyone should work with debug rollback systems enabled.
+It's the fastest way to find things that go wrong.
+When your designers are not running with debug systems enabled, they think everything they're making is just fine, only to find out later because QA happened to find a bug.
+Defer processing until after the rollback window if reasonable.
+What this means is, I don't have to actually roll something back if I don't respond to it until I'm guaranteed for it to have actually occurred.
+What I mean is, if an event occurs and I don't respond to it for seven or eight ticks, I'm guaranteed by the time I actually respond to that, that event has actually happened on both machines.
+It will not be rolled back.
+This doesn't have to be rollback compliant at that point.
+We do that for our pause menu.
+We do that for our cinematics.
+We will never roll back out of a cinematic.
+We will never roll back into a cinematic.
+So we didn't support our cinematic tool for rollbacks, although that causes our gameplay guys some headaches because they have to put these boundaries on either side.
+I'll also say in the cinematic vein there, we just categorically don't allow anybody to roll back across a camera cut.
+That's not for a technical reason, that's just incredibly jarring to the player.
+So, I mean, also in Mortal Kombat, if you cut a guy's head off, we don't wanna roll back before that boundary.
+Like, you just showed you ending the fight and it's terrible for the players.
+So there are certain boundaries that from a technical standpoint, we could support, but from a user standpoint, we should never allow.
+Bog is also no longer a function of a single frame.
+If you've done a terrible thing, it will likely persist for the duration of your rollback window.
+Future work.
+Multi-thread our gameplay script.
+We have free cores there.
+We can fill them with arbitrary work or we can just multi-thread our game script.
+That effort is underway.
+It seems to be going well.
+Extend state-based serialization.
+We do have something in the game where certain objects will enter a state, serialize that state, and then not serialize the object until state changes again.
+That's a great idea.
+We should do more of it.
+Simplify particle serialization or simulation.
+If we can move our particles in a parametric direction, everything gets easier and cheaper.
+separate the game state from the visual state, and add rollback support for more systems, largely just to ease the burden on our gameplay teams.
+Any questions?
+We're hiring.
+Hi there, I work on a lockstep fighting game, so first of all, congratulations.
+I'm blown away that you were actually able to pull this off.
+How close to the 60 millisecond performance budget were you before you started this process?
+Yep, so the question is, how close were we to the 16 millisecond budget or limit before we started the process?
+We were, in my opinion, we were a bit lazy due to the console generation jump.
+We were running at about 10 milliseconds in an idle frame, which gave us plenty of room to spike and generally stay in frame.
+I see, so the exercise was basically making sure that you could run the deterministic portion of your game within whatever budget you had left, and so you were paring down how much was in the deterministic segment and optimizing at the same time, is that the gist of it?
+And from a user experience standpoint, if you are rolling back, you didn't blend into the corrected frame.
+You just went straight to it.
+Is that correct?
+We tried.
+So the question is, did we interpolate into the corrected position, corrected pose?
+We experimented with that.
+The short answer was it felt worse.
+Our response from QA was that they wanted to see the frames immediately.
+As soon as we could correct it, we should correct it.
+Also, the interpolation led to a lot of foot sliding and that sort of thing.
+Right.
+So the user would essentially lose between three and eight frames of execution from the other.
+And they didn't really complain about that or care about that?
+No.
+I'll also note that.
+I'd have to rewind all the way to the beginning of the slides.
+The latency curve that I showed, the vast majority of our games would be played under four to five frames of latency.
+And we had three frames of static input latency, which meant only one or two frames of rollback.
+And that would cover 60% or 70% of the game.
+So most games are played at super smooth.
+So you rarely would run into problems where someone would like hit confirm and then it would be undone and then they'd be pissed off.
+Yep. I mean, it is a thing.
+Yeah.
+It is rare, as you said.
+Hmm. That's awesome. Congratulations.
+It was unexpected, frankly.
+Yeah.
+It was...
+I'm blown away.
+...a lot it would be much more visually jarring.
+I don't know how you did the serialization thing too. That's like super daunting, even considering how to go into that.
+It's not bad. Start by serializing a lot and then optimize it. That's the gist of it.
+Cool. Thanks.
+Thank you.
+So for this new system compared to the older system, it seems like the user reaction time might be a little different.
+Yes.
+Did this drive gameplay changes where maybe moves that needed to be reactable had to be made longer or things that shouldn't be reactable had to be made faster?
+Yeah. I'll repeat the question because I was told to, although it sounds like you're super clear here.
+The question is...
+basically there's reaction time implications to this right moves have warm up time it's a highly reactive game people want to respond immediately and uh... and your concern is is spot on so did we make changes for mortal combat ten which is where we initially patch this in no that basically that was one hundred percent engineering effort That's 99% engineering, but we didn't touch the gameplay.
+For Injustice 2, yeah, a little bit.
+The designers didn't change much, though.
+As I said, the vast majority of your matches will be played with one or two frames of actual rollbacks, like three frame static input latency, one or two frames of rollbacks.
+Yeah, you're shaving off about one or two frames there.
+So I don't know that our designers adjusted the moves a lot.
+You're right in that.
+Some seven or eight or nine frame punch is incredibly quick and shaving off one two three four or five frames of that is The thing comes out like lightning, but the honest truth. This is somewhat my opinion, but it's confirmed around the building is Fighting games are about footsies, right?
+It's, I know when I'm in this position, I'm in danger, right?
+And if you're within jab distance of a guy, the vast majority of your player base, largely including professional players, is unable to actually react to that, right?
+It's generally anticipatory.
+So that's the gist of it.
+We do shave off the front end of the attacks with some of these rollback frames, though.
+Yeah, I mean, it seems like you could lose seven frames on every single attack, theoretically.
+That is technically possible, yes.
+If you're playing up near the latency cap, that will happen.
+How do I, how do I, like, there's an anecdotal thing.
+We would receive reports during the beta for a guy who was like in Brazil playing on McDonald's wifi across the ocean, raving about how awesome it was.
+Like, is he a super competitive professional player?
+Like, almost certainly not.
+For everybody else, this is fantastic.
+I mean, the pros love it too, right?
+Like when they, like, their input cadence is identical.
+When they show up to a tournament, their online practice is actually valid.
+And at the same time, all of their truly competitive events are played on a LAN.
+Oh, no, this is clearly better.
+I was just curious if they needed to balance anything.
+Thank you so much.
+Yeah, thank you.
+Great talk.
+Two questions.
+Number one, major engineering effort, seven to eight years.
+Can you give me at least a rough idea of the breakdown of where most of that time went?
+Or was it just sort of evenly spent?
+Sure, so the question is seven or eight man years.
+How the heck did that break down?
+Man, good question.
+You know, certainly we lost a man year to desync chasing, no doubt.
+Several man years of that would have been spent doing raw optimization, of, you know, graph optimization, that sort of thing.
+So, I would say we probably spent four or five man years of that doing optimization work.
+And we probably spent the balance on correctness.
+And we probably had one or two man years just building infrastructure of serialization systems and trying to serialize the whole darn game.
+But a lot of it was optimization and desyncs.
+Super interesting. And then the second question I have is a lot of that work was making particle effects work.
+And you straight up called out that of course you ideally want to separate visuals from gameplay, have gameplay drive visuals.
+What prevented you from just never re-simulating particles ever?
+Just keep their orientations and rotations, and maybe they vanish if the confirm doesn't come out right, or maybe they move, they interrupt or something.
+Yeah, so the question is, hey, particles are a visual thing.
+Why the heck are you rolling them back?
+The gist of it is, I was trying to put a number on this mentally here, but it basically, some portion of our rollback is done for gameplay determinism purposes.
+And some percentage of it is done simply to make the game look better.
+So a lot of the particles.
+I hesitate to say all the particles, but a lot of the particles were rolled back purely for visual purposes and visual correctness, not for gameplay determinism.
+Also, that PPRS system prevented us from rolling back the vast majority of our particles.
+So by the end of it, we really were not rolling them back much.
+That PPRS thing really sort of saved our bacon there.
+I will try and knock these questions out real quick, and then I will talk outside.
+I think I have like one minute left or two minutes.
+Hello, on LittleBigPlanet we used a very similar system.
+And our biggest issues were performance and out of syncs.
+You've covered really nicely the performance tips, but do you have any tips for A, structuring your code to avoid out of syncs, and B, detecting and tracking down the cause of the out of sync?
+Yeah, so the question is desyncs are a real pain.
+Do you have any tips and tricks there?
+Oh man, deep topic.
+we lean so heavily on the fact that we were fully deterministic and we could replay those matches. I know that's not going to help you architecturally necessarily, but being able to play them back and being able to breadcrumb it, if you can't do that, you have to do that. It was just a complete lifesaver.
+I'll talk to you afterwards. I'd love for the whole room to hear it, but I just don't have time to dive super deep on that.
+I believe you guys are on PC as well, right?
+we ship a PC client.
+Yeah, okay.
+So, with respect to variable hardware, when some player's on actually hitting 16 milliseconds, how does your system work if one person's running at like 30 FPS or something?
+Yeah, my understanding, we don't ship the PC client in-house, we outsource it.
+But my understanding is that they, the short answer is they net pause more frequently.
+Like a lot of these safeguards that we have to ensure like a certain latency footprint, they exist, but on PC they just, it's a lot fuzzier, so they do end up pausing the game more.
+with variable hardware and variable, I guess the network experience is probably basically identical, but they'll net pause the game more frequently.
+One very interesting thing to note is that if you are bogging, maybe due to hardware or whatever, that does impact your RTT because your network send rate is changed and your network receive rate is effectively changed.
+That can lead to really weird feedback loops.
+I'm not sure what's being done there.
+Cool, thank you.
+Thank you.
+save state each time you're saving it?
+Is it like 20 megs?
+The question is, how big is the save buffer?
+It's small, measured in K, you know, maybe a meg per frame, probably less.

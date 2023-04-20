@@ -1,0 +1,257 @@
+OK, so let's get started.
+Welcome.
+It's not changing.
+OK, there we go.
+Welcome.
+My name is Lasse.
+I'm a senior programmer at Playdead Games.
+Some of you may be familiar with the previous title published by the company.
+It's called Limbo.
+Today I'm going to talk about tempo reproduction, anti-aliasing in our upcoming game, Insight.
+a little bit of background before we get started.
+Inside is a side-scrolling game.
+It's a mix between puzzle-solving, platforming, exploitation.
+And inside, we have lots of geometric detail.
+And we have many interleaved layers of transparency.
+Our camera is always slightly moving.
+So if we don't have any sort of temporal stabilization, then we get lots of crawling.
+We wanted to have really clean and stable images for this game.
+And in early 2014, we began looking into temporal anti-aliasing.
+And I whipped up a quick first implementation of this based on what was available on the internet and in my own head.
+And it quickly became our primary anti-aliasing solution during production.
+So, what is temporal antialiasing?
+Maybe not everyone is familiar with this term.
+It's a spatial temporal post-processing technique.
+What does that mean?
+It means that it uses a spatial relationship between fragments in multiple frames to make a correlation and use some information from the past time to refine the...
+fragments that we have just rendered in the current rasterization pass.
+It's inserted in the post-process chain as a pass.
+We do it after opaque transparency and pretty much everything except the last distortion effects.
+And it's a feedback loop.
+It reads from a history buffer, and it writes to the same history buffer in a double-buffered fashion.
+With temporal anti-aliasing, sub-pixel information is recovered over time, which is really nice for having stable images.
+Here's what it looks like.
+On the left, we have a raw output from the engine with no AA.
+And on the right, we have our temporal solution in action.
+And notice that we have the edges of the fence here can cross pixel boundaries without just jumping across them in one go.
+It's a stable output.
+Here's another example.
+Here it's interesting to note that the noise from a sparsely sampled directional occlusion is sort of vacuumed by the temporal solution that we are employing.
+creating a much smoother image on the right.
+Another example here was the Boren sensor, and it's, yeah, I think the results are obvious.
+So I'm going to go through every step of the technique and I want to start with some basic intuition.
+So let's forget about pixels for a moment and think about cameras between frames.
+And if we have some surface in space and we have a camera looking at a local region, like a local surface region, and then we have another camera in the past that's also looking at this region, but from a slightly different perspective, then we are having, then with rasterization, we obtain some slightly different information about this local region on a surface.
+So in a sense, rasterization, it has these unpleasant artifacts, so like aliasing artifacts, but these could also just be viewed as a variation.
+And if we can make the correlation and step back in time, then we can use this variation to refine the current frame.
+So to step back in time, we want to make a correlation between current frame fragments and fragments in previous frames.
+And we can do this spatially with a reprojection.
+And reprojection is a known technique.
+It relies on depth buffer information, so it's limited to the closest written fragment.
+But it's not always possible.
+Sometimes the data just isn't there.
+This is the case when we have disocclusion, so like we see some fragment and it's just not in our history. We can do a reprojection, but we are going to see a different surface from the previous perspective and if we just like blend those together, then we are doing something it's a false reprojection. Additionally, if we don't have any change in the relationship between the viewer and the subject then we don't gain any extra information from stepping back in time.
+There's no variance.
+So, like step one, jitter your view frustum.
+If your camera is static and you have a static scene, then you are effectively losing information.
+So, every frame prior to rendering, pick some offset from a sample distribution and use this offset to shear your view frustum.
+Like, just refer to GL frustum for this.
+I'll get back to sample distributions later.
+They are, of course, super important.
+Then, the temporal pass, it looks like this.
+So, it's a full screen pass, and the inputs to this are uh, the history buffer, so a temporarily stable image containing, uh, uh, anti-aliased uh, uh, yeah, colors uh, and uh, an input frame, which is the raw output from from the rasterizer and all of those passes, and that's color, depth, and velocity. I'm gonna, uh, go into reprojection first.
+So we have some fragment that we're in, in our full screen post pass.
+Let's just start in this texture called P-U-V.
+If we look at it on the boundary of the view frustum, it looks something like this.
+Then we can sample the depth buffer and reconstruct the world space position by just interpolating a corner ray and then scaling by the linear depth.
+Once we have the world space position, we can reproject this into the previous frame just by using the previous frame model view matrix.
+When we do this we obtain some normalized device corners and we can transform those into Texas base again and then we have this a Q you be that we can use to look up in our history buffer and then we have completed our reprojection so for dynamic scenes, it's a little bit more complicated and we cannot rely that on just a depth buffer. We use a velocity buffer.
+We generate this in a separate pass before the temporal pass.
+And we initialize it to camera motion vectors, just using the same approach as with reprojection, sampling the depth buffer.
+And then we render the dynamic objects on top with just a biasing test.
+Once we have a velocity buffer, the reprojection becomes a read and a subtract in the temporal pass, because we just look up the velocity in there.
+in the current fragment, and then we step negatively to obtain where we should sample our history buffer.
+So we don't actually sample the velocity directly in the current fragment, because if we do, then fragments on edges of objects, they won't travel with the occluders.
+We use the velocity of the closest depth-wise sample within our three-by-three region.
+And this is similar to a suggestion by Keres, and the result is nicer edges in motion.
+Here's an example of this.
+On the left, we have velocity from the current fragment being used to do the reprojection.
+And on the right, we have velocity from the closest fragment in the 3x3 region.
+So now we have our reprojection completed, and we have a history sample.
+We have to constrain this history sample, because as I mentioned, we may have a false reprojection.
+And I will talk about this now.
+So, sometimes the reprojection is false and the history sample is essentially invalid.
+And it can be because of this occlusion and objects moving around and it can also be because...
+of transparency layers in front of, like in the line of sight from one perspective, and these layers being absent in the next perspective.
+If we trivially accept the history example, then we get this ghosting-like effect, smearing like I've illustrated on the right.
+So we have to constrain our history sample.
+There are various ways to do this.
+Depth-based rejection, velocity weighing, Sousa Jimenez described this very well.
+I spent a bit of time implementing velocity weighing and trying to get this right, but found that it was really fragile.
+The threshold itself was sliding in history.
+It was difficult to get it right.
+And it doesn't really, like it doesn't do anything about transparency layers.
+So, you can, like we don't have velocities for transparency layers.
+And we have a lot of them interleaved between our layers of opaque geometry due to volumetrics and artist placed like sun rays and stuff like that.
+So, and we didn't want to just run temporal after the opaque pass.
+We needed something that would handle these cases.
+So we went back to the brick wall for a while.
+And then I read these slides from SUSE.
+And that was like a big rescue, this neighborhood clamping concept for us.
+So just to recap what is neighborhood clamping, it's like a pure color space operation.
+And it's like you clamp.
+expand a local color space around the current fragment from the raw rasterization.
+And then you take your history sample and you smash it into that space.
+And what Suse did in these slides, or what was written there, was that you would use four taps and a center text and then you would clamp your history sample to the local color space that enveloped these samples.
+Quick tests show that this gave a big improvement in stability over velocity varying, and we could work with that.
+And you don't have to use RGB to do this operation.
+You can also do the clamping to a box in a different color space if you want to rotate that around in relation to RGB.
+The first implementation of neighborhood clamming for insight was like a dynamic variation of Sousa's four-tap approach.
+I used a variable distance to four sample points decided per pixel, where a higher velocity in the current fragment would result in the four taps being inching closer to the center texel.
+And this meant that it was pretty strict on motion.
+When stuff was moving fast, then we wouldn't allow a large variation from the center texel.
+This gave us pretty decent results without having a velocity buffer for per object velocities.
+And we didn't have this at that time.
+We used this approach for about a year.
+And it enabled artists and, yeah, artists to tailor effects and content to the unique properties of having a temporal algorithm that also eliminates noise from stochastic effects.
+Then later in the production, we got a bit more headroom.
+I decided to ax the dynamic fall type approach and try to improve the image quality.
+And it kind of coincided with another presentation being published by Keres, who is a just use a three by three neighborhood and just eat the extra cost from doing more samples.
+So Keres uses like a larger and rounded neighborhood and just clipping instead of clamping.
+And it's not just like a 3 by 3 neighborhood.
+It's also blended with a minimum maximum 5 taps in a plus pattern.
+And it's more expensive to do this, but the image quality is better.
+And I love the dynamic 4 tap approach that we had going, but there was just, OK, this was just better.
+So we axed it.
+Also, clipping is really interesting, at least when you look at it geometrically.
+And, like, I experimented with it a lot, and I felt like it had faster convergence.
+Because clipping doesn't exhibit this problem of the constrained sample ending up in corners of the local color space.
+And I've illustrated that in the bottom left here.
+So, clipping is...
+in the Cedar can be a little bit slow and doing the proper line clip between like an arbitrary sized bounding box and two points that there are problems with this and of course there is a stable algorithm but it's tedious to run this for every fragment.
+So we just clip towards the center of the bounding box and because we do this, we can just do the, calculate the divisor for the ray towards the...
+the unconstrained history sample in a unit cube space.
+So we transform the vector to the history sample from the center of the bounding box into unit space.
+Then we calculate the visor there, and then we apply that in the actual clip space.
+So now we have our constrained history sample, and the next step is to weigh that.
+and use some history and use some amount of data from the raw input.
+And when we do this weighing, we use the unjittered input color buffer.
+The unjittering is done by just subtracting the jitter from the texture coordinates.
+So we rely on bilinear filtering for this.
+And I mean, that works for us.
+It's nice because we don't introduce any jittering into the feedback loop.
+So we calculate our feedback color.
+and by doing a blend between the the on to the input and the constraint history sample.
+And then we copy this to the output.
+Um in calculating the feedback color.
+We have to use a feedback factor obviously and we want to use feedback factor that is as high as possible to increase retention because everything that is nice and clean ideally is in our history sample constraint history sample.
+But I have to beware of artifacts also when choosing the feedback factor.
+Like you want to set it pretty high, but there's going to be cases where you'll see some trailing artifacts.
+case in point, the silhouette of the boy I was looking at on my workstation it runs pretty slow and I was looking at the boy at really low frame rates and at a low resolution and I noticed these fringing artifacts on his edge when he was doing...
+like fast motion, such as turns, landings, etc.
+And of course, this is a property of neighborhood clamping-clipping that history fragments can linger if none of the neighbors force them out.
+And that's the case for one frame when this happens near an edge.
+And it's only really distinct that artificially low resolution and frame rate, but.
+I looked at this and I was really annoyed by it. I wanted to do something about it anyway, and I said with another graphics programmer in a company and we were running back and forth this boy on in a high contrast area and.
+just thinking, well, what can we do?
+But these fragments have high motion vectors, so I thought, why don't we just conceal it with a little bit of motion blur in those cases?
+So, adding motion blur to the temporal path to conceal these type of artifacts looks a bit like this.
+We update the history buffer just like before and then for the output targets where we're seeing the artifacts.
+And so the screen basically we blend.
+Feedback.
+That.
+or what we are writing into history with another color, which is a motion blurred sample.
+So...
+and we apply the same on jittering to the texture coordinates where we do this.
+The amount of motion blur we introduce in each fragment is depending on the per pixel velocity and...
+And we begin introducing a little bit of motion blur at a met when the velocity has a magnitude of 2 or above.
+And we stop like we are only motion blurred motion blur information when the magnitude is 15. It's just a linear scale.
+So this forces transition to motion blur, but not in the feedback loop for really fast moving fragments, and it includes the immediate neighbors.
+of the current fragment due to the velocity sample relying on the closest depth-wise fragment.
+So here's an illustration of what that looks like for the bore.
+It's kind of an exaggerated example.
+You have to run at sub-20 frames per second and have a really terrible resolution to notice this because it's for a frame or two.
+But, yeah, it kind of...
+it's not pleasant either way, but fringing fragments on the left, I find them really distracting.
+Excuse me.
+So, putting it all together.
+Again, looks like this.
+Yeah.
+So I mentioned that I would get back to the sample distribution thing.
+This, for us, took a lot of trial and error.
+I took a very practical approach.
+I spent some weeks with my head really close to my screen in the office with the windows magnifying glass fully zoomed in.
+And I would look at all the pixels and obsess over high contrast regions.
+I wanted to find a really good balance between quality and speed of convergence.
+At the time we were targeting 30 frames per second and now we are at 1080p60.
+So that was hugely important back then.
+And also considering heuristics, that would be interesting because we have this side-scrolling behavior and mostly horizontal movement.
+There was this scene in the game, I think it was COD, where there would be a very low inclination and the boy would be able to run on the slope and there was this lamp that when you ran down the slope it would sort of fade into view and then you would run back up the slope and the light would hide under the shade.
+And I would run up and down the slope again and again with different distributions and offsets from the texture sensors just to see where I would get like a really nice transition for that single or like half pixel line under the lampshade.
+this is like an artificial reconstruction of this happening.
+It's not the actual scene, and I think I was more zoomed in also, but yeah, that's how it went.
+The cop loves it.
+So we are using a history buffer that is exponential and the samples weigh less over time and that is the reason why we need to use a high feedback factor, otherwise we get a visible cycle.
+It's interesting to see that if we use 90% of history compared to 10% of the...
+of the actual output of the rasterizer in a frame.
+Then 16 frames later, that information that was history at that time, it's down to 18 and 1 1⁄2%.
+So, I mean, things fade out fast.
+And for the sample distribution, it's nice to revisit, I found that it's nice to revisit same sub-pixels regions often, because the above figure on the right here assumes that we are just like trivially accepting every single history sample, and that's not the case, because we do a clipping based on the neighborhood.
+And this will compress the tail of the history in the frame that we are doing, applying a constraint.
+And that further reduces how long history lives on as the frames go on.
+So we want to quickly return to some data within a single pixel, so that if we are constraining our way out of it because of some sudden motion in one direction or the other.
+we get back to that and obtain some information about that particular part of a surface that we can reconstruct a nice edge or smoothen out a bit of aliasing from theta aliasing, whatever.
+So initially, used very few sample points in our sampling distributions.
+So here are some of the sequences I tested.
+Some of them are a bit braindead, and I just wanted to pick something and get going.
+Interestingly, for a year, we used a second one on the top row, which I called Uniform 4 Helix in the code.
+And it worked really well, despite the rectangular pattern and just being four samples for us, because it crosses the horizontal line in the pixel in every frame.
+So you can imagine going from left to right, and it would stitch across hard edges.
+I played around with some others as well.
+And then when we did the switch to the 3 by 3 neighborhood, And clipping then, and there was also in Keres' presentation a suggestion to use the Halton distribution.
+A colleague of mine also said, like, let's try a Halton.
+And I was like, okay, let's try Halton.
+And we did that, and I eventually settled on the 16 first samples of the Halton 2-3 sequence.
+So, while using the 4TAP neighborhood, as I said, uniform for helix, 4Helix was my favorite.
+Like, the short cycle meant that you returned to the same sub-tick region quickly, which is nice.
+And it does the stitching thing.
+And then switch to the 16 indices of Helton.
+And the coverage in this distribution is obviously much better.
+So, like, everything converges.
+a lot more when the circumstances allow this.
+And it's pretty good at getting back to the same subspecial regions, even though the cycle length is a lot longer because of the way of the the way the sequence is.
+Then I also spent some time looking at motion perpendicular pattern.
+I don't know if maybe you noticed on previous slide.
+That would be based on the trajectory of camera motion in screen space.
+It didn't develop into anything that's going to be used in a release of our game.
+But I think it's interesting to try and squeeze the distribution along the line of camera motion in this space.
+It needs more cooking time.
+So a summary of our implementation is that, well, we did our view frustum with 16 first samples of Halcyon 2.3.
+Then we generate a velocity buffer.
+Our engine doesn't provide one, the one we are using, which is Unity.
+So we initialized this to camera motion vectors, and then we add in dynamic motion vectors with manual tagging.
+And then we do read projection by sampling our velocity buffer and we use the closest depth-wise fragment to identify where we should sample the velocity.
+Then we do neighborhood clipping, where we center clip to the RGB minimum maximum of around a 3x3 region, like Keras.
+And then we have this added motion blur fallback that kicks in when the magnitude exceeds 2 and it's in full effect at 15.
+And we don't apply this to the feedback loop. We don't apply it to our history.
+And it's not like the code. I haven't performance crunched on this code.
+I think I spent a total of...
+3, 2 and a half to 3 months over a couple of years, like going in and then doing other stuff on the production.
+So it's not, I'm sure there's stuff to optimize this, around 1.7 milliseconds on Xbox One at 1080p.
+So, of course, this implementation is greatly inspired by a lot of people and their work.
+So, Yang, Sousa, Jimenez, Karris, Maguire, everything that was put online in other people's presentations, like, hugely appreciate this.
+And my slides are also gonna be available.
+The temple and she is in it also has some really nice side effects, so it's great that sucking up noise from stochastic effects and so shadows reflections for your metrics all benefit from this greatly.
+And we have a lot of these effects in our game that are that are sort of standing on top of temporary being great and these are discussed in detail in a talk about inside rendering, which is in.
+a couple of hours by two of my colleagues, Megan and Mikkel.
+So you should definitely go and see that.
+It's awesome.
+Playdead is hiring, so if anyone wants to come and talk to us about having a job, you can email us at job at playdead dot com.
+You're also welcome to talk to me, and I'll give you a card or something.
+And that's the end of my talk.
+Thank you for coming.
+As an extra note, we are releasing the full source code to our implementation.
+And it should be on GitHub, or it will be very soon.
+It's flagged private, but I think it may be public now.
+and you can email me with questions and if we have time for it, you can also ask questions now if you have any.
+Thank you.

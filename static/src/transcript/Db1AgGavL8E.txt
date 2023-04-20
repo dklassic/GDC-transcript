@@ -1,0 +1,500 @@
+Welcome everyone to our talk on vehicle physics in Skylanders Superchargers.
+My name is Jan Erik Steele. I was the lead vehicle engineer on the project.
+Primarily my responsibilities were to lead the team doing the implementation and design of our land, sea and air vehicles in the game.
+I'm Patrick Donnelly. I am also an engineer on the team. I was responsible more for interfacing with physics and math and solving a lot of problems that we had along the way of implementing our vehicles.
+So Skylanders is an action RPG where every single playable character has a physical toy associated with it.
+And the uniqueness and variety of these characters are really the driving force behind the franchise.
+What we had been asked to do was to introduce vehicles into the mix and make sure that these vehicles were just as quirky and playful as the characters that were going to be riding around in them.
+We also knew early on that there was going to be a huge variety of different gameplay here.
+We wanted to have...
+arena, vehicle combat, we wanted exploration, puzzle solving, and racing, and we were going to be doing all of that on land and in air and sea.
+So it was really important to our team that we have a really strong technical foundation so that it would enable our content creators to create this wide swath of gameplay experiences.
+Before we delve into it, I want to just give you guys sort of a sense of how this talk is structured.
+I'm going to run through some of the early prototypes and some of the missteps that we made early on.
+Those led us to define some guiding principles for the team, some pillars that really helped us make better decisions later on in the project.
+And then in the second half of the talk, Patrick's going to take you guys through more of a technical deep dive and really get into some of the details on the vehicle systems that we created.
+It's probably worth mentioning at this point that we use Havoc as our physics middleware.
+There's nothing in this presentation, nothing in our approach in general, that requires Havoc, but just so you guys know where we're coming from.
+So let's delve into the first prototype.
+We wanted to make a land vehicle.
+So at this point, we didn't actually have any vehicle physics tech in our engine.
+So we did a lot of research.
+We looked at Havok's vehicle physics.
+We looked at Bullet's vehicle physics and really tried to learn as much as we could.
+And these are great resources for you guys to check out and try to understand which aspects of this that you may or may not need in your game.
+What we decided to do was to implement at first in this prototype a Raycast-based spring suspension.
+This basically means we're going to take a spring, we're going to simulate it, attach one end to the chassis, the other to the wheel, and this spring is going to have a length and a stiffness, and then we use a velocity dampening parameter to make sure that the spring stabilizes nicely.
+Then we take a ray cast and basically cast along that spring.
+And when it contacts the ground, we compress the spring and this sort of creates a counterforce back up on the chassis.
+And this is what gives you that kind of nice physics-y feel where the vehicle's wheel is moving independently from the chassis.
+The way we apply our engine forces in this first prototype is we apply our braking and acceleration forces at the point where the wheel is contacting the ground.
+This is the same spot where we apply our side force that basically is simulating the side friction of the tire.
+We chose to have all three of these forces go to zero if any given wheel was off the ground.
+But we also used the grip coefficient such that if the suspension force was low, we would reduce these three forces.
+gave us the sense that if the vehicle was landing and not all the wheels were fully contacting the ground, that the vehicle might skid, or if you did a hard turn, the vehicle would skid out.
+And this drifting was something we really liked in the early prototype, and we really leaned into later on in development.
+When we wanted this vehicle to turn, all we do is we rotate the two front tires, and then the side friction pretty much takes care of redirecting the vehicle.
+So, we'll take a quick look.
+This is the first prototype that we made.
+And there were some things about this that we really liked right off the bat.
+We knew that our content creators were excited about sort of organic terrain and rolling hills.
+So, it was exciting to get this first prototype out.
+And it was just fun to bomb around and catch air.
+We loved sort of spinning around and doing tricks.
+One thing we hadn't really thought through and expected was that we noticed because we're applying all our forces at the wheels, the chassis will lurch when you brake or accelerate or it'll lean in the turns, and we got sort of this procedural animation for free. So that was exciting.
+However, there were plenty of problems in the early prototype.
+in particular when you crashed into anything.
+So you really, as these vehicles drive around really fast, even if you just skim the side of a wall, it really develops a lot of rotational forces.
+we spent quite a bit of time working with the suspension, doing things like reducing the center of mass, or not reducing it, but placing it lower to reduce the chance of the vehicle flipping on its side, or flipping on its head, or worse yet, just sort of getting flung out of the level altogether.
+So we knew that this was something that we were going to have to deal with.
+These things, I think to the engineers, seemed like manageable problems.
+You know, we can fix some of these bugs, we can make interacting with the suspension a little bit simpler because it was quite technically complex.
+But I think our designers had a totally different perspective from us, which was that they saw this first prototype and like I said, setting it up the suspension was complex.
+Actually, the first one that we did, Patrick set up most of the tunable values for the suspension to make sure it worked well.
+And, but I think to someone who didn't understand the physics equations that were under the hood, really a lot of the tuning values just seemed like a bunch of magic numbers.
+And worse yet, it was really easy to change anything in this setup and make that suspension unstable or implode.
+And I think it created an environment where the designers were nervous to change anything, because it was really easy to break.
+However, I think the most important concern they had, which is completely valid, is that they saw how much work it was for us to make one vehicle and get that working well, and they had to make nine more land vehicles.
+It was really important to us that all these vehicles feel unique and have their own personality, and at this point, the thought of making nine more...
+It was difficult just to make them functional, far less kind of pull out the personality.
+So that, we knew at this point that this exact approach maybe wasn't the right way to go.
+So we decided to kind of swing the pendulum the other way and try a totally different approach which we called character vehicles.
+we have in our pipeline we've created just hundreds of characters and Skylanders. Our tools pipeline and run time for characters is really powerful and our designers are incredibly capable and comfortable with that pipeline so we thought why don't we just augment that pipeline and try to make our vehicles inside that construct.
+So what that meant for us was that we were actually going to be moving away from physically accurate simulation and moving into sort of an animation state machine where we could layer on partial animations onto the vehicle.
+And really in our specific setup, this meant that we could no longer apply forces to our rigid bodies.
+We had to set a velocity every single frame on the vehicle.
+This totally makes sense to us for our on-foot characters, but I think for vehicles, if you want concepts like momentum and inertia...
+we really had to make sure that we were passing that velocity through frame by frame and state by state.
+I think the upside of using velocities is I really believe that people just have a better intuitive grasp of velocity than they do of forces and accelerations.
+And so it really let us sort of focus in on our interface and really try to simplify things to improve our design interface.
+However, I think when we actually fully built it, this approach also had a lot of problems.
+Some of the issues that you're seeing in the video here is that we can no longer apply forces to the suspension, so we're basically just doing a ray cast and matching it to the ground.
+This causes a lot of glitchiness if you have any kind of uneven surface, so our content creators had to smooth stuff out, and I had to beg them to take out any little crack and divot in the road, it was terrible.
+But we really see that...
+We always wanted to make that loop-de-loop.
+I think the thing that really caused me to believe that this approach was not going to be viable is that if you're setting the velocity on these vehicles every frame, the interaction with external forces when you're crashing into walls.
+vehicles are crashing into you or something else is smashing into you.
+What seemed simple at first actually kind of spiraled out of control on the engineering side trying to take in all these external influences and it started feeling like we were building our own kind of crappy physics engine on top of this.
+So we thought...
+Let's not do this. Let's return to the physically accurate simulation and let's leverage this amazing sort of physics middleware that we have and let's use that.
+However, there were definitely some lessons that we learned in the experiments with character vehicles that we wanted to bring in.
+And we felt like these might alleviate the concerns that we were having early on.
+And we thought if we could combine these approaches, maybe we can sort of get the best of both worlds and end up with a good system and a good approach.
+So at this point we tried to establish these pillars for the vehicle team so that we could make better decisions and make sure we were all on the same page and getting towards the same goal.
+So the first thing we decided was like let's simplify the physics simulation whenever possible.
+Make sure we're not taking along unnecessary complexity in physics all along through the project.
+And if we want complexity, ideally, let's make it arise from the interaction of simple systems.
+If we learn anything from our character vehicles, it is that we had to start thinking about our physics parameters, not just as the equations, but as to how our designers thought about these concepts, and make sure that we mirror back to them the things that they're saying about the vehicle motion.
+And finally, and this definitely was not obvious to us at first, was that we had to start keeping our physics parameters independent.
+This basically means that you're trying to minimize the amount of side effects as you change one value in the physics simulation, that it affects another area.
+And this really becomes a nightmare if you don't do this, to try to tune the vehicle and get it shipped out.
+So I'm going to go through a bunch of examples that hopefully will sort of exemplify how we use these pillars in practice and how we actually use it to make decisions.
+So, let's take a look at a simple example.
+We're just going to accelerate a vehicle up to top speed.
+Whenever we talk to our designers about this, they almost always ended up drawing up a curve like this on the whiteboard, and this was just sort of how they thought about it.
+They have an amount of time that it takes to reach the top speed, they have a top speed, and then they have this curve that tells us how the vehicle is going to reach the top speed.
+So let's look at an example of two different vehicles here.
+The top one is kind of a fast, zippy vehicle.
+and the bottom one is a lumbering vehicle.
+What might not be obvious here is that these vehicles have the same top speed, and they have the same amount of time to reach that top speed.
+The only thing that's different here is the shape of that curve.
+What we've come to realize in this case and in a lot of cases when it comes to the physics vehicles is that we had to expose these kind of curves directly out in our tools.
+So we've done this before in VFX and things like that, but now we're going to actually use it in gameplay.
+And this made a huge, huge difference for us.
+If you take an equation, just something simple like F equals MA, and give that as values or parameters out to your designer, they tend to only be able to set the force.
+That's the only thing they can change, and that's just a magic number, and they're like playing with it until it gives them something.
+But what you've actually done there is you've inherently said it's using constant acceleration, and you've denied them.
+the ability to change this and really that curve which you haven't given them then is the defining feature of that vehicle and it's really really important I think to use these kind of curves to help both simplify it but actually give access to a lot more of the personality of the vehicle.
+We also tried to simplify some things down.
+This kind of shows how we applied forces in the first prototype.
+We decided to simplify this a lot.
+We're just going to do engine forces straight through the center of the mass of the vehicle.
+This meant that we lost the procedural animation that I mentioned earlier, but what we gained was really a consistency in handling.
+And we didn't have to explain to players why, if one wheel was slightly off the ground, the turning felt different.
+or something like that. And really, now what we're going to do for turning is we're just going to apply a torque force and give ourselves a rotational acceleration and...
+and turn the vehicle that way.
+We also got rid of the side forces and we just used drag across all the vehicles.
+We used this model for the land vehicles. We use it for the air vehicles as well. The only difference was that we also do a rotation in the pitch in addition to the yaw.
+And honestly, from a physics perspective, that was really the major difference there.
+We also used this approach for the water vehicles, which simplified things when we tried to model buoyancy.
+So let's take a look at an early prototype that I made with Patrick and one of our rendering engineers, Patrick Hennessey, helped us out with this.
+And we wanted to get a feel for water vehicles. We knew we had these.
+sort of huge waves that we could do and we wanted to make sure the water vehicles could kind of ride up the waves, they could skid down them, they could dive through the waves.
+And so we had a ton of fun trying to set up this first prototype and honestly the approach that we took in this first week is very similar to what ended up shipping in the game.
+So let's take a quick look at the buoyancy modeling.
+It's a physically complicated concept.
+You can really model this in as complex a manner as you would like.
+What you're dealing with here is, in our case, a vehicle where partly the volume of that vehicle is submerged in the water.
+And the displaced water is going to apply a force across the surface of the volume.
+With our newfound pillars of simplification, we said, well, let's just make it a box.
+This is going to really help us calculate a volume and figure out how much of that volume is submerged in a much, much simpler manner.
+Also, we decided to apply a single buoyant force through the center of mass.
+This meant that a buoyant force actually isn't going to...
+apply any rotation to the water vehicle.
+It's really just going to sort of bob up and down in the water.
+We did apply the buoyant force along the water surface normal, and that helped us be able to deal with the waves that we were seeing.
+Also we had an angular spring on the vehicle which would turn and sort of rotate the vehicle towards the water normal so it would try to match up to that kind of gradually.
+This simple approach worked better than we expected. I really thought eventually we're going to add more points of buoyancy and it's going to like...
+be more complicated, but it worked well for the vehicle.
+You have to be able to handle the vehicle and it has to be controllable, so this made it a lot simpler, I think, for us.
+Also, because we chose such a simple model, it was really cheap.
+And we discovered, hey, let's just put this buoyancy thing on other objects in the world, and all of a sudden we have all this flotsam and jetsam that the vehicle can interact with.
+And we ended up really liking this approach.
+Another important concept in buoyancy is the resting height of the vehicle.
+I think for our designers, this was really something they identified for us that was a defining feature of the vehicle.
+What it means is how deep this vehicle is going to sink in the water when it's at rest.
+So a speedboat might only sink a little bit.
+If you have a sort of submarine type, it's going to sink lower.
+If you look at the equations of what governs the resting height of a vehicle, there's a lot that goes into it and there's a lot of things that can make that resting height change.
+However, what we wanted was to be able to set the resting height and guarantee that that's how the vehicle was going to behave.
+We ended up doing this by basically solving for the resting height and just putting in a value from 0 to 1, and then at runtime, we would dynamically calculate the other values to ensure that we actually got the correct resting height.
+In our case, we ended up calculating the volume.
+of the vehicle.
+And what this did for us was that if someone defines the resting height of the vehicle, if someone comes along two months later and decides that because of collisions they want to give this vehicle more mass, all of a sudden the vehicle sinks lower than the water.
+That seems cool, like a physics concept, but it sucks for the people who have tuned it and want everything to be right.
+So it was really important to us to look at all these equations as we implemented them and really evaluate every single parameter and understand if they were independent or if they were dependent, if we wanted them to be dependent.
+And more often than not, we really try to separate these values out and calculate them as needed.
+The last concept that I want to run through is some of the stuff we did with our animation system on top of the vehicle.
+The first thing was really just to take the physical movement of the vehicle and maybe the controller input and try to place the vehicle in a state, like is it just accelerating from rest, is it turning, and allowing our animators to just animate on top.
+of the physics simulation.
+And this, I think, more than anything, allowed them to bring out a ton of personality in each vehicle without actually changing a lot of the things about how we did physics suspension under the hood.
+And that both gives you a consistency in handling, but now you can really draw out the vehicle and figure out what this vehicle is about.
+Another thing we did here was that we had the animators actually animate the full extents of the suspension.
+So how high up can the wheels go and how low does it go to the gown.
+This meant that ideally the suspension will never look bad.
+It'll never clip into the vehicle.
+But also, it allowed us to actually not just have the wheel maybe move simply up and down.
+They could do a sort of a rotational suspension.
+They can do whatever looks good.
+While under the hood, the suspension is basically just interpolating.
+between these values.
+And I think this really let our engineers and designers on one hand focus on what felt fun and what was good with the vehicle and then allowing a lot of the other artists and animators to do their job and bring out the personality in the vehicle without the two teams stepping on each other's toes too much.
+So hopefully these examples kind of help clarify some of the pillars and how we went through them.
+At this point I'm going to hand it off to Patrick and he's going to take you guys through some of the details of the physics systems.
+All right, so before we get into this, I want to explain that when we say that we are simplifying these systems, that process in and of itself is not necessarily simple.
+We actually found more often than not it was a complex process for us to figure out ways to simplify, where to simplify, and to implement these systems.
+But we were okay with that because that meant that we as the engineers were taking on the burden of solving complexity.
+and allowing our content creators to have simple and intuitive systems that allow them to work on the fun.
+So we felt that this was a great compromise and a great organization of complexity.
+So without any further ado, let's dive right in.
+So first I want to talk about the velocity curves that Jan had mentioned before.
+On the x-axis we have the time from rest until max speed that is defined by the designer.
+And on the y-axis we have our speed from rest until max speed.
+Now, normally when you'd evaluate a curve like this you'd have a value on the x-axis and you would just pump it into a function and you'd get out a y value.
+However, for our vehicles, all we really knew was our speed.
+So we needed to get a time value out of it.
+So we did a process we called reverse evaluation.
+So, given a speed value, what we would do is essentially reverse evaluate to figure out our current time value.
+The process that we used for this was a simple binary search of the curve.
+We'd solve in the forward direction in various points and hone in on the time value that gives us the speed value that we were looking for.
+There's other ways of doing this. You can do a lookup table or if you have an implicit function You might be able to transpose it. We didn't have any performance problems. So we were just went with a simple binary search So once we have a time value What we can do now is step our time along the curve with our frame Delta time And then get out a new speed value then all we're doing is we take the difference between the two of these which is a delta velocity uh... which is an acceleration and we can multiply that by mass and apply it as a force and that's how we will move along this curve Now there's two very important points here.
+First of all, we are always applying forces.
+We never want to set velocity on the body.
+When we set the velocity, we can stomp on other systems and we have to maintain a lot of state, but if we're just adding forces, that lets us layer multiple systems together and get much more complex behavior from them, which is one of our pillars.
+Secondly...
+We never want to assume what our time is.
+We want to recalculate it every frame.
+This lets outside influences impact us.
+If we just assumed that we hit our target and ran into a wall, and then used that previous frame's value of time, the next frame, we would be going way faster than we should be.
+So, we recalculated every frame, and this lets the outside influences slow us down, or stop us, and lets things like hills, if we're going up a hill, we may not hit our target every frame.
+But we're going to generally follow the general fingerprint that design made.
+Even though it's going to take us a little longer to get to our top speed, we still get there in a good way.
+And we found that behavior was really good and really allowed the outside world to impact our vehicles.
+Moving on, I want to talk about our suspension because it's important.
+So, Oh, nope, one more thing.
+So our vehicles don't necessarily always travel from rest until max speed.
+They can actually be going backwards in relation to the direction they're trying to accelerate.
+So our curves actually look more like this, where the y-axis went from negative max speed to positive max speed.
+Zero was in the middle, and now our time on the x-axis no longer corresponds to what design has said is rest to max speed.
+But this is really easy to solve for.
+All we do is one time at the beginning of the load up, we can.
+look at and figure out where our rest is and where our max speed is by doing a one time reverse evaluation and then get this range back out.
+And this range corresponds to what design is input from rest to max speed.
+And we just scale our DTs by this amount, fit it to this range, and then we have a consistent acceleration across the curve, just the same.
+And they can put that zero point anywhere on this curve and it will still work.
+All right, now going on to our suspension.
+I hope.
+Alrighty, so we have a bunch of, variety of visuals up here, and we knew that we're gonna have these fantastical vehicles.
+As you can see in the bottom left here, we have Shark Tank, which has these tire treads, and actually can like dive under the earth.
+We have at the top the Shield Striker vehicle with these cog wheels, and actually it's six of them.
+And then in the bottom right we have Burn Cycle with a giant molten wheel and then our giant rocket booster in the back.
+In all of these situations, despite the variety of visuals, we always did four-wheel suspension.
+We found that four wheels provided the most stability and consistency in handling, and that was important to us.
+Now, we allowed some personality to come through by design could shift where the suspension was, how tall it was, how stiff it was, but we're maintaining this four-wheel suspension as it just fit our level mechanic and metrics best.
+Now, you might also notice that I'm drawing cylinders here.
+For our player vehicles, we did a shape cast instead of a ray cast.
+We found that this provided more information about the ground and allowed us to avoid the vehicles overreacting to a small divot in the ground or a hole in the collision.
+For our NPC or AI vehicles, we would just use a ray cast as before.
+The visual fidelity was not nearly as important and performance was, but for our player vehicles, it was shape casts.
+uh... but there's another problem with it if we got collision to hit us in the middle of our vehicle uh... the forces of the suspension would push outward until it eventually exploded and it would be very unstable it could also confuse our suspension pretty easily and get into the bouncing state like this or clip into the middle of our vehicle like that if you had a tall enough piece of collision in the middle your wheels would never touch the ground and you could actually get stuck.
+So this was a problem that we needed to solve.
+And the way we did that is we essentially made our vehicles a lot more like a Flintstone vehicle.
+We connected these cylinders in the middle so that if you had at least half of the vehicle on the surface, the other wheel would pick it up and you'd be stable.
+This fixed our edge cases that we were seeing before.
+Though this doesn't look physically accurate, it's much better that it's stable.
+And it still looked good in situations where you had small bumps on either side.
+The wheels were properly reacting.
+So this was a compromise that we felt the most important thing is stability and control.
+And we can live with that.
+And it also meant that if you were hitting a ramp, you just had to get close enough.
+You didn't have to hit it perfectly.
+So, moving on, I want to talk now about how we handle springs.
+So, when we were doing our initial prototypes, we did a spring damper system, as Jan mentioned, and we did what any good, lazy engineer would do and just did a single Euler integration.
+And Euler integrations are great unless you have a variable frame rate.
+And early on in development, we did not have optimized builds.
+And we were often working in our debug builds in order to implement new features.
+It looks something like this.
+So that's our vehicle running at 18 frames per second with a plus or minus variance of about 10 milliseconds per frame.
+It is undriveable, absolutely.
+And this was a big problem because we needed to debug our thing, our vehicles, and we couldn't, because we couldn't even drive them.
+We wanted this, where, because this is the frame rate, it's nice and smooth.
+So we needed a way of fixing this fast so that we can develop and show executives, hey, look at how awesome our vehicles are.
+So we took a short-term bandage approach.
+So if we before were just doing four steps for four frames of oil integration, instead what we would do is a bunch of little steps in a fixed time step, which we picked to be about 200 hertz or 5 milliseconds for our player vehicles.
+And we'd do oiler integrations across that.
+This fixed a lot of the problems we were having with our Euler integrations and the variable time step.
+And any leftovers from the first frame would kind of carry on to the next frame, and the next frame, and the next frame.
+And it would always be stepped at this consistent rate, so we didn't have that explosion of force when you're using Euler integration.
+There's other approaches you can take, of better integrators for sure, but there's a reason that we like this and I'm going to get into it in a little bit.
+Before I do...
+I want to show you the end result, which is this.
+So you can kinda see the wheels are jittering just a bit, but this is still the exact same frame rate we had on the left, the 18th frame per second.
+But we were never gonna see this in a shipping title, and if we did, we were in deep, deep, deep trouble.
+So this was more than enough for us to develop with, and we actually shipped with it, because we weren't ever gonna see the situation we have here, and it handled our spikes that we might have occasionally just fine.
+So we were very happy with that.
+I want to put up a little bit of pseudocode quickly to show how we did our stepping.
+If you can take a picture of it or you can come back in the vault and look at it later.
+I don't expect you to understand this all right now.
+But I do want to call out a few lines of code and explain what it's doing so you can kind of get an idea and maybe avoid some pitfalls that we had early on in implementing this.
+First of all, what we're doing on this line is where you are calculating the velocity of the suspension at the point that it connects with the chassis and also incorporating gravity that might accumulate over time so that we're basically simulating in the later sub-steps that it's accelerating.
+We will then project that in the direction of the suspension in order to see how fast the chassis is moving at that point in the direction of the suspension.
+And we're going to use that projected velocity in two places.
+First of all, we're going to use an inner spring damper, since it's a velocity-based spring damper, that's our velocity.
+And then we're going to keep track of how far we've traveled based on the...
+this each sub-step so that we are compressing or expanding our suspension based on how it's moving in the later sub-steps. So if our front wheels are compressing and our back wheels aren't, we're going to get some torque that's going to make our back wheels start to accelerate and then they're going to compress more and it's going to balance itself out that much faster potentially within a frame. So this is a really awesome thing and it has one other advantage that we really liked about our sub-stepping.
+and that's in landing. So if you imagine...
+Well, first of all, our vehicles are traveling in the hundreds of miles per hour range.
+in Skylands and when they're falling, they're falling even faster.
+If you imagine that we set up our suspension as such with the orange arrow representing the distance of the cast it's very possible that within a frame we don't see the ground but we're going to travel far enough that we're going to go through it and then our chassis will slam into it and we're going to be stopped and instead of having a smooth transition between falling and landing we're just going to slam in.
+This is a problem.
+But using the high frequency sub-stepping we can fix it.
+If we take the amount that we are going to move within the frame and extend our raycast by that much, we can then step it in each sub-step until we eventually get our suspension to start to intersect with the ground.
+And we will start to apply forces.
+It'll slow us down and maybe compress a little bit more, but the forces get stronger, and then we can actually counterbalance it.
+So, now instead of slamming into the ground, we have successfully landed, and our suspension has successfully kept us away from it, and we're free to drive off and cause all sorts of other types of mayhem, like crashing into things, which is the next thing I'm going to talk about.
+How we handle collisions.
+So we are making a game for kids.
+Collisions are going to happen a lot.
+We needed to make sure that these collisions are fun.
+But we didn't necessarily know what fun was in this context.
+we knew from our early prototypes that driving into a wall and then spinning out of control that's not fun, that's frustrating We needed something better.
+But we also knew that the thing that makes you feel like, hey, I'm driving a vehicle, is that the way that the vehicle responds when it collides with things, and the way those things that you collide with respond to you.
+That gives you that kind of visceral, physical feeling of I'm driving this massive object through the world and doing all sorts of damage and mayhem.
+So, we needed to figure out what parts of that response were interesting and when we wanted to apply them.
+and we needed a prototype and iterate on it so the idea was to essentially invest a significant technical effort into making a system that put these tools into the hands of the team as a whole both content creators and engineers so that they could figure out where the fun was for the relative systems and then implement that fun and then we would have a great collision response for our vehicles so to do that we made our system be defined in data what the concept of data, that's a gratuitous picture because this is all text what our data object was was called a rule now a rule consisted of a set of criteria about the collision that were used to filter out if this rule would match or not the criteria consisted of things about the body's relationship to the collision such as its speed towards a collision as a ratio of its max speed or the angle between its forward and the collision normal.
+It also consisted of some metadata about the body, such as the team relationship between the two bodies.
+Are they friendly, are they enemy, are they neutral?
+Or is it a player, is the body a vehicle, is it an AI?
+Any kind of information that would help a user to figure out if they cared about this collision was added to the set of criteria in the rule so that filtering was flexible enough to catch exactly what was necessary to catch.
+Next there was a priority.
+So in order to, if multiple rules matched, we needed to figure out who would be applied.
+The highest priority would win, and this allowed us to layer rules together of increasing complexity, honing in on key parts of the collision and increasing the priority to get more complex behaviors when, say, you're going faster, and this is a powerful thing.
+Now we made sure that our rules only involved vehicles. At least one of the bodies involved had to be a vehicle.
+This was mostly done for simplicity. We were only caring about our vehicles in this response system and also for performance.
+As our vehicles are traveling very fast, we just needed to focus in on these collisions instead of applying rules to every single collision that we ever saw.
+But this is not a requirement. You can use a system like this for all of your collisions if you want. We just didn't feel the need to.
+Next, they are scoped.
+What this means is where the rule is defined in data determines when it will run.
+At the highest level scope, we had global rules that would apply to all collisions involving at least one vehicle.
+The next level down was per game mode.
+We knew that we needed a different set of rules for, say, our racing mode.
+If you crash into a wall in the racing mode, we might want to guide the player back onto the track versus our arena mode where there is no track to worry about.
+The next level would be vehicle type.
+Air handling had different set of requirements as they were able to rotate in both yaw and pitch versus land vehicles that only really rotated in the yaw space.
+Lastly, at the lowest level was the per-entity scope.
+We could add a component onto our entity that defined a list of rules.
+And those rules would only ever run if that entity was involved in a collision with a vehicle.
+The entity did not have to be a vehicle itself, which is really awesome, and meant that we could essentially add custom rules in a single place in the...
+game and get the behavior to only happen there, which really drove some level mechanics.
+At one point we had bells that you had to ring in order to open a door and we could just throw a rule that said when this bell is hit, do this thing and then send this message off and keep track of it.
+So it was a really easy way to hook into making our levels more interesting.
+now the next thing is a little bit confusing and i'm gonna show an example about it later and hopefully explain it better but our rules were defined in a bidirectional way so what this meant is we don't necessarily know what order uh... our physics simulation is going to give us the bodies it could say that a vehicle is colliding with a box but it could also just as well say the box is colliding with the vehicle so it was up to the rule to uh... disambiguify that's the word uh... what order of the bodies were in and make sure that the response was applied in the to the proper body.
+We essentially tested each rule from both perspectives and then the rule needed to filter out and only match one, otherwise it'd be ambiguous which response would be applied to which.
+Lastly, there's a response.
+This defines how either body will respond to the collision and what's gonna happen after the fact.
+So, I wanna go into a little bit more detail about responses.
+Our responses ran in two phases.
+Morgenthau's art.
+The first phase ran in the middle of our simulation.
+This phase was used to do things, to change the collisions essentially before they ever happened.
+We needed this in order to do things like entirely ignoring the collision, or if we wanted to change the mass of the bodies in relation to each other, before we solve for it, we have to do it in the middle of the sim.
+This...
+We could do other things like reduce the amount of rotation the body's got or change the normal of the collision.
+Since we're running in the middle of the simulation though, that limits how much stuff we can actually do.
+If we allow ourselves to set the position of the bodies or change their velocities, we've already solved for our contact, so that's going to just invalidate that.
+And if we allow things like adding or removing bodies, that may cause us to crash, as we've just totally trashed our sim.
+so we basically don't allow any user code it's a very fixed set of operations that happen in here and they all happen right in the middle of the sim For anyone who is also using Havoc New Physics like us, this is running in the post-collide stage against the predictive manifold, so it's actually happening before the collisions happen.
+If you're not using Havoc New Physics, you can still do this, you just need to make sure it is happening in your sim and operating before you do any kind of solving.
+You may think that, oh, if I want to ignore a contact, I can just set the body's velocity back to what it was before.
+and it's like it never hit it.
+But the problem is you may hit that body into another body that causes a chain reaction that you're never going to be able to correct for.
+So this has to happen in the middle of the sim.
+The other phase is after the sim, outside of the sim.
+So this is where we react and start doing more flexible operations.
+We can do things like spawning effects, we can play sounds, we can do damage, we can add and remove bodies, we can...
+change the velocity if we want and simulate bounces or knock away really the sky's the limit so we had a like base virtual class in our response that other engineers could hook into for their own systems and our gameplay engineers use this to make it so that when you rammed into other vehicles it would both apply damage and send it flying in a comical arc and that way you can get this feeling of just ramming your enemies away uh... this phase ran in the against the actual impulses that were applied or clipped as they were in Havoc New Physics and if you're not using Havoc New Physics again as long as it's outside of the sim you're safe to go, you can kind of store off whatever happened and then apply it later apply these kind of flexible responses later there's one other part about how we handle the priority and layering of rules in the two phases.
+So, in the first phase, since we're only operating local to any kind of contact point, we don't want any outside influences.
+we took the best match, the highest priority match per contact, and this is different than what we did in the second phase.
+Since the second phase can do things like apply damage and play effects, if we have 10 contact points between two bodies, we don't want to apply 10 times the damage, we only want to apply one.
+So we found the best match between two bodies and then applied just one response per the two bodies.
+We would find all the ones that match the best rule, average them together to get them like a location and an orientation and apply the rule there.
+This little technical detail that was kind of confusing, but I think it's an important thing to call out.
+So now that we have this system in place, the first thing we wanted to do as engineers was make a set of rules and a global scope that would make sure that we could solve the problems that we were having in our early prototypes of losing control when you hit walls.
+And then by setting these rules up at the global scope at a low priority, then other people could essentially layer behaviors on top of these rules and then get more interesting behavior.
+So what you're seeing here is the difference between our collision with and without the rules applied.
+On the left with the rules you'll see basically we're not allowing it to rotate, we're not allowing it to get up the wall.
+And we may play a little animation effect of it jiggling when it hits, but that's just a little bit of extra flavor based on the speed and how we hit the wall.
+this was, is a much better response than, even though that's really awesome, the way we get air.
+We care a lot more about control than awesome, awesome tricks.
+So now that that's in place, we can start building more interesting behavior.
+One example of that is how we handle our destructibles and the vehicles colliding with our destructibles.
+So what we essentially wanted is, if our vehicle hits a destructible at a low speed, nothing happens.
+We just kind of either won't rotate against it, we won't push it.
+if it's fixed, but if we come back at it at a higher speed, we're gonna apply damage to it and send it, break it apart and send the pieces of debris flying and push it around, it's gonna look awesome.
+But we only want that to happen if we're traveling fast enough.
+So let's walk through how we set up this rule.
+So, first of all, we need to make sure that this is only ever applying when we are hitting destructibles.
+And that's easy to do with the scope.
+We can essentially add this rule to our base archetype of destructibles, and then, since all of our destructibles inherit from that, they will also inherit the rule.
+and this rule will only ever run on our destructibles.
+Next, we need to deal with that whole confusing bidirectionality thing.
+We need to figure out which body is which that we apply the response in the proper order.
+Usually when we're doing things like applying an action to another body, as a matter of standard, we said that the source was the person doing the action, the target was the one receiving the action.
+So in this case, the source should be the vehicle and the target should be the destructible.
+So all we really have to say is, hey, the source is the vehicle, yes.
+Now, if we didn't do that and we had a destructible flying at us, it's very possible that it may apply damage to us, and that would be very bad.
+So that's kind of what I mean by the bidirectionality.
+The only other thing we have to worry about is our speed.
+So we can just say, hey, is the source traveling at least 20% of its max speed?
+Once that is true, this rule will match, and if its priority is higher than the global rules, it's going to be applied.
+All the other criteria.
+for the collision are set up in such a way that you don't need to touch them if you don't care about them.
+They're going to match by default.
+So you're only really honing in on the parts of the collision you care about because there's a lot of criteria and that just makes it a lot easier and faster to set it up.
+Then all we have to do is apply our reaction.
+For our source, we want to ignore the collision entirely.
+This happens in the phase one that I mentioned before and we are going to pass straight through as if it was never there.
+our target is going to apply damage which will break it apart and send debris flying.
+An important note is the when these rule when the phases are applied is hidden from the user that's just like a technical detail they never had to deal with it they just had a single response and then we'd make sure that we applied the right responses at the right times.
+So this system as a whole it was a lot more complex than ultimately we kind of wanted.
+we were hoping that we would have like layering of rules would make simple rules that would you know stack together and then we'd have this nice complex behavior but since our rules were defined at different scopes in different places all over the place it really was more of a nightmare of trying to like organize them and keep them consistently prioritized against each other and we had to set up like just kind of keep an eye on that, make sure that one designer wasn't setting some number that would stomp on somebody else's rule and debugging it and dealing with a lot of context in the system it was more complex than I wanted if maybe if we started it in the middle of the development, if you want to do something like this, it's great to start it as early as possible so you have as much time to kind of iterate on it.
+But I don't want the complexity to necessarily scare you away.
+The flexibility that we got out of it was amazing.
+When we were closing out a project, if QA reported a bug in some particular part of a map, we can go to the entity that was causing the collision problem, add a rule to it, fix the bug, and know that we weren't going to break something somewhere else in some other map or somewhere else in that map.
+And if you've ever been in crunch trying to ship something and need to put in a hack, it is amazing to know that your hack isn't going to affect anything else.
+And it really drove a lot of fun iteration from our content creators, both design and artists and engineers, really were able to explore the fun of collisions with our vehicles and make it more than just something that happens, and instead turn it into an exciting experience that makes you want to crash into things.
+So, as fun as collision response is, I want to move on to something a little bit more fun and wrap up with our predictive landing system.
+So, as you've seen in a lot of videos, we like our vehicles getting air.
+Like the first time we had a prototype, the first thing I did was put down a ramp and hit it.
+It's fun to just go soaring through the air.
+But we knew that we needed our vehicles to properly land on the wheels.
+if it didn't you wouldn't have control and it just wouldn't be fun so we decided we're gonna make a system that's gonna make us always land on our wheels simple enough and then we can start doing flips and tricks and stuff in the air and get this awesome feeling and still know that everything will be fine when we land so how do we do this well let's walk through it This is what will happen when we don't have a predictive landing system.
+Our vehicle is going to hit a ramp, get some air, and then kind of do a partial spin and crash into its nose and that's bad and we don't want that.
+So we need to fix that.
+What we do is the moment we detect that our vehicle is going to get air...
+we take a pre-computed convex hull that includes the chassis and the wheels and orient it along the velocity that we're traveling and the up axis, world up, and then we cast it along a ballistic trajectory to figure out when and where we're gonna land.
+Now that we have that information, we can simulate what our vehicle would do based on its initial orientation and its angular velocity and multiply it by the time it's gonna take us to land to figure out what our uncorrected velocity would be.
+Then.
+We can just take the difference between that orientation and our ideal landing orientation that we can calculate just from the collision normal and our velocity, and figure out what correction we need to apply.
+If we apply that correction over time in the air, in theory, we're going to get a result much more like this.
+And everything is great.
+It's not that simple.
+uh...
+so and that's not even that simple anyways uh...
+so the when you're dealing with rigid body physics the angular velocity is stored as a single axis that you rotate around and multiplied by the speed that you rotate around it In order to do this kind of correction over time and incorporate flips and twists and stuff, you actually have to rotate the axis around which you're rotating over time, which is a process called precession, and is really, really, really hard to solve.
+It's like a higher order equation, and I tried, and I failed, and I had to move on.
+So we had to find a way of simplifying this slash cheating horribly in order to make this work.
+Here's how we cheated.
+The moment our vehicle gets air, what we're going to do is take its orientation right there, and then do the cast, like I mentioned before, and figure out where the orientation we want to be at when we land.
+We can pick an axis around which we can rotate from this orientation.
+Is that showing up?
+That's not really showing up.
+There's a little arrow there.
+We take the difference between this orientation and our landing orientation, get an axis we can spin around that will make us get to that orientation.
+and then we take our angular speed here, multiply it by the amount of time it's gonna take us to land, and then round that to the nearest full revolution.
+If you spin a full revolution around an axis, you wind up right where you are again.
+So then all we have to do is apply the difference between this orientation and our landing orientation as an angle, add that to the full amount of revolutions, and we get a result that looks something like this, where we're spinning around a single axis over time, getting a lot of cool motion, But you don't really know that it's just that single axis.
+And the part that's important to note is we could totally change the axis around which we spin by doing this process.
+Like our angular velocity could change drastically at that one point.
+But the process of getting air is chaotic enough that your eye doesn't necessarily catch that.
+And we hide the fact that we're doing this by that process.
+Now, if we weren't on a ballistic trajectory, or we allowed any kind of input to change when we were going to land.
+and we change angular velocity in the middle of the air, it's very obvious and it looks really bad.
+But at that one moment of getting air, our brains can't really see it, the change, and we hide that, and then this much simpler approach works perfectly fine and we ship with it and I absolutely love it.
+And so with that, that wraps up our technical deep dive.
+Hopefully this has shown you some of the insight on the complexities that we were dealing with with these systems and might help you avoid the pitfalls that we hit while implementing them and also helps you expose physics to your team as a whole so that everyone can really find the fun in physics.
+Absolutely. Also, I want to mention again how much these kind of pillars helped us.
+And it was really a changing point for our team when we started sort of honing in on these rules. And I think it helped us make much better decisions. Hopefully these are helpful to you, but I really think that for your own project and your own goals, you need to sort of find your own and really define for your team what is important and what isn't.
+Also, I think we wanted to kind of just mention here at the end that if you are like us at a point where you're sort of on the fence between whether or not you should introduce some of the complexities of physically accurate simulation, I think after spending a few years doing this and working with a lot, I think we can wholeheartedly say you should.
+It's difficult at times, but it's a process with physics that it can be controlled.
+It's not like you just have to give up control or give up design.
+It's really something that if you take the time and the effort that you can manage and that you can expose out to your designers and you can work together with them to really, I think, bring a ton to your game.
+And I'm really, really happy that we ended up doing this.
+So I think that wraps it up for us.
+Thank you.
+Bye, guys.
+I think there is a microphone set up if anyone has any questions.
+We have about five minutes, so we're right on track.
+Hello. Thanks guys for the awesome talk. It was really interesting.
+So my question is can you share a little bit about the numbers, how many of physics programmers were there on the project, and how many content designers, and maybe how many vehicles were there in the end? Thank you.
+So the question was how many physics programmers we had and how many people on the team.
+It varied throughout the project.
+I was very happy when I got to the point where I could have one engineer focus on sea and one focus on air and one, I focused on land myself so that we could all sort of take ownership of what was fun and really.
+uh... work with the designers on that as the engineers um...
+patrick helped us out uh... with a lot of the physics implementation uh... but even he was not on our team full-time uh... this is kind of an advisory role at times telling yan what to do and then making yan do it which is the greatest thing in the world And then I made sure that I at least had my desk next to his.
+So if he wasn't officially on my team, I could at least pull him over and say, I'm really dumb and you need to help me with this.
+What was the second part of your question?
+Sorry.
+So how many vehicles you had in the end?
+We had 20 vehicles.
+We had 10 land vehicles and maybe five or six each.
+Yeah, 20 total.
+A couple questions. One clarification, you said the forces are applied through the center of mass of the vehicle.
+That's just for like the linear portion of like the accelerations, I assume not like the suspension spring?
+The suspension was applied at the point that it connected to the chassis to apply torque, but the, yes.
+Okay, cool. And then so, I mean, so then how did you actually expose like the turning rates and things like that if the wheels weren't actually applying torque?
+So it was, remember how we had those velocity curves?
+We used them again, essentially, to accelerate our angular velocity over time.
+And then they could define a turning radius, I believe, is what it was.
+And it would accelerate to the maximum turning radius to get there.
+I guess one third question, do you have anything that's like a tank or something that turns in place or is it all just forward sort of?
+Actually the water vehicles tend to sort of turn around the center and some of the other vehicles, like especially when we had drifting, we had to change the point around which we turned.
+So we had the flexibility within our turning to...
+either choose to turn around the center, or we could offset that and pivot around something else, which that kind of drifting and getting that to feel right and sort of sliding that pivot around is non-trivial.
+Our initial implementation allowed you to actually define the rotation on all of the wheels, so we could actually make the back wheels counter-turn and do that kind of turn in place.
+But that was complexity that we felt, in the end, was not as necessary.
+Yeah, I think the doing just the turning angle at first with the wheels I think is just unintuitive and then switching to a turning radius I think really made a lot more sense to people.
+Good stuff. I think I enjoy playing this stuff as much as my kids do, so we appreciate it.
+Really quick question, kind of regarding the complexity or management of complexity, even after you kind of introduced scope and layers.
+I was curious if, when it gets down to like the collision map in general, toward the end of the project, with all the sort of accumulation of stuff that goes into it, does it still become kind of a data-driven design debugging problem, or does it land back on the engineers at that point?
+Almost all of the debugging, when rules were not being applied right, fell on my lap.
+The vehicles travel very, very fast and generated lots of manifolds.
+and we thankfully had the Havok Visual Debugger to kind of show us all these points and record it and then everyone would just send me a recording and I'd have to unwind exactly what was going wrong from that.
+There was a lot of information presented there and it was hard to present all of this stuff and enough information to actually reverse engineer what was happening.
+Um, the actual, so figuring out which rules were applied in that regard.
+or when they weren't applied properly was up to me.
+I don't think there was too much, there was a few problems about rules not being understood from design.
+Yeah, I mean, I think that there's definitely a management that we had to see that was not technical.
+It's just sort of procedural, almost.
+Like, you have to just make sure that the team understands what they're changing, and we're reviewing changes to all of it as we go through it.
+I actually think.
+It felt to us like we were very successful towards the end of the project in that we had made these decisions early on to try to stop stepping on each other's toes and having some person's fix break something else.
+And we had put in a ton of effort early on for that, and I think we really got the benefits out of that when we went to close out the project and.
+There was definitely part of me that was terrified that things were going to come apart at the seams right at the end and it was going to be really hard to fix things, but honestly we were sort of shocked at how smoothly it went for our team right at the end and like the independent parameters thing.
+it's a life saver.
+Being able to put the rule right in the entity meant that they didn't have to deal so much with layering, they just crank up the priority and put it right there.
+And if it wasn't firing, it was fairly obvious.
+So those kind of debugging things were pretty straightforward.
+And I think that's time.
+All right, cool, thank you so much, guys.
+We'll be in the wrap-up room if anyone wants.

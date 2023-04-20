@@ -1,0 +1,203 @@
+Hello, I'm Ashton Mason.
+I'm a software engineer in the Frostbite team at Electronic Arts.
+And today I'm going to show you our Quad Mesh Simplification technology.
+So we developed the technology in collaboration with BioWare beginning in early 2012.
+And this is a hand authored set of LODs or levels of detail, which are authored by a BioWare artist.
+And you can see that the the LODs have a very regular edge flow and a good quad topology, even though they're quite low detail.
+And at the time when Bioware asked us to develop this tool, they were always hand authoring their LODs.
+And this is why, because they kind of want this regular topology in their LODs, as I'll show you.
+So this is what you would get if you would feed a quad mesh model into LOD technology of the time which was triangle based so it would triangulate the mesh and would produce geometrically a very good result but with a completely different triangle based topology.
+So here we can see the impact of that. On the left we've got a LOD level of detail generated with triangles, sorry quads, and on the right we've got the same budget but with quads triangles.
+And you can see that the quad version has better flexing where the character is skinned and is deforming under skinning, whereas the triangulated version has some strange artifacts even in the face where the triangulation is not matching the natural flow of the body and the places where it needs to flex.
+So here I've drawn the edges on the model so you can see hopefully what I mean.
+that the quad mesh has edges in the right places using what are called rigging rules, where artists are told to put in rings of edges in the places where the mesh is going to flex, particularly.
+Whereas the triangulated mesh, of course, just has random triangles in those areas, so the flexing is kind of a bit haphazard.
+But there's another side to this as well, which is that very often the LOD tools are not perfect, so artists have to hand author these models or tweak them a little bit after they've been generated.
+And when they do that, the model on the left is a much better starting point because it looks like the kind of thing the artists would have produced themselves.
+So let's get started. In the talk, I'm going to be covering three different aspects, and then I'll show you some results. The aspects are requirements that Bioware gave us for this LOD generation for character models for quad meshes. So the first one is kind of to handle topology. They wanted the generated LODs to preserve this edge flow, this well-structured quad topology which character models did and which their hand-authored LODs had. So you could kind of say they wanted the LODs to look like hand-authored models, which at the time was a big ask. Then they also wanted the ability to hand-paint priorities onto the models, for example in Maya, and for those priorities to indicate that certain areas should be preserved in more detail than other areas.
+And the reason they wanted this was because they suspected that as brilliant as our tool would be, they would probably still have to go in and hand-paint some areas to kind of keep detail where they needed it.
+And then the third requirement was to preserve symmetry on models.
+So very often character models are symmetric topologically.
+So in other words, they have the same edge structure, the same topology on the left and right, just mirrored.
+And so they wanted to retain that.
+So topology.
+a sort of well-authored head model with a good quad structure.
+So how would we go about preserving the topology in the LODs?
+Like, recall that at the time, as I say, triangulation— sorry, simplification tools were triangulation-based and triangle-based.
+So they first started off by triangulating the mesh on the left and then generated LODs on the right.
+And this is the kind of thing we would have generated at the time, back in 2012.
+And as I said before, this is great from a geometry point of view, but doesn't have the right topology.
+But how does that process actually work?
+Like all other tools, pretty much, our tool for triangle mesh simplification works by collapsing edges.
+So here on the left, we're collapsing the edge in white to a vertex, which is located at a collapse point in red, and in the process, removes two triangles in orange.
+So by removing, by collapsing an edge to a vertex, you get to remove, in general, two triangles.
+And this is all done using something called the quadric.
+error metric, which is a thing proposed by Garland and Heckbert way back when, which basically tells you where to put the collapse point to best approximate the original geometry with only a vertex instead of an edge, and what the cost is of doing that, like a kind of cost metric which tells you how much the geometry will suffer in that area by doing so.
+So here's how that is used to simplify meshes.
+This is kind of an animation showing a large number of edge collapses in succession.
+and each edge collapse removes two triangles.
+And there's basically a big priority queue, which has all the available edge collapse candidates sorted by cost metric, the Garland and Heckman cost metric, so that you favor the collapses which impact the mesh least.
+So you remove two triangles for the cheapest impact to the mesh.
+And that standard practice is exactly how our simplifier worked.
+And so we kind of knew that we needed something similar, but for quad meshes.
+We read a bunch of papers and we found this paper by Daniels et al. from SIGGRAPH Asia in 2009, I think, called Quadrilateral Mesh Simplification, promisingly.
+And it proposes something called polychord collapse, which is kind of edge collapse on steroids for quad meshes.
+So here's an example of what that paper does.
+We've got a quad strip here in this quad mesh, like a sequence of adjacent quads separated by edges.
+And we've collapsed that quad strip down to just a sequence of edges instead, so in the process we've removed all of those quads in orange.
+And the way it's done is by collapsing edges cunningly, so it's like a bunch of edge collapses done in tandem, atomically.
+Each edge collapse can be done using a weld operator that operates by replacing v0 or v1 with just a v0 and v2 or v3 with just a v2, and then moving the retained vertices v0 and v2 to the computed collapse point locations, updating all the neighboring faces, calculating interpolated UVs and normals, etc, etc, to basically weld the mesh at that point. And in the process, degenerate faces, faces like the orange ones that degenerate away to edges are removed, and Bob's your uncle simplified mesh.
+But it's not quite that simple because quad strips, and therefore polychords, I should say polychords are just sets of edges, so in the previous example the polychord is the set of all the edges between all the quad faces that are all being collapsed together.
+So polychords, aka quad strips in this case, can cross each other like they are here, or can cross themselves, or self-intersect. So where that happens, things are a bit more complicated, because it's no longer just a simple single collapse of a single edge. Instead you've got four edges here that are all coincident, they're all touching, and all of those touching edges get collapsed to just a single vertex. And this is something that Daniels et al do.
+So you can imagine that as a sort of generalized weld operator.
+Well, firstly, a generalized edge collapse, which is able to collapse more than one edge as long as they're touching.
+And then also it can be implemented with a generalized weld operator again, which welds by replacing any occurrence of V0, V1, V2, or V3 with just V0, and updating all the neighboring faces.
+Again, it's not that simple because Single polychords can be arbitrarily long and in particular can snake around the mesh many times like this single polychord shown in orange on this asteroid.
+So Daniels et al report that polychord collapse in their experience is not enough to handle meshes like that with really long polychords and so they introduce a what's called a quad collapse operator which is different and not reducible to edge collapse.
+and this operates by collapsing a quad by merging two of its opposite vertices, in this case v0 and v1, to just v0.
+And so again you can do that with a weld operator but it's not an edge collapse, it's collapsing a quad to two edges.
+But in the process it untangles the polychord because where previously it crossed itself instead it meets itself.
+So Daniel Zadal reckoned that by mixing quad collapse and polychord collapse you can...
+untangle the mesh when you need to, and then get back to doing some polychord collapses.
+But we actually found we don't need quad collapse, and I'm not quite sure why, but part of the reason might be because our weld operator is quite robustly implemented, and we do everything with the weld operator.
+But then part of it might also be because we skirt the issue by not only limiting ourselves to collapsing whole polychords.
+We can collapse parts of polychords.
+which means we don't actually have to collapse this entire polychord, we can just go and do part of it.
+So yeah.
+The other thing to say is that edge collapse is just a special case of polychord collapse, where the polychord only has one edge in the set.
+So if you have a triangle mesh like this, there are no quads, so there are no quad strips, and instead each polychord, which is just a single edge, terminates at two incident triangles.
+So it kind of means that if you can do polychord collapse, you can do edge collapse, because it's just a simple special case of it.
+So we decently implemented the polychord collapse part of Daniel Zadal, and this is the kind of result you get. So it looks pretty good in that we've ticked the topology preservation box, because the edge flow of the model, the sort of flow of edges around the model, looks like an artist authored it, approximately.
+But the problem with it, if you like, is that our hands are tied at this point, because at this point we were only collapsing entire polychords, or nothing, like doneals at all.
+And that limits what you can do, because single polychords can go through completely different parts of the mesh, from the face to the back of the head and across to the ear.
+So if you want to collapse part of the back of the head, it forces you to collapse the part of the ear and the face which you might want to retain.
+So your ability to locally refine the mesh with different detail levels in different areas is limited.
+So for that reason, we started to look at collapsing parts of polychords, which we call sub-polychords.
+And that was also hinted to us by the second requirement, which was priority painting.
+So priority painting, again, is where an artist comes in and paints part of the mesh, saying they'd like that part to be retained at the expense of other areas.
+So here's the kind of result we wanted to get from that.
+These two LODs are both at the same budget, but on the right we've painted the face like I showed in the previous slide.
+And so we've magically retained more detail in the face.
+But you can see that doing that forces us to change the topology because we've effectively had to collapse only parts of these long polychords, stopping at the part where the face requires more detail.
+and in the process we introduce usually a triangle and a singular vertex.
+So that also hinted to us that we needed to collapse subpolychords rather than polychords.
+Here's just a little illustration of a subpolychord collapse.
+So we've got a polychord which extends down into the face, and we only want to collapse the first five edges as little edge collapses.
+And in doing so, here's the result.
+We end up introducing a triangle and a singular vertex.
+And that's it.
+Thank you. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 payoff for changing the topology is being able to vary the detail level locally.
+But that does present us with a problem because whereas there's only a limited number of polychords in the mesh, there's a very large number of potential sub-polychords. There's a lot of ways to select only some of the edges in a polychord and collapse just those.
+There's a number of simplifications that make that feasible. One is to only consider contiguous subpolychords, i.e. adjacent edges and not just random edges in the polychord.
+And the justification for that is that you can always go and do other edges later if you want to.
+The next is that we don't do a sort of exhaustive search of every possible contiguous subpolychord.
+Instead, we do a greedy search where we first find a short sequence, in this case three edges, that is the cheapest part of the polychord using a linear search.
+And then we then incrementally improve that by adding or removing an edge at either end, as long as that improves the value of the result, which is the ratio of the benefits, the number of triangles removed by that collapse, to the cost, which is just the sum of the costs of the edge collapses.
+And so we hope that that'll sort of hill-climb to a good solution.
+But we also, as a safeguard, always also consider the solution of just collapsing the entire polychord, because quite often that's the right answer.
+And you might not reach that by hill climbing.
+Another thing we do to speed things up is we maintain a data structure, which represents the partitioning of the sub polychord edges into islands of connected edges, because recall each island of connected edges collapses to a vertex in a sort of generalized multi-edge collapse.
+So.
+Typically, when we're doing the search for the best subpolychord, we end up testing successive subpolychords that differ by only one edge, either added or removed.
+So it makes a lot of sense to remember a lot of the information that you computed for the previous subpolychord, which was only different by one edge.
+So that's what we're doing here.
+And then when we add an edge, we have to update that data structure.
+But very often the new edge is not touching any existing edges, so it creates a new single-edge island.
+So that, the common case, is pretty cheap.
+And then occasionally an edge comes in which has the effect of merging two islands or something like that, because it's incident to two of the edges already in there.
+So that update is more complicated, but it's still worth doing because it avoids repeating a lot of calculations from one polychord candidate to the next.
+So here's just a quick example of that in the wild.
+So on the left, we've got a subpolychord in orange that we've been building with all its edges that we've selected in white.
+And we're going to select this edge here and test that candidate.
+And when we do, that edge is incident to existing, to two existing edges, two existing islands.
+So they get merged into a single island of three edges.
+And the way you can tell that that's happened is because there's a single collapse point.
+computed for all three edges, whereas previously these two edges had separate class points.
+Another thing we do is, whenever we collapse a polychord, we have to update all the candidates for the polychords whose geometry or topology is affected by that welding of the mesh.
+So there's kind of a neighborhood of polychords that are no longer valid because their cost will have changed, and so we have to remove them from the priority queue.
+and recompute their costs and re-add them.
+And we do that incrementally because usually the area that we have to update is smaller than all of the mesh.
+In bad cases it can be quite expensive, like this is approaching a third of the mesh, because the mesh is very regular so the polychords are quite long.
+But usually it's a lot cheaper than that.
+So here's the result when we have sub-polychord collapse.
+And you can see...
+It's an improvement over the previous results we had, in that now we're able to choose to alter the topology of the mesh locally in order to keep detail at a reasonable level and to vary the detail across the mesh, depending where we want it.
+And in particular, this gives us the ability to do priority painting.
+But an issue with this result, actually, while we're here, is that it's not symmetric.
+You can see that the left and right sides of the face are different in topology.
+And that kind of leads into the third requirement, which is that Bioware wanted us to keep the symmetry of symmetric meshes intact.
+And that's no small feat, because a lot of meshes, character meshes, are kind of only partly symmetric.
+Like this one is symmetric in some areas, but not others.
+And we also made life a little more difficult for ourselves than we maybe needed to, in that we wanted priority painting to be independent and orthogonal to symmetry.
+So...
+you could choose to paint only half the face and have that part preserved even though that conflicts with the desire to preserve symmetry. So in that sense our symmetry preservation is kind of soft in that we don't mandate that you always have to do exactly the same on the left and the right. Instead we have a cost metric term which strongly favors collapses that treats edges that collapse both of a set of edges if they are symmetric or doesn't collapse them.
+So that's useful in that it buys us a lot of flexibility but it also ties into the fact that meshes are not usually completely symmetric, so a method which mandated doing exactly the same to the left and the right would not be feasible, actually. So the soft approach seemed the right way to go, but it does complexify things a bit. So we developed an algorithm for automatically identifying bilateral symmetry in meshes, and I won't go into the details, but basically it does a search of the graph of the edges in the mesh, looking for parts of the graph that are...
+matching topologically. And so it's able to find symmetries within meshes that are only partly symmetric, and it's also able to find symmetries between different parts of the mesh.
+So in this example, it's the common case we find entire polychords which exactly match.
+But as I'm trying to show here, this is actually more complicated than it seems, because the actual symmetry map that we find is per edge. So we find that an individual edge is symmetric to another individual edge.
+And in the case where entire polychords are found to be symmetric, that's because there's a one-to-one symmetry relationship between their edges.
+But we don't actually find that polychords themselves are symmetric.
+Rather, it's all about edges.
+As an aside, we also found that it's important to handle symmetric pairs of polychords atomically.
+So rather than collapse the left polychord and then the right polychord immediately afterwards.
+it's actually necessary to collapse both of them together as one generalized set of edges.
+And the reason for that is because you, in the cases where they're insolent like this, you only get to know about the whole information of that collapse if you have both polychords available.
+So given the fact that most of the time we expect to find pairs of polychords that are kind of exactly symmetric, we needed a method to handle that and to find the best pair of subpolychords to collapse as our collapse candidate for that pair of polychords.
+So we just generalized our previous algorithm which was for a single polychord by just doing the obvious thing and having, finding first a pair of seed polychords, seed subpolychords of a fixed length, the cheapest area in each of the polychords, and then growing those seed subpolychords incrementally in the same way by adding or removing an edge at either end.
+And we can do that to both polychords or just the one, whichever produces the best value.
+And then again, we also consider the solution of just collapsing the entire pair, because that's often a good idea.
+But this rosy picture of exactly matching paired polychords isn't quite true, as I say, because we are dealing with meshes which are partially symmetric.
+and because our symmetry therefore has to be per edge, not per polychord, you can get situations arising, particularly after a few collapses, where the edge symmetries effectively make multiple polychords related to each other, rather than just pairs.
+And in this case, for example, there are polychords on the obvious left and right, but there are other polychords involved, which have become kind of entangled with them by other collapses.
+And so...
+In general you can have what we call flux of polychords where they're all, any number of polychords can be related by these per-edge symmetry links.
+So in this case you've got a polychord on the left which is related to two other polychords on the right.
+And you kind of imagine that actually those two other polychords may have been one polychord but something else has happened.
+Some part of that polychord has been collapsed.
+So that now there are three polychords involved.
+we needed a way to handle this.
+So the way we handle this is by finding the parts of the polychords which are most symmetric, and from that deducing, finding pairs of polychords in the flock which are most symmetric.
+Because we shouldn't forget that we're kind of expecting the mesh to be basically bilaterally symmetric, if it is symmetric.
+And so we expect to find matching left and right pairs or an approximation to that.
+So rather than.
+coming up with an algorithm to find the best arbitrary way to collapse any set of edges from a flock of polychords, which would be very expensive.
+Instead, we go and look for these pairs, and we then do the sort of pairwise seed sub-polychord greedy evaluation thing to each of those pairs.
+And then we also consider each polychord in the flock individually using the non-paired version of that algorithm.
+So we're effectively hedging our bets and imagining that the mesh might be either not symmetric, in which case we're going to have single polychors, or symmetric, in which case we're going to find good pairs.
+So when we've got all of that in place, we now have achieved all three of the requirements, and in particular we can preserve topology. We can also support priority painting.
+by varying the topology when we need to, to locally adapt detail levels.
+And we can preserve symmetry, all kind of at the same time, with soft sliders that choose how much topology is important, how much symmetry is important, and how much priority painting is important.
+And a number of other things as well, like we also have metrics and cost terms that try to preserve detail where it's needed for skimming, and where it's needed for silhouette preservation and things like that.
+So lastly, I'm just going to rush through some results quickly.
+So here we're comparing results from our tool at the top row with results from the artist at the bottom row.
+I say results from the artist authored models in the bottom row.
+And you can see we geometrically look very similar to the artist models.
+Where they do differ, it's that the artist has done things that we don't know about.
+For example, making the hands into mittens rather than keeping the fingers.
+Here we're comparing LLOYD3, the tool on the left and the artist-authored model on the right.
+And the idea here is you can kind of see, ignoring things like the mitten fingers, that we match pretty well and our match looks quite a lot like it was authored by an artist, which is the idea.
+Here we're doing a kind of switch test where we vary the distance to the LLOYDs and change between the LLOYDs according to the distance.
+And what we're looking for is popping, where we switch between the different LLOYDs.
+and you can see the difference between them when they change.
+So you'll notice that the artist-authored model, which is on the right, pops more than the one on the left, which is generated with a tool.
+And I think that's because the artist-authored model effectively is not just a distilled version of the original model, but rather is remodeled slightly.
+So you can see slight differences.
+Here's another Dragon Age model.
+And again, we're comparing the tool result at the top with the artist-author models at the bottom.
+And you can see we're pretty similar.
+Here's a close-up of LOD 3 again.
+And again, pretty similar.
+The big difference is that the artist has kind of done some broad simplifications of the silhouette, the big shapes at the top.
+The other aspect is that the artist has retained detail in the tail, which is needed because the tail flexes when they move.
+the beast walks, and we haven't done that. We do have a cost term to try and do that, but we'd have to crank it up to get that kind of result.
+This is just checking symmetry, so the ability to preserve symmetry where the mesh is symmetric, and you can see we're getting the right sort of result. This is just the same thing for the GURM.
+And then finally, I thought I'd show you a non-character model, because we ended up using this tool not just for characters and not just for quad meshes, but also for triangle-based models and props and vehicles, et cetera, throughout EA.
+And pretty much every studio in EA uses this tool for all kinds of models.
+And here we're comparing the tool results at the top with a competitor called Simplygon, a third-party tool called Simplygon at the bottom.
+You can see for the same budgets we're producing pretty favorable results, I think.
+Here I'm comparing Simply Gone on the left with the tool in the middle and an artist result, artist-authored mesh on the right, and you can see that we kind of match the artist in the sense that we have a quad-based understanding of the model.
+which has allowed us to retain the broad features without being distracted by edges which are just there because of triangulation.
+And I think that's what's allowing us to produce this cleaner result.
+Anyway, thanks for watching.
+That's all from me and I hope you enjoyed the talk.
+Cheers.

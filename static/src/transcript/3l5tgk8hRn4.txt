@@ -1,0 +1,464 @@
+All right.
+A bit of housekeeping beforehand.
+Any mobile phones turn to silent, et cetera.
+And I think after this, everyone gets an email with some feedback.
+That'd be great if you fill it in, even if it's a complete disaster, which hopefully it won't be.
+So I'm Mike Malinowski and I'm a senior technical artist at Creative Assembly.
+I've been in the industry for about 11 years doing a mixture of rigging, tools and pipeline development.
+Previous companies have been Animal Logic, Creative Assembly at the minute, Guerrilla Games and Lionhead Studios.
+So at Creative Assembly, we can have anywhere between two and six projects all running in parallel at the same time.
+So finding the right time to pause and refactor or experiment with new ideas can be really challenging without causing potential knock-on effects to any of those projects, especially when many of those projects all share large chunks of a common tech art and tool code base.
+So ultimately, the takeaway of this talk is how we actively change the way we write our tools to create a environment and a pipeline that allows us to be a bit more forward-facing and to take more risks.
+The majority of the examples that I'll put forward use Maya and Python, but the concepts are certainly not limited to either of those.
+So every solution is ultimately born of a problem, and anyone that's wrote any tools or even just scripts might familiarize yourself with this scenario where if we've been given a tool brief or we've just got an idea for a script that might help someone.
+We sit down and we start coding.
+And if we're writing something for someone else, we get a good idea of what it is they're after, and we start putting pen to paper, right?
+And we start writing some code.
+And at that point in time, we're probably the only ones using it as we're developing it.
+So our code is pretty clean, it's pretty tight, and it's relatively neat, hopefully.
+And we give our tools out to a couple of users, we get some beta testing going on, and inevitably they want changes because we've maybe misinterpreted something or what they thought they want isn't what they actually want.
+And so we go back into our code and we start altering that based on that feedback.
+And the remit of the tool doesn't really change, but we start to jiggle our code around underneath and time is not always on our side, right?
+So the code becomes a little bit more unclean.
+We release it out to the team, and we start to get more and more users using our tools.
+And as more users use it, and as our projects continue to grow.
+So does the requirements of the tool.
+People ask for extra pieces of functionality, and we start bolting on more and more code as the projects grow.
+And if we're really lucky, or unlucky, then multiple projects pick up our tool.
+And everyone, whilst they work in very similar ways, they all have slightly different requirements, or additional feature requests, and so we bolt on more and more features, or maybe we expose different pieces of our libraries to other tools in a project-specific pipeline.
+And what this tends to lead to is this scenario whereby you have this monolithic, horrible piece of code that no one really knows which bits are used by which project, if any at all.
+And it ultimately leads to a point where no one wants to touch it because no one really knows what the side effects will be of making any changes to those bits of code.
+So when we get to that point where we can breathe and we can look forward and we have a pause in production where we could potentially experiment with some new ideas, we don't.
+We look back and we say there's no way I'm going through another production cycle with that tool there because it's just a nightmare.
+and the cost of refactoring it is so high that we end up just chucking it in the bin, right?
+We start again.
+We take everything we've learned from that whole process, but ultimately we start the process over and we clean slate.
+And that I see a lot, right?
+It's depressing.
+I see a lot in my own tools and I look at it and I die inside when I see it.
+But I think there's a better way.
+A good example of this scenario are exporters.
+So let's have a quick look at how this happens in a more realistic scenario.
+So here's some hypothetical export code, right?
+And imagine that we're right at the early beginnings of a project, and all we actually need to do is export some meshes and export some joints.
+So we've got a bit of code at the top that's literally looking for all the meshes in the scene.
+And maybe we're looking for...
+a specific attribute, and if it has this attribute, then we'll ask some process to export it out for us.
+And then we're doing pretty much the same thing at the bottom, but this time we're looking for joints, because all we need is meshes and skeletal data.
+But maybe our project's going reasonably well and we decide to implement cloth simulation.
+Maybe we're using something like Apex where we need to mark up and paint data on this geometry within Max or Maya.
+So we have to export that data out as well.
+And it kind of makes sense to put your cloth export logic in with your geometry export logic because you're always gonna export your cloth when you export your geometry.
+So in that goes.
+And then maybe we attend something like GDC, and we get really excited by the next best runtime rigging technology, and we come back and we update our exporter because we want to have a play with that.
+And maybe our runtime rigging information needs to look at geometry and skeletal information.
+So each little insertion here isn't particularly complex.
+Each line, like it's a couple of lines each.
+It's not heavy code, but it's interspersed across the whole of the exporter.
+And then perhaps in a couple of months' time, as we mature in our project and we realize this particular implementation isn't what we want, if someone else has gone in and added support for things like blend shapes, for LODs or ragdolls, trying to cherry-pick these pieces back out can be really challenging.
+And that ultimately leads to a scenario where you end up with an exporter full of legacy code where no one really knows which bits are used and which bits are not used.
+And no one wants to touch it.
+And every project, we write a whole new exporter over and over again.
+And it's this problem that we put forward a solution to.
+And for us, that solution is the implementation of a pretty well-established design pattern.
+And a design pattern can be thought of simply as an approach or a concept to code that can be used in many different situations.
+And there's a great website here which is worth having a look at.
+This has a whole myriad of different design patterns and it details them out and it has examples in Python and C Sharp and C++, so it's a really good resource.
+But ultimately for us, we're gonna look at a design pattern called the factory plugin pattern.
+But before we deep dive into what that pattern is, it's worth taking a moment and reflecting on the fact that as a discipline, tools and tech art stem from many different backgrounds, right?
+We have engineers who have a passion for things that are visual, and we have artists and animators who love automation, and we have tech art and tech animation that sits somewhere in the middle.
+And so we all come from very different backgrounds with very different knowledge.
+So before we look at how we implemented this pattern and what it actually gave us and some examples of where we use it, I think it's worth taking a moment and collectively getting a good understanding of what the pattern is.
+So the pattern itself is made up of three parts.
+You have something called a factory, something called an abstract, and something called plugins.
+Now, arguably, the most crucial part of all of these is the abstract, because that tends to define what it is we're trying to achieve.
+So that's where we'll start here.
+And an abstract is pretty much just a class, right?
+And when we tend to use classes, we do so so that we can write some functionality, and then maybe we subclass off that base class, and we add some more specific functionality, and we keep going on like that.
+An abstract isn't that dissimilar from the base class, assuming that the base class is the gray icon here.
+But an abstract has to follow three really strict rules.
+So we can never instance an abstract class directly.
+We can only ever inherit from one.
+And an abstract is kind of a skeleton of methods and arguments.
+It never contains any actual functionality within it.
+And when we subclass an abstract, we absolutely have to reimplement any abstract methods.
+And that gives us classes that look a lot like this, where they're structurally identical.
+And Python gives us a really nice module.
+That's the best thing about Python, right?
+There's always something already done for you.
+But there's a module called ABC, and that simply allows you to decorate your classes, decorate your methods, and it will enforce this whole paradigm.
+It won't allow you to break any of those rules.
+So it's a nice way of, if you go down this route, of enforcing that it's followed.
+But the fundamental part of this is ultimately we can start to interact with all of these classes in exactly the same way.
+And that brings us to the second part of the pattern, which is the plugins.
+And they are the green icons on this slide.
+We don't necessarily have to care or know what each plugin is doing under the hood because we know exactly how to call them and what we can expect from their returns.
+So that's our abstracts and our plugins.
+So the third part of the pattern is the factory.
+Now the responsibility of the factory is ultimately to find plugins.
+And this can be as simple as doing a walk over directories and Python files and inspecting them for implementations of our abstract.
+And the second part of that responsibility is to give us some way of accessing the plugins that they've found.
+The idea here is ultimately that the finding of plugins is completely dynamic.
+So we don't have to hard code import statements to every piece of functionality a tool might need to utilize.
+To put that into practice, we can start to have a piece of code that looks a bit like this, where given a factory, we can just ask for all the plugins that it has, and we can cycle over each plugin.
+We don't necessarily need to know what that plugin's doing, but we know how to call it.
+We know how to interact with it.
+It also means that we can scale very easily.
+To add some new functionality, we just drop a plugin into a location where our factory is searching.
+Now don't worry if that sounds a little bit fuzzy and conceptual because we're gonna have a look again at the exporter, but this time we're gonna re-implement it using this pattern, and then we'll see side by side what it actually looks like and what it gives us.
+So I said that the abstract pretty much defines what it is we're trying to achieve, so that's what we'll start with.
+So we have two methods in our abstract.
+We have a method called the viable method and we've got a method we've called an export method.
+So our export is pretty simple and straightforward.
+The idea behind the viable method is simply for this plugin to decide itself whether there's anything within the scene or the context that it can export.
+So if this was a cloth plugin, it might look to see whether there's any cloth.
+And the idea here is it's a fail-fast method, so it should get out as quickly as possible.
+The export method is then the method that's actually going to do the data wrangling, all the hard work.
+So that's our abstract.
+That's all an abstract is.
+It's kind of a completely empty structure.
+Next, we need a factory.
+Now, a factory is really, really generic, right?
+It's just a mechanism of searching for things, and it can literally be a class that cycles over directories, and any plugins that it finds, it holds a reference to and gives us access to them.
+And they're so generic that we wrote a little module we call plugged, and we now use that everywhere.
+And we just ask for a new factory.
+and we have to give it three things.
+So we have to give it the abstract so that it knows what to look for when it's searching for plugins.
+We also have to give it an identifying property so that it can differentiate between different plugins that it has a reference to.
+And then we just need to give it the locations where it should search for plugins.
+So that's our factory, and we have our abstract, so now we just need our plugins.
+So this is what a plugin could look like.
+And you'll probably notice that it's pretty much a copy-paste of our first exporter, at least the geometry part.
+The only difference is we've jiggled it around inside these two methods.
+And because we're doing some of the same things within both of those methods, we've just added a private method as well.
+But ultimately there's no magic, that's the key.
+We're doing the same stuff, we're just encapsulating the geometry so that it doesn't affect anything else.
+And we do the same thing for the skeletal plugin.
+The code is almost identical because it was identical in the last exporter.
+But we've got now two plugins.
+And they're never gonna cross-contaminate each other.
+So we can start to make drastic changes to how we export geometry, and we're never gonna affect how we're exporting skeletal information.
+We can never break our skeletal exporter even if we completely screw up our geometry exporter.
+In practice, that gives us something that looks like this, right?
+So we're in Maya, we have a mesh and we have a skeleton, and we can see that we've got some exportable attributes on there so that we know what should get picked up.
+And in our script editor, we import our factory.
+We're not importing plugins, we're not importing anything specific.
+We simply import our export factory.
+We then cycle over our factory, and for each plugin in that factory, we ask the plugin itself whether it's viable, whether there's anything in here it can export.
+And if there is, we ask it to do the export for us.
+Now, in this particular example in the output that's now disappeared, but there was an output for a cloth plugin, but there's no cloth in that scene.
+So that returned false on its viability, and we never even attempt to export the cloth.
+Now, there's a trade-off.
+and that's one of performance.
+If, for instance, we have 10, 15 different data types, it's entirely possible that we're doing the same or similar validation in each plugin, so time will keep increasing.
+But the gain of paying that cost is that we can start to really experiment with different export types without ever incurring the possibility of having to refactor code.
+We can extend and contract our exporter without causing lots of knock-on effects elsewhere.
+And that's simply because the factory is kind of blind to what's going on around it.
+It's simply pulling out plugins from directories.
+So to add the blend shape support, or to add the LOD support, we just drop a new Python file into a directory that understands how to export that information, and our exporter will pick it up.
+And we can harness Python's implementation of keyword arguments to great effect with this, to be able to be really specific at export time, whilst retaining a very generic export framework.
+So for those of you that might not be familiar with Python's keyword arguments, it's ultimately a mechanism that allows you to call a function with any amount of arguments or named arguments, without ever declaring them up front.
+So in this example, we're calling a function called export scene, and we're calling it with an argument of bones per vertex.
+But our export scene doesn't have an argument of bones per vertex.
+So that goes into the kwags argument for us, and that becomes a dictionary of key value pairs that we can utilize.
+This means the export scene method never really has to care what arguments are being passed to it.
+It can just blindly pass those arguments down to the viability and the export method of each plugin.
+Those plugins can then choose what they look at within those arguments.
+So our geometry plugin's probably not gonna look for a bones per vertex attribute, so it'll just ignore it.
+But our skeletal plugin might.
+So here it's looking for a bones per vertex attribute.
+If it finds it, then it'll use it.
+Otherwise, it'll default to four.
+And through this mechanism, we can get very specific export results without ever having to update the central core part of our exporter.
+So when we compare these two implementations of exporters, it's a bit like comparing these two images, where we could choose to have one big monolithic exporter with complex and ever-growing logic, which becomes hard to follow and manage.
+Or we can encapsulate each export data type and kind of have a one-dimensional flow of logic which is understandable, that allows us to contract and grow.
+And this ultimately promotes experimentation.
+As soon as you lower the risk factor, then people are a little bit more happy to dive in and try new things because the cost of doing it wrong is the cost of just removing a file out of a directory.
+It's not a big, massive refactor.
+What's interesting for us, when we started to understand what this pattern was, we realized we were kind of already using it in some informal ways.
+and we had a lot of code replication.
+So we have a node-based execution graph, we had an animation asset manager on Halo Wars 2, and a nice rich set of batching tools.
+And all of them used this pattern informally in a very ad hoc way to abstract some form of what they were doing, but each one had its own implementation.
+And once we realized that, that's when we sat and we wrote that module that was called Plugged.
+And as soon as we had a module, which was a generic factory class, the barrier of entry to using this pattern decreased dramatically.
+And it started to ripple across a lot of our tools.
+So we'll start to look at what tools that we've used them in and how we use them.
+So at CA we have a pretty rich feature rigging framework that's been used on a lot of projects for a lot of years and it's incredibly flexible and it allows for a massive amount of reuse and our riggers can churn out rigs really very quickly and they're incredibly reliable.
+So this is exemplified by this work here by David Vince.
+Thanks for watching!
+I love that work, he's an awesome animator.
+But it's frustratingly good.
+And I say frustratingly good because when the results are like that, it's really hard to justify change in a rigging framework.
+But ultimately, the rigging tool set that we were using had become quite unwieldy over time.
+So it took the approach of being very highly parameterized components.
+So we'd have a component, say an IK module and an FK module.
+and these would build based upon attributes on joint chains.
+So to give an idea of what a single IK module might be able to do, it would support these kinds of features.
+So it could be standard IK, it could be spline IK, and it could be any combination of these, so they're not exclusive.
+And when the order of operations is quite important in rigging, when it came to wanting to implement soft IK, what should have been a very simple and straightforward implementation actually became really high risk.
+Not because the implementation of SoftIK itself is challenging, but it's really hard to know whether you're gonna cause any possible knock-on effects to any other pieces of functionality.
+And when you've got six projects all using the exact same rigging framework, You can't afford to refactor the whole thing because you may have rigs that have been in production for three years or four years, and they have to be able to build to exactly the same description as when they were built their first time.
+And this ultimately led to a scenario where our riggers didn't really want to push, not because they didn't have the motivation, but they were scared of the risk.
+And it was around this time when we had a good grasp of our, of the design pattern, and we were starting to look at some of the talks by Richard Lyko at GDC 2014 about rigging on demand, and he's doing an awesome talk tomorrow on that, so I recommend that as well.
+And we had a tech animator called, we have a tech animator called Joe, who just put forward the idea, he's like, I just wanna build something, they're just joints, right?
+I just wanna build on top of maybe our controls or our objects, it shouldn't be this hard.
+And so that's kind of what we ended up doing.
+We're very invested in a reference rigging pipeline.
+it's just impossible to make an overnight switch to building rigs on demand and have them all local in our scenes when we've already got all of this pipeline in place and they're being used across multiple projects.
+So we took a middle ground and we figured, well, our referenced rigs are pretty stable.
+They've been used for a long time, but we want to make them better.
+We want to add on top of them.
+So we decided to go down the approach of having bolt-on components that would interact or sit on top of our reference rigs and change their behavior.
+And that looks a bit like this.
+So here we've got a rig in the scene and we're launching our tool that we call Reaction.
+And the animator sees a list of components that they can utilize.
+They can click through those components and they get exposed to some options that allow them to tailor how that component might be built.
+And we're gonna focus on a component called the tail simulation component.
+And the idea here is simply that the component builds a kind of a hybrid rig that sits on top of our reference rig.
+It inherits the motion of the reference rig, but then drives it.
+This allows the animator to keep interacting with the tail in a normal way, a stable way.
+But ultimately when they hit play, the simulation kicks in, and the simulation is always striving to achieve the poses defined by the animator.
+But a component is more than just a rig.
+It's kind of a package for the animator to work in a specific way.
+So it also includes tools that are specific to that component.
+So here we've got a really simple tool, a tool that just allows the animator to add or remove collision objects.
+So they can do that through the Maya menus, but it means that they don't have to jump through five or six nested menus across a whole bunch of dynamics things that they don't go through very often.
+But they can also be a little bit more complex.
+So here we've got a tool where at any point in time, they can choose to make a visual bookmark of their simulation.
+They can go back and start tuning their simulation attributes.
+And at any time, they can then compare the results of their current changes against one of their snapshots.
+And if they don't like those changes, they can simply restore those settings back and go again from where they left off.
+And then at any point, they can simply choose to remove and bake down the component.
+That then bakes it down onto an additive animation layer, allowing them to blend the results in and out, even after the component is gone.
+Now, the specifics of those small tools aren't the focus of the talk, but it's important to recognize that a component isn't just the rig, right?
+It's the whole package, so the animator can work in a specific way for the task that they are trying to achieve.
+And this whole thing uses the design pattern.
+So the abstract looks a bit like this, where we have an apply method, we have a remove method, both of which pretty much do what you'd expect.
+And then we have a build UI and a runtime UI.
+So we can interact with this tool either through code directly or we can go through the interface.
+But we don't want our tool itself to have any direct understanding of any particular component.
+So when an animator selects a component from the list, we simply instance a plugin, and we ask the plugin for its build UI or its runtime UI.
+And the tool then embeds that blindly into the window itself.
+and we harness the keyword arguments that we saw earlier.
+So we expect or we ask that any QWidget that's given to us can serialize its state down to a dictionary.
+We can then pass that into the build method, or sorry, the apply method of the plugin, and suddenly we can build these components either through the UI or through code in exactly the same way.
+And as I mentioned before, this component is a way of working, so it's not just the rig.
+It's also a suite of tools to help the animator.
+And this moves us from trying to write the simulation tool that can work on every rig in every possible context with a million options that an animator might rarely use, and instead start focusing.
+If we're building a tail simulation component, we're pretty sure that the animator's trying to animate a tail.
+If they're trying to animate a chain, then maybe it's better that we have a chain component.
+And this means that our dev times for making tools starts to reduce because we can make so many more assumptions.
+But equally for the animator, their workflow improves as well because they're only seeing options that are specific to what it is they're trying to achieve.
+And the mechanism behind this is just the same as a build UI.
+We simply ask the plugin for the component for its runtime UI, and we blindly chuck that QWidget into the QWindow.
+So we don't ever have to hard code anything into the tool itself.
+But it comes with a flaw.
+There's a huge hole in this whole thing.
+An animator could choose to apply the tail simulation rig in this scene.
+and they can work and they can animate and they can use the tools and they'll be happy, hopefully, if we've done our job right, which isn't always.
+And then maybe one of our TAs comes to GDC or a conference and they find a new way of doing tail simulation, a way that's just far more efficient.
+They come back excited and they update that component.
+They change the code and the rigging code and they update the tools so that the tools work with that new component.
+And the animators start using that and they're really happy because the frame rates are going through the roof.
+and then an animator opens up their old scene.
+And the rig still works because the rig's local to the scene, so everything's all good there.
+But as soon as they try to use the tools, they break, because the tools have now been refactored to use the new version of the rig.
+And this leads to a scenario where either our tools have to start working in a way where they're coded with backwards compatibility for all possible variations of the rig, or we have to start batching over all of our scenes constantly, keeping all the versions of our rigs up to the latest version.
+Ultimately, both of these mean that we actually gain absolutely nothing from this design pattern.
+But the solution turned out to be pretty simple.
+All we needed to do was add a version number to each component.
+And by doing this, we could have multiple tail simulation component plugins, and they can be differentiated only by a version number.
+This means that when an animator would choose to apply the component to their rig, we simply scrape the factory and take the highest version of this particular component.
+But when we open a scene, we look at the version of that component in the scene and we instance the plugin specific to that version.
+What this means is we pay a cost of code replication.
+We could have 10 versions of the tail simulation component and each one may only really change a little bit.
+But what it gives us is we're not constrained by the choices we made yesterday or last week.
+When we come with a new idea for tail simulation, we're writing our tools specific to that rig.
+We don't have to make our tools work with the way the last version worked.
+We can start to experiment in a very free way and know that we're not gonna break the rig that was built three years ago.
+And that brings us back to this slide, where we can strive to make our tools work with all the different versions of our rig that might be in production.
+And our tools become increasingly monolithic, the complexity grows, and eventually at some point the whole lot goes in the bin and we start again.
+Instead, we encapsulate it.
+We break it down, we accept the cost of code replication, but ultimately when it comes to wanting to implement the new version of a component, our mindset is purely on that implementation.
+It's not on the refactoring or the risk or the concerns around it.
+When it comes to asking for time to implement something, we don't have to take a really fuzzy guess at what the tech debt will be if we screw up.
+And that does happen, right?
+We all take risks, we all strive to push forwards, and that inevitably means that we get things wrong.
+And ultimately, the animator gets a far more focused workflow than just a generic rig that's trying to do everything for everyone in all circumstances.
+And this was incredibly freeing for us, but that freedom started to demonstrate restrictiveness elsewhere in our pipeline.
+specifically around metadata.
+So metadata is the glue between our rigs and our tools, and David Hunt did an awesome talk way back in 2009.
+But to briefly recap, metadata is a mechanism that means we, or our tools, don't have to read naming conventions, or they don't have to read hierarchy structures within our rig.
+Instead, perhaps we use network nodes and message attributes or string attribute data.
+But it comes with a bit of a flaw.
+Ultimately, our metadata lives inside our rigs.
+And our tools traverse this metadata.
+Whether they do that directly or whether they do that through a module, they're ultimately directly dependent on that particular metadata structure.
+This means that it's really hard to experiment or try new things in terms of metadata mechanisms.
+Or if we want to use rigs outside of our studio, but with our tools, it can be incredibly challenging, especially if those rigs come pre-bound with their own metadata structure attached to them.
+And in a studio where we have six projects all running and we have multiple tech art teams going and working on those, we inevitably get divergence.
+Everyone wants to push boundaries.
+And so we have two metadata systems at CA that are currently in play within one or two productions.
+We've got one around messaging attributes and network nodes, and we've got one using string markup data.
+So having the ability to interact with either of these mechanisms would be hugely beneficial.
+And when it's visualized in this way, it starts to feel like a good fit for the design pattern.
+So using that factory plug-in approach, that's what we did.
+Now, defining an abstract for a metadata system is a lot trickier than trying to define an abstract for a rigging tool or an exporter.
+But the principle is the same.
+Our abstract essentially becomes an API for rigs.
+And ultimately, the plugin is then responsible for mapping that particular metadata system to this API.
+For us at CA, the key needs of metadata is pretty much about being able to do big searches and relationship searches.
+So I wanna know all the controls in a rig, or I wanna know all the deformers, or something more specific, like I want the left IK hand control, as well as relationship information.
+So if I've got a left control, I want the opposing object, or what am I being affected by, or what am I affecting?
+So our abstract for our rigs looks like this.
+We have functions that are related to tagging and to querying.
+And we have functions that give us relationship information.
+And ultimately, we leave it to the plugin implementations to map the specifics of their metadata system to this API.
+We then add one more function.
+We add the viable function, because we don't want our tools to know what rig it's got to interact with.
+And the idea behind a viable function is very similar to what we've seen before.
+So we take in an object and then we ask that plugin whether that plugin can represent that object.
+So if we're dealing with a network node metadata system, maybe we'll look at the top root node and we'll quickly check whether there's a meta node attached to it.
+or we'll look for a string markup data.
+And the first plugin that returns true on its viability test is instanced and returned.
+So when we take that concept and we wrap it in a tiny little function that we call grab, we can start to get a rig API from a tool without really knowing or caring which particular metadata system we're actually interacting with.
+So here we're just going through every plugin in our factory and we're asking that plugin whether it can represent this rig node.
+If it can, it's instance and it's returned to us.
+And that gives us something that looks like this.
+So here we've got three rigs.
+We've got a CA production rig, and we've got two rigs that we took from high-end 3D.
+And all of them are vastly different, right?
+They have different naming conventions, different structures, different metadata.
+And we implemented a plugin to represent each rig type.
+This means that we don't really have to care about which rig we're interacting with.
+So we call our grab method with whatever's selected.
+We then wrap that into a select command, and we ask it for all the controls in the rig.
+And immediately we get a select all control script that's rig agnostic.
+We can use that same bit of code, regardless of the rig that we're operating on.
+And we can take it a little bit further.
+So we can look at all the objects that we've got selected, and for each one, we can ask the rig API for its opposing object.
+We then wrap that in a select call, and we get a select opposite script that's working on all three rigs independently.
+Then the crucial part here is in the scripts where we're writing, we're never making any kind of assumption as to the rig we're working on.
+We let the framework or the system work that out for us, and ultimately the system is letting each plug-in make that decision.
+And we can bring that back to the context of an exporter.
+So we have a very generic exporter that's plugin-based.
+And then we have a rig API where we can say, hey, give me all the deformers, and I'll pass that to the exporter.
+And suddenly we can start to export data from rigs that we don't control.
+That allows us to chuck in rigs into our pipeline from lots of different places, or experiment with lots of different things.
+But it's really worth pointing out that writing a plugin for a metadata system isn't particularly trivial.
+Depending on what that metadata system looks like and how it works, it can be really involved.
+But ultimately, the cost of implementing a plugin around a metadata system is significantly less than trying to get all your tools to work with all the different metadata systems that you might have in play.
+And there's an interesting side benefit to all of this.
+The abstracts and the factories are super generic, so they never really contain any code specific to Max or code specific to Maya or MotionBuilder.
+So to take this whole system and push it into a different application is really just the cost of implementing a new plugin.
+So that's what we did.
+So we took our our framework and we started using it in Maya and we've got a script here where we're just dumping out a bunch of information through the rig API.
+So we're asking for sockets, we're asking I think for meshes or some deformers, and then we're sending this scene over to MotionBuilder.
+And in MotionBuilder, we've got exactly the same code.
+So we're importing our rig API, we're grabbing those objects.
+And ultimately, we get exactly the same output.
+So we're then jumping between two different applications, but we're interacting with our rigs in exactly the same way.
+And the only cost of this is the implementation of a plugin that's specific to that application.
+This means we can start to build things in different applications and not have to worry about how we're gonna find our objects.
+Which brings us again here, where through representing our metadata systems through plugins, we're adding flexibility into our pipeline.
+Everything becomes a bit more forward facing.
+We're not tied into a specific metadata system.
+We could choose to make our tools work with the two metadata systems that we have in play, and that would work for today, but it wouldn't necessarily work for tomorrow when someone else comes up with a better way of dealing with metadata systems.
+And ultimately, our tools don't become the bottleneck for us experimenting.
+What becomes interesting is suddenly our metadata system and our rigging tool and our exporter all look the same.
+Their code structure looks the same.
+And so when we go in to do code reviews, the overhead of doing a review is really low.
+We're not trying to get our heads around how this person has implemented this system because the system's kind of the same.
+We're immediately looking at the detail and the implementation.
+The focus is fundamentally always on the functionality and not the framework itself.
+So we've seen animation and rigging examples, but the whole concept is a lot more flexible than that.
+So I mentioned before that we used this kind of informally in our animation asset manager on Halo Wars 2.
+So that took the concepts of an asset and it abstracted it away from the asset system itself.
+So that had functions like get me the dependencies, get me metadata, get me icons, et cetera.
+And ultimately, the framework would search through files and folders for files, sorry, search through folders for files, and it would pass those file paths into each plugin, and the first plugin that would say, hey, you know what, I know how to represent this asset, that would be instanced, and the framework, the asset system itself, would start calling the methods of that plugin to populate a database.
+This meant that we could have Maya scenes or Max scenes or textures, and the plugins would know how to read the metadata relating to each one, and our asset system wouldn't ever have to care.
+That gives us something like this.
+So we can dynamically infer the asset type filter, because we can just ask the factory for what plugins there are.
+We then query our database and we get a list of the assets that are in there, and we can start to interact with those assets.
+But when we're right-clicking one of these, the asset system doesn't know what actions are available.
+We simply do another validity check.
+And we ask that plugin for its action list.
+And we generate a context menu based on that.
+So if you right-click a rig, then you might get options like reference it or edit it.
+But if you right-click a texture, you might just get apply.
+But the system itself still had hard-coded code based on how to find an asset.
+Ultimately, on Halo Wars 2, all of our assets were on our local hard drive.
+So it was hard-coded to search for Maya files or Max files in specific locations.
+And whilst that wasn't bad because that adhered to the restrictions of the project, it limited the scope of the tool.
+And we wanted to break away from that limitation.
+So we added a second factory.
+This time the responsibility of that factory was to hold plugins relating to search mechanisms.
+So we then added a plugin for local folder searches and we moved the code that was in the asset system itself into that plugin.
+This meant the whole thing worked in exactly the same way, the result was identical, but our asset system was a lot lighter.
+And this opened up some interesting doors for experimentation.
+So for the sake of proving that flexibility and having a soft spot for dinosaurs, we implemented a second plugin.
+This time, the plugin would only return its viability test if the path it was given was a URL to a website called paleobio.org, which is all about taxonomy information on dinosaurs.
+And ultimately, we're no longer scraping files on a disk, but we're calling a remote server and we're asking for information, and we implement a second asset plugin, which then will only return its viability if it gets JSON data from this REST API.
+Now we're not making a game about dinosaur taxonomy, so this was a complete waste of time, but it proved the system.
+And it meant that we could jump between two vastly different data types very, very quickly.
+So here we're browsing Warhammer 2 assets, and these were scraped from the local hard drive and pulled in, and the way we interact with those is to open or reference.
+But we can jump over to our options tab, and we can see that the file path, or the search routes for those, were a local hard disk.
+But if we switch over to our Paleo project, you'll see that the search route changes.
+So the search route is now a Paleo Bio REST API.
+So it's now actively searching the online resource and populating the database based on the taxonomy information.
+And the way we interact with those assets, because assets are just pieces of information, is drastically different.
+we get an open a Google Images search or open a taxonomy information.
+The key with this is you never tell a producer what you're doing because they'll never let you do and play with this stuff.
+But it was good.
+But the key is it ultimately proved that it works.
+And it doesn't take a great leap of imagination to see that the next use of this tool is probably for an animation motion library.
+where maybe we're looking at motion information that's on a network drive, that's on Perforce, that's on an FTP, and perhaps we're dealing with FBX files and BVH files, Atom files, as well as our internal formats.
+And ultimately, for the animator or for the user, they don't have to care.
+They can simply search for animations within this framework, they can right-click an animation and apply it, and it's up to us in a plugin to decide what happens when we choose to apply.
+that kind of file format.
+Which brings us here again to this familiar slide where when we implement an asset system, it's all too easy to think, well, our assets are Maya files and our assets are TGAs, so we'll just hard code that into our asset system.
+And that's what we've done so many times and we end up constantly having to refactor or rewrite for every single project.
+Instead, we push that into small little encapsulated blobs of plugins, and we let the plugins decide when they should be used.
+This ultimately means that we get massive amounts of reuse from our tools.
+They become a lot more flexible in what they can be used for.
+Our coding standards tend to improve because there's a lot of familiarity, I can never say that word, between all of our tools, right?
+When a TA comes on board, we only have to teach them or show them how one of our tools works and they pretty much know how all of our other tools work because there's so much consistency.
+Our TAs are far more collaborative now.
+I mean, they're a pretty social group anyway, but as soon as they can jump onto someone else's tool or library and not have to go through the pain of understanding how the system works, everything's a bit more fluid and dynamic.
+But ultimately, it means we can grow in a much more stable way.
+And this has been really good for us, it's been really effective, and it's now interspersed across a lot of our tools that cover Maya, Max, MotionBuilder, and Standalone.
+So it's been really, really powerful.
+It won't necessarily minimize the amount of code you write.
+If anything, in certain situations, as we saw with the rigging tool, it actually means you write more code.
+But it means you're being a lot more focused and you're paying a lot less refactoring costs.
+It also won't solve your project-specific problems, but it does allow you to scale without an ever-increasing amount of complexity.
+It allows you to experiment and take risks without incurring technical debt that's an unknown quantity.
+For us specifically, we gained the ability to keep growing our tools without being restricted.
+And as I mentioned, our TAs work far more collaboratively because the overhead of diving onto someone else's tool is significantly lower.
+Generally, our dev and testing times start to diminish because as soon as you know how the system works and you've got a pattern of files and structure, you dive straight into the functionality and you're not whiteboarding architectural decisions every other day.
+But more important than all of that, it means that you can experiment with ideas when you don't know whether they're gonna pan out.
+And when you're.
+visiting GDC or other things like that, you know, you get inspired and you take risks and you go back and you want to try things out, but not everything pans out the way you want. So that's a really nice benefit.
+But ultimately, tools and tech art are not a self-serving group.
+Our goal is to empower content creators.
+But the two things shouldn't be thought of as being exclusive.
+Because the freer we are to experiment and take risks, the better the results are that our content creators get.
+And it's worth pointing out that all of this is the work of our entire tech art team.
+Thank you.
+And if anyone has any questions, feel free.
+Hey, Christoph from Remedy.
+Cool stuff.
+We have kind of similar things happening at our company.
+I do have one question.
+You mentioned that you have to write a lot of boilerplate code, which I assume you do, to support an IK plugin for MotionBuilder, Maya, Max, whatever.
+Can you actually always guarantee that the IK will always behave the same, or is that something you're willing to live without?
+So the rigging code itself, we haven't ported over to any other application than Maya.
+So the rigging tool at the moment is specific to Maya.
+Right.
+So it's only metadata that you've ported.
+Yeah, the only one that we've really pushed out is the rigging API.
+But yeah, that would be interesting to know.
+We're trying to solve the same issue.
+Thanks.
+Cool.
+Thank you.

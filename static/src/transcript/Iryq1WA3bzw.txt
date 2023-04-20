@@ -1,0 +1,577 @@
+All right, let's get started.
+It looks like this might be a little bit full, so if any of you guys that are on the edge could move in.
+It just makes it easier for anybody who comes in late to find a seat.
+I like that this is a room of completionists.
+You guys all stuck around to the very last talks at GDC, and I personally appreciate that because I'm one of the last talks at GDC.
+Now the conference is almost over.
+How was it?
+Was that bad?
+Yeah, so I'm also curious.
+How many of you guys were just at Chris Butcher's engine architecture talk upstairs?
+Oh, sweet, most of you.
+So I do not have the silky sexy Kiwi voice that he does, so you'll have to listen to me and I'm a little bit hoarse.
+So I am Justin Truman.
+I'm one of the engineering leads over at Bungie.
+And before I start talking about anything, I want to make sure that I make it super clear that I'm not even close to the sole contributor of the architecture that I'm going to be talking about today.
+There was a good, probably, 50 man years that went into our activity networking systems for Destiny, built on top of all of the Halo Reach tech.
+It was a very large group effort, and that's why I'm going to be saying we a lot during this talk.
+And I want to answer any questions that you guys have at the end.
+I'm going to try to leave time for some Q&A.
+Assuming I don't go long.
+Now is also a great time for you to silence your cell phones.
+And if you like the talk, please rate me and give me feedback.
+If you didn't like the talk, you can keep it to yourselves.
+But.
+So who here has played Destiny?
+OK.
+Good number.
+Who's got a level 32 character in Destiny?
+A few of you.
+Who has three level 32s?
+Oh, wow.
+I don't.
+That was great.
+Destiny was a lot of firsts for Bungie.
+It was our first four-platform game.
+We had only ever shifted on one platform before that.
+It was our first always-online game.
+It was pretty scary getting into a room in 2010 before stuff like the Xbox One had even been announced, and planning a console shooter that requires an always-online internet connection.
+It was also the first time that we tried seamless background matchmaking.
+Halo had matchmaking lobbies and menus.
+We wanted to get rid of all of that and just let strangers wander into your game automatically and organically.
+We wanted to get rid of the single-player versus multiplayer menu options and just have play destiny.
+To accomplish that goal, we built a unique and uniquely complicated networking topology.
+Over the next hour, I'm going to talk through the decisions that led us to this unique architecture, and both the advantages and disadvantages that resulted from our choices.
+Instead of just using a peer-to-peer architecture like our previous Halo games, or implementing traditional dedicated servers, we built a hybrid approach that we call Activity Hosts.
+Activity Hosts are cloud-hosted machines that run a stripped-down simulation of just our mission script logic.
+With our activity hosts, which I'll be describing in detail, we were able to successfully scale at launch without any queues or downtime.
+And we were able to support that million player load with just a few hundred servers in our data center, because we could handle over 10,000 players per server.
+By combining our activity hosts with traditional peer-to-peer networking, we got the low latency action gameplay of a Call of Duty or Halo, while constantly seamlessly matchmaking you to new strangers.
+A typical Destiny player is host migrating between different PS4s once every 160 seconds, without noticing any discontinuity in their simulation.
+So that's the player experience that we ended up with today.
+But when I joined Bungie five years ago to work on Destiny, we didn't have any of that.
+All we really had to start with was some key design pillars that informed all of the early architectural planning.
+These design pillars were making a kick-ass action game, making sure that it always supported co-op, allowing you to meet strangers, and untethered freedom to explore.
+Before talking about the tech, it's worth diving into each one of these in a bit of detail.
+Kick-Ass action game means that we needed Halo parody.
+We needed FPS genre parody.
+We needed to make a highly responsive, low latency action game that's instantly familiar and competitive with all of the other great FPSs out there.
+The internal bar that we used to great effect was, it needs to feel like a single player shooter.
+This was important to us because the online experience is not opt-in.
+We force you to matchmake with other players, even if all you want to do is play a solo campaign.
+Therefore, we need to make sure that our matchmaking and our networking goals never hurt that solo campaign experience.
+So this means that we started with the Halo code base and networking model.
+David Aldridge did a GDC talk four years ago about the Halo Reach networking model, which describes it in detail.
+I'm gonna skip over most of that.
+You should really watch his talk, though, if you're interested in the details of our action game networking.
+But I will quickly touch on some Halo networking terminology, which I'll be relying on later in this talk.
+The most important thing to know about Halo Reach was that it had two networking models, one for PVP and one for PVE.
+PVP used standard peer-to-peer host-client networking.
+One Xbox was the host of a game.
+Let's call that the physics host for reasons that will be useful later.
+The other Xboxes were all clients communicating with that host.
+But the host arbitrated all state changes.
+For PVE, we used lockstep networking.
+This is the networking model most commonly used for stuff like a real-time strategy game.
+If your game is fully deterministic, which means the same set of inputs always produce the same set of simulation outputs, then you can just network the controller inputs from each machine and not simulate the next tick until you've received the inputs from everyone else about what should happen.
+We do some tricks in our lockstep networking to hide that latency, but ultimately you have to pay full round-trip networking time between when you pull the trigger and when the gun actually fires.
+So that meant that while we had a networking model in Halo Reach for campaign and PvE games, you could play through the whole Halo Reach campaign with four players.
+It was a noticeably more latent experience than our PvP game.
+So going back to the original design goals, this lockstep networking latency was unacceptable for the feels like a single player shooter bar that I talked about earlier.
+So that meant that we chose to instead start with our Halo era PVP networking model.
+But we had to extend it to support the full story campaign, which leads well into the second design pillar.
+What I like to call, everything is more fun with your friends.
+This meant to us that every activity supports co-op gameplay, always.
+This also meant that you can always hook up with your friends.
+Every activity supports join in progress, and we endeavor to make that available at all times.
+For our cooperative campaign, that meant that while we could start with our PVP networking model, we had to build it out to support AI and complex activity scripting for the first time.
+Lots of really cool stuff was done to accomplish this networking goal for AI, but I'm not giving that talk either.
+I am going to talk about activity scripting though a little later in the talk.
+So, moving on to our third pillar, which I like to state as, showing off is more fun if others are watching.
+At Bungie, we believe really strongly that even with the minimal social interaction verbs that we provided in Destiny, the mere existence of other players, perceiving you, perceiving your avatar, gives value to your actions.
+Xbox 360 achievements were intrinsically more valuable than in-game rewards, because you could easily show them off to your friends.
+As another example, as soon as you build something awesome in Minecraft, if you're like me, you immediately want to show it to your other friends who play Minecraft.
+So we're convinced that if we can take even a solo player who has no friends on Xbox Live or PSN and regularly put them in rooms with other people, they will care more about their fancy hat and their attack power and the level number over their head.
+We also want these strangers to not be pursuing the same goals as you.
+We think of it as intersecting, not parallel lines.
+We don't want these strangers competing with you for resources or pushing you forward at a pace faster than you would like.
+Instead, intersecting with strangers that are not directly competing for any of your goals minimizes friction and potential resentment.
+So the last pillar that I'll be talking about was untethered freedom to explore.
+This means that our activity designs shouldn't stop you from leaving the activity line and just exploring.
+In Halo Co-op, you were always tethered to a maximum radius from the physics host.
+If you fell behind or you tried to run too far away, we'd teleport you back to the host.
+In Destiny, we wanted to let you meet up with your friends, but have parallel play in different areas of the same destination.
+You could run alongside them for a mission, or stop to harvest some spin metal while your friend rushes ahead.
+So, these are the four design pillars that our architecture was trying to satisfy.
+And looking at them, I feel like they're pretty scary from a risk perspective, especially when you stack it up with stuff like new IP, first multi-platform title, new engine.
+Therefore, while we were setting ambitious design goals, we also set some early scoping constraints on our architecture.
+One of the strongest early constraints is what we call bubbles.
+And it's important to think about them as a constraint.
+Bubbles were not an accomplishment of a design goal or vision.
+They were a scoping decision.
+I could certainly imagine a version of Destiny without these, but I couldn't imagine us shipping in 2014 without these.
+So what is a bubble?
+A bubble is our unit of simulation.
+A player is only ever simulating one bubble's worth of combat and physics at any time.
+A bubble is also our unit of asset streaming.
+You have at most two bubbles asset memory loaded at any time.
+The one that you're currently simulating and the one that you're pre-caching.
+For simulation perf, we had a bunch of different perf rules depending on the max player count, vehicles, et cetera.
+But our standard bubble was six versus 25.
+That meant six players and 25 AI in a single bubble active at any one time.
+25 AI ought to be enough to give you the kick-ass action game.
+And with three player fire teams, a population of six gives you the ability to play with friends and have three strangers to interact with.
+But over a one hour experience in Destiny, we need a lot more than three strangers.
+That's why bubbles are also our unit of matchmaking.
+So here's an example of two bubbles with a Z-leg transition between them.
+From an asset loading perspective, this is pretty standard zone-based or airlock streaming.
+15 seconds out from the bubble swap, you start pre-caching all of the resources for the new bubble.
+When you get to the bubble swap part at the end, we've got all of your resource loaded for the new bubble, and we can instantly de-instantiate everything in bubble A and instantiate everything in bubble B.
+The neat thing that we also do during these transitions is matchmake you to a new networked game.
+In order to meet new strangers in bubble B, we start matchmaking for a new host at around the 10-second mark, and are ready to seamlessly swap you to the new game when we perform our bubble swap.
+If we don't find a suitable bubble to match you with by the five second mark, we abort matchmaking, which gives you enough time to spin up your own standalone bubble that other strangers should eventually join.
+So, as you're running through the world, you're continuously matchmaking to new bubble instances.
+Fireteam is the term that we use for a party.
+an intentionally formed group of friends that all go on the same activity together.
+For most activities, the fireteam size limit is three.
+A notable exception is six fireteammates for raids.
+So you and your fireteammates are always guaranteed to matchmake into the same bubble instance if you go to the same geographic location.
+But while your fireteam is guaranteed to matchmake to the same bubble instances, you're not actually required to stay together.
+You're untethered, which means you could be in an activity with some fire teammates, but each of you is matched and connected to a completely different bubble instance in a different part of the world.
+Strangers, on the other hand, will match with you in one bubble, but your connection to them is not guaranteed if you leave that bubble.
+So you and a stranger could matchmake together in one bubble, then run through a bubble transition side by side, and end up matching into separate bubble instances on the other side.
+On your screen, he'll just phase out midway through the Z-leg and disappear.
+So bubbles are a unit of autonomous simulation and matchmaking, but not all bubbles are the same.
+If we talk about design goals again, we definitely want to achieve the pacing, spectacle, and designer curated experiences of a Halo or other single player FPS.
+So we want you to be able to go to a boss battle and not have some random stranger ruin the experience for you or potentially show up and have the boss already be half dead.
+On the other hand, we also really want you to meet strangers, and these goals are fundamentally at odds if we try to satisfy them simultaneously.
+So we settled on the notion of public versus private bubbles.
+Public bubbles are the canonical destiny experience.
+Lots of strangers interacting on intersecting activity lines.
+Private bubbles are all reserved exclusively for your fire team.
+No strangers ever show up in a private bubble.
+In MMO terminology, the private bubbles would be instances, but that terminology isn't a perfect fit for Destiny, because all of our bubbles are instances.
+There could be thousands of copies of a single public bubble, each connecting up to six strangers.
+So, here's an idea of how we lay out one of our planets in Destiny.
+We call them destinations.
+The squares in this diagram are public bubbles.
+The circles are private bubbles.
+You can see how there's a loop with the public bubbles, a fairly easy way for you to roll around in a patrol activity, moving predominantly between public bubbles, opening treasure chests while interacting with strangers.
+Now if I add some other activity lines, most of our activities start in a public bubble, and they all take you on a deliberate path through many bubbles.
+You typically get some exposure to one or two public bubbles during the activity line, and then you dive into a private bubble chain where we can have a hand-authored mission climax.
+Now as I continue to layer on the various activities that strangers can be on in the same bubble, the intent is that when you encounter folks in a public bubble, they're likely to be intersecting lines, passing by, but having different goals and different directions of travel.
+So I mentioned that every time that you enter a new public bubble, we matchmake you to a new host.
+So who should be responsible for hosting each of these bubbles?
+We could make it the traditional Halo Reach-era physics host, whichever console was elected to be the authoritative arbiter of all the combat events.
+We decided not to simply use the physics hosting console, and to help explain why, we need to talk about host migrations.
+A host migration occurs whenever the physics hosting console disconnects from the game.
+In order to keep the game running, we need to elect a new physics host from one of the remaining players.
+We pick a new host, and then we need to get new authoritative simulation state from the new host.
+In Halo Reach, this was a pretty abrupt experience for players.
+It always caused a black screen for a few seconds, and it could result in inconsistent state.
+It was okay that this experience was a little sucky, because it was reasonably rare.
+Not only did we tie all PvP rewards to finishing a match, we even temporarily banned players who quit PvP too often.
+So host migrations did not typically interrupt the player experience.
+But Destiny is a world of intersecting, not parallel lines.
+Most of the time, players are just passing through public bubbles.
+Any one of these players could be the current physics host.
+And as soon as she leaves and de-instantiates the bubble, we need to migrate to a new physics host.
+So in most Destiny public bubbles, physics host migrations happen all the time.
+The average player in a public bubble experiences a host migration every 160 seconds.
+I pulled that data from our server logs from the live game.
+One every two and a half minutes.
+We knew that we needed a better solution that didn't create a black screen load and hopefully doesn't cause obvious player facing artifacts.
+At this point, I'm sure some of you are thinking, just use dedicated servers.
+If we just never host migrate because we put all of our physics hosts in the cloud, we don't have to solve all of these annoying problems.
+There's a couple of strong reasons why we didn't simply run dedicated servers that were traditional physics hosts.
+For one, they need to be cost feasible.
+To support our launch, we'd have needed hundreds of thousands of headless PS3 parody executables in the cloud, and that becomes a significant continuous cost to maintain, especially if our player retention continues to stay as strong as it has been.
+Additionally, peer-to-peer networking supports maximally responsive action gameplay.
+In many cases, we can match you with players that are in the exact same city as you, and you get extremely low latency with your physics host, much better than what we could do with dedicated servers.
+We don't want to increase our latency for firing bullets and doing damage.
+That violates our feels-like-a-single-player-shooter goal.
+So, can we keep our traditional physics hosts around, but fix the host migration problems that Halo had?
+Halo Reach host migrations were typically abrupt black screens.
+What does a Destiny host migration look like to players?
+It depends, really.
+We can talk about two examples to begin with, what I'll call fully graceful and fully ungraceful.
+This isn't a binary switch, but two poles on a continuum.
+Fully graceful would be our best case.
+So the current host knows that he's about to transition to another bowl, and as soon as he enters, the transition interior.
+That gives us about 10 seconds of anticipation during which we can elect a new host and transfer ownership to them seamlessly.
+In the best case, the current physics state is also fully compatible with the old host state, so there's no need for discontinuous state, and players never notice that we switch physics host midway through combat.
+This sort of host migration happens a lot during a typical player experience, and most of the time no one notices a thing.
+I feel like this is one of the pretty cool things about the Destiny architecture.
+On the other end, you could imagine our worst case ungraceful host migration.
+The physics host pulls their Ethernet cable, and we stop receiving any packets from them.
+We have pretty lenient timeouts because we're always online and we don't want to be constantly kicking people out of the game world if they have a bad internet connection.
+So it could be 15 or 20 seconds before we fully timeout the old host.
+During that time, you'll be locally predicting state changes, but they won't ever apply anything authoritative.
+So you'll see predictive health bar damage, but be unable to kill any AI.
+And your public events won't advance in any significant way.
+Eventually, we'll elect a new physics host, and public events and AI death, et cetera, will start functioning again.
+So that's the player experience, but what's going on under the hood?
+We obviously need to elect a new host to hand off all of our simulation authority.
+But that new host simulation state will not be identical to the old host.
+Not only may objects be in slightly different states, they might not have all the same objects instantiated as the old host.
+They might have prematurely deleted some objects.
+And this can cause some pretty severe experiential bugs.
+In the worst case, it can completely break activity script progression.
+So let's imagine a really simple case from PVE scripting.
+You have a door that is scripted to open when a player presses a switch.
+These are both separate objects that each track a separate Boolean state.
+Open closed for the door, on off for the switch.
+Crucially, because these objects are separate and unattached outside of the script logic itself.
+They're networked separately.
+Destiny bubbles have many dozens of complex objects all being simultaneously networked and competing for traffic.
+By networking each one of the objects separately, we can heavily prioritize our networking traffic to emphasize the objects that are most important to the player.
+We've been doing that since the Halo days.
+So let's say that the physics host goes over to the door, presses the switch, which opens the door.
+He then immediately pulls out his ethernet cable.
+It's entirely possible that all clients, or whomever we elect as the new host, could receive the packet saying set switch state to on, but never receive the packet saying set door state to open.
+That packet could just get lost through ordinary packet loss, and the host is no longer available to resend it.
+In that case, you now have a new host with a switch that has already been pressed, but a door that is still closed, and you've now got a critical path progression blocker.
+And for what it's worth, this case is very real.
+Halo Reach had to deal with lots of inconsistent state like this during host migrations.
+It could easily break games like Capture the Flag.
+This is a bug screenshot that I grabbed from Halo Reach.
+This was a host migration causing the script to spawn duplicate flags and break the score.
+There's two red flags.
+And while I don't think we shipped with this bug, we did ship with host migration bugs, and plenty more than we wanted.
+So, there's a couple of ways that you could imagine fixing this problem.
+One would be to program defensively.
+The CTF game ensures that there's never more than one flag of a given team color.
+The door switch resets itself off after a few seconds so you can reuse it if necessary.
+We have to think about each of those cases as you're writing each activity script or feature, and it's hard to catch them all.
+Plus, host migrations are frequently not covered in the standard development testing and iteration, so you can get very close to shipping before you find all these weird edge cases.
+Many of them you won't even find, they're timing sensitive.
+Our simple diagram that we just used required that two packets get sent, but you managed to drop exactly one of them, which is gonna be hard to repro.
+Halo reached ship with way more of these bugs than we'd like and that was just PVP.
+How do we avoid this tax on every single PVE script, each of which is typically much more complicated than a PVP game type?
+So, what if we go back to the dedicated host idea, but we only host the mission-critical state that could break activity scripts?
+We keep all of the combat and physics peer-to-peer, so we have a responsive action game with low latency.
+But we keep a minimal, cost-feasible set of state up in the cloud, so that it never host migrates.
+So what do I mean by mission-critical state?
+Mission Critical State is any contract that an activity script explicitly or implicitly requires.
+If an activity script says that a button opens a door, it's implicitly linking the two together and saying if the button is on, the door is open and vice versa.
+And the really important and really tricky thing here is that these contracts are typically implicit, not explicit.
+You have to first figure out how to discover all of the activity script contracts before you can find a way to enforce them all.
+So some of our early attempts here were to try to create atomicity guarantees between any linked state.
+So if the button is connected to a door, you just make sure that all networking updates for both of them are atomic, and you're all good.
+This approach has two major problems.
+One, a lot of contracts within real scripts are a lot more indirect.
+You kill two AI, that spawns a third guy.
+The third guy runs over to a door, and he opens the door.
+In that case, is the door linked to the original two AI?
+Also, it requires that someone, and if we're talking activity script, we typically mean a designer, actively think about host migrations and atomic linkage, which puts us back in the defensive programming trap that we'd really like to avoid.
+So instead, what if we just compiled a list of every object that the activity script ever cares about?
+All three AI, the door, the CTF flag, and we make them all atomic with each other.
+then we only update atomically, and every client always gets a fully consistent set of activity state that satisfies all contracts.
+And it's important to note here, we're trying to get the minimal set of necessary state.
+That way, as much as possible is still hosted by your low latency physics host.
+We call this minimal subset of game state that we care about and want to atomically reconstile activity state.
+ActivityState is all authoritative on the activity host, which runs up in the cloud and never migrates.
+So all of our activity scripts, like a story mission script, run in the cloud.
+And these scripts all declare up front what state they care about.
+Activity scripts operate on some set of objects.
+Those are by definition the objects that they care about.
+You can't reference an object in ActivityScript without including it in ActivityState.
+There's tons of other objects in the simulations they never care about.
+Bullets and crates and vehicles.
+But we can do even better than that.
+Because activity scripts also declare what they care about each of these objects.
+Let's take a squad, for example.
+A group of coordinated AI in Destiny.
+An activity script might care, has the squad spawned?
+How many AI are alive or dead?
+But they probably don't care about the individual health or world space positions of those AI.
+We call these bits of discrete mission-critical state sensors.
+We can take all this specified state, which isn't very much, and make it all atomically reconcilable and persisted in the cloud.
+This way, at any time, a new physics host can take over and can set itself into a fully consistent state that will allow the activity script to proceed.
+So here's an example of activity state on both the physics hosts, that's the PS4 360 console in someone's house down at the bottom, and the activity host which lives up in the cloud.
+There's a full duplication of sensor state on both machines.
+Auth state is what we call sensor communication from the activity host to the client because the activity host is always the authority over activity state.
+Those are the red arrows going down.
+And sense state is communication in the other direction, the green arrows.
+So as a simple example, let's suppose that you have a squad.
+You want to spawn it and trigger an activity complete banner when everyone in the squad is dead.
+I've written a sample script up there on the right, where you place the squad, you wait for them all to die, and then you play activity complete.
+So first the activity host script calls place.
+This sends down auth state to the physics host, which spawns three AI.
+At this point, the three AI are simulated on the physics host and peer-to-peer networked to other clients.
+There's already a couple of interesting things to note here.
+First, the activity script itself is running in the cloud.
+None of our Lua logic for activity scripts are actually executing on the PS4 client.
+Second, it's worth pointing out that these three AI are not in activity state.
+There's a squad sensor inside activity state, but it's tracking very minimal state.
+that three of them are alive, that they're using this specific firing area, stuff like that.
+Outside of activity state, there are three linked heavyweight objects.
+Those are the actual bipeds with world space positions and skeletons and specific animation state.
+None of that state lives on the activity host.
+The networking protocols are also different.
+Those three AI are networked just like any other peer-to-peer object.
+They're each separately networked to all physics clients in the bubble, independent of the sensors, using traditional Halo PVP networking.
+So now let's start killing some aliens.
+As the physics host detects each kill, it sends sense state up to the activity host, decrementing the alive count on the sensor.
+These updates are time-sliced to be relatively infrequent.
+We use 10 hertz for both CPU and bandwidth reasons.
+and it's atomic with all other sense state changes.
+We send all coherent sensor changes up simultaneously on a given sensor update.
+After the alive count hits zero, during the next script update, the script coroutine continues on the activity host.
+At this point, it would communicate down via an objective sensor, which would then update the HUD to display the activity complete banner.
+So, for a given activity, we specify all of its sensors up front.
+all the objects that it might care about during the activity.
+Sensors can be related to game objects, but they aren't one-to-one.
+You can have multiple objects tracked by a single sensor, like a squad, or multiple sensors on a single object for discrete, unrelated components of state.
+Basically, on the physics host, any sensor can read anything at once about game state.
+But whatever internal memory it decides to store gets communicated up to the activity host as sense state.
+The sensor internal memory is a very small subset of the overall game state.
+So our activity hosts are much cheaper than a traditional physics host dedicated server.
+We only need to pay for our data center, simulating a networking activity state, not the entirety of the physical simulation.
+By pruning activity state down to what's absolutely necessary, we're able to get significant scale on our data center.
+Each of our activity host executables is around 45 megabytes.
+We could make this even smaller.
+It's a stripped down version of the Destiny executable where we just tore out anything that wasn't needed for activity state.
+And we basically stopped memory optimizing when we became CPU bound on our servers.
+We took our activity hosts at 10 hertz, which allows us to run almost 5,000 of them per server.
+That's a 40 core, 256 gigabyte machine.
+Given that we typically have a bit over two players per activity host in real world conditions, that means that our data center could hypothetically handle one million concurrent users with only a couple hundred servers, and that's with plenty of safety headroom on each machine.
+That's dramatically better scale than trying to use a full dedicated server.
+With full dedicated servers, that same hypothetical million players would require half a million headless PS3 processes, each running our full game simulation.
+So now, what happens if you have a host migration?
+Let's suppose that the activity host has an alive count of three.
+It never got send state saying that any of the AI died.
+But the new physics host, for whatever reason, has inconsistent state that gives it an alive count of one.
+So the new physics host has only one AI left alive, and it's only networking one AI to physics clients using Halo peer-to-peer networking.
+Whereas the activity host authoritatively states that there should be three AI left alive.
+The activity host is the session authority, who arbitrates election of new physics hosts and handles all the migrations.
+So any host migration necessarily goes through the activity host, and it calls a special reconcile function on each sensor.
+The squad sensor, along with every other sensor, sends down auth state in a special reconcile command, which requires that the new physics host modify his simulation to match the auth state.
+In the common graceful migration case that we talked about earlier, this often results in zero or imperceptible changes if the new physics host is up to date with activity state.
+In this case, the physics host has to spawn two new AI to match the auth state requirement of three.
+And one cool thing here is how we spawn the dregs.
+We already have squad place logic in the sensor that knows how to tell the game to instantiate new AI bipeds.
+we can typically reuse those exact same code pathways to handle reconcile.
+It's just like any other auth state update that you might get through that sensor.
+Similarly, if the auth state had said that there were fewer AI than the physics host was simulating, code in the sensor would choose AI to instantly kill in order to get it down to the correct count.
+There's several other powerful benefits that come from having these dedicated activity hosts.
+One is security.
+For every Destiny activity being played right now, there's a machine that we can trust that has fairly complex understanding of the minute-to-minute gameplay.
+This helps greatly in combating piracy, is a strong avenue for investigating suspected cheaters and exploits.
+Additionally, activity bubbles can execute scripts without any players being present.
+We don't have to leash you to a boss room, and we can maintain an activity script even when every player has left the bubble and locally deleted every single object from their console's physical memory.
+And what happens if a player re-enters one of these empty activity bubbles?
+The player herself will spin up the simulation in the default state when she crosses the z-leg.
+She'll be elected as the new physics host, since it was previously empty.
+And then she will get a reconcile call where she can fix up all of her simulation state to match the authoritative sensor state.
+This is actually pretty cool.
+we automatically get a minimal state load functionality when entering an empty activity bubble because we only fix up the declared sensors and we leave everything else in its default state.
+So, all the examples that we've talked about so far are co-op scripting.
+Two or three players and a single fire team on the same activity in a networked environment.
+But Destiny is also about meeting strangers on intersecting paths.
+What happens when two players meet who are on two completely different activities?
+This is where it starts to get even more complicated.
+So, let's suppose that we've got three players in this public bubble.
+Alice, Bob, and Charpy.
+They're peer-to-peer connected to each other using traditional reach networking, and Alice is the physics host.
+Two of them, Alice and Bob, are doing a strike together.
+This means that they're connected to a mission activity host for their mission.
+The mission activity host is where all of the script logic for the chosen activity lives.
+Firing off objectives, spawning bosses in their private bubbles, et cetera.
+Charlie is playing a patrol, so while he's in the same bubble, he has a separate mission activity host giving him local patrol objectives.
+Finally, they're also simultaneously all connected to the same bubble activity host.
+The bubble host is responsible for all of the ambient scripting in the public bubble.
+It spawns and scripts all of the ambient AI that you fight, it handles the respawn timing and placement of all the resource nodes and treasure chests, and it runs all of the logic for all of the public events.
+Those are the main things that we do in our Destiny public bubbles, but technologically, a bubble host is almost identical to a mission host.
+So you could write an arbitrarily complex script in there for a crazy public boss encounter.
+I said almost identical because there's one key difference between mission activity hosts and bubble activity hosts that's worth mentioning.
+If you go back to look at our activity line, with all of these public and private bubbles, we could make them interchangeable and have an activity host for every single public bubble and one for every single private bubble.
+But there isn't really a need to split up the private bubbles for a given fire team.
+one fire team has their own shared instance of every private bubble in the destination, so we can simulate all of them simultaneously on a single activity host.
+So you have one bubble host for each of the public bubbles, and then one mission activity host that manages every other bubble on the destination, all of the private bubbles specific to the mission that you're on.
+So, to reiterate, each fire team gets their own mission host.
+All Fireteam mates are always connected to the same Mission Host.
+And this may be the only connection that they share if they're not in the same bubble.
+The Mission Host runs the activity script specific to the activity that you're on, like a given story mission script.
+The Mission Host also owns all of the private bubbles in the destination.
+That way your Fireteam can meet up in any of these private bubbles, but no stranger will ever show up there.
+Then you also have bubble activity hosts which control public bubbles.
+For every public bubble instance that we have running in the Destiny universe, there is exactly one bubble activity host in the cloud.
+It does all of the scripting for the public bubble itself, public events, spawning treasure chests, ambient encounters, and at any given time, a bubble host will likely have several strangers in it who each have their own separate mission hosts.
+Additionally, every member of a fire team could be connected to different bubble hosts if they're all in different public bubbles.
+So going back to our public bubble case, you've got three different activity hosts all running scripts simultaneously and injecting state into these consoles down at the bottom.
+How do we keep the scripts from stomping all over each other?
+As an example, you've got Charlie on the right who's on a patrol.
+Lots of the patrol jobs take place in public bubbles.
+How is that ownership distributed between the patrol mission host and the public bubble host?
+In order to keep these scripts from fighting each other, we have a few policies that we enforce on mission hosts.
+They're allowed to do whatever they want inside all of those private bubbles that they own.
+But they're not allowed to instantiate or modify any networked objects inside a public bubble.
+This way, there's only ever one activity host per bubble who can create or modify the shared simulation.
+However, they are allowed to do some stuff in public bubbles, as long as it doesn't affect the shared simulation.
+They can play lines of dialogue.
+They can set objectives.
+They can play full screen effects, all stuff that is just local to that fire team.
+Additionally, it's a common occurrence for the public bubble script to have some activity-specific logic in it.
+For example, it can say, if any players in my bubble are on this specific story activity, allow this interactable to be used by one of those players.
+A really great example of public bubble hosts triggering mission-specific logic is the raid entrance bubble for the Vault of Glass on Venus.
+If you wander through that bubble, you might see a raid party show up, and their presence in the bubble causes the bubble host to trigger the first encounter of the raid.
+Special enemies from the raid spawn and players in the bubble have to stand on three switches long enough to open a giant door.
+All this logic occurs on the public bubble host, not the mission host for the raid.
+And the cool thing here is that not only can the stranger wandering through this bubble see all of this happening, because it's all happening on the shared bubble host that they're all connected to, but you can also participate in that first encounter and help out without having to be on the raid activity.
+If she helps them complete this encounter, they'll run off inside the door, which is a private bubble, and phase out of her game, even if she tries to follow them.
+This cool upside carries with it additional complexity.
+In order to do something like this, you have to split up your activity into public and private portions.
+The public portions live on their respective public bubble hosts.
+The private portions live on the mission activity host.
+And for reasonably complex interactions between the two, you have to pass global flags back and forth between them because there's very limited interaction between activity hosts.
+This constraint, plus the fact that a single public bubble script needs to know how to arbitrate all of the different possible events that could happen inside of it simultaneously, kept us pretty conservative with what we do in public bubbles for Destiny so far.
+But I believe that we've only just scratched the surface here and there's a lot of really ambitious stuff we can start doing in public bubbles for future releases now that we're starting to get our sea legs with all this tech.
+So, while I do think that we've managed to create some pretty cool tech and have even more ambitious designs coming down the pipe, it's also worth spending a little time talking about the downsides and challenges that we've encountered.
+A phrase we like to use internally a lot at Bungie for this is, we're not the best.
+Yeah, so...
+Back in January, players found the first repeatable host migration exploit that I'm aware of for Destiny.
+They could cheese the final boss fight in our first DLC raid by pulling out their network cable at a key moment.
+This rapidly turned into the de facto way to defeat the raid.
+Raise your hands if you've played in a game that cheesed Crota by having the host pull out their network cable.
+Alright, a few of you are honest. I appreciate that.
+I mean, if this makes you think, so isn't all of this talk's resilience to host migration stuff total bullshit?
+I don't really blame you.
+This case was an interesting book.
+We have several client-side systems that don't run on the activity host for handling damage state and AI behavior transitions.
+In this case, a mission-critical portion of the raid boss logic was set up entirely using those client-side systems.
+so it never got persisted or secured by our activity host model, even though we had built sensors specifically to secure this sort of state transition.
+This is a general problem that we have.
+Any time that we expose new complexity that is client-side only, you run the risk of anyone in the studio unintentionally rigging up some Rube Goldberg machine that runs entirely on the client and then making that machine mission-critical.
+And to be clear, I'm not selling out the content creators here.
+It's our job as the engineers to create intuitive systems and communicate their usage patterns well to the entire design team.
+I view this case as an engineering failure for not paying close enough attention to and auditing the more complex raid scripts and damage setups.
+Ideally, we all want to live in a world where designers don't ever have to think about host migrations, or about which machine their logic is executing on, and everything should just work.
+Some other stuff that sucks.
+Our bubble system has some strong constraints that it imposes in our combat spaces.
+The Z-legs are a significant amount of real estate where we can't really put any interesting gameplay.
+You also get some weird player artifacts.
+If you run through a public bubble transition with another player on your fire team, you'll see them disappear and then respawn.
+That's because when you bubble swap, you're fully disconnecting with that player and his game, leaving their game, then joining a new game and respawning them in that new game that you've connected to on the other side of the transition.
+Writing sensors is also a pretty expensive new cost that we have for Destiny.
+If you want to expose a new type of state to activity script, you have to write a new sensor and handle reconciliation and all of the networking details.
+This is a lot heavier weight than exposing a function to script in a single-player game.
+This trade-off is made directly against host migration bug costs, though.
+Rather than paying a cost per script to hunt down host migration and networking bugs, we're paying an upfront cost per sensor.
+It's still a very expensive upfront cost, and it slows down early iteration of new mechanics by design.
+Designer complexity.
+This goes back to the rate example.
+Overall complexity for creating and maintaining activity scripts is definitely higher than it was on Halo.
+Designers frequently create content that runs exclusively on the client, and then they write script that runs exclusively on the activity host.
+And while in many cases you can hand wave away the distinction as an implementation detail, in other cases you have to fully understand the activity host, physics host distinction, and understand where each piece of content lives.
+The silver lining here is that while you're in ActivityScript, what you see is what you get.
+You only have access to the sensors that we've provided, and they only have access to activity state, so the delineation is usually intuitive, even if you don't realize that it's all running on a separate machine in the cloud.
+That rate example was an exception because most of the time, our designers write activity script and then they write other stuff that happens on the client, and they don't really have to pay attention or even necessarily understand the distinction and what runs up where.
+So, because we want your players to be, your friends to be able to join you at any time, we reserve slots in any public bubble for the rest of your fire team.
+For fireteams that already have two or three players, this is great, but a lot of players run around in our game solo.
+When three solo players all meet in a public bubble, each one of them is reserving two extra slots for their friends that might want to join.
+That fills up the bubble, preventing it from matchmaking with any more strangers, and you end up with a low-population bubble.
+We thought this was gonna be rare, but this actually turns out to be the typical case.
+Average public bubble populations are not far off from three when we'd like it to be more like six.
+And it's pretty tricky to solve this case while still allowing your friends to seamlessly join you at any time and not crash the simulation.
+So, to conclude, let's walk through a summary example of the entire ecosystem.
+Because it's kind of crazy.
+You have multiple public bubbles, each with their own bubble activity host.
+In this case, the archer's line bubble has one player in it, Deborah.
+while Hellmouth has three players in it, Alice, Bob, and Charlie.
+You also have multiple fire teams, each with their own mission activity host.
+In this case, a strike that Alice and Bob are playing together, and a patrol that Charlie and Deborah are playing together.
+You can also have multiple players on the same fire team who aren't connected to the same bubbles, like Charlie and Deborah.
+Charlie's over in Hellmouth, and Deborah is in Archer's Line.
+In that case, they're sharing the same local activity state.
+They get the same dialogue lines, same objectives, activity UI, but they're in completely separate bubbles, which means they have fully separated simulations match made with completely separate groups of players.
+You also have a world server up in the cloud.
+That's the system that persists all of our character and progression data for the RPG that I avoided talking about today, since it's a whole additional unit of complexity that's not directly related to activity logic.
+Each bubble, public and private, also has its own physics host, which is one of the peer-to-peer consoles that's not in the cloud.
+In this case, Alice is the physics host for the Hellmouth bubble, and Deborah is the physics host for the Archer's Line bubble.
+The physics host does all of the traditional Halo-era host responsibilities, like firing bullets and tracking damage and moving crates around.
+Crucially, we don't have to pay for any of that bandwidth or simulation in our data center, and it's always low latency if there's other players you can match to.
+And that, ladies and gentlemen, is destiny.
+So we've still got a few minutes, if anybody has any questions, just step up to one of those mics and introduce yourself.
+Hi.
+How's it going?
+Thank you for the talk.
+So how did you build consistency into the activity hosts, so as you have so many of them as they're coming up and dying while still maintaining an excellent client experience?
+What do you mean by consistency?
+If those instances that are running in the cloud are dying for whatever reason because those boxes are having issues, do you build any kind of consistency?
+Because that is your authoritative state for the activities.
+So how do you build consistency so that you can migrate from one activity host to another activity host if something happens to your activity host?
+Oh, yeah, we didn't.
+So basically, In general, it's pretty rare for a player's activity host to suffer a problem and crash.
+And if that does happen, you get kicked to orbit, and you get one of those wacky animal name error reports that you can report.
+But it's pretty rare.
+Hi, I was wondering, are you able to flex your capacity up and down?
+Do you guys utilize that at all with the number of hosts?
+Do you flex your capacity up and down?
+Oh, you mean like scaling our data center?
+Yeah, well, not just the data center, but like during peak times, do you go up and down in terms of the activity and public hosts that you have?
+Yeah, no, absolutely.
+We have one data center that runs all of our servers for the activity hosts, and it manages to scale up and down based on the amount of load that we have.
+We've never really hit our population caps, which has been nice, because it means we've been able to have a stable launch.
+We did have to buy all the machines up front.
+It's not an arbitrarily scalable cloud service that we're renting, but because of the ability to build the tech specifically for that, we got a pretty good cost savings involved.
+Cool, thanks.
+Hi, I'm one of the server engineers on World of Warcraft.
+One of the things that I think is interesting about this that I have a question for you on is degrees of separation in the design between mission critical state and other state.
+Like you sort of hand wave around the like, well, there's three guys alive, and then the host, the physics host, is actually simulating bullets and damage, which means then you just move the exploit potential to fake bullets and fake damage because it's considered the authority.
+How do you...
+work with design to figure out where the right line for acceptable exploiting is?
+Because like the way that we solve it is there's a simulation in the cloud, right?
+And clearly you guys can't do that because of peer latency and other things you talked about.
+Yeah, this is a tricky question that I'll have to skate around because I don't want to reveal too much about what we're doing with security in a recorded talk.
+But.
+We'll meet afterwards.
+Yeah, I know.
+But in general, I mean, we do allow a certain amount of exploiting to happen on the individual consoles because we don't host everything in the cloud.
+And we rely on other metrics to monitor those players and ban them, typically retroactively.
+Thanks.
+Thank you.
+I just want to know, how does this system impact the memory management for gameplay missions, since you can have a bunch of missions stacked on top of each other?
+So how do you prevent your designers from going over budget with too many stuff happening at the same time?
+Yeah, so that hasn't been a huge problem, because in general, you're only ever in one bubble at any given time.
+and that bubble has a single script for it that determines what loads.
+So if, hypothetically, you have three different missions that all intersect in the same bubble and they all have the opportunity to do something, that script already has to deal with the built-in memory limits of, like, for example, if you're allowed 25 AI in the bubble and you have one boss encounter that spawns eight AI, but then you have 22 ambient AI, that script has to deal with the fact that, oh, we need the eight AI for the boss.
+find some other guys to despawn.
+And we wrote some tools to help that happen pretty automatically for the designers, but they just have to deal with that in the public bubble scripts.
+Thank you.
+So, being that Destiny is a game that you want to keep supporting for 10 years, basically what I'm asking is, if you happen upon a paradigm for doing all of this that's significantly different, worry about? Was that a concern? We're going to make sure this is agile and we can unhook this and hook this in over here and change it all. You get what I'm saying.
+Did you go to Chris Butcher's talk right before this about engine architecture?
+No, I didn't get a chance.
+Can you talk a little bit about the principle of that?
+We tried to plan out what we thought were going to be the major architectural changes and technological changes that we could see coming down the road, but we already got a few of them wrong.
+We assumed that machines were going to get arbitrarily more multithreaded and have more and more cores, and that hasn't really been the case.
+Also, at launch, it makes a lot of sense for us to host our own servers and do all of this optimization work and complexity in order to save some of the costs of full dedicated servers, as well as provide latency benefits.
+But it's entirely possible that five years from now, there's awesome, cheap, scalable cloud services that are co-located in every city and can provide the same guarantees.
+And we could just switch to dedicated physics hosts.
+If that happens, we're just going to have to pay an expensive cost to migrate over to that.
+Cool.
+Yeah.
+Yep.
+How big, in terms of, like, number of bytes, would you say the average mission host, the gameplay data for that takes up?
+Oh, gosh.
+Do you mean, like, in networking bandwidth, or on the activity host?
+I'm just talking about, like, storage.
+these three bots are alive, that's one byte of data.
+How much do you think that is?
+Yeah, so I mean, our activity hosts themselves typically use about 45 megabytes of data when they're running.
+And then of that, gosh, I don't actually know.
+Probably less than half of that is just the sensor and the activity state.
+But I'm kind of making up that number.
+Sorry.
+How many sensors would an activity host normally, on average, survey?
+So in a typical story mission, I would guess that we have less than 100 sensors.
+Typically maybe something like 50.
+A public bubble script might have like 20 to 40, depending on how much interesting stuff happens there.
+probably our peak is in the low hundreds.
+I would be really surprised if we had something that was like 500.
+And all of those sensors are for every script tracked object for the entire mission.
+So that'll include sensors that like, of those hundred sensors, there would probably only be 15 to 20 of them at most, instantiated at any one time in any one bubble.
+And it's tracking all the sensors across many bubbles.
+Thank you.
+Alright, I guess that's all the questions.
+So, thanks guys.

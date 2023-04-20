@@ -1,0 +1,345 @@
+All right, everyone. Welcome to my talk.
+My name is Rupert Renard. I'm an Australian game developer.
+I'll be talking about the wind simulation of God of War today.
+I've been programming games for around 12 years now.
+I've worked on 12 ship titles and half a dozen canceled titles.
+Some of the games I've worked on you may have heard about, such as God of War, The Legend of Zelda, Deus Ex, Mass Effect 3, Develop 2, and Scooby-Doo.
+I've worked in a variety of programming positions.
+I'm currently at Sony Santa Monica.
+as a graphics and engine programmer, where we shipped God of War in April 2018, and it did pretty well.
+Wind is starting to become a standard feature in games these days.
+Most times the wind is just a generic sine wave, animating some bushes back and forth, and we decided to go a little deeper.
+By building our wind system, over time, we started to have a reasonable, decent amount of customers wanting to dynamically change their state based on the winds around their location.
+Our particle system was one of the early adopters.
+Particles getting pushed around the world.
+Hair, leaves, and fur were grouped together in another system, able to bend and sway in localized clusters.
+Audio emitters changed the way they behaved based on the intensity of the wind.
+And our cloth system also experimented with being affected by the wind.
+The goal was to have a dynamic living world where nothing less than hard stone was susceptible from being affected by wind.
+I've recorded some footage from the final game to demonstrate some of the wind effects we have, as well as to demonstrate that the game can get pretty windy at times, and it's a useful effect to have in order to help set up mood.
+Basically, it looks like if it's moving in the world, then there's a really good chance it's being animated dynamically based on the wind simulation, otherwise it might be a baked animation.
+We wanted the wind to be subtle for most cases, and be obvious in others.
+and and and and and and and We prototyped the fluid simulation on the CPU.
+We're based off an old tech paper from GDC 2003 called Real-Time Fluid Dynamics for Games by Josh Stahm.
+The tech paper, however, took a few shortcuts.
+These shortcuts were beneficial at the time the paper was written, but created some very obvious quality issues.
+We felt like these quality issues weren't acceptable anymore especially since we have the performance available to avoid it.
+So now we have the ability to do a proper fluid simulation without these shortcuts and achieve high quality.
+But the paper itself was an amazing source of information as a starting point, and it still is today.
+We have a three-tiered system for most of our wind sampling systems.
+Static wind is a global vector applied uniformly to everything in the scene.
+It's capable of changing over time and also as the player moves around the world.
+We feed static wind sometimes with a scrolling noise texture.
+Dynamic wind is the focus of this talk.
+It's a 3D volume that contains detailed fluid simulation that surrounds the player.
+It's always aligned to world coordinates and shifts as the player moves.
+Counter wind is a simple mechanism used to fake wind application on things that are moving.
+It's simply the negative velocity vector of the object that is moving.
+If an object is moving roughly at the same speed and direction as the static or dynamic wind, this will counteract the wind, hence the name, and give the appearance that the object isn't being affected by wind.
+This is ideal, since the object is roughly in sync with the static or dynamic wind itself.
+So we combine these three tiers like so for an object that is sampling.
+The static wind vector is added, the dynamic wind volume is sampled with the object's position, and the object's velocity is subtracted.
+Our 3D volume is a 32 by 16 by 32 texels, which covers around one meter cubed per texel.
+We had a very, very strict time budget for simulation and other wind processing on the GPU, so our resolution is mostly tailored to fit this budget.
+We opted for a uniform 3D volume out of simplicity instead of a complicated hierarchical volume.
+Our volume also needed to be large enough in world space to contain the player interactions, such as throwing the axe.
+Since our game takes place mostly on a horizontal game plane, we opted for more resolution horizontally than vertically, but we still wanted enough vertical resolution to encompass trees that the player can walk past or interact with via throwing the axe.
+Try throwing the axe directly up, the leaves will be affected by it.
+We have 5 iterations of diffusion, each frame.
+Diffusion can be tightly packed and highly performant, so we went with five iterations.
+There's no real reason why we picked five specifically, we just felt like we got a good quality performance ratio with it.
+We have several types of motors, which are used to inject velocity into the volume.
+Some motor types were specifically crafted for certain scenarios in the game.
+We have full forward and reverse advection.
+These really do complement each other well and I highly recommend taking the time to have both and avoid preferring one over the other.
+This is one of the shortcuts I mentioned earlier.
+We also used to simulate pressure, which was eventually scrapped.
+Some of the effects artists didn't like the way particles were moving.
+We deduced it to pressure.
+We turned pressure off for the whole studio and nobody complained.
+Simulating pressure is actually one of the more difficult simulations to implement, since it's a finite quantity and cannot go negative. I was more than happy to remove it.
+But for the sake of this presentation, I will include pressure as a demonstration that you can add extra attributes fairly easily.
+We have separate 3D volume textures for each attribute. I might just point out velocity is considered a three-dimensional attribute, so we have separate textures for each axis.
+This actually proved to be incredibly beneficial for performance.
+You can see we have a very slim number of attributes.
+This was mostly enforced by our tight timing budget.
+But we also weren't really willing to dive into any of the more exotic fluid simulation attributes such as heat.
+In order to properly execute the simulation, we needed to double buffer each of the textures.
+Combining all the textures needed for simulation, we ended up with about 384 kilobytes worth of storage.
+We ended up swizzling the way we access the 3D textures.
+Textures have restrictions on their width and height.
+Notably, they must be a multiple of four.
+However, 3D textures are able to have finer control on the amount of slices, aka depth, that they have.
+Originally we took the naive approach and had world X and Y slices along the Z axis, but we preferred having our world X and Z axis be treated uniformly, and we wanted finer control of the Y axis. This meant that the texture restrictions led to our 3D volume to actually be world X and Z slices along the world Y axis.
+You can see this in the diagram on the right.
+The texture is 2D slices along world Y of world X and Z dimensions.
+The shader code needed to be adjusted in order to sample and write to the textures.
+I've provided some demonstration code for this.
+Diffusion is the step to spread the attributes with neighboring cells over time.
+Think of it as a blur.
+You can also think of it as a mechanism to bring a fluid simulation to an equilibrium.
+It's used to transfer energy between neighboring cells as they directly affect one another due to proximity.
+Diffusion requires double buffering as you're diffusing one iteration at a time to a separate buffer.
+Multiple diffusion steps can simply ping-pong between the double buffers.
+We found that by separating our velocity attribute into three separate textures, we were able to achieve incredibly efficient performance with diffusion.
+While the overall bandwidth is the same regardless if you separate the axis or not, we can achieve faster iteration with separation. Without the separation, you would need to wait for the first diffusion iteration to completely finish before you can start the second. Instead, this now only occurs per axis.
+Our shader ends up with dealing with less bandwidth per thread, caused by less data per thread, which means fewer vGPRs per thread, which means better occupancy potential.
+Having fewer VGPRs is also highly preferred for shaders that want to run asynchronously.
+You can schedule the first diffusion iteration of the X-axis.
+Queued behind that is the first iteration of the Y-axis.
+Behind that, the Z-axis.
+Behind that, the second iteration starts.
+The second iteration of the X-axis only has to wait for the first iteration of the X-axis to complete.
+were able to fully utilize the GPU and minimize any stalling between iterations.
+We absorbed the stalls between iterations by doing more work on other axes.
+Motors are the main source of generating wind in our volume.
+Various motor types were supplied to the designers.
+Some were tailor-made for certain scenarios.
+Most of the motors were applied as analytical shapes.
+The directional motor simply generates wind in certain direction at a specified strength.
+Omni behaves radially from a central point and can be outwards or inwards.
+Vortex behaves sort of like a tornado.
+Wind is generated around an axis.
+A moving motor generates wind purely based on its movement.
+The direction of wind generated is a cone shape in the direction of movement and the strength is scaled from the movement speed.
+The cylinder was a very custom shape with multiple functions.
+The radius at both ends of the cylinder were customizable.
+The direction could be either unprojected, that is parallel to that cylinder axis, or the direction was projected, and would deviate from the cylinder axis based on the change of radius, sort of like a perspective projection matrix.
+Pressure motor, we simply inject or withdrew directly from the pressure attribute.
+It could create nice explosion effects, but was unfortunately dropped with the whole pressure simulation.
+We had some aliasing problems along the way.
+Very similar to aliasing problems commonly found in rasterization.
+Designers were creating very small motors with a large one meter per cube resolution of the wind volume, we couldn't properly handle it.
+We had a few options to help this scenario, but we ended up with keeping the very simple alias version for performance and continuity reasons.
+One solution we proposed was to simply scale the intensity of the motor the further away it was from the texel center.
+But the preferred solution, which we will likely adopt in the future, is to estimate how much of each texel is contained within the motor and scale the intensity based on that.
+Here I've supplied some sample code of our wind motors.
+Advection is the process of transferring energy based on velocity, in this case between texels.
+You advect all the attributes by the velocity attribute, including advecting velocity by itself.
+Using advection, velocity pushes the energy of the attributes around your simulation and behaves like momentum. We can do similar performance tricks on advection like we did with diffusion.
+We're able to run this advection through separation of axis and keep register pressure low.
+Both forward and reverse are important to our simulation quality.
+But both forward and reverse advection require being able to read-write to multiple texels in one iteration and this causes contention.
+Contention means multiple threads are trying to access the same resource at the same time.
+Solving this on a single-threaded CPU is fairly trivial.
+Solving this on a multi-threaded GPU is difficult.
+In our case, we have potentially multiple threads trying to write to the same texel at the same time.
+How to resolve these writes is case specific but in our case we simply need to sum the results.
+Unfortunately the hardware doesn't let us do atomic arithmetic on floating point values so the first solution I came up with was to spin on a compare and exchange instruction.
+While not ideal, this did work and the performance actually surprised me a bit.
+It wasn't too bad.
+I would consider the performance to be shippable.
+You can see in the example code.
+The first attempt is guessing the current value of 0, adding our value, and attempting the compare and exchange to update the value in memory.
+If the compare and exchange fails, we can use the old value it gave us as our new current value, add again, and compare and exchange again.
+But by borrowing some old school technique, we can do better.
+As I said in the previous slides, the hardware doesn't allow atomic arithmetic on floating point values.
+floating point. Why not try fixed point, as suggested by our tech director, Florian Strauss.
+We used 16.16 pixel fixed point format, which gave us plenty of precision in both the upper and lower end. All of the shader ALU ops would still behave in floating point, but when it came to storing and loading the values to memory, we would do the conversion to and from fixed point.
+While this wouldn't decrease the contention itself, that's out of our hands here, but we were able to reduce the overhead of trying to store these scatter writes.
+We saved approximately 40 microseconds right off the top and notice we got significant improvements in cases where we expect lots of contention, approximately 130 microseconds worth.
+These time savings proved to be well worth the precision loss which wasn't even noticeable.
+On store, we would simply scale our floating point values by the precision we needed, convert to integer, and then use Atomic Integer Add available to us, and it worked great.
+The wind simulation is quite literally the first thing that is run in our GPU frame.
+It takes about one-tenth of a millisecond if it is run on the main graphics pipe, but it is actually run asynchronously at the same time as our post-space deformers, custom render targets, and some particle maintenance shaders.
+It's run first because some of the results are required for our depth pass, which is the first main pass used to draw the scene.
+Here you can see the timing of our wind simulation.
+Please note, all times are taken as if they were run on the main graphics pipe.
+That is to say, all compute work that normally runs on the async pipes are being run on the graphics pipe here.
+In blue, we have our diffusion steps.
+In red, our motor application.
+In orange, we set up the forward advection pass, which is this clearing the memory, which will accumulate the forward advection results.
+In yellow, we do the forward advection itself.
+In green, we set up the reverse advection pass, but instead of clearing, we duplicate the current advection results.
+So in cyan, we perform the reverse advection itself.
+Finally, in purple, we export the results for easy access on the GPU and CPU.
+You can see each pass has very low amount of VGPR and SGPR pressure, ideal for running asynchronously.
+A reminder that the diffusion pass is five iterations.
+So the total is 43.2 microseconds.
+It averages out to around 8.64 microseconds per iteration.
+You can also see the diffusion has very good scheduling.
+This is the separation of axis working for you.
+I think if we had larger volume than our 16 by 32 size, we could better demonstrate some of the high performance this simulation can achieve.
+We simply don't have enough data to process in order to properly max out the GPU.
+Hopefully, the visual results of the game have proven we should consider a large timing budget next time around.
+In hindsight, I realize I could have very easily absorbed both of the setup steps for advection by using a little bit more memory for an additional buffer.
+This could have also reduced some of the synchronization between the steps, perhaps saving around 10 microseconds.
+Just for fun, I decided to double the resolution on each axis, giving us 8 times more resolution overall, and to time it to see how it pans out.
+As you can see from the results, it scales quite nicely, except for the export stage.
+The export stage is heavily bound by the texture addressor unit.
+I didn't have much time to investigate this any further, but I suspect it's because it's effectively reading 3 lots of 32-bit textures and writing 2 lots of 64-bit textures.
+It's bandwidth heavy with very little ALU.
+You can async that with some ALU-heavy shader work.
+Here I've shown the timing of our full frame.
+You can see the win section is tiny in comparison with the rest of the frame.
+Please note, this is also with all async compute turned off.
+I've done this so you can see how it all fits together.
+This is also why postEffects shows up twice.
+We kicked one lot of postEffects to run on top of our transparent pass.
+Speaking of transparence, this scene had very little, which is why it's a very small sliver on the timeline.
+Being able to temporarily cut out the simulation and override it with a global uniform vector was very useful.
+It lets us make sure that the different systems responding to the wind were all visually relative to each other as much as possible.
+Authoring assets to portray movement at x meters per second isn't easy.
+This helped us find the assets that weren't correctly set up.
+They may behave too strongly or weakly to the wind compared to the assets around them.
+We could also crank up the override speed and easily find assets that hadn't been set up to be affected by wind at all yet.
+I wrote a small particle emission system, which would cause particles to emit directly in front of the camera and follow the wind.
+The goal was to mimic plucking some grass from the ground and dropping it, watching how the wind affects it, sort of like what sportsmen do.
+However, I don't think anyone ever used it.
+Being able to lock the volume in its current position proved useful on several occasions.
+Being able to visualize the 3D volume as 2D slices was by far the most important debugging feature we had available.
+It lets me sanity check the simulation, as well as give peace of mind for when artists or designers say they think something may be wrong with it.
+Designers also found the visualization useful, too.
+Here you can see the green fan in the scene.
+That's a directional motor.
+It's blowing wind in the direction it's facing.
+We also here have a Jotun, whose attacks are able to generate wind.
+Kratos' axe swings also generate wind, as do his axe throws.
+As for the colours of the slices, mid grey means zero wind, strong red means strong positive X, and no red at all means strong negative X.
+So red, green, blue indicate the X, Y, Z axis.
+We also have a second visualisation mode.
+where we show the magnitude of the wind is red.
+The more red, the larger the magnitude, and black means no wind.
+We also supplied two methods for sampling the volume around the camera and display the results on screen.
+This was mostly used by myself and Sean Feely from our tech art department.
+We used it to validate sampling and other obscure situations.
+One method would sample a wind volume around Kratos at a specified interval and draw the vectors in world space.
+We can also draw the magnitude of the wind as text instead of a vector, although that text might be a bit hard to read on this presentation.
+We can also change how many samples we take, as well as the spacing between them.
+The second method draws vectors in the exact location the volume cells are in.
+This can get a little overwhelming visually, but you do get used to it.
+But it's not really meant to be used by anyone other than myself.
+There are various customers to the wind simulation results.
+Most read the simulation results on the GPU in the same frame.
+Things such as hair, leaves, fur, and particles were all able to update their simulation immediately after the wind.
+However, there were a few systems on the CPU which needed the wind simulation results too.
+We don't want the wind customers to have to sample the attribute textures individually.
+That's three separate samples.
+So we ran a shader to combine the velocity attributes into a unified 16-bit per channel texture and export it as XYZ magnitude.
+But we really had two exported textures, one for the GPU in its GPU-preferred tiled and swizzled form, and one as a double-buffered linear texture for CPU access.
+The audio and cloth simulations, which ran on the CPU, had to read from the previous frame's wind results, but this was acceptable to us.
+There is another GDC talk which goes into more details on how the hair, leaves and fur behaves, and I highly recommend you check it out.
+The Beaufort scale was of great help to us.
+It's generally considered a scale of 0 to 12, where 0 is no wind and 12 is hurricane force.
+It gives very nice descriptions of what you would expect to see visually on land and at sea at certain speeds of wind.
+It would range from descriptions like leaves rustle for the Beaufort scale of 2, which is about 2 meters per second, or small trees begin to sway for Beaufort 5, which is around 9 meters per second.
+If you're going to author assets for wind, I highly recommend you check out the Beaufort scale.
+So in conclusion, I've hoped I've convinced you of several things.
+Firstly, Wind is a good tool you can use to help bring your world alive and add a little bit more interaction between the world and the player.
+It doesn't have to cost you much either.
+We achieved a lot in a fraction of a millisecond.
+You can get pretty decent quality results and also keep the simulation very stable.
+Forward and reverse advection complement each other well.
+Please use both.
+Old school techniques like Fixpoint will never truly go away.
+They always have a nice little niche to fit into.
+Finally, having good debugging tools will make the whole thing go a lot smoother, especially being able to visualize the slices.
+We've come a long way in 15 years.
+What was once done on the CPU can now be easily done on the GPU.
+We have distinct advantages available to us on the GPU.
+It's another tool to have on your belt, so use it.
+Please go and see Sean Filly's talk on interactive wind and vegetation.
+His talk starts where mine leaves off.
+If you like my talk and I've managed to convince you to have wind in your own game, or maybe you're still on the fence and still need a bit more convincing, you must attend this talk.
+Sean's talk will focus a lot on the customers of wind, which I've only very lightly covered here.
+Things such as foliage, air, fur, trees, leaves, and how they interact with the wind.
+He'll cover things we worked on, such as leveraging compute workloads to update the state of dynamically animated objects and logarithmically binned flow maps, and go into detail on what goes on in the vertex shader for wind objects, covering topics such as dual height field grass interaction.
+He will also speak on some of the miscellaneous topics, such as card clustering and big O log n flood fill, and a bunch of other topics.
+Thanks, everyone, for attending.
+I'd just like to take a few moments to thank others who helped out in various ways.
+Big thank you to Sean Feely.
+He did more work than you can possibly imagine in making Wind and God of War a success.
+Florian Strauss, Dale Sun, and the rest of the rendering team.
+Jack Mulholland and Andreas Frederiksen.
+Sorry. We're hiring in a bunch of positions.
+Please check out our website.
+We have job openings in a lot of departments, and you can help join us on our next project.
+We also have a bunch of other talks we're giving from the studio.
+I believe we are currently around here.
+So we've got all these left to go.
+Any questions?
+Please come up to the microphones.
+Hi, good talk.
+Please, sorry.
+Go ahead.
+OK.
+You talk about some motors there.
+These motors are, you got some from where or you developed it?
+The motors are applied in shader code.
+And we set them up, sorry, the question was about motors and how to place them.
+Is that correct?
+Yeah, yeah.
+If you developed these motors or you got it from the.
+I don't know, any tool that you already have online or even from inside the engine?
+No, everything was inside our own engine and was custom built by ourselves.
+So we would place the motors inside of Maya scenes.
+I think we could also place them in script.
+And basically they would be applied in shader code on the GPU at runtime.
+Does that answer your question?
+Okay.
+Excellent.
+Yes, thank you.
+Go ahead.
+Yeah, the area is not too big, so how did you do the fade outs that you didn't see like pops or something like that?
+Because you see this in the textures.
+So the question is on the range of the wind volume.
+So we have the wind volume, which surrounds the player camera.
+It's actually pushed a little bit forward, so it's not directly in the center of the camera.
+It's pushed forward so you can see most of it, but the static wind is what covers outside of that volume.
+So that's why we have a three-tiered approach.
+The static wind is mostly for everything that you can see as far as your frustum plane will allow.
+And the dynamic volume is what's surrounding the player and follows the player, and that's the interactable part.
+Is that it?
+Yeah.
+Yeah, no problems with pops or something.
+No.
+Okay, thanks.
+No problem.
+All right, go ahead.
+Sorry.
+Do you handle interaction with terrain or static objects at all?
+So a slope would push the wind upwards if it was blowing in that direction or...
+Sorry, what's the question?
+Do you handle interaction with terrain or static objects?
+So if there's a slope or a boulder, it would push the wind...
+Oh, OK, interactions with the world.
+We thought about it, but ultimately we didn't really have any places to justify doing that.
+So the wind volume is actually completely unobstructed.
+Thanks.
+No problem.
+Go ahead.
+How much did you iterate on the scale of the wind volume, and how did you decide to make that cut off?
+So the question is about the scale of the wind volume and how we arrived at that.
+That's a good question.
+I guess it was mostly tailored to make sure that how far the axe can be thrown by Kratos would be the limit, because it's actually quite far.
+And so that's also why we pushed the camera forward, because the axe throw is usually forward, you know, you can't really throw it behind you.
+So the bound of the volume itself is mostly defined by that, but also, again, the timing restrictions we had in the game.
+So that's a good question.
+Thank you, Tom.
+You're welcome.
+Thanks, everyone.
+Thanks for listening.
+And we'll see you next time.
+Bye.
+Go ahead.
+Great talk.
+Thank you.
+How did you send the motor information into the shaders?
+Was it via textures or?
+Oh, good question.
+It was applied as constants, sorry.
+Yes, not textures, not buffers.
+It's in the shader constants.
+Thanks.
+Hi, sorry, so related to that question, so were the motors, some motors like the fan, was that placed in the level by designers?
+Yes, it was.
+And how, so then if you had like a lot of these in a level, how would you like only consider the relevant ones?
+That's a good question.
+So we basically just tested all of the motors on the CPU and we filled up the buffers that we had in the shader.
+Sorry, I said buffers to him, but it's an array.
+What I meant was an array.
+So we would effectively pre-filter the closest motors on the CPU, then set them in the array on the shader constants, and then that's how the GPU would find them.
+Makes sense, thank you.
+No problem.
+Any final questions?
+All right, thank you, everyone.

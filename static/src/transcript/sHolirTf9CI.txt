@@ -1,0 +1,547 @@
+Can everyone hear me?
+All right, that sounds good.
+Hi, everyone.
+Thanks for coming.
+My name is Andre Arceneaux, and I'm from Creative Assembly.
+And I'm here today to talk to you about the AI for our siege battles in Total War Warhammer.
+A little bit about me before we get started.
+I'm a 21-year veteran of the games industry, making games for a long time.
+I got my start designing levels for Doom, specifically Final Doom, but most of my career has been focused on gameplay programming for MMO and RTS titles.
+I've also spent a few years in project leadership and production roles, and you'll see a little bit of that influence in this presentation today.
+And I joined Creative Assembly in 2014, and now I'm responsible for the battle AI in the Total War series.
+For those of you who may not be familiar, Total War is an award-winning strategy series with over 15 years of history.
+It's been set in various historical time periods, ranging from the Japanese shogunate through the Napoleonic Empire.
+It features a sandbox-style, turn-based campaign map with real-time battles.
+And all of the resource management and recruiting is done in the turn-based campaign.
+So the battles themselves don't have any resource gathering or unit recruitment, which means it doesn't fit the typical RTS formula that you might think of.
+So when I talk about battle AI in this talk, what I mean is the AI for the real-time battles portion.
+During those battles, players control armies of thousands of men in real time to defeat the AI.
+And we've supported various different types of battles throughout the series, from open field land battles to ambushes, river crossings, and siege battles.
+And this talk will focus exclusively on those siege battles.
+Total War Warhammer brings together the gameplay style of the Total War series with the amazing world of Warhammer fantasy battles.
+It's the first non-historical setting for the Total War series, and as such it presents some pretty unique challenges to the AI that we haven't had to deal with before.
+Things such as totally new unit types like individual heroes, flying units, and crazy mechanical contraptions.
+We have some very different unit rosters per faction.
+For example, the dwarfs don't have cavalry, and the vampire accounts don't have any ranged units.
+We also have a very wide range of unit power, capabilities, and upgrades.
+And finally, there's a cool new spell system that brings a dramatic new element to the battles themselves.
+So in this talk, I'm gonna cover a number of different subjects.
+And I wanted to bring this talk to GDC this year because it covers a number of topics that are different than the typical agent-based AI that you're all familiar with.
+And that's a good thing for us to broaden our horizons and learn a little something about different disciplines.
+So during this talk, I'll be covering the context of siege battles in Total War Warhammer, what they are, why they're important, and how our gameplay goals changed for this type of battle in this particular title.
+We'll then cover an overview of the AI architecture in general for the real-time battles of the Total War series.
+Then we'll dig into reviewing some AI-related design hints that are used on every siege battle map in order for the AI to behave correctly.
+But the bulk of the talk will be spent diving into the details of the attacking siege AI.
+We won't get into any depth on defending so that we can really get into some of the nitty gritty of attacking AI.
+And finally, we'll end by covering a little bit about our team process and collaboration with some conclusions and general advice.
+So let's get into it.
+Siege battles.
+Let's talk about what they are and how our goals changed.
+So siege battles are major battles over a well-defended, walled city.
+It shows off some of the biggest and coolest cities of each faction.
+And the siege battles are intended to be a high-stakes battle with significant strategic impact on the campaign.
+Sieges are triggered when an army attacks the capital of a province on the campaign map.
+The defenders can hold out for several turns before beginning to suffer losses due to attrition, being starved out, essentially.
+The attacker can spend multiple turns building siege equipment before they initiate the battle.
+And when that attacker chooses to start the battle, they'll take that siege equipment with them into the map.
+But you can't carry the siege equipment with you as your army moves around in the campaign.
+So within a siege battle, there's always an attacker and a defender.
+The attacker always brings the army from the campaign map, which was laying siege to this settlement, including any siege equipment that they may have built.
+The defender always has some free garrison units with which to mount a defense.
+The amount and type of those garrison units can be increased and changed by building various city upgrades on the campaign map.
+The defender might also have an entire army of units stationed in the city if they were able to do so before the city was besieged.
+Each side can bring multiple armies of reinforcements with them, but this is wholly dependent on positioning at the campaign level.
+So if you had a friendly army nearby, it can be pulled into the battle with you as a set of reinforcements.
+Those reinforcements may be either player-controlled, in the case of a player having two armies nearby.
+or it could be AI-controlled, if an AI player is near the city while you as a player attack it.
+Within the battle itself, the army always deploys its armies outside of the city walls, and the defender always deploys either on the walls or inside the city, and the attacker always deploys first, without knowledge of where the defender is.
+The battle is over once either you've managed to destroy or rout all of your enemies, or the attacker has managed to capture the central victory point of the city.
+So in our previous Total War titles, our goals for siege battles were to be historically authentic, or at least believable, to allow the attacker to physically surround the city to really get that feel of laying siege.
+and then to begin with a deliberate bombardment phase where the attacker is trying to inflict a lot of damage into the city before entering.
+Once they manage to enter the city, there should be an intricate street battle once the attacker has made it past the walls.
+And in Rome 2 and Attila, which were our two previous titles, these goals were executed by having the attacking CGI use a single tactic, which used one finite state machine to control the entire attacking army.
+But our goals for Warhammer were slightly different.
+We wanted fast, high-intensity battles, as opposed to deliberate phases.
+We wanted a single attack direction to ensure that the battle was focused on the city walls instead of surrounding the city, so you couldn't just slip past unnoticed.
+Holding those city walls is the key to defending a settlement correctly.
+And there should be a quick resolution to the battle once you've made it past the walls.
+So therefore, pressing the defender quickly and broadly is important for the attacking AI to do its job well.
+Because of these different gameplay goals, the AI needed to attack cities in a very different way than we did before.
+While we had solid functionality to build on from Total War Attila, significant effort was spent to reorganize this functionality in order to suit our new goals.
+And we did this by executing many specialized tactics simultaneously.
+Most of what we'll cover today is the result of that reorganization process.
+So let's talk a bit about the general battle AI architecture in the Total War series.
+There's many tiers of game objects that are present in the battle hierarchy.
+Starting with the smallest, we have an entity, which represents either a single man or a composite entity such as a horse and rider.
+We then have squads, which is a collection of entities, and a unit, which is a collection of squads.
+Generally, a unit has only one squad, but through various game mechanics, the unit can get chopped into multiple squads, for example, if they're in different pathfinding areas.
+A typical unit is composed of between 80 and 120 individual entities.
+Above that, we have an army, which is a collection of units.
+Generally, there's up to 20 units in one army.
+But then you can also have alliances, which are sets of multiple armies.
+This typically happens when you bring reinforcements into a battle and can control more than one army at a time.
+Orders, however, are always issued to units.
+And the AI uses the exact same set of orders that players can issue.
+Orders are things like move to that location, change your width.
+attack that particular target, pick up this piece of siege equipment, or activate that ability, etc.
+Effectively then, battle AI in Total War is game logic that acts similar to a player by issuing the same set of orders.
+Those orders are defined and implemented by the battle team, which is essentially our gameplay team for the battle mode.
+Therefore, anything that happens as a result of player action is the responsibility of that battle team and not the AI team.
+This includes some things that would classically be considered AI, such as pathfinding and navigation.
+There's a separate campaign team that's responsible for all of the gameplay and AI on the turn-based campaign map.
+So the battle AI team is focused just solely on providing an enjoyable computer opponent that can play against the player using the same set of tools.
+So let's look at how that's accomplished by examining the architecture of the battle AI.
+The AI architecture for these battles in Total War is well established and has been used for many years.
+It uses a top-down set of strategic layers going from high-level strategy down to group tactics.
+We call it the objective detachment tactics system.
+There isn't any individual unit AI at all in this system.
+Even individual orders are only executing after considering what other units on the field are doing.
+So starting at the top, we have alliance, which we've touched on before.
+Each alliance in the battle is capable of running the AI.
+That's useful when you have a reinforcing army that enters the battlefield on the player's side.
+or if the player decides to place some of his units under simplified AI control.
+Each alliance owns an object called the Grand Tactical Analyzer, or GTA for short.
+And this decides whether the entire alliance should be attacking or defending, depending on the battlefield circumstances.
+It's also then responsible for creating the set of objectives to be executed and assigning units to each objective.
+The objectives themselves represent the set of units that's matched to a high level goal.
+For example, if the enemy splits his forces into two groups, the GTA might generate a separate objective for each set of units to go and attack them.
+And this would cause the AI to divide its forces as well.
+Detachments are responsible for figuring out how to accomplish the goal.
+In practice, each objective just has one detachment.
+The detachments have a set of tactics that they can use to choose from in order to accomplish the objective.
+That list of tactics is specific to a type of detachment, although the tactics themselves can be reused in multiple detachments.
+The detachment may assign units to any of its child tactics as desired.
+Tactics themselves usually represent a maneuver to be executed, such as advancing in formation, outflanking, or holding a position.
+Its goal is generally to get its set of assigned units into an engagement distance with the enemy where the melee manager takes over.
+The melee manager is responsible for the micromanagement of individual AI units, such as performing the evaluation of potential targets and issuing individual attack orders.
+This system is the core of the low-level AI logic.
+When the melee manager decides to issue an order to a unit, it steals control away from the unit's assigned tactic for the duration of those orders.
+And when it no longer wants control of the unit, it relinquishes it back to the tactic.
+All of these systems are owned and processed by the battle model.
+And when we say model, we mean basically the typical model view controller architecture.
+This battle model is completely deterministic for networking and replay requirements.
+And those replays are really useful during development to reproduce bugs that people find.
+The battle model itself is ticked 10 times per second, meaning that we have up to a maximum of 100 milliseconds per tick to do all of our calculations.
+But in practice, faster is a lot better because we have a fast forward feature.
+And if you're running at the maximum of 100 milliseconds per tick, then it doesn't go any faster than that.
+So in practice, our model tick is about 20 milliseconds.
+Tactics themselves can hold state between model ticks, and they typically do so in a finite state machine.
+But objectives and detachments recalculate everything every tick.
+That means there's no guarantee that a tactic will still be running on the next tick, or even that a tactic that continues to execute will have the same set of units it did last time.
+The strength of a system like this, though, is its responsiveness to player action.
+So getting into the details of the Siege AI in particular, there's a single objective detachment pair for attacking and a different objective detachment pair for defending.
+The Grand Tactical Analyzer intentionally keeps these pairs alive for the entire duration of the battle, meaning that for siege battles, we can safely hold more state in the detachment than we typically could.
+The various tasks and tactics in the lower right portion of this diagram are defined and carried out by a highly specialized subsystem called the Settlement AI, which deals exclusively with the interior of the city in order to have those compelling street battles.
+And it does so using a specialized settlement graph and various influence graphs, which we'll get into in a little while.
+But this talk will focus primarily on the tactics, which are highlighted in red, and how the attack settlement detachment coordinates between them.
+But before we can get into those details, we first have to discuss the AI hint data that has to be present on every siege map.
+The first hint that's worth discussing is the settlement perimeter.
+This is a closed polygon that defines which parts of the map are considered to be inside the city, and anything else is considered outside of the city.
+It doesn't have to be perfectly drawn, but there should never be any point outside of the polygon that's actually inside the city, including the walls of the settlement.
+And this polygon is manually drawn by a designer.
+And I should repeat the same disclaimer as the previous talk.
+This is obviously not indicative of the final product.
+Clearly a test map.
+The next hint are deployment lines.
+These are manually placed by designers, just like the previous settlement perimeter.
+And these lines indicate where the AI might choose to deploy a portion of its forces when attacking.
+The width of the lines doesn't really matter.
+It's just their positions and orientations.
+From those deployment lines, we trace a line forward until we contact the settlement perimeter.
+And this yellow line is called the assault designation.
+Each assault designation represents a channel or a lane that the AI can use to focus on part of the city's defenses.
+The AI will generate these hints when the map loads.
+Each assault designation has an attack focus, which is the point where the assault designation makes contact with the settlement perimeter.
+This is typically used to define which walled buildings are relevant to each assault designation by doing quick distance tests along the settlement perimeter from the attack focus.
+Each assault designation is scored from 0 to 1 for each possible method of getting into the city, of which there are three.
+And we'll get into a lot of detail on this a bit later.
+But for the three scores, the first one is assault walls.
+And we determine that score based on how many dockable wall pieces there are near the attack focus.
+Then we have assaulting gates.
+And we generate that score based on how close the nearest gate is to the attack focus.
+and then the breach walls, which is scored based on how many destroyable walls are near the attack focus.
+These scores are first calculated when the map loads.
+And as mentioned earlier, we have a settlement graph, which is a complex graph of nodes and edges, which are used to define the AI's usable space within the city.
+It's used for navigation and spatial awareness.
+and it's manually drawn by a designer, but it can be dynamically modified at runtime if parts of the city walls have been destroyed, for example.
+The shape of that settlement graph also defines the shape of the corresponding influence graphs that the AI uses to perform tactical spatial reasoning within the city.
+We have a number of such influence graphs with different values for threat.
+the strategic value for capturing an area, which is what's shown here with the victory point in red, the strategic value for defending an area, each area's exposure to missile fire, the current friendly occupation strength, and the current enemy occupation strength.
+And we can refer to any of the values from these influence graphs when determining where to position our units within the city and where they should move to get to their next objective.
+On previous titles, each siege battle map was handcrafted, and due to their complexity, they were a common source of AI behavior issues.
+The prefab system, which is new to Total War Warhammer, allows us to reuse those logical layouts, and therefore reuse the AI hints and settlement graphs, but still give each map a dramatically different look and feel between factions.
+The quality of that settlement graph authoring has a huge impact on the AI's performance within the settlement, as you can imagine.
+This is one of the major benefits of switching to the prefab system for city building.
+We got to author fewer settlement graphs, which means we get better testing coverage, and therefore, better quality AI behavior.
+And in Warhammer, we have many such logical layouts for each faction.
+Now let's dive into the specifics of the CJI strategy and tactics.
+The strategy for attacking a walled city is pretty simple.
+Get past the walls, capture the victory point.
+Executing that strategy, however, is not so simple.
+Step one.
+is carried out by a set of special purpose tactics, all executing in parallel.
+Each tactic is attempting to get its units on top of or past the city walls.
+Step two is carried out by a highly specialized subsystem called the settlement AI, which controls all of the AI units within the city walls using the settlement graph and its associated influence graphs that we spoke about earlier.
+units are transferred to that settlement AI system once they reach the settlement graph itself and can be attached to it.
+Therefore, the goal of all the specialized tactics in step one is to create entry points into the city through which we can send the rest of our attacking units.
+Notice that since units are handed off to the settlement AI as soon as they attach to the settlement graph, that means that both steps of this attacking strategy are also executing in parallel.
+The units outside the walls are under control of the tactic, when units on or inside the walls are under control of the settlement AI.
+So how can we actually get past the walls?
+Well, we can destroy the walls, which is pretty much the easiest option.
+You just blow them up.
+Shoot them with artillery.
+Or we could climb over the walls.
+We have a couple of tools for this.
+We can dock a siege tower, or you can place some ladders.
+Or we could destroy the gates.
+There's a number of tools available for this.
+But some of these options are not available to some factions.
+So understanding your enemy's capabilities is important for mounting an effective defense against them.
+As is true with all battles in Total War, the battle AI cannot choose to surrender or withdraw.
+So attacking the gates serves as the direct fallback option, which is always available to the AI, since any unit can attack the gates.
+I mentioned earlier that the goal of each tactic is to enter the city by creating entry points.
+Well, an entry point is an actual game object representation that's created dynamically at runtime, which represents an available method of getting into the city, or an attempt currently in progress by the AI.
+Each entry point has an estimated time to completion, a progress percentage, and a fulfillment score, which roughly corresponds to the number of units that is currently assigned to that entry point.
+Internally, each entry point also holds a pointer to the tactic which is currently responsible for that entry point.
+The entry points can be created via player actions as well, meaning that if an attacking player creates a way to climb the walls, the AI reinforcements will know about it.
+In order to determine which tactics we should employ to get past the walls, we have to organize our available units into specialized groups.
+This process will normally occur during deployment.
+And the attacker always deploys first, so while organizing these groups, we have no information about how the defender has arranged their forces on the city walls.
+So we have to first identify, from the available units, which ones can lead each type of tactics, and then form hypothetical groups around them with supporting units.
+That will give us the set of ideal groups from the main attacking army.
+We then match those ideal groups to the AI hints that are placed on the map according to the result designation scores.
+And then finally, we send any groups that we weren't able to match with AI hints to the reserves along with any ungrouped units.
+So now that we essentially have our set of initial tactics in place, we can move on to examining each type of attacking siege tactic in greater detail.
+starting with the gate assault tactic.
+So the goal of this tactic is to destroy a specific gate so that we can get into the city.
+The functionality for this tactic was extracted from that single tactic that was used to control the whole army in the historical version, and was turned into a standalone tactic in its own right.
+So given an assault designation to use, the gate assault tactic identifies the target gate by choosing the closest one to the attack focus.
+Note that there has to be a gate within a reasonable distance.
+Otherwise, this assault designation would have received a zero score for gate assaults.
+In order to destroy that gate, we have a number of tools at our disposal.
+We can use battering rams, which are definitely the right tool for the job.
+But they need to be manned by an infantry unit.
+They wouldn't do anything by themselves.
+Or a new thing in Warhammer, we could use monstrous creatures like giants.
+Some factions have those types of creatures.
+And some of them are really well suited to bashing things.
+But that's not to say that all monstrous creatures are well suited to bashing things.
+So we have a bit of a dilemma here.
+Time for a quick diversion.
+Let's talk about unit classification.
+What is this thing?
+So in historical games, unit classification was pretty straightforward.
+We had sword infantry, spear infantry, missile units, cavalry, and artillery.
+It's a nice and simple classification system.
+So as a result, the AI succumbed to this temptation of making behavioral decisions based on the type of the unit.
+But in Warhammer, we have all of those things, plus flying units, war machines, monsters like giants, trolls, and gigantic spiders, and individual heroic characters.
+And at first, those might just seem like new unit categories.
+But the units themselves within those categories can have very different strengths and weaknesses, especially with the individual heroic characters.
+As a result, we needed a better way to describe each unit's role on the battlefield to the AI.
+So essentially, the AI code was asking the wrong question.
+It doesn't matter what a unit is.
+It matters how we should use it.
+Is it excellent in melee, for example, or should it try to avoid combat altogether?
+Is it a great choice for breaking down the gates?
+Or maybe it excels at flanking instead?
+Is it a high-value unit that should be protected even at the cost of another unit?
+Well, each unit can have more than one use, so we created a set of AI usage flags that designers can place on each unit record to help identify how the AI should use them correctly.
+Those flags are effectively combined into a bit field structure that we can examine anywhere.
+So now getting back to the gate assault tactic, we can now examine the unit's AI usage flag to determine if it's a gate crusher or not.
+instead of checking whether it's a monstrous creature.
+And that gives us a lot better results.
+And then finally, bashing the gate is the ultimate fallback.
+As I mentioned earlier, if there aren't any other options for the AI, we can always fall back to trying to break the gates down.
+So the way that this tactic works.
+is the first thing we do is we form up into a group formation, ensuring that our units, our best units for destroying the gates, are at the front and center of that formation.
+We then advance that formation together towards the gate.
+and we choose the best unit once we've reached the staging position to destroy the gate by sending it forth to attack.
+In order to make the decision as to which unit to send, we perform a time to destruction calculation for each unit in the tactic, which factors in the time it would take to reach the target from our staging position, and then the time it would take to destroy the gate once it arrives, essentially doing an estimate of their DPS versus buildings, which we perform at runtime.
+At the same time as we're attacking the gate, if possible, we can periodically relinquish a unit to climb the walls and attack any defenders who might be up there firing at us.
+Or if we're lucky enough, we might be able to get over the walls and capture the gate from the inside instead of trying to bash it down.
+If at any time during this attack process the attacking unit is invalidated, such as it was forced to flee or it was killed, then we just choose the next best one and send it in.
+During that process, we also try to use all the supporting units in the tactic to defend that main attacking unit from the enemy.
+Once we destroy or capture the gate, we can then record it as an accessible entry point and the tactic has accomplished its goal.
+The next tactic that's worth examining is the wall assault tactic.
+And here, our goal is to create a way for our unmounted units, or our footmen, to scale the walls.
+This functionality was also extracted from the single tactic in the historical games, which used to control the whole army at once, and turned into a standalone tactic in its own right.
+So given a specific assault designation to use, The wall assault tactic identifies the set of allowable wall targets by scanning the wall pieces that are close to the attack focus.
+And note that there has to be at least some valid ones, otherwise the assault designation would have a zero score for this attack type.
+And some of the tools that we can use in order to accomplish our objective are siege towers, which are the perfect tool for the job.
+They offer excellent protection from missile fire for the unit while it's approaching the walls, and then they're quite easy to climb.
+The downside is that they have to be built while besieging the city on the campaign map.
+And also we can use ladders.
+So any footman unit can raise ladders and scale the walls.
+However, they don't have any protection during the approach and they'll incur fatigue penalties while climbing, which leaves them less fit for combat once they crest the walls.
+So only certain types of units can climb those siege towers and ladders.
+So while it's a great tactic to employ, it won't necessarily work for all of our units, such as our vehicles or our cavalry.
+So the way that this tactic progresses is first we form some groups within the tactic itself.
+So we form groups around units that have a siege tower currently equipped, or a unit that we want to place ladders.
+And then we assign to each of those groups some remaining support units who are going to try to protect that leader as it approaches the walls, and they're going to return fire on the defenders who are on top of the walls.
+Then each group independently selects which wall piece they want to dock with.
+And then we validate those target choices within the tactic itself to ensure that none of the groups are going to cross paths as they approach the walls.
+And then each group advances independently towards their selected target.
+Once they reach their target wall piece, they'll either dock the tower or place the ladder onto that wall piece.
+And once that's happened, we can mark that section of wall as an accessible entry point.
+And that group has accomplished its goal.
+And the third tactic that's worth talking about in detail is the wall breach tactic.
+And its goal is to destroy a part of the city walls so that our units can run through.
+This functionality was also extracted from that single monolithic tactic from the historical games.
+So given a specific assault designation to use, the wall breach tactic identifies a target wall piece to destroy by scanning the walls near the attack focus.
+And there must be a valid target for it to choose, otherwise we would have received a zero score for this assault designation.
+In order to do this...
+to actually destroy the walls, we bring out the big guns.
+So anything that has a weapon big enough, or a missile weapon specifically, to damage buildings.
+While it's only a small subset of units that can do this, any unit can walk through the breach created.
+So it's actually quite a valuable tactic.
+The way that it works is given that small set of artillery units and some support units to defend them from attack, we form them up into a group formation, ensuring that any direct fire artillery, such as cannons, are placed in the front rank, and any indirect fire units, like catapults, can go in the rear.
+We then select a section of walls to destroy and advance the group towards that target until all of our artillery pieces are within their effective firing range.
+We then focus fire all of the units on that wall target until it's destroyed.
+And then once it is destroyed, we can record that wall section as an accessible entry point.
+And the tactic is complete.
+Now that we know about all of the climbable walls, the destroyed or captured gates, and all of the wall breaches, we're ready to storm the city, right?
+Well, actually we're not, because we only know about the entry points that the AI created.
+But what about the ones that the player might have created?
+Since the AI can act as a friendly reinforcement for an attacking player army, we also have to consider the entry points that they have created.
+In order to do that, we need to go back to our architecture diagram.
+And we have to add a missing element, which is the entry point manager.
+So we can detect entry points that were created through player actions by periodically scanning the city walls for any docked towers, placed ladders, captured or destroyed gates, and destroyed sections of wall that the AI doesn't already know about.
+And for each one that we find, we can just create an entry point object that is marked as already accessible to represent that new way of entering the city.
+The entry point manager, owned by the Grand Tactical Analyzer, is responsible not only for storing all of the AI-created entry points, but also for performing the scanning process.
+This ensures that all entry points, regardless of source, are accessed and treated the same way by the rest of the AI.
+So now we're ready to storm the city.
+The storm entry points tactic is responsible for sending units into the city via the accessible entry points.
+It starts by forming a storming group for each accessible entry point.
+It's perfectly fine to have empty groups at this point, as units can be allocated to those groups in the future.
+Generally, the units that were responsible for creating an entry point should be allocated to that entry point group first, so that they can exploit the opening that they've created.
+So for each group, we queue up our units in front of the entry point, and then we send them through one at a time.
+In the historical titles...
+This tactic, the tactics themselves were responsible for sending the units through into the city.
+But we've changed that for Warhammer.
+The storm entry point tactic is new for Warhammer and it was created because the process of using the entry points is very similar regardless of the type of entry point.
+And so this created a nice separation of responsibilities for us.
+The assault tactics always create the entry points, and the storm entry points tactic uses them.
+Once the AI is broken past the walls into the interior of the city, its goal becomes to capture the city's victory point.
+And as mentioned before, the special purpose settlement AI is used to identify threats within the city and direct the attacking units to their goal.
+As this system is quite complex and remains mostly unchanged from the previous titles, we won't be diving too deep into that today.
+So how do the reserves fit in?
+Well, if a tactic or an entry point group can no longer accomplish its goal, for example if the wall breach tactic loses all of its artillery units because the defender sallied out to meet them.
+then we have to abandon that tactic and reallocate its units elsewhere.
+But where should we reallocate them?
+Well, we've created a new tactic for that, and it's called the reserves.
+For the first time in the Total War series, the battle AI is making use of reserves.
+This is a pool of units that's held back to see how the battle unfolds before we commit all of our resources.
+For the attacking siege AI, This is a group of units that examines the entry points, either in progress or already completed, before deciding where to commit its units.
+So effectively, the reserves tactic has become a mechanism to transfer units between tactics as the battle progresses.
+Depending on the starting army composition, we might already have some units in the reserves straight away during deployment.
+Any tactics that are abandoned will send their units to the reserves, and the reserves periodically scans those entry points in order to decide where to allocate them.
+This whole process can occur within the same model tick, so we don't necessarily have to wait for the units to physically move from where they were to the reserves before being assigned to the next tactic.
+When considering which units should be assigned to which entry points, We have to consider each unit's capabilities and the current set of options.
+A unit might be better suited to one type of entry point than another, and it might be worth waiting for progress on a highly desirable entry point instead of making a suboptimal assignment now.
+Highly desirable entry points, though, might already have enough units assigned to them.
+So we use a simple scoring heuristic to ensure that a unit is always assigned to an entry point for which it is well suited, but that we don't perform any overcrowded allocations to those entry points.
+Once an assignment decision is made, it's passed up to the parent detachment for execution.
+If the entry point is already accessible, this will result in the unit being transferred to the storm entry points tactic.
+But if the entry point is still in progress, then it will result in the unit being transferred to the tactic that's currently attempting to create the entry point.
+Note that since the reserves tactic is making its assignment decisions based on the set of entry points held by the entry point manager, there's no direct dependency between tactics introduced because of this process.
+And the assignments will consider entry methods created by player actions as well.
+So let's move on to talking about how the battle AI coordinates between tactics within a detachment in general.
+By design, our AI architecture dictates that the tactics should be as encapsulated and modular as possible, so that tactics can be reused between different detachments in various contexts.
+For example, the same tactic might be used in a land battle and a naval battle, or maybe while attacking and while defending.
+Sometimes, limited coordination between those tactics is performed by the parent detachment.
+In the general purpose battle AI, detachments allocate units to tactics using a prioritized bidding process.
+But in the case of the attacking CGI, the detachment does quite a lot of coordination, actually, by manually managing the process of allocating units to tactics.
+So let's get specific on the tactical coordination by going through a few examples.
+The first is the gate assault tactic, choosing to relinquish some of its units in order to place a ladder on the walls near the gate.
+A wall assault tactic wouldn't normally be able to do this, because the gate assault tactic would have claimed that assault designation, and therefore all of the wall pieces near its attack focus.
+The tactical coordination process unfolds as follows.
+The gate assault tactic determines the list of units that it's willing to relinquish in order to climb the walls near the gate.
+It passes that list of units up to the detachment.
+The detachment verifies that the assault designation has a high enough score to warrant an attempt at climbing the walls.
+The detachment then, if that is true, will start a new wall assault tactic on the same assault designation as the gate assault tactic.
+The detachment will then transfer control of those units from the gate tactic to the wall tactic.
+And since none of those units will have any wall assault equipment, they won't have siege towers, because they were just in a gate tactic, the new wall assault tactic forms ladder groups as opposed to siege tower groups, and uses the unit's ability to place ladders to accomplish its goal.
+And finally, the new group will then select a wall target, which is definitely near the gate, and proceeds as normal.
+A second example of tactical coordination would be when a tower docks with the walls, and it has therefore accomplished its goal.
+So the group within the tactic which was responsible for docking that tower should be removed from the tactic, and its units should be assigned to the storm entry point's tactic in order to climb that specific tower, thereby exploiting the entry point that it just created.
+The way that this process unfolds...
+is the first, the wall assault tactic marks that entry point representing that wall section as accessible.
+The tactic then relinquishes the set of units that were in that specific tower group along with the entry point for that tower group to the detachment.
+And the detachment assigns those units to the storm entry points tactic indicating that they should be assigned to that specific entry group.
+The storm entry points tactic then assigns those units to that particular group.
+And since that group knows that the entry point represents a docked tower, because each entry point has a type, it's able to issue the appropriate unit orders for those units to climb to the top of the walls using that specific tower.
+And then finally, if the wall assault tactic no longer has any units assigned to it, and therefore has no groups remaining, it's destroyed by the detachment because it's accomplished all of its goals.
+And as a final example of tactical coordination, we can look at the process of allocating the reserves.
+So units in the reserves are being held until there's a good opportunity to bolster an existing tactic in progress or to enter the city through an accessible entry point.
+Each entry point, whether completed or not, has that fulfillment score, which ensures that we don't allocate too many units to a single location.
+Each unit in the reserves is then scored for each entry point to determine how valuable it would be to that entry point.
+We can then determine if any units can be allocated to an entry point which would fully utilize the unit's potential, but not become over-fulfilled in the process.
+The way that that works is periodically the reserves scans for matches between its units and the set of entry points.
+Note that we don't have, sorry, not all units can use all entry points.
+For example, mounted units can't climb ladders, obviously.
+And we only have to inspect the set of entry points that are below their maximum fulfillment scores.
+So the reserves tactic then passes that set of mappings of unit to entry point pairs up to the parent attachment for assignment.
+The detachment iterates that set of mappings and moves the units to the appropriate tactics.
+Note that since we create accessible entry points as a result of allied human player actions, this process allows the assignment of AI units to use entry points that were created by the player.
+So at this point, we have a complete view of how the attacking CJI functions.
+Everything from the initial organization to execution, coordination, and adaptation through to completion.
+So the final remaining topic is that of additional armies or reinforcements.
+A reinforcing army is a friendly player army that enters the battlefield, sorry, not player, a friendly army that enters the battlefield after it's already begun.
+This happens when an allied army is nearby on the campaign map when the siege is initiated.
+The reinforcing army may either be player-controlled or it could be AI-controlled.
+If it's player-controlled, we don't need to do anything special.
+They'll just control up to 40 units then instead of a normal 20.
+In the case of AI-controlled reinforcements, they're not necessarily of the same faction as the player's army.
+So for example, an AI army of dwarfs could reinforce a player army of the empire when besieging a city held by the vampire counts, if the dwarf and the empire factions are military allies on the campaign map.
+This can lead to some pretty cool combinations.
+So in this image, the enemy defenders are in red, the player's army is in yellow, and a reinforcing army of AI-controlled units is just entering the field in blue.
+So by definition, the reinforcing army doesn't bring any siege equipment with it into the battle, so they might be ill-equipped to fight a siege battle.
+When an AI-controlled army of reinforcements joins the siege battles, they're all added to the existing reserves tactic, which means that they mostly rely on the original staging army to create the entry points.
+As the entry points are created, the units from the reinforcing army are sent into the city using the normal process for allocating the reserves.
+So that wraps it up for all the details of attacking siege AI.
+Now let's switch gears a little bit and discuss a change in process that we made for the Warhammer project, that increased collaboration between disciplines for siege battles.
+So in addition to our daily stand-ups, I initiated a one-hour siege AI meeting for Warhammer.
+I know that everyone hates meetings, but this one proved vital to the success of our siege battles.
+So represented in each meeting were the battle AI team, which consists of myself, responsible for sieges, and two other AI programmers who are responsible for the general battle AI.
+We also had the designer who was responsible for siege battles.
+We had the designer responsible for both battle and campaign AI.
+We had the lead battle programmer, three representatives from QA, including the lead QA, an embedded battle tester, and an embedded siege tester, and a producer, and the game director himself.
+So essentially, everyone was in the room who needed to be there in order for us to make actionable decisions.
+So yes, it was a big meeting, but it was by far our most productive.
+During each meeting, we would review the status of action items from the previous meeting, of course.
+And then we would play the build, specifically to demonstrate any AI changes since last week.
+We would then discuss whether or not those changes looked good, if they were working out as expected, or if something needed to be changed, whether it was in the AI itself or potentially a feature in the game that wasn't panning out as we expected or something that was particularly challenging for the AI to use.
+We would then demonstrate any updates to the debugging tools to visualize any of these new behaviors.
+And then we'd bring up any changes or decisions that might have occurred outside of the siege team that could have impact on the sieges.
+And then finally, we would generate a list of relevant tasks that we intended to complete for the next meeting.
+Speaking personally, this process was invaluable to me as an AI programmer and to all the other participants as well.
+It formed the core of our collaborative process, which got everyone invested in the success of the siege battles.
+And critically, this collaboration provided a mutual understanding of challenges, and it prevented surprises as the project progressed.
+So, if you'll indulge me, as a result of those changes in process, and my experience in the past, I'd like to offer some general advice.
+Now, this stuff might seem pretty basic, but it's shockingly rare to find people who actually follow it sometimes.
+So, it bears repeating.
+First, play your game. Understand your game. And watch other people play it as well.
+Talk to your expert players if you're lucky enough to be in a situation like us, where we all have a very established fanbase.
+Understanding your game means noticing things that design documents won't tell you explicitly.
+And it should be obvious that in order to program a competent computer opponent, you should understand the game that it's trying to play.
+Be the champion for the AI.
+No one will understand the AI better than you do.
+It's easy for someone outside of the AI team to make a decision that impacts AI without even realizing it.
+Since you're responsible for the AI, you're also responsible for educating the rest of the team about the AI.
+Encourage questions and be available to answer them.
+Be the expert. As the AI programmer, you know how the AI works. Or I certainly hope you do.
+If you understand how your game works, then you should also be able to anticipate scenarios where the AI might do a bad job.
+Don't rely on other people to find those edge cases for you.
+Just think about it, and if you can anticipate it, you can probably come up with a plan to mitigate it.
+But resist the temptation to work on theoretical problems.
+Instead, you should identify it, discuss it with your team, and prioritize it.
+Maybe it's not a big deal.
+Be organized.
+Having your own private to-do list is important, but buddy up with a producer to get those tasks tracked as appropriate.
+It's really easy to let things slip through the cracks, because these games are so complicated.
+And if you don't quantify and track discovered work, you're either going to work yourself into the ground fixing them, or you're going to let the quality of the game suffer.
+Don't let that happen.
+show your work, subject the AI to critique on a regular basis, people will have ideas about how to improve it.
+And you don't need to act on every suggestion.
+But two heads are better than one, especially when they're from different disciplines.
+You might get some really great suggestions.
+Invest in tools.
+They'll save you time in the long run.
+I know they're not sexy, but they're so useful.
+Especially visualization tools that help you understand what's going wrong.
+Make sure those tools can be enabled on anyone's machine.
+You don't have to do something special.
+So that you can diagnose weird behavior when someone ambushes you as you walk by in the hallway.
+And if you train other people to use the tools, they can potentially diagnose issues for you and lead to better quality bug reports.
+And finally, don't take it personally.
+It's not a personal insult if someone says the AI is doing something stupid.
+Set your ego aside during development and put the game first.
+So to wrap up, the CJI on Total War Warhammer is remarkably different than previous games in the series due to a different set of design goals.
+We started with a proven set of functionality from Total War Attila and iterated towards a style of gameplay that we wanted in close collaboration with the battle and design teams.
+The breadth of the player-facing AI behaviors is driven by the variety of unit types and army compositions that are brought to the battle, not by randomization within the behaviors themselves.
+And for the first time, we're now holding back units and reserves instead of committing the entire force at the start of the battle.
+And also for the first time, the friendly AI is able to follow the player's lead instead of just forging its own path.
+So Creative Assembly is located in sunny England, and we're hiring for positions across all disciplines.
+We have lots of opportunities, so if you're ever interested in moving to England, please come find me at the conference or talk to me after the chat.
+Thanks very much.
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+Woo!
+All right, folks. We've got about four minutes for questions. I know it's not a lot of time and obviously you can also ambush Andre outside. Just don't break down any walls because I think that's against our contract. So if anybody has questions, always please use the microphones, one in each aisle. Anybody?
+Let's just keep our eye open for a minute. There goes John. John, go ahead and go for it.
+Hey.
+So can entry points be closed down, as in ladders being kicked down and so on?
+And if so, how does the units actually reorganize in accordance to that?
+And how do the reserves, if they're heading for it, reorganize?
+Yeah, good question. So it is possible, but it's very unlikely, which means we have to handle that.
+So the way that that works, typically the entry points are permanent, but it's entirely possible that, for example, that section of wall is destroyed, and so the siege tower attached to it is worthless now. So the way that that works is just the same as a tactic being abandoned.
+the entry point will be shut down.
+All of the units that were assigned to it will be immediately transferred to the reserves tactic.
+And from there, they go back into the typical process of the reserves scanning for other entry points.
+So if there's something else for them to do immediately, they'll get transferred to another tactic right away, and then they'll go off and do that.
+Here.
+I'm curious how the game difficulty affects the battle AI in these games, or at least in Warhammer.
+That's a good question.
+The short answer is it's very indirect.
+It happens as a result of the unit balance.
+We have some pretty sophisticated systems called the combat outcome prediction, which features quite heavily in the way that the melee manager works.
+And so the AI doesn't make any different tactical decisions, but it'll certainly make a lot of different targeting choices within the low-level behaviors as a result of the unit balance shifting.
+What do they do with flying units during a siege?
+Good question. I didn't touch on that because they don't feature into any of these particular assault tactics. So what we do with them instead is they have a separate objective, which is just attack enemy.
+and they will wait and scan the entry points into the settlement and decide to fly towards one of them once it's about reaching its accessibility point.
+And so at that point, we can get some flying units, dive in and attack the guys on the walls just as your guys are cresting the ladders and chaos erupts and it's pretty crazy.
+It's fun.
+One over here.
+You mentioned visualization tools.
+Could you just describe in a couple words what exactly are you visualizing?
+Sure.
+Well, our visualizers are pretty rudimentary.
+It's just lines and text.
+using them appropriately is the hard part, right?
+So the way that we do it for most of our tactics is we'll draw like bounding boxes around all of the units assigned to a tactic.
+And then if that tactic has subgroups like the wall assault tactic does, then we identify those.
+And then we will draw like pegs to say, these are the leading units and therefore anything else enclosed by that bounding box is a support unit.
+And we can see how that progresses, and when the bounding box goes giant, then obviously something over there just got allocated to it.
+And then on each individual unit, we can print out a bunch of text saying which tactic is it currently in, which state is that tactic currently in as well, and what are its priorities, what's it trying to do.
+So fairly simple stuff, but really useful.
+One more in the middle here.
+Okay, last one in the middle.
+You mentioned that the AI is not permitted to retreat.
+Correct.
+Why?
+That's a game design decision at the highest levels, but basically it comes down to preventing the campaign AI and the battle AI from disagreeing.
+So if you enter a battle, and the battle AI goes, I can't win this, crap, I'm going to retreat.
+And the campaign AI goes, well, I told you to attack for a reason.
+Go attack again.
+And then you can get stuck in these loops.
+And there really isn't any coordination between the campaign AI and the battle AI currently in the Total War series.
+But that's something that I think is a great target for improvement in the future.
+Cool.
+Thanks a lot, everybody.
+That was really great.

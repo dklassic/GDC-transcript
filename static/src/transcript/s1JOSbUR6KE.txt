@@ -1,0 +1,248 @@
+My name is Jonas Gilberg.
+I am part of EAQE, and I spend all of my time building bots that play games so that humans don't have to.
+Today, I'll be talking about those bots in the context of Battlefield.
+So let's have a look at Battlefield V.
+So that was a short clip of what Battlefield 5 can look like.
+Now, why do I spend all of my time building bots that play games so that humans don't have to?
+Well, it provides me with fun and interesting challenges.
+But the reason EA wants me to do this is that we've reached capacity.
+The session sizes of today's multiplayer games already stretch the limits of what is possible for us to continuously stability test using humans, especially outside of initial launch.
+Games are growing in both size and lifetime, so to be able to test things in the future, even the near future, something that scales better than humans was needed.
+Take Battlefield V.
+If you want to test all combinations of maps and modes for one hour, that requires 2,304 man hours.
+If you want to test that every day, that requires 288 people.
+Multiply that by the number of target platforms, classes, customization, and other permutations, and it transforms into an enormous number, no matter how cleverly you optimize it.
+And this was at launch.
+The number of maps and modes will keep growing.
+Other new content will be added, new features, et cetera.
+These old things need to be retested along with the new.
+That is why we need the machines.
+Now this is a picture of the DICE automation farm, which has over 200 machines.
+We want to put them and other hardware at our disposal to good use.
+Which brings us to automated stability playtests.
+This was the goal for the initial proof of concept and is still a core pillar today.
+For this, there are a few requirements.
+They need to run on all client platforms.
+They should exercise code as similarly as possible to a player.
+So we wanted it to be input driven with minimal client impact.
+We want to make sure that we're still testing the same thing.
+The implementation should also be as far removed from the actual game code as possible.
+If you tie the AI down to game implementation details, which will shift a lot during development, we spend too much time on maintenance as well as being in a worse position to apply the solution to other projects.
+And anyone should be able to create test cases and direct the AI players.
+It should not require an engineer.
+More specifically, this was a collaboration with Dice QA, and the desire was for their QA automation specialists to be able to implement the support for all the game modes.
+Now, before I came to EA, I spent my time doing loads of different things, AI and otherwise, as technical lead AI programmer on Tom Clancy's The Division.
+I gave a talk on the behavior of 3D tech a few years ago.
+Some of you might remember this.
+Another thing I worked on then that is particularly relevant now were the bots for server load testing.
+As I was hired to do this proof of concept, it meant that when this all started, I knew nothing of Frostbite and very little of Battlefield.
+So the first thing I did was to investigate the tech and if there was anything I could reuse or repurpose.
+Unsurprisingly, the existing AI solution had been built with a different set of constraints and non-trivial to fork and rebuild for my needs.
+If it had been a reasonable fit, I would definitely have tried to reuse existing tech.
+The NavMesh tech itself could be used, but as the multiplayer levels do not feature AI, they and their assets are not built with AI or navigation in mind.
+There were, however, a lot of interesting bits and pieces for both input injection and player scripting, as well as the capability to create fake players on the server without client connections.
+I would just have to figure out how to glue them together with AI on top.
+Having a parallel implementation for the test AI is not without benefits, as it makes it possible to update it without worrying about breaking the actual game.
+And it neatly ticks some of the boxes of the desired requirements.
+But it came with the cost of building the AI parts from scratch.
+So, what about machine learning?
+Now, some of you might remember this from last year's GDC.
+While I was doing the proof of concept, that was a research project, made PhDs, impressive hardware, et cetera.
+And I personally wanted to produce something that had the potential to run on all platforms.
+With that significant runtime impact, where non-engineer end users could be in control within months.
+And it would use throughout production, where content and the game changes constantly.
+So don't get me wrong, I think machine learning is a great tool.
+I just made the judgment call that it was not the tool for this job at that time.
+So, normally when developing game AI, you spend time on functionality, fun, fidelity.
+You might be tempted to approach this in the same way.
+But the end goal here is not fun.
+For the most part, no one will even watch these bots play.
+So we don't have to deal with fun or fidelity.
+And to be completely honest, we don't have to be all that functional either.
+The bots will not deliberately exploit each other.
+And if they accidentally do, it would only be a problem if it hurts the simulation.
+We don't care if they're having fun.
+They are definitely allowed to cheat, if that makes things easier.
+The main goal here is to get test coverage, not a Turing test.
+So starting out, I focused on taking control of the player on a single-player test range, providing it with inputs produced by the AI.
+So what does it mean to say that the autoplayer should be controlled using inputs?
+Normally, when you press the button on your controller, that is translated to an abstract input based on the current game context.
+This abstract input is then what is processed by player code to produce movement, actions, et cetera.
+For other players, we don't want to interact directly with the game code, nor do we want to press the equivalent of hardware buttons, as that would require us to correctly track the current context.
+The input state provides us with a reasonable middle ground.
+This means that almost all of the AI brain, the output of the AI brain is produced as inputs, such as yaw, pitch, fire, et cetera.
+Something that's worth noting here is that we chose not to automate things through the UI, which means we're missing out on a whole class of potential issues.
+Now, the agent's combat behavior is based on the current weapon equipped.
+A simplified weapon representation is generated from game-specific data.
+The effective range of the weapon, what inputs are needed to fire, should aim be used, plant and detonate, etc.
+To find hostile targets, we do a line-of-sight test of the closest target in our view cone.
+It's a single asynchronous raycast, and we don't do it very often.
+While this might seem overly simplistic, it's good enough for our use case and extremely light in terms of performance.
+As the AI potentially runs on a maxed out system, we want to keep everything as light as possible.
+Sometimes it doesn't work.
+We temporarily blacklist targets if we have line of sight and shoot at a target for some time with no effect.
+So by default, the pathfinding runs on the server.
+And in our case, we wanted the AI to run on the client.
+So I implemented some custom networking for paths.
+This meant we could keep the pathfinding on the server and not impact the client.
+As the autoplayers are used throughout production, and often on content that is not built for AI, the navmesh is often out of date or suboptimal.
+As a result, paths will often go straight through obstacles and the bots cannot.
+To tackle this, we monitor the progress on the path as a 3D distance to the next waypoint.
+If we haven't made sufficient progress within the allotted time, we try to clear the obstacle by spamming buttons that often get us out of a jam.
+Jump, interact, open door.
+And if that doesn't work, we teleport.
+That was good enough, and what we used for quite a long time.
+Now, we actually need to control these players.
+To do this, we wanted to use Frostbite schematics, not only because it's a powerful visual scripting tool, but because it would allow us for easier adoption and potentially a piece-wide upgrade process of existing scripting.
+QA came up with a list of requirements of what they would need to write the high-level logic for all game modes, based on their previous tests and scripting experience.
+So schematics are used to set the objectives for individual auto-players to follow.
+Objectives control where the auto-players go, but objective parameters also control how they get there, if they should engage their enemies, remain passive, have god mode on, et cetera.
+Examples of objectives are, in addition to move and defend seen here, interact, action, attack, follow, and more high-level ones like seek and destroy.
+You can also create game or game-mode specific objectives if that's necessary.
+Now that the auto players had basic combat, navigation, and scripting capabilities, we needed to actually transition from single machine development to many in order to actually develop these tests for the large scale game modes.
+Or did we?
+As I mentioned earlier, it was possible to create connectionless players on the server.
+All I had to do was to make that work for auto players as well and re-architect the AI so it could be run either client side or server side, depending on the use case.
+Once that was in place, it allowed for much faster iterations, both for QA and myself.
+It takes seconds to add 64 players to a game, and it can be done on demand from a console command or a command line parameter.
+When the autoplay test has been properly tested using this local multiplayer setup, then it can be tested in the real environment.
+The important thing here is that to the client, the server players look like any other clients.
+This is a simplified view of what the setup looks like for the Conquest game mode.
+Conquest is Battlefield's signature 64-player domination mode, where each team tries to control predefined areas, control points.
+The game mode schematics expose data that the independent test schematic can read and act on.
+When the auto player needs to pick a new objective, they pick a control point at random and then pursue that either aggressively or defensively.
+The defensive ones are guaranteed to actually get to the control point, unless they get killed.
+Now, we are about seven weeks into the project and this is what it actually looked like.
+Now, it wouldn't be Battlefield without vehicles.
+They really push things to the limit.
+So the auto players needed to support that.
+Support for keyboard turning, once we had what we saw previously, was easy.
+And now digging out the weapon information for the tanks and actually aiming turned out to be a bit more involved.
+So for the first iteration, auto players driving a tank simply assumed that the weapon pointed forward and turned the whole tank when they wanted to shoot the targets.
+I mean, it's not optimal from a gameplay perspective, but it exercises the important paths at a fraction of the implementation time.
+Airplanes, similar scenario.
+Following the same bang for buck principle, the airplane support simply meant that the other players would spawn in an airplane, get the same objective position as otherwise on the ground, and crash there.
+I mean, that is what happens to a large number of our players anyway.
+One way to expand the auto-player capabilities beyond weapons and the primary objectives provided by the game mode is something called secondary objectives.
+Secondary objective generators are typically provided by game or game mode specific code and produce an objective based on a specific context.
+It's probably best explained with examples.
+The first example that I'll use is the way that the auto-players build fortifications, defensive structures in predefined locations.
+The area around the player is scanned for locations where fortifications can be built and repaired.
+If a suitable one is found, an action objective is generated.
+The action objective instructs the auto player to equip a specific item, tool, and use a specific input action, fire, while being close enough to and aiming at a specific position.
+It's also common to set the passive and god mode parameters of the objective to make sure that it really happens.
+The other player doesn't really know what it's doing or why, but it doesn't really have to as long as it succeeds often enough.
+You could potentially run this as a separate test case with all auto players running around constructing all possible fortifications on the map.
+You could also periodically generate secondary objectives to blow things up.
+Or again, all auto players could be configured to have bazookas with infinite ammo and shoot at all possible destructible objects on the map.
+So here, I simply wanted to show you a short, more recent clip of what it looks like when the auto-players are playing Conquest, viewed from above with some debug drawing turned on.
+Visual inspection of the AI from the ground or above is not a very efficient method to detect patterns over time.
+And most of the time, no one will be looking at the automated tests.
+This is worth repeating.
+The tests need to produce data that you can use to validate them, since you can't be sure that human end users will do it for you.
+For the validation of autoplayers, we depend heavily on the telemetry system used for real players.
+A good way to analyze that data is in the 3D telemetry viewer.
+In this video, you can see the playback of a conquest session on Narvik.
+This is an old version of autoplayers.
+I've also used the telemetry workflows quite a bit on my local machine.
+If you look closer at the video you just saw, there were a bunch of pink boxes being generated.
+The pink boxes represent a player being killed because they were outside of the allowed game area.
+Scrubbing through this again with team colors turned on, it's clear that they're chasing enemies into their home areas, which is something they shouldn't be doing.
+This is a really early example where I immediately realized that I'd forgotten to do position validation when chasing an enemy.
+I mean, correcting that was quick and easy.
+Then I simply reran the same 64-player playtest locally with local telemetry and could verify the issue was fixed using the same tool that found it.
+So, telemetry visualization is useful to get a feel for what they're doing and find anomalies in their behavior.
+The initial validation of autoplayers was done by taking data, such as telemetry, crashes, and asserts produced by playtests with human players, and comparing that to data from an equivalent playtest with autoplayers.
+We call these mirror tests.
+The vast majority of these tests have been done on PC, which affects the numbers you will see later.
+For the mirror test, we track overlaps and crashes and asserts, but we can also look at the actual session heat maps.
+For the first test, we needed to use spare machines during the weekend and turning those on manually.
+And that's a lot of machines.
+So thank you, Paralingvel and Marian Kobus for making that happen.
+That process has now been largely automated.
+And for each human playtest, a corresponding auto playtest should be run on the farm.
+And here you can see the heat maps for two sessions, one with the playtest and one with the auto players.
+As you can see, there are some differences.
+Some of the hot zones shift slightly, the auto players have a tendency to both follow the exact same paths over and over, and they also tend to camp the flags closer.
+In general though, this does not show anything alarming, such as all auto players being stuck under the terrain, clustering only in one part of the map, or some other really bad thing that could potentially happen.
+As the primary purpose of the auto players is to provide test coverage, they also try to cover as many player configurations as possible.
+When they spawn, the kit that they use is picked at random.
+Normally for playtest, people will pick the default ones.
+Then the character will get either random or default unlocks.
+We want to make sure we test the default unlocks more, but not only the default unlocks.
+On respawn, there's a chance to redo this whole procedure.
+These little pie charts show the kills by weapon.
+As you can see, the auto players still use the default weapons to a high degree, but has a bigger spread in terms of weapons used.
+In addition to data produced continuously, analysts have done a manual deep dive on the crashes encountered on playtests and autoplaytests during two months to find details on what the autoplaytests might be missing compared to manual playtests.
+The left part of this graph, the green 49%, are crashes from the playtest the auto players have found.
+The yellow 15% are crashes that they haven't found, but that are similar enough to crashes that the auto players have found that they are judged likely to be found given enough time.
+The 36% that currently cannot be found have in this graph been further been split by cause.
+Since the auto players don't use the UI, the 13% UI crashes are not unexpected.
+The hardware and OS related crashes, which come down to the farm simply not representing the crashing configuration, was slightly higher than I expected, 16%.
+Again, this data is mostly from PC.
+The remaining very rare crashes we might never find, even if we in some way manage to cover the other areas.
+Now, if we remove the UI and hardware related crashes, which we know the auto players can't find no matter what they do, this is what we're left with.
+For stability testing, we're currently trying out a 50-50 split of clients controlled by humans and clients controlled by auto players, and we will monitor those results closely.
+So, to tackle the problem today, rather than to wait for the machine learning future, we developed a bot system using classical game AI, auto players.
+Auto players allow anyone to set up full-scale multiplayer test scenarios where AI controls the players.
+They can be run in a full client server setup or all of it can be run on a single machine.
+Having this system allows us to leverage the hardware at our disposal and not be limited by humans.
+For Battlefield V, there are 601 game mode and feature test cases.
+It takes 330 client hours to run all these tests on all platforms.
+We have spent more than half a million hours running automated tests for Battlefield V, or put in another way, about 300 work years.
+178 of these tests contain auto players, and those tests take up over 50% of that time.
+AFK takeover deserves an honorable mention as it's so very useful and very simple to implement.
+What this means is that the AI automatically kicks in if the player has been inactive for a certain amount of time.
+You can watch the center bottom of the screen there.
+It's very useful while working on the AI, but it can also be used if you want the AI to take over for players that go AFK in a play test.
+Even if the bots haven't been polished for gameplay, it might be better than nothing.
+Multiplayer client stability testing was the primary goal, but now that we had a system, it turns out people could do a whole lot more.
+The following are just a few of many examples.
+Very early in the process, well before we done any thorough validation of the crash and assert data, autoplay tests started being used in addition to the automated fly-throughs for performance testing.
+All that had to be done was to run the autoplay test case instead of the fly-through test case, and 64 other players would show up and play the game.
+As it was no longer necessary to run a playtest with human for each configuration, numerous configurations could be explored, and the best could then be used on actual playtests to get more useful data out of those.
+This is also used for something akin to profile guided optimization.
+The game is run and restarted over and over again in many, many configurations for about 10 hours.
+And data is collected, such as DirectX 12 shader permutations, which can be extracted and fed into the next build.
+As we can create server auto-players, and the game server itself can run inside the client process, it's very, very easy to test these on your local machine.
+A lot of other tests depend on this ability, some QA workflows especially.
+So while the primary purpose of auto-players is to produce data not to look good, people can see them and do play against them.
+And as such, we've added a few small behaviors and tweaks to make the experience slightly less jarring.
+We can also use those server auto-players to fill up dedicated server game sessions if there aren't enough human players for a full round.
+This is not primarily used for gameplay testing, but the mirror test, for example, depend on this to fill the server's up to capacity as it doesn't run the full 64 clients.
+Auto players are also used to play through the single player campaign.
+DICE has a long tradition of keeping a scripted playthrough alive.
+The difference now is that it can be implemented in a way that is more resilient to changes and exercises the content in a more realistic way.
+Another way to run these tests is to use them to test the servers.
+But for these configurations, you instead want to minimize the impact of the test system on the server.
+This means that all the AI logic, such as navigation and objectives, et cetera, instead runs on the game clients, clients which run in the cloud.
+This is an example that we never imagined.
+Auto players are used to brute force the multiplayer maps, finding tons of spots where real human players would get stuck in collision geometry, forcing them to suicide and redeploy.
+This was made possible after some improvements to the unstuck behavior had been made, where raycasts are used by agents to find their way out of tricky situations when they get stuck.
+Now, this can be done locally and at high speeds, as it can be run with the server auto-players.
+Now, these are two examples.
+You might not even be able to see the characters as they blend in quite well.
+At the top, the character looks stuck between two trees and a rock, and at the bottom, in some debris.
+Working with independent hardware vendors and tech partners, the historical challenge has been that they cannot locally reproduce our stability issues, as they require 64-player playtests.
+On Battlefield 1, working with Frostbite on DX12, they wanted 100% local repros for these bugs, and it was impossible as it required lots of players doing crazy things simultaneously.
+For Battlefield V, auto players were used extensively to test DXR.
+You could simply run them on a single machine with an RTX card at the office, or send the auto play test configuration to NVIDIA and they could test things themselves.
+Another success story from Battlefield V includes tracking down an incredibly hard to find DX12 crash, which took weeks of auto player soaking, and involvement of multiple partners to track down.
+Our partners were able to do this with only guidance required from DICE.
+There are a lot more things that I would like to show you today and many more details to share, but that's all we had time for.
+So to wrap this up, with other players, we addressed the scaling problem to enable large-scale testing.
+We're ready for the future and ready for testing massive number of players in our game sessions.
+We empowered end users by using Frostbite schematics to unleash a lot of hidden testing potential.
+By trying to focus on what was required, we could manage with what, to me at least, was surprisingly simple behaviors.
+And this is just the beginning.
+We're still exploring the possibilities that this affords us.
+Now that we have these autonomous clients that can take orders, how can we use that to improve workflows?
+Are there more ways in which we could generate useful data automatically?
+Or will an interactive collaboration with the machines yield the best results?
+During the development of Battlefield V, auto players have gained momentum and have been expanded to multiple projects and studios across EA.
+We have access to vast quantities of data, and we need to leverage that.
+Better models, better feedback loops, better everything.
+This work has already been started, and there is some interesting progress, but there is a lot more that can be done, and I can hopefully speak on that topic at a future date.
+Now, I know we're short on time, but as some of you might have realized the first time I showed it, the intro video was created using footage of auto-players playing the game, not humans.
+So let's have a look at that again.
+Thank you.

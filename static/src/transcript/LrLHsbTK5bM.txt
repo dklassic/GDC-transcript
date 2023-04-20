@@ -1,0 +1,561 @@
+Okay, hello.
+Small announcement.
+Could everyone please silence their mobile phones?
+Thank you all for coming.
+Really appreciate it.
+Welcome to Player Traversal Mechanics in the vast world of Horizon Zero Dawn.
+My name is Paul van Grinsven, and I'm a game programmer at Guerrilla.
+I would like to start off with a short video that gives the impression of the various player traversal mechanics in the fast world of Horizon Zero Dawn.
+As the game has just been released this week, you might have already seen some glimpses of it.
+So who is this flame-haired female warrior?
+Who are we dealing with?
+Let me introduce to you Aloy, a tribal outcast searching to understand her origins.
+Aloy is an adventurer with a lot of agility and endurance.
+Growing up in the wild in years of training made her into a very strong climber with well-developed fighting and hunting skills.
+The world of Horizon is huge, and most of the terrain is procedurally generated.
+The world sports a lot of different ecotopes.
+There's a large variety of rivers, forests, vegetation, climates, and wildlife.
+Next to that, the world is also filled with man-made structures and settlements, both indoor as well as outdoor.
+All of this makes it quite challenging for a game programmer to implement a solid traversal system.
+So now that you had a small introduction to Horizon, let's have a very quick look on what will be covered during this presentation.
+I will explain very briefly what the goals and constraints were for the traversal mechanics, a short look at our tools, workflow, and animation pipeline.
+Then we'll start off with a breakdown on how we achieved creating responsive navigation, followed by an in-depth description of our more advanced traversal mechanics, and last, some of our future plans will be discussed.
+To begin with, I would like to say a few things about the goals and constraints that we had for player traversal at the start of the project.
+From the design point of view, the overall requirement was to have responsive and fluid movement.
+Horizon is an open-world action RPG, so responsiveness is a big influence on the actual gameplay.
+The traversal development team consists of two programmers, three animators, one designer, and one producer.
+And from a technical point of view, everything needed to run at a minimum of 30 FPS.
+And as the terrain is mostly procedurally generated, we also had to make sure that all the movement would work properly everywhere in the world, no matter where you are.
+At Guerrilla, our animators work with both Maya as well as MotionBuilder.
+Morpheme is used as an animation middleware consisting of an animation authoring application, Morpheme Connect, and a runtime engine.
+Morpheme Connect allows our animators to graphically author blend trees, state machines, and transition logic.
+All this animation behavior for a character is stored in an animation network.
+The Morpheme runtime code that is integrated into our Decima engine then takes care of instantiating such animation networks and handles the runtime playback.
+The Decima engine is our own in-house developed engine, consisting of an editor and a runtime.
+The Decima editor is our authoring tool that allows users to graphically build huge and dynamic game worlds, including all systems and logic.
+We wanted the world of Horizon to have a lot of similarities with our current world, covering a lot of different landscapes.
+The image on the slide shows a typical traversable area in Horizon.
+You can see a lot of differences in elevation in the terrain.
+And unlike the Dutch landscape I'm used to, it's not flat at all.
+During the presentation, I will explain the various mechanics that we have developed that will allow Aloy, here standing on the left of the screen, to reach the far right of the screen.
+So if we want to get anywhere, we first have to make sure that Aloy is able to start moving.
+In our opinion, the feel of responsiveness of a controllable third-person character is mostly defined by the starts and stops.
+That is why, for Horizon, we really want to get a fluid and responsive start-stop system.
+The system should support left and right footedness, and the movement has to be very easy to control, where the character should always go into the direction of the player's input.
+Let me introduce you to the first problem we encountered during the early prototyping of our start-stop system.
+When trying to transition from a stop to a start, the movement input wasn't directly handled in the animation network, as we were first waiting for the stop animation to be completely finished.
+This was done because the stop animation contains some nice secondary motion which we would like to show.
+Let me visualize what this problem looks like in the next video.
+On the top right you can see the input of the controller.
+Note the latency between the input and the actual movement of Aloy.
+The solution to this problem relies heavily on the use of animation events.
+Within Morpheme, each animation clip can be annotated with such events, which have a time, a duration, and an ID.
+The animators can control when and for how long events are active, and how events are blended with multiple animations.
+Morpheme Runtime will provide a list of currently active events to the game after each update.
+This is an important tool for the game logic to synchronize its own state with the animation network.
+We solved the problem for the unresponsive stop to start transition by allowing an early reaction during the period of time that the exit allowed event is active.
+When during this event any movement input is given, an early transition to the start animation is triggered to increase responsiveness.
+If no movement input is given, we just continue playing the stop animation until the end, before transitioning to the idle.
+Normally, the exit allowed events are only active at the end part of the animation clip.
+The next video demonstrates the result.
+Let's continue on the start system by taking a closer look into the setup of our directional starts.
+We have three states controlling how to start.
+We have a forward start state, and a left, and a right one.
+The forward state includes all animations for starting to move more or less forward within a 45 degree angle.
+Note that we have no support for stepping backwards, as Horizon is all about moving forward.
+As you might have noticed, there are transitions possible between the different start states.
+This is done to make sure that we can already trigger a new start in a different direction.
+We found out that this increased responsiveness even further.
+Within the start system, we have three animation variables that control the animation network.
+A Boolean variable move that indicates if we are willing to move, a float variable speed, representing how fast we are willing to move.
+and a float variable heading, indicating the direction in which we would like to move.
+Movement in code is handled with a movement velocity and a turn speed.
+The turn speed is dependent on the movement speed.
+So the faster we move, the faster we are able to turn.
+Aloy has the ability to make a moving 180 degree turn by quickly steering the movement stick in the opposite direction.
+Since gamepad sticks and fingers are slow, such sudden changes in movement direction still take a few frames.
+They're definitely not instant.
+To handle this properly, we are keeping a history of the last three movement input directions and base our stops, turns, and starts on that.
+Movement speed and direction are always instantly updated, though.
+The image on the slide represents the blend tree of a directional start.
+As you can see, it contains four blend nodes.
+The first blend node is blending on the move heading, 45, 90, and 180 degree.
+This makes sure we match the correct direction of the start.
+Per direction, we can achieve three different speed ranges.
+We have slow walk, fast walk, and jog.
+And these inputs are blended on the move speed variable.
+With the setup of a directional start in mind, let's focus on the animation metadata in the animation clips.
+This diagram shows the trajectory of a 90 degree directional start.
+All directional start animations are annotated with various events.
+And one very important one is the local motion event.
+This event tells us at runtime if we should use animation driven movement.
+So during the first part of this animation where the trajectory is rotating, we let the animation completely dictate the movement of our character.
+This is done to make sure we end in the correct direction as the player requested, and it reduces the amount of foot sliding.
+When the locomotion event is no longer active, the character's movement will be completely driven by the regular movement code again.
+The use of the locomotion event did cause the problem that our character's movement became unresponsive and uncontrollable during so-called micro-movement.
+Our movement logic was set up as shown in the diagram on the slide.
+In this example, we transitioned to a stop if the movement stick is released during a start.
+Because the stop animation contains animation driven forward movement, transitioning from a start to a stop would take away all control for the player, not giving him any chance to steer or abort.
+We solve this problem by introducing steps and shuffles in the start state and remove the transitions from a start to a stop and from a stop to a start.
+Steps and shuffles are start motions combined with stop motions.
+Shuffles are considered directional motions where the footedness stays the same, but quick rotation and small forward displacement is applied in the motion.
+The shuffle is triggerable by quickly tapping the movement stick in any direction.
+We define a step as a small forward motion where the player switches footedness.
+The step is triggerable by letting go of the movement stick once the feet have started to cross each other.
+It only contains forward displacement and no rotation.
+Each directional start then contains an event for when we allow the transition to a step or shuffle.
+So let's focus again on the animation metadata in a 90 degree directional start.
+The moment we want to stop moving, the current playback position in the animation determines if it will trigger a step or a shuffle.
+When we have reached the end of the animation clip and we still want to keep moving, we allow an early transition to the cycle.
+All transitions from a start animation to either a step or a shuffle are synchronized transitions, meaning that the time in the source animation is synced with the destination animation.
+Here's a short video that shows what this looks like in action.
+Now that we're able to start a stop, let's continue with the next obstacle.
+As seen in the image, there's some elevation noticeable in the terrain.
+Smoothly standing on and walking over such rough and wild surfaces turned out to be quite challenging.
+Before going into detail on how we achieve smooth movement, I would first like to mention the constraints that we had to take into account.
+For the player character, we don't use a navigation mesh.
+Mostly for memory budget reasons, we didn't have one, making certain things a little bit harder.
+Player navigation is done by simulating a capsule shape through the physics world.
+So no real magic happening here.
+We do have a maximum slope angle of 50 degrees and a maximum speed of alloy six meters per second while sprinting.
+The maximum height that alloy can jump is 1.5 meters above the ground.
+Our capsule collider supports different predefined sizes, where the default standing size is 1.8 meters high and 70 centimeters wide.
+For implementing smooth movement along an even terrain, we need to know what the ground surface gradient is, and we definitely like to ignore high frequency differences in elevation.
+Therefore, we cannot directly rely on the contact normal of the capsule's intersection with the ground, since that's very sensitive to that.
+We solve this by constructing a contact plane from four collision probes around the player's capsule collider and smooth out the results over time.
+If you look at the top view image on the slide, you can see that we have four probes around the player, marked with a blue dot.
+All the probes have a fixed start and end offset relative to the player's position...
+and are aligned with the orientation of the player.
+The contact plane can then be constructed by calculating a plane normal...
+which is the cross product of the direction between the right and left contact position...
+with the direction between the front and back contact position.
+We then smooth out the resulting normal with a previous one...
+to rule out even more high frequency noise.
+Note that some intersection points of the probes are rejected because of two extreme angles.
+But as long as we have three or more contact positions, we can construct our plane normal.
+Once we have constructed our contact plane, simply projecting Aloy desired movement onto it will make her move smoothly over the terrain.
+The forward and lateral slope angles are also sent by the game logic to the animation network, which allows Aloy to play additive animations based on the slope angle.
+To prevent us from having to waste precious cycles while waiting for the probe results, we decided to probe async.
+The collision probes are scheduled so they can be executed on different threads later in the frame.
+However, this means that the results of our probes are lacking one frame as we have to wait for the frame to be finished to gather our results.
+So now that the movement is smooth along uneven terrain, how do we keep the feet aligned with the ground?
+The solution for this is to procedurally adjust the position and orientation of the legs and feet.
+Duration events in the animations decide when the feet and legs are allowed to be adjusted.
+And our code decides where the feet are allowed to be placed, depending on the game state and the results of the collision probe.
+So, placing a foot on uneven terrain works as follows.
+We start by doing a raycast from knee height downwards to the collision mesh...
+...to detect any surface underneath the foot.
+The intersection point is sent back to the two-bone IK solver...
+...where the chain will be solved from ankle to knee to hips...
+...with adjustments of the pelvis as well.
+All animations have been annotated with foot rest events that control when a foot is resting on the ground.
+And so we know when adjustment has to be fully active.
+Separate events are used per foot.
+The described approach works quite well in most situations.
+But one specific case that it can't handle is shown here on the slide.
+Standing close to a cliff with one foot in the air.
+We've been calling this the floating foot problem.
+This happens when the downward raycast is not hitting any ground below the foot.
+We solve this problem by adding a fallback mechanism in the case that the raycast is unable to detect the ground.
+Once this happens, we perform another intersection test, but then with a swept sphere instead of a ray, so we can actually cover the whole size of the foot to find an intersection with the surface.
+This wider intersection test could find intersections that have a horizontal offset from the foot, but that's handled perfectly fine by the IK.
+However, the fallback mechanism is only enabled for alloy, as MPCs are always attached to a navigation mesh that guarantees to have a valid surface underneath.
+The next video will demonstrate the result.
+It's not only small differences in elevation that Aloy will encounter when traversing our world.
+She also has to deal with blocking obstacles like rocks, broken trees, robot parts, etc.
+As Aloy is very agile, we wanted her to effortlessly traverse most obstacles on her way.
+And so, our Vault system was born.
+Our vault system is capable of performing three types of moves.
+We support step up, step over and step off.
+The detection distances and parameters that are used are dependent on the current type of movement.
+For example, swimming or sprinting has different detection settings compared to normal walking.
+In the vault system, the first step is to see if we are actually allowed to vault.
+Our level designers can disable vaulting in certain gameplay areas by placing trigger volumes.
+Besides that, individual game assets can also be marked as not vaultable.
+For example, a table with a pickup on top of it.
+If the player is allowed to vault, we start by scheduling collision probes.
+This scheduling is done the same way as how we detect the surface gradient.
+So again, we will be one frame late as the results will only be available in the next frame.
+Moving on to the next frame.
+We're now able to process the results from previous frame.
+The collision probe that we scheduled is a swept sphere intersection test in front of Aloy.
+The probe starts at the standing height and ends a few meters below the starting point.
+If the intersection point of the swept sphere is higher than our current position, it means we should start analyzing the obstacle shape for a possible step up or step over.
+If the intersection point has a horizontal offset relative to the starting point, it means there is no direct ground underneath the starting point and we have probably hit an edge and should start searching for a possible step off.
+Because we don't use a navigation mesh for the player, we have no directly available metrics for the shape of the obstacle.
+Because of this, we have to do some smart shape analysis to another set of collision probes.
+These multiple collision probes are downward raycast in front of us with a fixed offset in between.
+This way, we can detect the depth of the obstacle and determine if the obstacle is flat enough to actually stand on.
+By looking at the height differences of the intersection positions of the raycast, we can see if we should be stepping onto the obstacle or if we can actually step over it.
+For a step-off, the same logic is applied as a step-on, the only difference is that the intersection position should be lower than Aloy's current position.
+Once the obstacle shape has been analyzed, we store all metrics of the found obstacle, which allows us to choose a matching animation to trigger.
+Transition selection is based on a scoring system with weighted variables.
+For each transition, we calculate the score and the transition with the highest score will be triggered.
+First, we have to make sure the transition is actually possible for the obstacle metrics.
+Each transition is categorized by an obstacle type, normal or climbable, and a vault type, step up, step over, step off.
+Every transition contains metrics of the corresponding vault motion.
+Next to that, each transition is allowed in defined ranges.
+Maximum upwards displacement, maximum forwards displacement, et cetera.
+By comparing the obstacle metrics with the animation metrics, we can select a transition that suits best.
+And as we prefer climbable vaults over normal vaults, each transition to a climbable obstacle receives a bonus score.
+So having looked at finding a valid full transition, let's now move on to executing one.
+As a result of supporting a variable range for each full transition, we introduced a problem.
+The obstacle has probably never the exact same metrics as the motion in the animation.
+So how can we make sure that the transition will match the obstacle and actually intersect with the shape?
+We use animation warping to solve this problem.
+Animation warping is the bending and stretching of an animated motion to reach a specific position at a specific time.
+The advantage of warping is that you don't need a lot of unique animations to cover all cases.
+Another nice thing is that while warping the destination position can be adjusted during playback.
+The image on the slide gives a rough idea of what animation warping does.
+On the left side you see the original motion and the right shows the warped motion.
+In order to efficiently spread out the warping adjustments over time, we need to know the total remaining displacement at any time in the animation.
+So this will require an analysis of the animation.
+In Horizon Zero Dawn all the warping is operating on each axis individually.
+So, consider this graph to be the displacement over time on the forward axis of the trajectory bone relative to the start position.
+Let's say if our current frame is at the orange dotted line, you can see that the next frame will contain a lot of forward displacement, the frame after that will contain almost no forward displacement and the frame after that will contain some backwards displacement, etc.
+By summing up the displacement of the remaining frames, we know our total remaining displacement.
+To warp this animation for every frame that's played, we need to add a little bit of extra displacement and rotation.
+The amount of motion that's added each frame is dependent on the amount of displacement in the animation for that frame, and the amount that's still remaining.
+Calculating the amount of extra displacement that is needed is done by dividing the current displacement by the remaining displacement, multiplied by the requested destination displacement.
+Note that the extra displacement is always pointing in the direction of the requested destination.
+We improved this basic warping technique with several enhancements that improved the usability and quality of the warp motions a lot.
+During the warp motions of our vaults, we needed to make sure that the hands are placed exactly on the obstacle shape.
+To achieve this, we have extended our warping logic to allow any bone to reach the given destination.
+This is done by calculating the offset of the hand bone to the trajectory bone at any point in the animation and subtract its offset from the destination position.
+This makes sure the hand bone will end up at the destination position.
+One note, when using this technique, the trajectory is defined by the motion of the hand bone.
+Another enhancement that we have implemented is to warp only during specific time ranges.
+For example, when both feet are still on the ground, you probably don't want to enable the warping yet, as this will introduce foot sliding.
+This is done by using specific animation events that represents the time window when warping can be applied.
+Multiple events are allowed in one animation clip.
+This is a very powerful enhancement to warping, and it's very easy to implement.
+If the animation event isn't active in a frame, we don't take the displacement into account when calculating our remaining displacement.
+This is illustrated by the graph on the slide.
+One problem is that sometimes you don't want to reach the destination at the end of the animation, but at a specific time in the animation.
+We solve this by allowing a user-defined arrival time.
+The arrival time is indicated by a specific event in the animation.
+The remaining displacement of the animation used in a warping formula is calculated till the user-defined arrival time.
+The displacement after this is not affecting the warping, but can be used for post-arrival motions, such as a landing animation.
+The last enhancement that we have implemented that can really help improving the quality of the warp motions is to preserve the original velocity of the animation.
+One noticeable problem that is caused by warping an animation is that adding displacement can cause unnatural speedups.
+We solved this issue by also adjusting the playback speed of the warped animation.
+To illustrate this, the graph on the slide shows the result of an animation warping to twice its own distance.
+You can see in the graph, marked with an orange line, that this doubles the velocity.
+To solve the unnatural speedup, we modify the playback speed to cancel out the speed increase.
+In this example case, we play back at half the speed.
+There are limits to how much faster or slower we can play the animation before it starts looking unnatural as well.
+Therefore, we let our animators control these on a per animation basis.
+The use of animation warping allowed us to turn the Vault system into a very versatile system that we use for a lot of different features, such as diving into water, climbing out of water, grabbing ledges.
+Here's a short video demonstrating all of these features.
+We start by triggering a step off.
+Then there's a step on to a climbable obstacle.
+followed by a step on to a normal obstacle.
+As you can see, all vaulting is triggered automatically.
+I don't press any buttons for triggering the various vaults.
+We have various variations.
+Here we have a step over with the left hand.
+And for that same height, we also have one with the right hand.
+We can dive into water.
+and climb out of water.
+All of this makes Aloy pretty exhausted.
+Not all obstacles in the world can be vaulted.
+Sometimes Aloy's only option to cross it is to jump.
+So let's take a look at how Aloy can jump to the ledges at the other side of this river.
+I would first like to explain very briefly how we annotate the world with environmental metadata.
+The world of Horizon is split up in big tiles.
+Each tile is 5 x 12 x 5 x 12 meters and currently we have more than 100 of them.
+Each tile is streamable and 3 x 3 tiles around Aloy's position are always loaded.
+A single tile contains various environmental metadata.
+The most common one is probably the collision mesh, which in our case is pretty low detailed and is available everywhere in the world.
+It tells us where Aloy can and cannot go.
+It also provides information about surface materials for impact sounds and effects.
+Besides that, we have other types of metadata, such as volumes that indicate where you can swim and volumes for defining where Aloy can be installed.
+We also have information of all the roads in the world, their width, their connections, and all of the junctions.
+But the most important one for the traversal system is that we have annotated geometry that identify traversable routes.
+All geometry in the world can be annotated by either points or lines.
+The points or lines can be attached to static geometry, but also to dynamic, movable geometry.
+These points and lines form what we call an annotation.
+The annotation can contain multiple tags, which makes them very abstract and versatile.
+And in the next slide, I will explain why.
+As all our geometry is streamable, the annotations will happily stream along with it.
+And as already mentioned, they provide semantics for various gameplay systems, such as our traversal system.
+In this image, the red lines highlight the annotations.
+We use text to indicate which traversal mechanics are allowed on the annotated geometry.
+For example, climbable means that Aloy can hang with her hands on the annotation, where balanceable means that Aloy can stand with her feet on it.
+Unstable means that it should look like that you could fall off at any moment by playing an additive animation.
+And ziplineable means that she is able to zipline along the annotation.
+Multiple tags are allowed on a single annotation.
+Before I continue explaining the traversal mechanics that use these annotations, I would first like to describe how we did set up our jump system, because attaching to one of the annotations often happens from a jump.
+In Horizon, our jump trajectory is split up in two phases.
+We have a pre-apex phase, which is animation driven, and we have the post-apex phase, which is code driven.
+As already mentioned, animation driven movement takes away control.
+Therefore, we added in-air steering.
+During the complete take-off and falling phase, we allow adjustments on the orientation of alloy, which results in bending the trajectory.
+By applying dampening on the forward momentum when the player lets go of the movement stick, we simulate in-air braking, and this improves controllability even more.
+We are using an animation-driven take-off to guarantee that the trajectory matches the jump motion.
+In our previous games, the complete trajectory was co-driven, which made it hard for our animators to create a matching motion for all the different speed ranges.
+So with all of these improvements on controllability, you could think that jumping towards a specific destination is a piece of cake.
+So I've prepared a demonstration to see this in action.
+As you can see, it is still annoyingly difficult for the player to time and predict a jump to end at a specific location, or at least for an amateur like me.
+So how can we improve this behavior?
+It would really help if we were able to predict the jump trajectory so we can apply small adjustments to guide the player to a specific traversable destination.
+One important note is that we absolutely want to maintain the illusion of control.
+To be able to predict the jump trajectory at runtime, we need to know the full motion of our jump animation.
+This is why we analyze our animated motion during the offline conversion process and store all the metadata in so-called motion tables.
+Motion tables are databases of animation metadata for individual animation states.
+They contain information about how the displacement, speed, time, etc. changes for animation states dependent on the animation variables that affect the animation state.
+These motion tables are, for example, used for storing the animation metrics in the vault transitions, as mentioned earlier.
+In an offline step, we populate our motion tables by analyzing the resulting motion of all animation states for all valid permutations of input variables.
+This is quite an expensive task.
+At runtime, we are able to query the database for a given state with the active runtime animation variables.
+Based on the active set of animation variables, several stored results are then blended together to form a final resulting set of metadata.
+Here's a rough example of how that works.
+This example shows a simple animation state that blends three animations together, depending on two input values that are set by the game logic.
+In this case, variables x and y.
+The blend node simply blends two animations together when the weight depends on the input variable.
+In this case when X is 0, 100% of A will be blended with 0% of B.
+And when X is 0.5, A and B will be equally blended.
+For our motion table, we want to pre-calculate all metrics for our animation state for certain combinations of input values.
+We are only interested in combinations of input values that make any of the blend nodes choose a single one of its inputs.
+In this case, we have a total of four input values possible for the two different blend nodes.
+X can either be 0 or 1 and Y can either be 4 or 8.
+Because there's no blend node attached to the input value when y equals 8, we have a total of three combinations possible.
+So for these three combinations of input values, the animation metrics are stored in the table.
+Querying metrics for arbitrary input values is now just a matter of blending the stored results together.
+Applying the same blending as in the animation network to the values stored in the motion table results in a valid outcome.
+Now that we are able to query the metrics of a jump motion, we can easily calculate the position of our apex by adding the complete displacement from a take-off animation to a take-off position.
+This will be the initial position of the falling face.
+The initial velocity will be the velocity of the last frame from the take-off animation, which again is also queried from the motion table.
+Using these positions, we can construct a parabolic trajectory as shown on the slide.
+With the constructed parabolic trajectory, we can now start searching for nearby jump destinations.
+This is done by gathering all possible targets within a certain radius of alloy.
+We iterate over our jump trajectory with a fixed time step to see if a target is reachable at any given moment during the jump.
+Targets that are above our apex are never reachable, because it would look too unnatural.
+If a target is close enough to our originally predicted trajectory, we can calculate a skill factor of the parabola by defining the desired displacement by the original displacement.
+This way we know how much extra velocity is needed to reach the target.
+We only allow guiding to targets for which the change of velocity is within an adjustable limit.
+This makes it very easy for designers to tweak and control the snappiness of the jump guidance system.
+The previous slide showed how we could predict the trajectory if the target position was exactly in front of Aloy.
+But since we support in-air steering, we should also allow some bending of the trajectory to reach a certain destination.
+We are able to account for this by calculating the required turn speed by constructing a circle that goes through both our current position as our destination position.
+We can do this in 2D since we are only focusing on heading changes.
+By calculating the angle between the vector from the current position to the circle center and the target position to the circle center, divided by the travel time, we have our turn speed.
+If the desired turn speed is bigger than an adjustable limit, again, we don't ally guidance to this destination.
+The next video will show this jump guidance system in full effect.
+In this video, I will pause the game, press the jump button, and then you can see the original trajectory as a white line and the predicted trajectory with a colored line.
+The green circle is the circle used for calculating our turn speed.
+It's a really big green line.
+I think I can leap onto the tall neck from here.
+Made it.
+I should be able to jump onto the tall neck from here.
+We're almost there now.
+The world of Horizon is filled with rock walls like this, which Aloy can climb without much of a problem.
+To give our designers maximum control, Aloy can only climb on annotated geometry.
+While climbing, she is physically attached to the geometry at a single point.
+While climbing with hands, this attach point is between the hands.
+This is also the position where Aloy's trajectory joint is located.
+When Aloy is standing on an annotation, the attach point is located between the feet.
+We trigger transitional animations when climbing from one annotation to another.
+First of all, we look for all nearby destinations and find the one that has the best combination of distance and angle.
+Then we go through all our possible transition animations and currently we have more than 100 of them, and find the one whose motions would need the least amount of warping.
+Each transition has conditions and ranges that we take into account, and we also check if the transition's motion won't collide with anything.
+And in the end, we will trigger the best transition that we found and warp it to our founded destination.
+During climbing, we use IK on the hands and feet to guide them.
+For the hands, we always make sure they are placed onto the geometry.
+This can either be on the current position or when we are performing a transition on the destination position.
+While climbing we also continually check if our feet can be placed against the geometry in front of us.
+If no geometry is available at the foot position, the IK on the feet can be turned off and we will let the feet just dangle.
+To find the IK rest position we are using multiple collision probes to find an intersection position.
+For the hands, we use a slightly tilted probe that goes through the palm of the hands.
+And for the feet, we use two sets of collision probes to allow Aloy to pull up her legs a bit more.
+Each of the four limbs can be controlled individually.
+Our animations control when the hands and feet should be resting on the geometry and when not.
+They have an animation event that drives our IKs and also locks the limbs.
+The next video shows the probing and IKs in action.
+Here Aloy is hanging with IKs enabled on the hand and feet.
+The green lines visualize the intersection tests.
+Now Aloy is hanging without IKs enabled on the feet.
+The red lines visualize there's no valid geometry for her feet to rest against.
+One of the bigger challenges that we had to support for climbing was climbing on dynamic objects.
+such as the toll neck.
+For example, not all assets in our game have the same update frequency.
+Aloy, for example, is updated at a higher frequency than our toll neck.
+So when jumping towards a toll neck or climbing on one, we have to compensate the motion of all the toll neck's annotation for this difference in update frequency.
+Next to that, we also have to correctly apply the motion of the object we're attached to to Aloy's body.
+To make sure our feet and hands are placed correctly on the Climb asset, the collision probing also needs to be in sync with the desired update frequency.
+Since Tonics are updated at a much lower frequency, their collision volumes also move at a much lower frequency.
+So ELOS probing for collision should also be performed at the same lower frequency to stay in sync.
+Well, that brings us to the end of the final section.
+Now, I would like to emphasize on what we think worked well and what didn't work that well.
+First of all, what worked really well for us is having the ability to distinguish between early reactions and late reactions when transitioning between animations based on events.
+This really allowed us to make the character feel more responsive and helped us a lot in improving the overall quality of our movement system.
+The abstract text on the annotations that provide semantics for a traversal system allowed us to create a very reliable jump prediction system as well as a very flexible climbing system.
+Because we select climb transitions based on the required displacement needed to reach a destination, the climbing system managed to even climb moving dynamic geometry.
+In the jump guidance system, there are only two variables to tweak.
+We have a maximum change in velocity and a maximum change in turn speed.
+Therefore, the designers were able to find their desired balance between snappiness and realism.
+A guided trajectory also allows us to already anticipate on the landing, making it possible to seamlessly blend to a landing animation that fits the destination, such as toll necks, zip lines, war crawls, etc.
+So what didn't work that well?
+Because most of our traversal systems and tools were developed from scratch upon switching from Killzone to Horizon, our level designers initially didn't have the visualization and editor tools to optimize areas for traversability.
+Our ambition was to have a lot more traversable paths throughout the world than what we ended up shipping with.
+While the Vault system eventually worked out fine, it is probably not the best and efficient way to implement it.
+A big improvement would be to also support the navigation mesh for the player, as this would also solve other problems as well.
+For example, preventing the player from getting stuck or entering inaccessible areas.
+And last but not least, we've reached the point where our animation networks have become very complex and hard to maintain.
+This is mostly because both programmers as well as animators alter them.
+We are looking into making things more manageable by moving more of the decision logic from the network to code as well as applying stricter ownership of the networks.
+So what are we thinking of next?
+One of the most interesting talks last year at the GDC for us was the talk by Simon Clavey, Ubisoft Montreal, about motion matching.
+Since there are few similarities with what we've been exploring for Horizon, we are very interested in researching some of its possibilities.
+As already mentioned, in a small postmortem, we are probably going to investigate player navigation through the use of a navigation mesh.
+We are also very interested in using full body IK for our various mechanics.
+We didn't get to it for Horizon because of time constraints and regular 2 bone IK was giving fine results.
+But full body IK sounds like a very useful upgrade.
+I would really like to thank everyone at Guerrilla, Team Traversal, and especially my colleague Thijs Kruijten for helping preparing this presentation.
+Thijs and I have been working a lot together on these mechanics, and therefore, we'll be joining the stage for the Q&A sessions.
+Finally, I would like to end by thanking you all for your attention and interest.
+Please fill in the feedback form that should have been sent to your email.
+And if anyone has any questions, we will be pleased to answer them.
+uh all right so you mentioned that there was a lot of annotation of your uh assets that uh either I didn't catch what those designers or artists had to do. Um. Mostly artists.
+Okay. And there was also a lot of uh times where you mentioned that designers could tweak parameters on like to get a good balance between realism and and snappiness. Um so my question is how much of a burden did all that annotation work place on the designers and artists and how did you mitigate it? Um Well, the annotations were mostly done in Maya.
+And the tweaking of the variables is happening in our Desma editor.
+So there, the designers can tweak the values.
+Hi, Zach Toops, New Mexico State.
+This is great, thanks.
+I was wondering how you kind of signal to players sort of like where they're going to land since you're sort of dynamically adjusting.
+And I heard in one of the videos her kind of like saying, oh, I could jump to that from here.
+Is that kind of one of the ways you did that?
+And did you use your dynamic adjustment system to kind of like contextually change that?
+Are you wondering how we make it clear for the player?
+Yeah, if I'm playing, how do I know where I'm going to land when I try to jump on something?
+It's mostly intuitive.
+It's like only when it's within your forward movement, we adjust you there.
+So it's never really like a surprise that you'll land somewhere.
+So because it's in your path, it should already be clear that that's the location you'll end up at.
+But did you ever kind of run into any issues where it was just a little bit further than you kind of allowed it to be?
+I mean, is this something that came up in play testing?
+Or did it just kind of seem to work all around?
+I think it's mostly a matter of tweaking.
+We tweaked everything so it's exactly intuitive, and it's never too snappy.
+Because that's the thing we want to prevent.
+You don't want the player to suddenly grab a ledge that you didn't want to grab at all.
+Thanks.
+Hello. Thank you for the presentation. It was great, very informative for me.
+And what was the reason for not using navigation meshes?
+Well, mostly for memory budget reasons, we didn't have one for the player.
+All right, I guess me.
+Hi.
+So you talked about the annotation system and a little bit about how designers or artists had to interact with that.
+Did you ever put any thought into using auto-generating some of that information by doing pre-physics tests as a process on assets they had brought in?
+I'm curious if you had considered that and rejected it, or time constraints, et cetera.
+We actually did some experiments with that.
+And it turned out that it was quite OK.
+But we also like to have total control, mostly from the design side.
+They wanted to have total control over traversal paths.
+Apparently, we didn't want to have a world where you could just climb everywhere.
+That's kind of mostly a design decision.
+Cool, thank you very much.
+Hi, thanks for the talk, really informative, really thorough.
+You talked at one point when mantling normal obstacles, you could do left or right handed.
+Was that all randomized or did you analyze based on the shape of the object?
+Well, we have various variations for the different heights, but I think for every height, we have a couple of variations.
+So then we have a left hand and a right hand, and that's actually just completely random.
+Got you. Was there any thought to maybe having that as part of the selection parameters?
+Maybe with the angled log, the left hand being higher up would be a little more natural than the right hand.
+Like was there thought with that or?
+Well, not really.
+That's not how it works in our case.
+Gotcha, thanks.
+That was actually the question I was gonna ask.
+But I have another one.
+So with a lot of this, like with the vault traversals and stuff, it seems like it could have been used pretty easily on NPCs.
+Did you give that any consideration or try it or clearly out of the picture?
+I think we did do some experiments with it.
+I don't actually know why we never went that way.
+Currently the fault system is pretty expensive because we do a lot of physics probing everywhere.
+So if we enable that on NPCs then it becomes, yeah, then we're probably not going to hit that 30 FPS requirement.
+But like the NPCs are attached to a navigation mesh, but because of time constraints we never made a fault system based on the navigation mesh.
+But that could be a next step.
+I mean you could just like put boulders in front of them and not mark them out of the navigation mesh and they just...
+go right through them with this system.
+Yeah, could be.
+But yeah, because of time constraints, we haven't actually done anything with NPCs and vaulting.
+OK.
+Thanks.
+Hi, thank you for the great talk. I have a question. You mentioned that you detect if the obstacle is deep enough to climb it by ray casting before the player.
+So didn't you have a problem with really narrow shelves when the player is moving almost parallel to the shelf?
+So the rays would all hit the shelf, but it's really very, very narrow.
+Yeah, well, currently, I think the minimum depth of an obstacle is something around 30 centimeters, and that's also where the first race starts.
+So that's how we are.
+And yeah, otherwise, the whole system won't work.
+So then you don't jump over it.
+Okay, but do you put some special constraints on how the geometry must be constructed?
+Or artists were free to create anything?
+At Guerrilla, most of the time our artists don't have constraints.
+Like, they can do whatever they want.
+And we have to make sure that our systems are working.
+Okay, thank you.
+You mentioned that vaulting was automatic and didn't require any player input Basically just as long as they're moving along they would automatically vault over obstacles. I'm curious how you protected the player from Accidentally triggering a vault on like objects. Maybe they didn't intend to vault over like a small wall. They're running alongside or something We do have like methods of excluding vaulting over objects.
+You can mark them as unvaultable, you can put them in a volume that excludes all vaulting.
+So we have exclusion options there.
+Okay, thank you.
+Hi.
+Thank you, great talk.
+I'm also interested in using a full-body IK in the future.
+What would be a benefit you get from using full body IK for next game?
+For us currently, it's for example, really interested in the melee combat system.
+So currently, we just blend a couple of animations to reach a certain height.
+But that would be perfect for full body animations.
+But also, like having full body animations for on steep slopes and that kind of things.
+Thank you.
+Hey guys, when you were talking about the climbing, you mentioned that some of the NPCs are updated with lower frequency and when Aloy is climbing on them, you basically dump her down as well.
+Did you try to bump up the update frequency of the NPCs rather than...
+We didn't want to do that because that will increase the performance cost.
+If you only do that just because you want to know where the annotations are, it's quite high penalty to pay.
+So it was just performance reasons.
+Yeah.
+Okay, cool.
+I wanted to know at the runtime level, why did you use morpheme and what tasks you delegated to this middleware?
+Because in all of what you described, you're telling how you programmed the animation, but what did morpheme, the runtime part, what did it do?
+And what did you make it do?
+The runtime code is just a part of Morpheme.
+And that's just integrated into our DECIMA engine.
+So that handles the runtime playback of the animation networks.
+Is that what you meant?
+Not really.
+For example, when you cook your animation assets from a Maya motion builder, you go through first a cooking step in Morphine, right?
+That's what you showed.
+And what does it do?
+And at runtime, what couldn't you do?
+And what did this middleware do for you?
+I'm not sure if I'm clear.
+So Morphium is two parts.
+It's an altering tool that allows you to import animations from Maya Motion Builder and make a whole blending tree and state machine for it.
+And then you have a runtime engine, which is capable of playing back those state machines and blend trees and basically providing a pose at any frame for any frame.
+Hi, I was just wondering if you used any physics animation on her body, or was it all full body animation?
+Yeah, currently we have three physics states, so we have soft key, hard key and we have ragdolls.
+Hey, thanks for the talk.
+You talked about your annotation system that you used for marking up the environment for climbing.
+But for the vaulting, it sounds like it's using a different system.
+So I'm wondering why you're not using annotations as well for the vaulting system.
+Well, we wanted our fault system to be completely dynamic.
+For example, when you kill a big raptor, it will lose all of its parts.
+And then if you run up to it, it will automatically work, because we have those physics probes.
+And we don't want to have our artist also annotate all the geometry in the world to also make the faulting possible.
+So we had to come up with a dynamic system.
+Thanks.
+I was just curious about your AI nav meshes.
+Was that restricted to smaller areas that allowed you to get away with using the memory for that, or compared to the physics you had for the player instead of a nav mesh there?
+Well, we don't know much about the navigation mesh for the AI.
+I know it's just generated, but I don't know exactly how it is.
+how it's implemented or generated.
+Well, I mean, it was too much of a memory cost for you to put on Aloy, right?
+So, but the NPCs were okay.
+Yeah, NPCs have a navigation mesh, but like Aloy can currently traverse the whole world, so also on the really steep slopes and like the navigation mesh is a bit constrained to like smaller, flatter terrain, so.
+So it's much more coarse, basically.
+Yeah, yeah.
+Okay, I think, yeah.
+Got it.
+OK.
+Thank you.
+Thank you.

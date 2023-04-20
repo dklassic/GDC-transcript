@@ -1,0 +1,423 @@
+Hi everyone, my name is Guillaume Coron.
+I am a senior graphic programmer at Contic Dream.
+Contic Dream is a studio which creates games with strong visual and story.
+And we have our own in-house engine.
+This talk is an overview of various rendering techniques used in our two previous games and in the current one.
+It mainly focuses on lighting and shading.
+My co-worker Thibaut is credited here for his help on this presentation, but he's not with us today.
+OK.
+The first part will focus on our need to be physically best and the path we choose from Heavy Rain to Detroit Become Human.
+I will discuss why we are using photometric units and the need to have material calibration and validation tools.
+Then I will explain the direct lighting and shadow techniques you will use in your game.
+And I will make a brief talk about our volumetric lighting solution.
+And I will finish with our indirect lighting implementation.
+But let's start with a quick trailer of Detroit Become Human.
+I'm the android sent by Cyberlight.
+You have to accept the world as it is, or fight.
+My name is Connor.
+My name is Marcus.
+My name is Connor.
+This is our story.
+For the players.
+OK, get back a little bit in the past and talk about our previous game.
+Every run was the PS3 game based on forward rendering engine.
+All the shading and lighting was done in gamma space, and the BLDF was derived from BlinFoam.
+It's pretty classic.
+On Beyond Tosu, we converted our rendering engine to a different one.
+All material evolution remained in gamma space, but lighting and shading are done in linear space.
+We use a more refined BRDF based on micro-facet theory with some approximation to fit the PS3 capability.
+For Detroit Become Human, we get back to cluster forward shading to have more flexibility on all materials.
+All our rendering pipeline is now in linear space and we use micro-facet BRDF mainly based on GJX distribution with support of anisotropy.
+The diffuse part still use a vanilla Lambertian diffuse term, and we do partial energy conservation between diffuse and specular.
+Photometric units are used for all intensity on both analytical light and emissive surfaces.
+All our material are built by our artists with the help of a shading tree.
+This is very powerful and can be hard to control performances and global coherency.
+Some materials can have multiple specular lobes, like the skin shader, the car paint, or even the lid shader in some cases.
+To handle this kind of materials, we have implemented something we call a BRDF layer stack.
+We split our BRDF in multiple layers and stack them.
+Material can have two specular lobes, plus one diffuse and one subsurface or backscattering one.
+For example, the lead shader have only one specular lobe by default, but it can be possible to add a second for metallic materials with render effect on them.
+Energy conservation between layers is required, and each layer computes its reflected and transmitted energy.
+The remaining energy is reused to compute the next layer.
+To have a perfect energy conservation, we will need to pre-compute energy transfer over the entire BRDF, taking into account multiple scattering, Fresnel, and absorption.
+This approach was not retained by the fear of the costs introduced by multiple lookups needed to achieve this.
+And unfortunately, we just take into account the Fresnel interface to achieve energy conservation between layers.
+But a recent talk by Christopher Kula and Alejandro Conti at last year's Seagraph on this subject gave us some hope to use such a technique in our next project.
+OK, now you have an overview of how our shading is processed.
+And I can talk about the issue we faced in the production cycle.
+Before Detroit become human, each artist build their own level and add their own habit.
+Lighting from one scene to another could be very different, even under identical light condition.
+Materials was not spared by this issue.
+In this case, it was really hard to reuse props in different scenes and understand who is the culprit.
+Is it the material or the lighting?
+For all this reason, we decided to move to photometric units to fix a part of the problem.
+When we started to this development, light coherency was our main goal.
+With photometric units, it was easier to compare sunlighting to real-life references, and artists can use real-life measured value.
+It gives guidelines for artists to correctly lead their scene, and by the same way, it presents them from unconsciously back lighting information in their albedo.
+For example, when they do darker albedo for night scene.
+And finally, intensity range between bright and dark area of the scene are more plausible.
+For more information about photometric units, you can refer to a great presentation by Sebastien Lagarde and Charles de Roussier called Moving Frostbite to Physically Based Rendering.
+Let's do a quick reminder about photometric units.
+You have the luminous power that can be expressed in lumen.
+was the total light amount energy emitted by light.
+The luminous intensity that was expressed in candela is the luminous power per solid angle direction of a light.
+The illuminance that can be expressed in lux, that was the light amount falling on the surface.
+And the luminance that can be expressed in candela per square meter.
+And it's per unit area of candela in specific direction.
+Directional light can be expressed in lux, because as seen previously, lux is the light amount falling on a surface.
+Other lights can be expressed in lumen, or in candela per square meter if area lights are used.
+You can see some luminous power references provided by Sebastien Lagarde in this presentation of the subject.
+And as you can see, the range between values can be really high.
+Quadratic attenuation are mandatory for punctual light sources to compute correct illuminance at the surface of object.
+And illuminance can be really high near the punctual light sources.
+For emissive surfaces, we add an emissive intensity parameter on all materials in combination with a traditional emissive color.
+Emissive intensity is expressed in exposure value, heavy or stop in photography.
+But why are we using heavy and not candela per square meter, which might be a more logical unit to use for emissive surfaces?
+Candela per square meter is a linear scale, but is not perceived as such by the human eye.
+But EV is perceptually linear scale for the human vision, and adding one unit in EV double the perceived light intensity.
+To work with such high range, we need to correctly expose our scene even in our level editor.
+Using an auto exposure is not recommended.
+It can easily break your landmark.
+To keep real life comparison, we use measured exposure for triple light condition.
+And fortunately, all level are split in volume called scene zone.
+This scene zone are used for visibility in combination of portals, and usually match a room in a house.
+We add to them our exposure information.
+In this case, our director of photography provide exposure references for set artists.
+The scene exposure are fixed, are fixed value for the scene zone, and there is no camera transition.
+We instantly apply exposure when the camera enter in the scene zone.
+Scene exposure is expressed in EV100.
+It represents a combination of camera shutter speed and f-number for ISO100 sensor sensibility.
+Scene exposure is a great tool to ensure that our lighting was in coherent ranges for asset production.
+And it is really useful to pre-expose our accumulation buffer.
+But it's not enough for in-game exposure.
+where we need more control.
+And that's why we introduced camera exposure.
+Camera exposure is an exposure composition over the scene exposure.
+And it gives more control to dynamically change the exposure.
+Artists are able to choose between four different camera exposure types, depending on their need.
+Auto exposure are mainly used in gameplay phases, and manual exposure on cut scenes.
+Okay, the first one, we call it manual exposure.
+The exposure value is in EV100 and can be controlled by animated curve.
+The second one is called camera.
+It computes exposure from physical camera setting, like the half stop, the ISO, and shutter speed.
+We have an auto average that computes the exposure from the log average luminance of the scene.
+That's pretty classic.
+And the last one is called auto UV zone.
+It's a little bit special.
+It computes the exposure from the value provided in the scene zone in addition to decals, exposure decals manually placed in the scene.
+This screen capture represents our camera auto EV debug view.
+As you maybe can see on the scale on the right, All the pixels in the room have neutral exposure compensation.
+This is because the camera is currently in the scene zone of the room.
+All the pixels outside of the house are in a different scene zone, which is approximately three steps above the current scene zone.
+This is the right pixel.
+It's the red pixel, sorry.
+And the dark pixel near the entrance was EV decal manually placed by artist to control exposure.
+This decal was approximately half a stop below the current scene exposure.
+And now let's see it in action.
+You can see the box of the decal near the door.
+And when the camera sees all the pixels in this zone, the exposure, the total exposure is down.
+And as you can see, when the camera goes out, the same exposures change.
+But the camera exposure do compensation to have a smooth transition.
+OK.
+To work with photometric units, we developed a lot of debug tools.
+Here is some examples.
+The first one is virtual spot meters that give us pixel absolute luminance in candela per square meter and EV100.
+It also gives us RGB value of our accumulation buffer.
+It's really useful to tweak emissive surfaces and debug high value in specular reflection.
+And the second one is a fast color debug screen that helps us to check if a scene is well exposed.
+It highlights range for correct exposed middle gray, skin tone, and ranges for creased black and burnt white.
+This debug screen is really useful for our director of photography to check if the scene was correctly exposed.
+Now, with all the work done on the photometric units and exposure, we have a good framework for lighting with real light references and consistent value.
+But if we don't want to break all the work done on the lighting, material needs the same treatment.
+Our first idea was to scan a huge quantity of material to use them on our game, but it was not possible for us to do it. We don't have the workforce for it.
+Even if we are not able to scan all materials, we really want to capture some objects and material references.
+To do this, we needed to build a controlled environment that was easy to reproduce in our engine.
+We built a black room with three incandescent bulbs and captured reference material and objects.
+All this process also gave us possibility to validate the work done on photometric units and capture our first full-range image baselight.
+Around this, we built a tool called the HighSync tool that provides calibrated environment and easy access to material properties.
+It is really important to use full range image baseline to have a result as close as possible to the reality.
+You could find some interesting information on this subject on a presentation by Sébastien Lagarde called An Artist-Friendly Workflow for Panoramic HDRI.
+Artists can easily check their props in this tool and check if the materials are correct.
+Screenshot of this tool.
+Let's see the screenshot.
+The panel of the left give easy access to display material properties.
+And the props and character of the game can be verified in this tool.
+It's pretty useful to detect wrong material setup.
+In addition to the icing tool, we provide some debug options to highlight values with out of range material properties.
+Wrong base color is highlighted in red, wrong Fresnel value for glass shader in blue, and material with wrong metallic setup in yellow.
+It's really useful to quickly understand what's wrong with your material.
+Let's see some example.
+This allows us to identify that the base color of the snow are often too high, and the glass shader often have too high reflectance value.
+And in some cases, we could find some strange setup, like for the sofa, that have metallic property on it.
+Now let's talk about our lighting and shadowing solution.
+Okay, we use photometric units and have calibration material.
+But what about analytical light?
+All of our analytical light were punctual sources.
+We have a direction light, a point light, and spotlight, and a projector light that is a directional light constrained in a box with attenuation.
+Pretty simple.
+Attenuation is quadratic by default, but artists can tweak the value from zero to two.
+It is useful to fake bigger light by decreasing the attenuation.
+The quadratic attenuation is combined with an attenuation radius that try to preserve energy as much as possible, but energy loss is unavoidable at the end of the radius.
+But punctual light sources.
+But with punctual sources, some really high intensity peak can appear in the specular reflection.
+This issue is mostly present in materials with mid and low roughness.
+To fix this issue, we have implemented area light using closest point techniques.
+But forward rendering mean all lights need to be an area light.
+This introduces additional cost to lighting, and artists should have to re-lit all the scene already lit.
+And unfortunately, it was too late in the production cycle to integrate them in the current game.
+Finally, we slightly biased the material roughness to prevent the issue.
+Okay.
+With light, with different shading, we were able to use custom geometry easily.
+It's up to constrain light in an arbitrary geometry to prevent them to leak from wall or even without shadow.
+But because we have a forward engine, it was not trivial to use custom light geometry like we've done before.
+To handle a part of the problem, we have added an orientable near-clip plane on all of our light.
+It's very useful and cheap to add light positioning without custom light geometry.
+We also had some visibility flag on our lights that give us the possibility to reject light per cluster and per pixel.
+A light can lit all the scene zone of a level or just the scene zone where the light is in or all the scene zone visible by the light, the first term of the light.
+It prevents leaking from light with a shadow and it's great for performances.
+By example, in a house, a light on the second floor won't lit the pixel of the first floor with this flag on it.
+Okay, now let's introduce our close-up lighting system.
+Our game are story-driven with many close-up camera shots.
+We want to be able to lit our close-up shot like on a movie set.
+And we pay special attention to the lighting.
+With our tool, we are able to edit the lighting of all camera shots on a post-production phase.
+Artists can choose for each camera track what object will receive our close-up light and can also add some exposure track on them.
+On the engine side, the close-up lighting is a set of light used to replace the regular lighting.
+Artists choose objects that will be lit by the close-up light set.
+They can also affect the indirect contribution with GEI and IBL color multiplier.
+They can flag a regular light in the scene as additional close-up light.
+And close-up light always use our close-up shadow system that we'll explain later.
+And it have its own light cluster fitted to the bounding box of the close-up selection.
+And the size of this additional cluster is 11 by 11 by 4.
+OK, let's see a screenshot with our close-up lighting on and another with the close-up lighting off.
+It's pretty useful in this case.
+Now that the subject of direct lighting has been approached, I can talk about our choices, the choices we made on the shadow part.
+We use classic shadow mapping techniques, but our percentage cross-filtering is done with 8 samples and temporal super-sampling.
+All the samples are jittering using blue noise, and the temporal anti-aliasing softens the result for us.
+The default blur radius is three pixel wide and can go up to 15 pixels.
+Shadow bias is automatically computed from the geometry normal and artists do not need to worry about it.
+We also implement soft shadow in the form of PCSS, but it's turned out to be not feasible for us because of the too high register pressure in your shadow.
+But PCSS is still used on all tooth shaders.
+Shadow was stored on an atlas of 8192 square pixel texture at 16 bit precision.
+Artists are able to choose between three different sizes for their shadow and all are multiple of 256 pixels.
+Shadows are resized depending on their distance to the camera.
+The resolution can be halved at max.
+We decrease resolution in four steps to prevent pixel quarrying and repack them in the atlas when reaching a multiple of 256 pixels.
+The shadow atlas was lazily updated, only if a light move in, or if something move in their frustum.
+Point light faces can be individually excluded, and we also have a tweakable near clip plane to help with numerical precision and light positioning.
+This clip plane can be correlated or not with the light near clip plane itself, but this one is not, don't support rotation.
+For the directional light, we use cascaded shadow map with the same filtering than on the other lights.
+I sample with temporary supersampling.
+With most transition between shadow split by using jittering and temporal anti-aliasing, our cascade have four split at max, but majority of our scene only have two or three split.
+And split distribution is automatically handled.
+No artist input needed except for the far distance of the last split.
+We handle a static shadow too.
+We try to have a shadow on all lights.
+And to do this, we have a static shadow system.
+The shadow of a light switch to a static shadow depending on the camera distance.
+They contain only static geometry, and we do only one sample with bilinear comparison.
+It's pretty fast.
+All the static shadow are stored on an atlas of 2,048 square pixels, and shadow itself are 16 full square pixels.
+We are able to have up to 1,024 static shadow in a scene.
+Static shadow for the directional light is handled by a huge texture storing all the static geometry.
+It's a pretty huge texture.
+Okay, close-up shadow.
+Like for our close-up light system, we want to have high-quality shadow on our close-up shot.
+We are able to have two additional shadow for our close-up light system, and the system is always on, even if we are not in a close-up shot.
+All the shadow can be promoted to a close-up one.
+Close-up shadow are used to add precision and contact and self-shadowing.
+Artists select a relevant object in the scene that receive close-up shadow.
+By example, all the characters are close-up shadow receiver.
+And only this object receive the close-up shadow.
+Okay, how it work?
+First of all, we compute a bounding volume of all visible close-up shadows receiver on the radius of 10 meter around the camera.
+The bounding volume of skinned object are computed from a point cloud to be able to fit to only the visible part of the character or the skin object.
+Then we fit the first term.
+to the binding volume of all the visible close-up receiver.
+An object between the light position and the near plane of the fitted frustum are projected on this near plane.
+In this case, we render only the object in the bonding volume and all the object between the bonding volume and the light.
+Okay, a screenshot with close-up shadow on and another without the close-up shadow.
+It's really help with light leaking and self-shadowing.
+Okay, our shadow memory budget.
+We have a big chunk of memory dedicated to shadows, which is about 280 megabytes.
+Close-up shadows are stored on the main shadow atlas.
+We are able to have between 10 to 1,020 for shadow at a time, depending on the resolution of the shadow.
+By example, in the case of point lights with six face casting shadow, At 1024 pixels each, the atlas is filled up with only 10 lights.
+And trust me, this case appears more than once in the production.
+Okay.
+Now, a video that displays the shadow atlas.
+You can see some close-up shadow that constantly fit on the character.
+you have two close-up shadows.
+And on the lower left and lower right, you can see shadows that resize depending on the distance with the light source and the camera.
+And when the close-up lighting is enabled, the number of close-up shadows is proportional to the light count used for the close-up light shot.
+OK, shadow performances.
+We have 15 to 20 shadow updates on average per frame, but there is no limit quantity.
+It can get wide in some cases.
+And on the previous video, the shadow cost is between 1.5 milliseconds and 3.5 milliseconds.
+Majority of OSN don't go over 5 milliseconds for shadow, the most of the time.
+The cost for the close-up shadow are really scene-dependent and it can be really fast if few objects are reprojected on the near plane, but it can be really slow in the case of a tree covering all the first term of the light because of huge alpha test coverage.
+Okay, let's talk about volumetric lighting.
+For volumetric lighting, we use an unified volumetric lighting solution popularized by Bart Wonsky in 2014 and Sébastien Hilaire in 2015.
+The technique consists of storing all the medium property and the lighting to a volumetric texture fitted on the first sum of the light.
+It's a kind of deferred shading done on a volumetric buffer.
+For more information, I advise you to read the previous paper on this subject.
+In our case, we render our volumetric buffer with checkerboard rendering.
+The native resolution of our volumetric buffer are 192x108x64 on the base PS4, and we slightly increase the resolution on the Pro.
+The temporal component of the effect use blue noise jittering on the depth slicing, and all the features are supported, all lighting features are supported, like click plane on the light and shadow, as well as our indirect lighting.
+Fog contribution is supported in our JBaking, and it gives us an approximation of multiple scattering in the fog.
+Okay, volumetric light can leak through surfaces with this technique when the light is in the same depth slice than the surface of an opaque object.
+As you can see, the light can leak some sample in the cell and when we compute moving average of all the sample, the light contribution can be stronger than expected.
+For us, it is really important to fix this issue because we have a lot of small volumetric light attached to objects.
+To fix this issue, we store min-max depth per tile in two dimension.
+We use max depth to clamp voxel thickness at light evaluation.
+And we apply a ZBIAS when sampling the volumetric texture.
+that was storing the light catering when the type variance is above a certain threshold.
+That don't fix all the issue, but it can be really effective in some cases.
+OK, let's see a screenshot with the volumetric lighting off, and another with the volumetric lighting on, with some color setting.
+It's prettier in the game.
+In the majority of our scene, the performance has around 2ms and can go up to 3ms in scene with huge amount of moving light.
+We use some technique to reproject and prevent ghosting on moving light and this is why in this case we have more cost when huge amount of light are moving in the scene.
+but we don't go over 3ms all the time.
+Okay, just a little video because I love this effect.
+It's quick.
+Okay, now we can talk about our indirect lighting solution.
+If we go back in the past with Beyond to Soul, at that time we were using Half-Life 2 AmbientCube, stored per vertex for static geometry and with LightProbe for dynamic geometry.
+The indirect specular were the mix of various technique.
+We have planar reflection, and also with vertical blur pyramid to fake roughness and cube map.
+a capture without BureauDev integration and manually used in the shading tree.
+It was pretty ugly at this time and all the artists need to do the capture and integrate the high BL in their shading herself.
+And what we want is to have an unified solution for static and dynamic object.
+We start to work on a probe-based solution for everything.
+Our solution is typical this day.
+We use image-based light for specular component with ggx-ndf integration.
+Filtered importance sampling is used to prevent firefly, and we have influence and parallax box.
+For the diffuse part, we begin to use diffuse probe grid.
+But as we choose to use diffuse probe grid, some technical flow appears to us.
+Light leaking was one big issue introduced by some...
+introduced by PropGrid, and it's an ongoing research around with some interesting solution proposed last year.
+Interpolation irregularity are not often addressed, but was considered as problematic for us.
+By example, if we try to fix light leaking by rejecting probes based on occlusion, it often leads to interpolation artifact.
+We ended up to never discarding any probe.
+We store our probe in an adaptive sparse octree automatically built with RTSQ.
+They can provide density zone to out the automatic voxelization.
+And the scene voxelization help us to automatically adjust the resolution of the octree around the object and the wall of the scene.
+Okay, in our case, one octree cell contain eight probes on one per corner of the cell.
+A pointy space is always surrounded by eight probes, and we never discard any probe, but virtually offset them at the baking time instead.
+Thanks to this, artists can use a probe attractor.
+This attractor are closed mesh that attract all the probe in the volume.
+This attractor can be fit to a room or just on a certain object.
+And they are really cute, and they are...
+There, sorry.
+And they are useful.
+And they are usually close to all volume zones already used for visibility.
+Artists can also use mesh repulsor to offset probes outside of the geometry On the left, note how probes inside the single-faceted cube receive light information and introduce light leaking On the right, probes are offsetted outside of the cube and create a more natural occlusion Also note the interpolation error on the right side of the cube Okay, offsetting probes help us to solve majority of light leaking cases.
+As previously said, we virtually offset all probes during capture or baking time.
+But the evaluation of the GI is always based on the original grid position.
+The offset is only done at baking time.
+Probe inside the wall is undefined.
+because the wall usually uses backfascaling, and the probe was in a state that we don't know.
+We use a repulsor to virtually offset the probe position outside of the wall.
+In this case, this probe that was moved on the outside of the wall, takes some bright red color.
+We fix one side, but this creates some leaking on the other side of the wall that's, that was way dimmer than the first one.
+Here the leaking was always present and irrelevant.
+We subdivide the arg tree around the object, if possible, and it will fix the issue.
+If it is not possible to subdivide because we reach the maximum octree depth, we favor minimum indirect light error.
+Weak indirect is always less noticeable than bright indirect.
+Okay, in the cases we can properly handle, we also provide some probe color modifier with smooth quadratic transition for manual modification.
+This color modifier are post-applied on the JBEQ computation and provide really fast iteration.
+To prevent filtering discontinuity between octree, between octree level when using hardware filtering, we first color continuity at baking time by interpolating probes that are not, that are on the border of the octree depth size difference, like on T-junction.
+In this case, blue probes are never computed, but interpolated instead.
+It's helped to prevent irregularity and this allow us to use hardware filtering.
+Okay, let's talk about how we store data in Perlsock tree.
+Only leaves have content and we only need to store leaves.
+And remember, I previously mentioned, we have eight probe per leaf for the eight corner of the tree.
+Leaves are stored in a volume texture atlas.
+We pack the eight probe of each leaf into a two by two by two block of the volume texture atlas.
+Probe are shared on corner of the YOG3 but need to be duplicated to support adaptive difference in the cell depth of the oak tree.
+And it gives us a lot of redundancy.
+To prevent this issue, we do not store the oak tree leaves, but its first parent cell instead.
+We pack leaves first parent into tree by tree by tree block of the volume texture atlas.
+Storing parent cell is way better.
+We still have some redundancy, but it's good enough for us.
+The irradiance is stored in each probe by using second-order spherical harmonics with geometric reconstruction for better quality, which means we need to store four coefficients by probes.
+In this case, we have three RGBA volume textures at 16-bit precision for our volume texture atlas.
+By example, 24,000 probes can be stored on 100 by 100 by three volume texture, which gives us around 3 megabytes for all these probes.
+In the game, we are closer to 100,000 probes for each scene zone.
+This gives us approximately 15 megabytes by scene zone.
+Okay, how do we display our GI?
+We never discard any probe that allow us to directly sample volumetric texture by using hardware filtering.
+But for each probe, we need to store a hash key and to reconstruct atlas texture coordinates.
+We use one hash per octrelive.
+The hash code is formed from a 3D position thanks to Morton Key algorithm.
+It's a constant time algorithm to transform multidimensional data to one dimension.
+And the hash code is restricted to 32 bits, which limits the octrelive to 10.
+And finally, The hashcodes are used to compute textual coordinates to fetch the atlas volume.
+The bonuses provided with such technique is that we can easily blend between different, between multiple G-set with a compute shutter.
+It lets us to easily switch our GI when a light is switched on or off.
+And it can be useful to make GI global illumination transition for daytime or, by example, when opening or closing a curtain, like on this video.
+Because we use scene zone with portal, we want to avoid add transition between scene zone.
+Artists can set up transition distance around portal.
+All dynamic object passing through sample both global emission.
+The sample global emission of the both scene zone.
+Transition is based on distance to portal and normal direction.
+A screenshot here with the transition off and one other with the transition on.
+This helps us to have a really smooth transition.
+One character go to a room to another with really different lighting condition.
+OK, for static object, we also use global elimination transition for objects.
+Most of the objects are in a unique scene zone, like interior wall versus exterior wall.
+But what about door, window, and window frame?
+These objects are assigned to a scene zone, but are also visible from others.
+In this case, we flag object to sample both GI Atlas, and it solves the issue.
+On the left, the door and the window only sample the interior GI, and on the right, they sample both.
+Okay, now it's time to conclude this talk.
+First of all, the road to physically based rendering never ends.
+We need better energy conservation for light and materials.
+Materials are not physically accurate enough.
+And being physically based is good, but don't forget artist's visions and needs.
+It's really important.
+And remember that photometric units can provide a good framework to ensure coherent asset production.
+And always use referent environment to validate your materials.
+OK, what's next for us?
+We want to have area light and soft shadow everywhere.
+It's one of our big subject.
+We need to work on energy conservation and improve our BRDF layer stack.
+Adding more dynamic components in our global animation system is also really, really important for us.
+We haven't had the time to add pseudo-dynamic global animation, like adding spherical harmonic light injection and virtual point light or inject color modifier on the fly.
+For volumetric lighting, we want to add more flexibility on fog density volume and add volumetric shadow too.
+And that's it.
+I want to thank all the rendering team at Country Dream for their fantastic work.
+And I want to thank Julien Merceron for this advice on my presentation.
+OK, it's time for a question maybe.
+Did you experiment with BC6H compression?
+For your indirect lighting.
+For the global emulation?
+Yeah.
+Yes, we...
+All our...
+All volumetric texture...
+Sorry, I'm...
+don't do this, we don't experiment with compression, I think.
+The size was really small for us and we don't, we won't have enough precision to our global dimension.
+Sorry.
+Thank you.
+Hey, how did you guys handle the interpolation errors at the edge of the blocks that are stored in the pre-texture?
+We have some redundancy in your global elimination atlas.
+And we don't have to involve the different interpolation, because we have all the probes surrounding the position in space that was on the block.
+And when we have different level in the oak tree.
+We don't compute, can I go, we don't compute all the, the probe, but instead we interpolate, we do some interpolation between the two different probe.
+Oh, sorry.
+Oh, no.
+OK, the blue probes are interpolated and using the probe from the upper level.
+And in this case, we don't have a discontinuity when we use, when we fetch.
+OK, but like in the next slide, when you go, when you have the texture like, sorry, keep going.
+The one past this one.
+in the texture that stores the leaves, like when that two by two block is next to another two by two block, you guys said you were using like trilinear filtering on the texture to get the value.
+Like what happens if you sample near the edge of the block where it connects to the other one?
+We offered that to don't go over the half pixel.
+Okay.
+To just get on the, Okay, cool, thanks.
+On the block.
+Thank you.
+Another question?
+OK, I think we can conclude here.
+Thank you.

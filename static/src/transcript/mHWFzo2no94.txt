@@ -1,0 +1,253 @@
+Welcome, everyone.
+Two things first.
+Please remember to silence your mobile phones.
+And also remember to turn in the electronic feedback and at the end of the session.
+It's really helpful for next year for all of us speaking.
+My name is Arne Ola Hellingstad.
+I'm the lead gameplay programmer at Splash Damage.
+And I think we'll start.
+So first a little bit about Splash Damage.
+It was founded in 2001 by members of the Quake 3 mod community.
+We specialize in making multiplayer, team, and objective-based first-person shooter games.
+And the first one we released was Wolfenstein, Enemy Territory.
+It was a free-to-play game.
+Unfortunately, we forgot to monetize that.
+That was back in 2003, I believe.
+We then released Anime Territory Quake Wars in 2007, and then May of last year we released Brink, our first multi-platform title.
+We have a fairly small team at Splash Damage, as we have to be very focused on what we try to innovate on.
+And then, one of the really important parts at Splash Damage is to evolve the multiplayer shooter genre.
+So that leads into the goals for Brink.
+As one of the things we wanted to improve on was the player movement when playing in multiplayer.
+We wanted a more fluid play movement.
+And this is kind of how the engine looks at the player as he moves around the level.
+It's not really ideal.
+You easily get snagged on corners and table heights and chairs and everything.
+And the player sees himself more like this.
+And this is also how we want the engine to see the player.
+So that was the goal.
+Any solution to this problem also needed to be consistent across multiple maps with the same geometry.
+It also needed to be accessible for even casual players.
+That was a really important point.
+And also we had different body types from game design, which had different restrictions on what they could do in the environment.
+And also, any solution to this couldn't require any extra level design work, ideally.
+And also, it needed to be used by the AI for pathfinding on the map and be able to use the same kind of movement as the player did.
+So smart movement is what it's called.
+It stands for smooth movement across random terrain.
+So we have an example test map here.
+Here we have a wall hop into a step up, it's called, into a vault. Here we have a mantle into a slide under the railing into a mantle.
+Then we have a wall hop into mantle.
+And finally, we have just a mantle.
+So what we'll cover in this talk, first we'll look at the prototype.
+We'll look at the pre-computation step.
+Then we'll look at the runtime detection, runtime execution, and finally, the lessons learned from implementing.
+Prototype.
+So the goal of the prototype was to prove the variability of the smart movement in a multiplayer game and also the impact this had on level design.
+and gameplay.
+We started the prototype right after we finished Quake Wars.
+The prototype we had used runtime collision traces to find ledges in the map.
+And the prototype was refined over six months, where we iterated on different heights for mantling and vaulting.
+And I'll just get a good feeling for moving around in the level.
+So if you look at an example of a player near a ledge and how ledge detection work for the prototype, we have first a trace to find the ground, to find the height above the ground.
+We then have a trace forward in the player's forward direction to find a wall, potentially.
+We then do two traces, a low edge and a high ledge trace.
+We potentially want to do different things if the player has two different ledges.
+If you look at the simpler example of just one low ledge, we trace the player's clip up to the ledge height at this point to make sure we have nothing obstructing.
+And then we trace the clip over the ledge to make sure we can actually go onto the other side of the ledge.
+And then finally, we trace down to make sure the fall on the other side of the ledge isn't too high.
+And if all that's fine, then we do a vault over the ledge.
+Otherwise, we go back onto the ledge and trace down there to make sure the play can stand on the ledge itself if the fall is too high on the other side.
+So some successes from the prototype.
+It was very easy to implement.
+It took a couple of days probably to get something very basic going, just to get a feel for how it works.
+It didn't require any level design placed hint objects.
+And it also worked on any map in the level.
+Also on the same geometry on different maps, we were guaranteed to have the same results because it was all dynamic based on traces.
+Some issues with the prototype.
+It required at least one trace every frame to actually see if the player was near a ledge.
+Oh, that was the wrong button.
+Questions?
+No.
+No.
+No.
+Let's see.
+There you go.
+And in the worst case, it required eight traces per player per frame.
+So in a 16 multiplayer game like Brink, 128 traces potentially.
+There's stuff you could do like time slicing and not doing it every frame.
+But we are thinking of a different way of doing it anyways.
+So pre-computation.
+So the NAMMESH system in Brink we use for the AR pathfinding.
+It's a map compile step for production maps.
+It's about 20 minutes to generate the NAMMESH.
+And all it does is look at the map geometry and generates areas with flat areas in the map.
+And then create reach abilities between those areas to tell the AI how to move between those areas.
+I mean, we were thinking we could potentially use this for smart movements.
+So looking at the reach abilities, we looked at all the edges between all the areas in the map.
+And if the edges between two areas overlap vertically, there was a potential for creating a reachability between those two areas.
+And if we did find an interesting edge, we stored the edge segment so we knew exactly which ledge we were interested in.
+And we also stored a tower flag which tells the AI how to move between those two areas.
+So for smart movement, we added a couple of new reachability types.
+The barrier vault reachability for fairly low ledges.
+Created the barrier mantle reachability between, I think, 0.8 and 1.4 times the player's height.
+It was used for AR pathfinding as well, which was good.
+And it was also used by the players and bots for moving in the level.
+This had an issue after actually implementing this.
+There was the obvious case of the player standing on a high ledge and not being able to jump onto another high ledge and being able to either mantle or vault that ledge.
+So we quickly created Barrier Dynamic, which is only used by players.
+Our AI programmer is Magic and had lots of work to do.
+So we didn't solve this for AI.
+And if you could actually do a water mantle, we decided at runtime.
+And also, the issue with this was that it created an explosion in number of reachabilities in map.
+So what we did was, if there already was a reachability nearby, a potential new reachability, we called away or just ignored the new reachability.
+And that seemed to solve the problem.
+Unfortunately, I don't have the exact numbers for the performance issues with this expression in number of reachabilities or the memory issues, but they're both issues.
+So look at the slide, which is a bit different.
+In the NAMESH, you have areas, and some areas are marked low ceiling, which means you can't move into those areas unless you crouch.
+both players and bots.
+Players can auto-slide into these areas, potentially.
+And that's all there was to slides.
+Runtime detection.
+So at this point, the map has information about the ledges we are interested in for smart movement.
+And we move now over to the player physics loop, where we actually try to find those ledges and put the player in the proper physics state.
+So it consists of a number of steps.
+First, we check if the player is on the ground, and if not, the height above the ground.
+We then curate the player's body type for the available movement modes.
+We have light, medium, and heavy body types.
+And they have different restrictions on what they can do in the map.
+The third step was to detect any high moves, which is the vault, mantling, and wall hop.
+We then detect low moves, which is the slide.
+Fifth step is to choose an active move.
+You could potentially find a high and low move, and there's a condition for which one you actually choose.
+Finally, we update the player state machine and potentially put the player in a smart movement state.
+Looking first at the detection of the high moves.
+So it consists of three parts, the player checks, the NAMMESH query, and then finally, the evaluation of high moves.
+We do any quick checks before curing the NAMMESH.
+Curing the NAMMESH is fairly expensive.
+So first, we check if the player is in any active state at the moment, things like vaulting, mantling, sliding, iron sighting, or being knocked down.
+Second step is the damage query.
+So we create a search bounce, which is six times the player's bounding box width, and two and a half times the player's bounding box height.
+And this size is a medium between too big a size for performance reasons, and too small to actually not actually find any interesting ledges around the player.
+So we query the BSP tree with all the ledges, and we get a list of areas around the player.
+And we look at each area and for each reachability in each area.
+And if the reachability has a barrier vault, barrier mantle, or barrier dynamic flag, then we append that reachability to our list.
+Evaluation of high moves.
+So at this point, we have a list of reach abilities.
+We iterate those to filter them down further.
+And one thing is the player must be looking at the ledge.
+And the distance to the ledge can't be more than 2 and 1 1 times the player's spawning box width.
+There's some specific checks for each of the movement types.
+For the vault, the ledge height needs to be between 0.4 and 0.8 times.
+The player's height for the mantle, the ledge height needs to be between 0.8 and 1.4 times.
+And we also had auto wall hop.
+So the ledge height needed to be within the mantle height plus the player's jump height.
+At this point, we have a fairly filtered list of reach abilities.
+And if there's any at the moment and we have a wallhop and a mantle, we exclude the wallhops.
+And we also have a mutual exclusion between the mantle and vault.
+We allow the mantle if the player is within one and a half times the player's bounding box width.
+Otherwise, we allow a vault.
+And the reasons for these checks is basically from play testing and design feedback.
+The goal is all the time to make a more fluid movement in the map.
+And these were the kinds of checks that allowed that to improve fluid movement in the map.
+Finally, we sort the potential list of moves by the ledge closest to the player.
+Step four, detection of low moves.
+So it's fairly similar here.
+So I'm not going to go into the first two here.
+And we'll go straight to the evaluation of the low moves.
+So instead of iterating on the reachabilities, we iterate on the areas themselves.
+And relative height to the area needs to be below 0.4 times the player's height.
+The area also needs to be marked as a low ceiling area.
+And we force the player into an auto crouch if the distance is very small to the area.
+And we force the player into a slide instead if the distance is within one and a half times the player's bounding box width.
+Similarly, we have a mutual exclusion.
+We allow the auto slide if the sprint button is held.
+Otherwise, we allow auto crouch.
+Finally, step five.
+If you have both a high and a low move, which one you actually choose is based on the pitch of the player.
+So if the player is looking up, you can expect him to want to move up on the ledge.
+Otherwise, he'll slide under.
+Moving on to runtime execution.
+So the player has been placed in the vault physics state, for example.
+It consists of an intro and an exit state.
+The intro state is where you initially calculate the duration of the vault. It's based on the player's incoming velocity and also the distance to the ledge itself.
+And we create a spline between the player's position, the ledge point, and somewhere inside the ledge.
+The exit state, all it does is a single frame state, and all it does is calculate the momentum of the player.
+It also calculates the direction of the sign from play testing and from the sign feedback here.
+It really makes sense to have the player have some decision or some influence on which direction move after vault.
+If you have some momentum, it makes for a much more fluid moment in the map.
+Finally, we clear the player's momentum if the drop is too high on the other side.
+And that's a trace we need to do.
+Metal physics states, so it's very similar.
+It has the additional climb state.
+Similarly, we calculate the spine from the start position, mid-wall position, and end position on top of the ledge.
+The intro state similarly calculates the duration, like the vault.
+And the goal of the intro state is to push the player in the correct position under the ledge.
+The climb state, it scales up the time for the whole move, because as you pull yourself up, it kind of makes sense to slow it down a bit.
+And the goal of that is to pull the player on top of the ledge.
+The single frame exit state again, all it does is clear the player's momentum for the vault.
+Slide and wallhop physics states.
+So for sliding, you're forced into a crouch state when you enter the slide.
+And all it does is force a constant velocity on the player in the direction you're traveling for about a second.
+For the wall hop, it's a single frame state.
+If you're next to a wall and press the wall, the jump button, for example, it's going to do a wall hop.
+It might also do, it might also have detected a wall hop previously, in which case it forces you to wall hop.
+And only the light body type may wall hop.
+Looking at the third person animations, so all the animations are driven by the physics states themselves.
+And for the slides, all it does is play the slide animation when you enter the slide state.
+For the vault, it plays the vault animation as you enter the intro.
+The mantle one, the most complex, it plays the intro, the grab animation, when you enter the intro state.
+And also plays the climb animation as a root motion with the origin at the ledge.
+So that's pretty much how it works in the physics.
+And we'll look at some clips from the shipping game.
+Good finish.
+So some conclusions.
+This system allowed for a much more fluid movement in environments, which was a super important goal for us at Splash Damage.
+We added a smart button, which is very similar to the sprint button.
+But when you held this button, it also allowed you to do all these movements automatically as you ran around in the environment.
+And it generated all the information we needed as a map compile step.
+It didn't require any level design, placed hint objects, or anything like that.
+We also had different restrictions on the different body types.
+Only the light body type could do the wall hop, and only the light and the medium body type could do the mantle.
+So it's a design decision to have a balance between different routes in the environment and how tough your guide was.
+Some lessons learned.
+The prototyping early on for six months allowed us to do quick iterations.
+Really important for getting all the metrics done before you actually enter production.
+uh... systems can successfully be used beyond their original intention uh... this being the Namesh system uh...
+quite a useful system to actually use uh...
+quite a good performance increase probably from the prototype early on uh... we could potentially give the client more authority over the physics uh... sir was the author inbrink uh... so the client could mispredict potentially, and the server would have to correct the client, and that could create tiny glitches on the client side.
+We could potentially have consolidated the physics states to save some network bandwidth.
+As an example, the mantle The mantle had an intro and a client state.
+And the server couldn't assume the client was in the client state when it told the client to go into that.
+So it had to resend some of the same information the client had from being in the intro state.
+So combining those could save some bandwidth.
+Thank you for listening. Um, you can visit us at splashdamage.com or send me an email at ao at splashdamage.com. Follow us on Twitter at splashdamage or at Arne Olov-Hal. Any questions?
+I think we have about two minutes for questions. So if you want to speak up, I'm going to Who's first?
+Just a quick question.
+So for the objects when you were doing all the locomotion over or around those objects, are you actually disabling collision between the player and the object that they're trying to vault or mantle or go under?
+Or are you doing anything specifically?
+Are you relying on the physics to push you out of that in case you try to go into it or anything like that?
+Yeah, we completely disable the physics, so we don't really care how you collide with anything.
+We just know the start position is inside the vault, and we know the end position is inside the vault, and the goal is to have a fluid and nice looking moment in between those two points.
+I was impressed that you made it completely dynamic, but I'm used to using mental brushes to dictate where the player would do these things.
+How much iteration was required from the level designers to prevent players from getting to places that they shouldn't, because it was dynamically allowed?
+nothing really, because you had the Namesh generation and that the reachability is guaranteed that the end position is within the world.
+So yeah.
+Cool.
+Does that answer your question?
+Yeah.
+Hi, so the smart button basically allowed players to automatically go into things like the Vantel.
+mantels are in the vaulting and sliding states.
+But you could also manually trigger those things by pressing the right button at the right time, right?
+Yeah.
+Were there areas that they could reach basically using that manual triggering of those states that they couldn't use with just a smart button?
+No, I don't think so.
+But the thing more competitive players did was you sprinted into a vault. And at some distance to the ledge, you started the vault.
+But they wanted to start that earlier, for example, in most cases.
+And you just press the jump button.
+And that forced you into the same vault as well.
+So in some cases, it actually was more efficient for you to trigger it manually?
+Yeah, that's true.
+Yeah.
+So unfortunately, I don't think we have more time.
+But thank you very much, and please remember to give some feedback.
+It's very useful to see what I can improve on for next year.
+Thank you.

@@ -1,0 +1,433 @@
+So, hello. My name is Jalal. I'm a technical architect at Ubisoft Montreal.
+I'll be talking today about some of the architecture optimization we did on Rainbow Six Siege.
+So, of course, the work I'm presenting today is the work of the whole 3D team.
+So I'd like to thank them in this slide.
+So I will start by giving an overview of some of the rendering passes we're doing on Rainbow.
+Then I'm going to talk about two of my babies on this production, which is the material-based draw call system and the checkerboard rendering.
+So the rendering overview.
+So where is Rainbow Six Siege first?
+So it's the rebirth of a very loud franchise.
+So that meant that a lot of hardcore players were waiting for the game.
+And for the hardcore players, 60 FPS on competitive gameplay is really important.
+So it was really important for us to hit that target.
+Also, we had to give more importance to the PC build, since a lot of hardcore players actually play on PCs.
+Also, we have a gameplay-driven game.
+So if you have to do a trade-off between graphic beautifulness or animation beauty, we're pretty much going to always go for gameplay and something that's going to improve the gameplay and the user experience of the player.
+I also have the destruction as a core gameplay mechanic.
+So, and destruction needs to be pretty much consistent between all platforms, so since in competitive mode you don't want a low-end PC to have different outcome than a high-end PC, so most of the destruction needs to be equivalent.
+Also was the first renderer that ships...
+was the first Rainbow Six that ships with the engine and we had a lot of legacy code, so Rainbow Six had a lot of development through the years, a lot of PS3-specific code that needs to be cleaned up, so we had to survive a lot of legacy code.
+A little video in reverse that I just pulled off the internet, showing what we achieved.
+In reverse, because it's cooler.
+Yeah.
+So on the tech side, so we were targeting 60 FPS.
+That meant that we need to run the GPU at 14 milliseconds on average on non-combat situations.
+And we also negotiated with the engine team a 38 millisecond linear on CPU.
+And our critical path was around 10 millisecond on average.
+Also needed to provide scalable destruction, which is important since you want when a level starts to start at 60 FPS and also when it ends when there has been a lot of combat and a lot of stuff happening on the level to still be at 60 FPS.
+We also wanted to ship at a resolution bigger than 720p on all platforms and we wanted to commit 4K on PC.
+So, also to support a wide range of PCs, so we need to support one gig video graphic card.
+And it turns out to be quite difficult when you target current gen, since if there's like one thing that we have, I think plenty of on the current gen is actually memory.
+So, yeah, that needed a lot of like work to pretty much get back all the default calls of the engine to be able to run on one gig graphic cards.
+So one more thing, that Siege is a live game, so we're still doing updates, we're still working on some graphic features, we're still doing development.
+One of the stuff we're looking at is auto exposure.
+A lot of players are complaining of visibility from inside to outside, and it's stuff that we're still looking for, and we have to be careful not to break things, like just a couple of weeks ago, released an update where some shaders were missing, and we ended up with this bug on screen.
+Here's a hierarchical view of a GPU frame on Rainbow Six Siege.
+So we spend on average 5 milliseconds on geometry rendering.
+So to achieve that we rely heavily on Kullin.
+It's going to be like the draw call based material system that I'm going to be talking about in the second part.
+And we also do a lot of shadow caching.
+We spend also average 5 millisecond on lighting.
+We do screen space reflection and this actually also includes screen space reflection pass, not the ray tracing because it's done on a sink in parallel of shadows.
+And here is where the checkerboard rendering technique, which is going to be the second part of the talk, helps the most.
+And we also spend an average like 4 millisecond on...
+various post-processing, like downscaling hierarchical Z-buffers and stuff like that.
+On CPU, our critical path was around 10 milliseconds.
+And we implemented the Eskidor, where actually most of the rendering passes can be automatically independent on the number of draw calls that we're going to do.
+It's going to be split up in smaller pieces, so even the OPAC, pretty much, if we know that it's going to take around 4 milliseconds, we're going to automatically split it in different pieces.
+And we're going to try to maximize the number of...
+command buffer execution by having the graphic thread, which is our immediate context thread, steal tasks in order.
+And so pretty much visibility in all other passes gets stolen, and we don't have any overhead on that.
+And we're able to self-squeeze the most out of our main graphic thread.
+Also, shadow caching helps here a lot.
+I'm gonna be talking more about shadow caching.
+We, like, I was saying 4ms, actually, like, currently, the 4ms is spent on the opaque pass, and we rarely, like, go above 4ms, even, like, with the number of door calls we're doing, virtual door calls.
+So, for example, like, one of our passes...
+So I'm going to be repeating Colin and Hy-Z a lot in this talk, because pretty much we do Hy-Z, Colin, in every single pass on our render.
+So for first-person rendering, we pretty much start by rendering the first-person character to the gbuffer and wbuffer.
+From that, we just render the first 100 best occluders that we have on our scene, which is usually just the 400 closest objects to the camera.
+to the depth buffer.
+We downscaled that depth buffer to generate a high Z buffer, starting from 512, 256.
+And we used that hierarchical Z buffer to actually perform calling on the subsequent passes that uses the main view, and most notably the back pass by itself.
+So for shadows, all shadows pretty much start off with a cache.
+And we always, when doing caching, we generate a high-level Z-buffer from that cache to perform calling.
+For the resolution part of the shadows...
+We do it on a separate pass, pretty much we had it in the beginning merged with our lighting result, but the VGPR pressure was too big, so we just moved it from the lighting result.
+And also used the IEqualZ buffer of the shadow map to pretty much determine if a whole block is shadowed or not and skip work.
+For our local lights, we just resolved them in QuarterRez.
+Turns out to be a good quality.
+versus performance trade-off.
+So, for shadow maps, we always start when loading a level by shooting a static shadow map, which is 6K by 6K, 16-bit.
+We do it at load time, not at...
+map generation time because we have a lot of game plays that where actually level designer place object that are randomly going to appear and block some passages, block some windows.
+And those actually are very good occluders that we want to get into the static shadow map.
+And most of the time, like 99% of the time, they are static objects, so it's actually better to have them on the static shadow map.
+So from that we generate a 512 by 512 ESM that's going to be used for many large particle shadowing.
+And also generate the hierarchical Z-buffer.
+So to scale our shadow rendering, we blend between the static shadow map that we generated at map load and dynamic cascades.
+So, and all the dynamic cascades are going to actually use the static shadow map.
+to do calling so like on consoles.
+It's what's one for example, the first cascade is fully dynamic.
+Because we don't have enough resolution with 6K to actually provide good enough quality.
+The second and third cascades are content just the dynamic object and when we render those dynamic object, we use the static shadow, the static high Z buffer to actually do calling and reduce the amount of draw calls and the cost.
+of doing the rendering of dynamic parts.
+And we just blend between the static and the dynamic shadow map.
+The fourth cascade is pretty much substituted by the static shadow map.
+And we have the ability pretty much to scale that dynamically or like on low end PC, we just generate one dynamic cascade and everything else is the static shadow map.
+Because we have a lot of locking lights, like usually a level has more than 80 shadow spotlights.
+We can't have them all in cache at any given point.
+It would cost too much in memory.
+So, what we do is, when we encounter a new light, and we actually only support a maximum of eight shadowed lights on the frustum.
+So, when we encounter a new light, we always shoot the static part of the shadow map.
+When we shoot the static part, we generate a high-frequency buffer from it.
+uh... then we're rendering the lights with just instead of clearing the depth buffer we just copy the static part into the dynamic part we render the dynamic objects on top and of course we do culling since we already have a hierarchical z-buffer and then the result resides in an array that can be accessed in further passes So for the lighting, our lighting is based on a clustered structure.
+Each frog cell is 32 by 32 pixel based and has a z exponential distribution.
+And we also perform high-tech culling on the light volume using the high z, the view high z buffer and other like.
+just going through the structure hierarchically.
+And we fill each cell with the list of lights that we're going to render on that cell.
+And we also see local queue maps as lights.
+So they are gathered within the light list volume.
+And just like when we render them, they're pulled off the same way.
+We just maintain an index, and they actually reside in a queue.
+in a cubemap array.
+The same thing we do for shadows and gobos.
+So pretty much everything is in arrays, and we only maintain indices in that array, and during the rendering, we just need to fetch the shadow or the cubemap for a given cell.
+So that allows us to pretty much handle the same features between the forward and the deferred paths.
+So I'm going to be switching to the second part of the talk, which is the material-based vehicle system.
+So Rainbow Six Destruction, we had a main guideline from the art direction.
+which was, when destruction happens, it really needs to be visible.
+So when you go into a room, you didn't see destruction happening, you just see the aftermath of it.
+You need to know that there has been a big change.
+So we need to pretty much have better persistency of objects and have this feeling of a lot of volume getting generated from destruction.
+Fortunately, we're dealing with a close quarter game, so...
+We have walls and floors mainly to destroy procedurally.
+They generate a unique geometry.
+Problem that we have with that is that they're usually very good occluders, but not in our case when you start poking holes into walls and floors, you lose occlusion efficiency.
+We also have a lot of, to deal with a lot of debris and problems.
+So those are usually smaller meshes, but they are in greater numbers.
+Can also be procedurally generated, so they have unique geometry or instances.
+So here's an example of a destruction.
+So I'm going to decompose that.
+In our game, it's really important to have the player model the destruction the way he wants.
+So if he wants to shoot a hole that's like just two centimeters from the door frame, he can do so.
+So we generate a lot of unique geometry for that.
+And to pretty much have this volume that's getting conserved from the hole in the first place, we generate a lot of debris to fill up the space beyond the player.
+In this situation, we have more than 100 debris that got generated from the destruction.
+Some of them are going to disappear, but most of them are going to stay persistent during the hole, actually, around.
+which can last up to three minutes or even more on PvE games.
+For the occlusion efficiency, so I took a wall and shot a couple of bullets into it.
+So you can see how pretty much those holes are going to propagate along the hierarchical Z-buffer, and thus making like an object that's...
+Uh, small enough on screen, but we're going to pretty much select this, uh, this uh, high Z, uh, level, the high Z texture level to do the ABE test.
+And we're going to actually pass it as visible, even though it was tested, uh, like on a, on a bigger level, it will have failed the test.
+So pretty much easily reduce our occlusion efficiency just by poking a couple of holes in any given wall.
+And that happens a lot in gameplay actually.
+So, the early prototypes were largely graphic, CPU and GPU bound.
+Like, once we go through computing the destruction by itself, we have to render it, so there's all the debris that get generated, all the unique geometry that gets added into the world.
+So, we started thinking about ways on improving that.
+And of course...
+Our first implementation only had a PC, the i6-11, deferred context style of render, which is not great at scaling.
+So, we thought of what we have pretty much on our scenes, and you can see that when you do a destruction, usually a lot of stuff share the same material.
+So, most of the debris that are going to be generated share the same material.
+Walls usually also share the same material.
+It also goes from this art direction where destruction have to be visualized by the player.
+So if we're using a red wall, it means that can be destroyed.
+So it's a lot of red walls here and there.
+So we can actually batch a lot of stuff by material, by design.
+And as I said, all the debris share the same material, which helps.
+There has been a presentation, because we're sharing a lot of work with the Assassin's Creed Unity.
+done by Eric Har last year.
+That's interesting.
+Like, there's stuff that I'm not covering, but actually they are covering.
+And I invite you to go see it.
+Also, we wanted more granularity in culling, since when we decrease, like, the efficiency of our culling, we want smaller units to actually be able to select a higher-level MIP in our high-Z buffer to do the culling.
+So to implement that...
+We started off by unifying a lot of buffers that we have on our renderer.
+So in Rainbow Six, a lot of resources will reside in some unified buffer of some sort.
+So we have the unified vertex buffer, which is like one buffer that contains the geometry for the whole map.
+Unified index buffer, same thing.
+Unified constant buffer, it contains all the constants for the whole rarcode.
+So we pretty much simulate structured buffers on top of that.
+They're implemented as byte address buffers.
+But we generate some C++ code to help access it from the CPU and some HLSL code to help access it from the GPU.
+We also add some metadata to pretty much explain how we're going to access this data to do it more efficiently.
+So here's an example of how we generate that code.
+So we go from the scripter that is in C++ that pretty much just goes to the different values that we're going to pass onto the GPU like we declared them.
+We generate an equivalent HLSL code that's going to help us load that chunk of data from a unified constant buffer.
+So all the door calls are going to be used.
+just in bind, just this buffer.
+And we're going to use indices that we pass along with our pipeline to be able to fetch those values.
+So, what's cool about that is that we have complete control over data layout.
+So we can easily, like, we tested a lot of stuff, like structure of Q32 arrays, and just a couple of lines actually in our code to change from one method of access.
+to another like AOS, SOA.
+It can also support in constant buffers other type of data and be pretty much going to be hidden from the high level programmer.
+We can have like RGBA8 or other type of formats.
+And it's just going to be transparent because we generate all the code that does that.
+And to some certain extent, especially on GCN.
+Anyways, those are instructions that do the same thing, so better just do it ourselves.
+So we also support some high-level APIs to be able to broadcast values into different constants.
+So since all the copies and all the management of those buffers, we handle ourselves using compute shaders.
+We can pretty much do broadcasting values quite easily.
+And code generation is always nice on iteration and to migrate access pattern, to do tests and to pretty much do whatever we want with our data and give us more control on our renderer.
+So, as I said, so the geometry, which is the unified vertex buffer, unified index buffer and constant are unified in our renderer.
+So a draw call is going to be defined by the shader it uses, the non-unified resources like textures, and the render state, like sampler state, raster state, et cetera.
+So elements that are going to share all of the above are going to be batched together.
+And all the paths are actually just going to use a subset of the different non-unified resources, like in a shadow path, which is going to, if you don't have alpha testing, we're just going to skip fetching the textures.
+We just remove them into our batching computation.
+When we initialize our renderer, or when we load our map, so each submesh instance is going to be mapped to three types of batches that are going to be used to alter the rendering, which is the normal, shadow, and visibility.
+So those kind of like types just are a helper to mask different type of data and try to remove some of the stuff that is not used in any given path to increase the amount of batching.
+And each one of these batches in the end when doing the rendering is going to correspond to a multi-draw index indirect command.
+So here I have an example of three submesh instances.
+So each one of them is going to map to a different normal batch.
+Two of them are going to share the same visibility batch.
+And they're going to be drawn with the same wichidraw indexed indirect command.
+And the instance two is going to have its own visibility batch.
+And then the three of them are going to share the shadow batch, which is usually the case.
+Shadows are more batchable by design.
+So, uh...
+And then on the GPU to pretty much access the data for each of those submesh instances, we maintain a globally unique index all through our pipeline that is maintained by the GPU and help us fetch any kind of data for our submesh instance.
+So from that index, we can go through multiple levels of indirection to fetch the vertices that are going to be used when running the vertex shader, the transform matrix.
+So just like depending on the data that we want to fetch and its frequency of access, it's going to have different index and it enables us to fetch whatever we want.
+What's important to note is that sometimes we take one level of indirection off just to speed up the access because we don't want to do too much indirect access to some of the further laid out data.
+So for each pass that we do, like the opaque pass, what we start is gathering dynamic buffer, all those globally unique indices.
+So each pass is gonna map only to one batch type, like normal, shadows, or visibility.
+And it takes us around 1.5 milliseconds to gather all of those indices for all the passes.
+So we just like spawn jobs at the beginning of the frame.
+We gather all those indices and then we start rendering using the dynamic buffers.
+We also append some extra data that can change between frames.
+And we also write our offset into the dynamic index buffer that we're going to be building when we're going to do the advanced culling per triangle.
+So from this path buffer that contains the list of all the submeshes for a given path, we start by doing submesh instance culling, which is like culling.
+for that frequency.
+It's either we're gonna draw the object, it's gonna go either directly to the draw path or it's gonna be further culled or just gonna discard it from the start.
+So if it goes further down the culling path, so all of our measures are split in chunks of 64 triangles.
+We do culling.
+for those 64 triangles.
+And if the chunk passes this phase, we do backface culling per triangle.
+And in the end, we only draw pretty much the triangles that passed all of those culling levels.
+So on the first level of culling, which is like per submesh instance, we start by screen space size culling.
+Then we do distance culling, frustum culling, occlusion culling.
+So our renderer actually starts by doing a very coarse culling phase, which gathers a bulk of objects, and then we just go through them and further cull them.
+We can actually discard a lot of stuff on the frustum culling path too.
+The second level of culling, which is by 64 triangle chunk of each one of those measures that pass the first level of culling.
+We're gonna pretty much go through the same thing.
+We have, we substitute the distance culling by orientation culling, so in a baking phase, we just.
+try to compute a normal spread for each chunk and we do orientation culling at that stage and then we do occlusion culling.
+So occlusion culling on that stage enables us to improve our culling efficiency since we reduced the size of any given object we're gonna cull to chunks of 64 triangles so we have better chances to fetch the Z-samples from higher level MIP on the high Z-buffer.
+Then if everything passes, we do just triangle normal culling.
+We maintain a buffer, actually, for each triangle.
+And we don't fetch the vertices.
+And we have a buffer with per triangle normals that we fetch and do the triangle normal culling.
+So we go from this pass buffer.
+We do all this type of culling.
+Then we're going to fill up a multi-draw parameter buffer.
+And for each batch, it's going to be a multi-draw indirect with all.
+The parameter is laid out.
+And then on the draw call itself, what we do is we start from the start instance that we fill out during the calling.
+to fetch the submesh instance index, which actually the sort instance is directly the submesh instance index. And that is used to fetch the unified constant buffer for that instance, which is going to help us through an indirection get the mesh descriptor. And using the sort index, which is SV vertex ID, and the dynamic index buffer and the unified vertex buffer, we're going to fetch the vertex data.
+So in the end, we run our vertex shader and we fetch all of the data ourselves.
+Yeah.
+So, vertex shader is going to pretty much consist of this fixed input, which is the per instance primitive info that we're going to just fill out with the global instance index of each submesh and then the hardware generated vertex ID.
+And then we already generated the code to actually fetch from the global buffer using those indices, the vertex info by itself.
+Then, to pass on the data from the vertex shader to the pixel shader, since we don't want per pixel to actually fetch all the indirections, we pack up all the resultant indices that are going to help us get any kind of info used in the vertex shader in a non-interpolated attribute passed on from the vertex shader to the pixel shader.
+And what's important to know, this is a good optimization, is actually use read first lane on that value, since you want everything in there to be in the scalar registers.
+And we got pretty good wins on Xbox One and PS4 by using that.
+So here are an example of, like, doing destruction and amount of draw calls added to the scene.
+So just took a...
+walls that are similar in material, shot a couple of explosives into them, and we just added five draw calls compared to the original scene that we were drawing. So batch visualization pretty much that shows you the color coding of the batch. You can see all the debris sharing the same batch.
+Also the decals that are drawn on top of the debris are also using the same pipeline.
+We have some tricks to actually do sorting per batch level on them, and we pretty much impose some constraints on the artists, on the number of levels that they can have on their decals.
+And actually, the sorting of the decals is kind of fixed, so they have to choose from the beginning that you're always going to have decal type 1 on top of decal type 2.
+or whatever happens.
+So for this scene, for example, we go from 10,500 draw calls.
+Like, those are draw calls that we would do if we didn't have the whole system.
+they correspond actually to the submesh instances that we're gonna draw on the scene in the end.
+From that, we end up with 412 batch draw calls for the opac, decals, and visibility pass.
+VCTPath is usually on our renderer.
+Just six, I think, to eight draw calls on average.
+Like, something really ridiculous.
+And 64 draw calls for the shadows.
+And from beginning to start, we managed to drop off 73% of all the triangles that were originally on the scene, knowing that we already do core sculling on CPU to start up.
+So one problem that we shipped with and we're working actually to improve in future updates is that we're pushing a lot of empty draw calls. Empty draw calls have a cost.
+So just like the command buffer running on those empty commands is going to take time and it's time that the GPU is doing nothing.
+We try to hide it with async jobs, but it's not enough.
+It's actually if the GPU can manage to work, it's better to do work.
+So, the next thing is pretty much just be able to specify the final number of draw calls on the GPU, and when we know that we called on the GPU like 10 out of 20 draw calls, we're just going to do an issue, those 10 draw calls, instead of issuing the whole 20 draw calls, and have some of them with zero indices.
+We can pretty much move to buying these resources to improve the batching.
+We still don't see the benefits right now for it, but it can help us reduce even further more the load on the CPU.
+And we want to move all the traversal of our scene graph to the LOD, pretty much have all the scene being descripted on GPU.
+The CPU doesn't know pretty much anything about it.
+Right now we have very complex CPU code that does LOD selection.
+We're moving it to the GPU, and then we're gonna do LOD selection on the GPU, and everything's gonna go without any CPU intervention.
+So the last part of the talk, which is checkerboard rendering.
+So for us, as I said, 60 FPS was important for adversarial PvP games.
+So we wanted to target early on in production.
+So our...
+we're working hard like pretty much to reach it like in our first label we managed to have on 50 FPS a couple of weeks later we ran 60 FPS and afterwards we're just like pushed to maintain that frame rate so anything that goes in in the engine or in the art have to have to be performance improved approved and to be able to have like a quick jump on the frame rate We started thinking out of the box, like Killzone came out when we were pretty much working on those techniques, and one interesting thing that they were doing is pretty much rendering half the pixels on screen.
+On their adversarial games, they keep the same cost per pixel as a 30 FPS game.
+But their technique was AQA based.
+And we wanted our stuff to run on PC too, since we wanted really to have the best performance possible on low-end PC and have decent frame rates with decent GPU on 4K.
+Was a big quick win for us.
+We just enabled it like.
+without telling anyone on the floor that what has been enabled just to see if people will notice like any quality drop.
+Luckily, people noticed like just the increase in frame rate, which is good.
+So, what we implemented was pretty much instead of rendering to 1080p render target, we reduced the resolution on the wide axis to 960x1080.
+We maintain a velocity vector per pixel, which is 3D.
+And we have our R12, G12, B8 format.
+That's going to have pretty much the implementation of it on the bonus lab, if you're interested.
+Then each frame, we just offset the projection matrix to render either the even or the odd lines.
+And one important thing to note is that to get correct texture gradients, you need to fix them up.
+Since the scaling is not uniform between the two axes, we need to divide the ddx by two when doing the sampling, so we need to go through all our shaders and fix them up depending on what they're doing on screen.
+So, of course, things that are not represented by motion need to be dealt with.
+So, lighting changes, shadow changes, transparency.
+We started doing a lot of work.
+to maintain a history buffer just of lights and shadows and try to determine if for a given missing pixel there has been like a change just on either of those to better fill that missing pixel.
+It was taking too much GPU time and too much memory.
+Additional memory that we have to maintain between frames.
+We end up pretty much just relying on color clamping most of the time, as explained in the Unreal TAA paper.
+Also, a lot of data needed to be tweaked.
+Artists like to do very sudden effects, and usually those effects are the ones that are not represented in the...
+with velocities, like they're gonna do like one frame flashes, particles that are gonna change per frame, so you can have that if you want to have decent quality, so a lot of stuff needed to pretty much be tweaked to have like a less harsh transition, and all our like engine oscillators, we just hack them to never have a zero to one transition.
+It always go to a smoother curve.
+Still had a lot of issue with aliasing on vertical lines.
+And fixing that wasn't easy after all, and took us, I think, a couple of months to get to something working properly.
+But we were not satisfied with the aliasing properties of the technique we chose.
+So this is where checkerboard rendering comes.
+So the base idea was to actually solve the aliasing issues.
+We experimented on a series of images and compared the signal to noise ratio and was usually better if we were using checkerboard pattern to interpolate between the missing pixels.
+So the idea of using MSA2X was bouncing around.
+since the beginning, and we made that push for it for E3 2015, and in two weeks we switched to the technique that I'm going to describe right now.
+So here is a couple of examples.
+So we took some images, took off the vertical lines, the odd vertical lines, and we reconstruct the image from the neighbors, the direct neighbors of each pixel.
+So you can see line versus checkerboard.
+Like, there's less visible aliasing on the image.
+Sorry about the moire.
+The resolution of those screens are not high enough to display the image properly.
+So, other example.
+Checkerboard versus line. Less aliasing.
+Like, on a computer-generated image, less aliasing.
+Sorry. This actually shows the difference.
+So, how do we manage that?
+So, we start by rendering to a Quartrez render target.
+This Quartrez render target is gonna be MSAA to X.
+So, Quartrez multiplied by two, half the pixels.
+Pretty much ends up being the same amount of pixels as the previous technique.
+So we just used a standard MSAA pattern, which has two color and z samples, which is perfect.
+We want this thing to run on PC, and that works on PC.
+And we just need to run our pixel shaders per sample instead of per pixel, because we still want the frequency of shading to happen on each of those samples we are rendering.
+So in the end, each of those samples is going to line up exactly with one pixel on the final render target.
+So checkerboard rendering.
+The good thing that we get with that is that on our particles, we can just, instead of evaluating the pixel shader per sample, can do it per pixel.
+We do that for smoke and other effects.
+So we don't have to deal with sorting between small particle buffers and normal particles.
+Everything that needs to go full quarter res, it's just going to be evaluated per pixel instead of per sample.
+Also, we can fit a lot more stuff on the ESRAM.
+So all of our render targets are actually half the size, which is good.
+And we don't need to mix up the gradients anymore.
+Why?
+Because right now, the scaling becomes uniform.
+So instead of dividing the dx, dy, which actually costs some AU, we just bias the MIPS by one, and we have the same result.
+So instead of being some cost that we do on the CPU, on the GPU, it just, like all of our samplers, change the MIB bias when we switch on this technique.
+Actually, this technique can be switched on and off on PC.
+So, consoles give you the control.
+of choosing your sample locations. It's not possible on all GPUs on PCs. I think it's only on Maxwell on NVIDIA.
+But it has been there for a long time on AMD, actually.
+To unify our implementation, instead of switching the sample location, we just offset the same way we were doing before, between two frames.
+So it's going to yield the same result, but we're going to end up with one missing line that we have to do proper clamping when we actually fetch the values.
+So to reconstruct the missing pixels, which are represented here by P and Q, we sample the current frame direct neighbor are in linear Z.
+Yeah, we sample the linear Z direct neighbors.
+We also sample the direct neighbors colors for each missing pixel.
+and also we compute a history color, there's a seamless thing, in Z.
+So, to compute this history color...
+We're going to select one of the direct neighbors' velocity to do reprojection.
+So we choose.
+We tested a couple of stuff.
+We ended up just choosing the closest one to the camera, since we always want to preserve the first person object on screen.
+And you don't want a silhouette to be mixed up with other stuff.
+So we chose the closest pixel.
+currently rendered pixel to the camera.
+And with that motion velocity, we sampled the previously resolved color, so the full resolution render target.
+So, we use binary filtering.
+Actually, I think we need to try to use catMirrorROM interpolation.
+I heard it's gonna yield better results.
+But that can introduce accumulation color.
+We didn't see that much effect on our rendering, but it's a possibility that we didn't actually run into.
+And then we clamped the reprojected color, that's history color we computed to the neighbors, direct neighbors, like for Q it's A, B, E, F.
+And then using the previous step, because we maintain a 3D velocity vector, we determine if the pixel was hidden next frame.
+And we blend back between the unclamped and clamped value, depending on how sure are we of that pixel being hidden or included in the previous frame.
+So now having this history color and the interpolated direct neighbors, the interpolated color from direct neighbors, we define a weight that we're going to use to blend between the two.
+Since, like usually, when you have transparency, when you have lighting changes, it's always, or...
+Most of the time, it's better to just use the interpolated color instead of the reprojected color.
+It's going to yield better results on the image.
+So depending on the minimum difference that we have between those neighbors, we're going to define a weight, and we combine it with different weights depending on the magnitude of the velocity.
+So the bigger the velocity, the more we're going to tend toward the interpolated color instead of the clamped color, historic color.
+And we, using those two weights, we just write out the final color.
+So here, I'm not going to explain this diagram.
+I'd just like to show you the complete pipeline that we go through to determine this missing color.
+It's actually a lot of passes and a lot of determinations.
+And we have a lot of knobs to either have more ghosting or more flickering, depending on the situation on the map.
+So the result is quite context, and we did a lot of tweaks to get it right for our rendering.
+It runs in full res, and it costs about 1.4 milliseconds on Xbox One.
+And we have a net win of 8 to 10 milliseconds each frame.
+So on top of that, we run TAA.
+So it integrates well with checkerboard renderings.
+We're already doing the whole clamping and velocity vector reprojection.
+And actually it can run on the same shader.
+But we separate it just also for VGPR usage.
+So...
+It's kind of like, imagine that our pixel is actually one of our samples.
+So per sub-sample level, we have this flipboard, MSAA4X style jitter that we're gonna just flip through each frame.
+So we have a total cycle of eight frames to determine the final color of one pixel.
+And the reprojected color uses similar weighting logic that we use for determining the missing pixels.
+And on top of that, we run this unteaten algorithm to smooth out some of the imperfections that we have when we're doing the resolve.
+So because during the resolve, we're going to interleave perfect pixels that were rendered this frame we're sure about to imperfect pixels that were projected and that went through a lot of history.
+So we apply a filter to detect patterns that we might introduce when doing the resolve.
+So that filter, the detector filter, is gonna run on five horizontal and vertical adjacent pixels.
+We determine a threshold, and depending on that threshold, and if each of the five pixels either are above or under that threshold.
+we generate a mask of either 01010 or 100101, anyway.
+And we detect that pretty much we have this teething pattern on screen.
+And if that's the case, we just blend more between the different samples to try to remove it.
+So it's more blurriness, but it's for better image quality in the end.
+So the overall technique was very good for us.
+We managed to get a lot of GPU time out of it.
+Similar quality, like it's close enough to that.
+For us 3D programmers, of course, we're going to see that there is something being done on the image, but for the average user, and it just means better frame rates, which is what we were targeting.
+And it's really interesting when you want to target 4K, because instead of having this 4x resolution scaling, it's just 2x.
+The implementation wasn't very scientific.
+It was pretty much trial and error, just testing stuff, seeing if it looks better on our game.
+So maybe we need to define a better framework for what we did and have more scientific approach of whatever weights we choose to have in the technique.
+And pretty much we're still gonna like run with it.
+even if we have better GPUs or whatever, just because it allows us to actually push the quality per pixel, which is interesting.
+So, special thanks to all those guys that helped on the presentation, and also for the insights on the techniques.
+Thank you guys.
+Questions?
+Hey, great talk.
+From playing Rainbow Six, I noticed there's no motion blur in the game.
+Is that because of the checkerboard pattern?
+It was actually a choice, the art direction choice, not to have motion blur.
+And the technique actually, and TAA by itself, introduces.
+uh... this kind of like a brand and on the image that's uh... i think was enough of loren for uh... for for what we have so was uh... idea can kind of like an art direction choice not to have motion blur actually makes sense to have motion blur since it's going to help smooth out uh... the results and lessen any artifact you might have from implementing the technique good thanks Thank you, great talk.
+So the checkerboard rendering introduces inter-frame dependency.
+How do you deal with multi-GPU rendering?
+So it's one RGBA8 buffer that we have to sync between frames.
+So on Rainbow Six, we disable all...
+all driver syncing.
+And it's like the driver is not aware of any of the buffers, so we just disable, like, hardware handling, driver handling from our resources, and we do our syncing ourselves.
+It's gonna cost, but we pretty much managed to have the scaling on other parts of our rendering, and we still end up syncing that buffer, which is...
+one, let's say, of the few buffers we are thinking.
+Uh, the technique we use for other stuff is pretty much redoing the work each frame on each GPU rather than having the between-frame dependency.
+man 2 in audience Thank you.
+No problem.
+Other questions?
+I guess that's it.
+Cool, thank you.
+I'll...
+I'll be at the Ubisoft lounge tomorrow at 11 if anyone have additional questions or just want to talk with me, I'll be like on the wrap-up room right now. Thank you guys.

@@ -1,0 +1,844 @@
+Okay, last talk.
+I'm hopefully not gonna make it too hard for you guys, but I have a little bit of mathematical content to wake you all up on a Friday afternoon.
+First off, I'll just introduce myself.
+So, I've been in the game industry for quite a while.
+Started a long time ago doing Commodore 64 game development, then was the co-founder and CTO of Havok, the physics special effects company.
+And then Core, which is a Lua virtual machine company, which got sold to Havoc, and then now Swerve.
+And Swerve is a company that focuses really on app and game developers developing mobile titles.
+And we provide a series of platform tools and technologies for those guys, from analytics to A-B testing to messaging and targeting and all that sort of cool stuff.
+If you're interested, come and talk to me afterwards.
+That's all I'm gonna say about Swerve.
+So part of what we do in Swerve is A-B testing.
+And we've been involved in that for the last three years and sort of have evolved our architecture quite considerably over those three years.
+And I thought I'd give you some information on how we've evolved that, some of the background to the design of the current system that we have.
+and sort of the learnings as a result of running tests in the wild with millions of users and just how that's worked out for us.
+I also wanted to sort of do a little bit of soapboxing, comparing perhaps the sort of more classical experimental design approach, a frequentist approach, to say the more current Bayesian approach, although Bayes is arguably an older technology.
+So I'm not trying to say either is perfect, but I think certainly the evolving opinion is that Bayesian approach is a much more suitable approach for the sorts of things that we do in this industry.
+And I'll try and make that case and do some degree of comparing and contrasting the two different approaches.
+So first off, just in case, and I'm sure I don't need to do this terribly much, but I'll just introduce the concept of A-B testing and the why of A-B testing.
+We all know now it's all about rapid iteration.
+It's about getting to soft launch in our titles as early as we can, getting them in front of an audience, sort of using that information that we get from how they interact with the game to essentially get to a final launch, and then you're constantly iterating that game service.
+And the idea is you're looking at how users interact with the service, the things that are working, the things that are not working, the things that are monetizing well, things that aren't monetizing well.
+And you use that data to hopefully upgrade and adapt the service to user behavior.
+And that's the idea.
+In order to do that, you need a framework that allows you to make changes very rapidly inside the game.
+And you need a sort of an underpinning data science that gives you the confidence to be able to make decisions in an appropriate way, decisions that are informed by data.
+and informed by real actionable results.
+Ultimately, what we're trying to do is balance an equation, right?
+Now I'm sort of glossing over, obviously there are lots of different types of developers and lots of different types of business models, and this probably is a talk that focuses a little bit more on the assumption of a free to play style model, but I think a lot of these ideas translate to any sort of model.
+But fundamentally, there's a cost to you in developing your game.
+There's a cost to you in serving the game to your users.
+And that cost needs to be balanced by the things that the users gain value out of inside of your game and the things they pay for.
+So either they pay up front as a premium title or they pay after the fact with in-game items or upgrades or whatever.
+But fundamentally, there's a lot of different activities that you're going to get involved in that hopefully accrue to a lifetime value for your users that balances the equation of the spend that you have to get the user into the game in the first place.
+So I'm going to look at some of the A-B testing techniques that we can use on the right-hand side of this sort of equation.
+We're not going to be interested at all at this stage in how we get users into the app, but it's more.
+what do we do after they arrive in their first session, how can we interact with them, and how can we learn from their behavior.
+And obviously this is the equation we're trying to balance.
+We want an ROI, we want to make money, we want a profit.
+And fundamentally we want to make sure that we're making more money than we're spending.
+So ROI is an interesting thing.
+And lifetime value is perhaps an even more intangible thing to get your head around.
+Arguably, lifetime value is an infinite series.
+You wait for long enough, and people will spend more and more on your game, and eventually they'll stop playing.
+So over what period of time do you want to measure this?
+And what sort of time frame do you have in order to make changes inside of the game?
+So just looking very quickly at some data from games on our service, this is a classic profile of popular games with high volumes of users.
+And this is showing the spend curve.
+This is where spending happens inside the game based on from day one install.
+How early in the game are people spending and how much revenue comes in in those early stages?
+And it turns out the vast majority of the revenue, the vast majority of people's engagement with your title tends to be in the very early stages of their play.
+So usually, 50% of revenue comes in the first 30 days.
+The other 50 is spread over maybe a year or longer.
+So it's all about having a very quick reaction time, being able to fire out tests and test things and look at what users are doing and react very quickly in order to sort of maximize your ROI.
+So, nearly finished my A-B testing soapbox.
+You need to understand what users are doing, which is about analytics and getting data in.
+You need an ability to test hypotheses against your users.
+You want to be able to try things out and see what works and see what doesn't work.
+And essentially use a data-driven approach to making those decisions.
+And finally, you need a way to sort of act on the data that you're seeing.
+You need to push out content or lock in changes or adapt to the game service very, very rapidly.
+And that sort of promotes the idea of having a data-driven layer on your game, which is something in the game industry we know a lot about.
+in sort of separating tools from run times.
+It's exactly the same concept can be used for A-B testing and for live updated game service.
+So, the mechanics of an A-B test are very simple.
+At any given point in time, you have an hypothesis you want to test.
+You split your users into separate user groups.
+You show them different variations of the game, different content, different price points, different whatever.
+You look at the data coming back in and you assess the validity of that data.
+You try to determine is this actionable or not.
+You use statistics to do that.
+And that's actually where we're going to focus the talk today on.
+And then ultimately you want to choose some winning variation or treatment and push that out then to all your users.
+And this cycle continues ad nauseum.
+And the successful game developers who are really adopting A-B testing are running multiple tests in parallel against different segments of users and having to deal with some of the complexities of that.
+But essentially it's all the time testing and all the time updating.
+So from a platform perspective, the mechanics are quite simple at a high level.
+We have a game which is being served, typically with a backend server, storing game state and user save play and all that sort of stuff.
+And so on the left-hand side, you have your BI stack, your analytics stack, your testing platform.
+And as the game is uploading, or as the game is being started, users are being bucketed into A or B groups, and they're getting custom content.
+So the A group gets one version of the game, and the B group gets the second version of the game.
+Now, I'm not going to get into the details of serving that, but think of that as a content management system, where the content that you get streamed down to the game depends on what user group you're in, or what behavioral target group you're in.
+And that content might be just.
+different imagery, it might be data controlling the flow of a UI or it could be price point information or whatever.
+Users then play the game, interact with it, hopefully enjoy that game.
+And as they're doing that, you're streaming event data back to your backend service.
+And that event data is essentially tagged by, is the user in population A or population B?
+And you use that to generate pretty graphs and boot up Tableau and do lots of analysis.
+And ultimately, based on that data, you make a choice.
+You lock in perhaps variation A or variation B.
+So you have this sort of feedback loop where content is all the time being deployed with logic to the game.
+The game players are playing away, and that data is coming back, promoting us to make different choices about content.
+This is sort of a constantly adapting and shifting system.
+And that sort of operates nearly in parallel to your regular game development cycle, where you're pushing out new app updates every two weeks or every four weeks or whatever it is.
+These sorts of iterations can happen in hours or even minutes.
+And if you automate some of this, it can happen in seconds.
+So what would you want to test in your game?
+Well, anything, of course.
+Anything that's available to be tested, can be tested.
+And the types of things that we see people testing, typically, the low-hanging fruit are things like messages.
+You know, different layouts of UI, different message content, different calls to action, all that sort of thing.
+Tutorial flow is another classic one.
+So looking at building into your game, sort of a data-driven view of the tutorial, being able to dynamically reconfigure the tutorial on the fly, and essentially thinking of the tutorial like a state machine that you can sort of play with as users are interacting with it.
+So this is an example of an actual tutorial, and there's a choke point where users are falling off at, say, the seventh or eighth stage in the tutorial.
+And that's a good motivator to go in there and try and A-B test different versions of whatever it is you're presenting to the user there, because it's clearly not working so well.
+Then you can get into the economy of the game.
+And there's a whole ton of this sort of stuff that goes on in the background.
+And the simple things to think about are changing price.
+But typically, you don't just change price.
+That's a bit too disruptive to your users.
+You'll typically go in and look at marketing activities.
+And if you've got an in-game store, you can look at promotions and discounts and trying out different discounts at different points in time.
+You could try it different exchange rates.
+A classic technique in economy management in games is as users progress through the game, you sort of induce an inflationary effect into the game's economy.
+Things get more expensive.
+And so we sort of know this intuitively, but how more expensive and how quickly you do that is sort of like a game balancing and economy balancing thing.
+And you can use A-B testing to test that out and to test different exchange rates.
+Something that's used quite a lot is your sort of price sets and the pricing that's available to users.
+Now you're not changing the value of anything here. You're not saying something that was $2 is now $4.
+You're just essentially changing the inventory that's available in the store.
+And in this case it's, you know, coin bundles or whatever.
+And if you look at these price sets just a little bit closely, you'll see that as you go from top to bottom, we're sort of increasing the value of some of these things in fairly subtle ways.
+In fact, the users are arguably getting better value because we've increased the price point from $1 to $2.
+But we've more than doubled the number of gems they're getting.
+So it's not an unfair thing.
+But all we're doing is we're changing the choices that users have inside of the store, which is exactly the same as a retail manager laying at their shelves, deciding what things to place on key places on the shelf.
+And we have exactly the same problem of scarcity in games, if scarcity of screen space.
+So what typically happens here is testing has motivated the different price points, and as users go through the game and perhaps become a paying user, you start shifting around the inventory that's available for them to purchase, again to try and increase the monetization inside the game.
+By basically getting out of the way of the user, typically people who pay a lot in games, and like paying a lot in games, don't pay at the lower price points, they prefer to pay at the higher price points.
+So this is a way to allow them to do that.
+Here's some examples of that in action.
+So this is a sort of a complex graph.
+I'll try and step through it.
+On the bottom we have the value of the very first purchase a user makes out of one of those sort of price sets, one of those gem bundles.
+And there's multiple different price points they can purchase at.
+So let's say the $2, the $5, $15, $30, and $70.
+So, you know, a classic stratification of pricing inside of a game or a free-to-play game.
+And you can see that there are users who purchase first right over there on the $70 line.
+And some of these guys then continue to purchase at the $70 level.
+So that's what this sort of second faded line means.
+Each user there first purchased at $70, and then their total purchase so far is $140.
+And you can see the steps further up as users continue to purchase.
+So these guys up here are our VIPs.
+These are the guys who are spending lots of money in the game, clearly a high disposable income.
+But some of the things to notice here are AB testing smears.
+So what we've done here is we've looked at different price points and we've looked to see can we shift, say, a price point that was $28 to $29 to $30 and look at the price elasticity, the sensitivity of the users to those changes.
+Now again, you're shifting.
+You're also giving them better value.
+You're adding to the coin bundles that they get.
+but you're just looking at their sensitivity to the specific price point.
+And that's, you know, classic A-B testing used to try and mix very small changes in the economy, very small changes in the inventory, which can have big impacts on the actual underlying revenue itself.
+Here's something else that you want to test.
+The sort of marketing activities inside of your applications.
+Something that people do a lot in games, obviously, is ask the users, can I send you a push notification?
+Or would you like to register on Facebook?
+Or would you like to tweet the thing you just experienced?
+Or whatever it is.
+So these are.
+sort of ways to increase the virality of your game.
+Now to do that, the last thing you want to do is just ask them right when they install because everyone says no.
+Because there's no benefit to a user at that point.
+They haven't learned anything about the game.
+So a classic thing to test for is let's wait.
+Let's create a sort of a marketing strategy that says we'll wait for a little while.
+Wait until the user has played the game a couple of times.
+Let's say three sessions.
+And then we look at a key point inside the game that we know people have shown high engagement after.
+Let's say there's a video reward sequence at the end of completing a level.
+So right at the end of the level, you play a pre-roll video, and then you ask the user, would you like to share your experience on Facebook?
+And at that point, you bring up the Facebook registration page.
+So there's lots of choices that have been made there.
+And the danger is to assume that you have an intuitive a good opinion as to the best place to make that call to action happen inside the app.
+The best thing to do is to have lots of opinions and to try them all out against your users and see which one works best.
+So for example, how many sessions do I wait?
+One, two, three, four, five, try them all out.
+Test different groups of users and see what your sort of conversion rate is for their Facebook call to action in this example.
+So this is an example of testing the marketing logic inside of your game.
+So the when and the where.
+So what you end up with is data.
+And this is sort of the classic result you'll get from running a multi-treatment A-AB test.
+That's a sort of a bit of a contradiction in terms, I agree, but A-B, no one is actually doing A-B testing in games, they're all doing sort of multivariate testing or multi-treatment testing or constant optimization.
+But we just call it an A-B test just for simplicity of communication.
+So here you can see an A-B test running with I think it's four variants.
+And you see over time, the pattern of behavior is changing.
+Our confidence in the winning variant has changed dramatically.
+Certainly from the start, you can see there's a huge amount of oscillation.
+And then things slowly settle down, but there's still an inherent amount of noise.
+And this is the challenge you face.
+So if you're running these sorts of tests, you have to have an underpinning mathematical model to validate the choices you're making.
+You can't just look on Tuesday and say, conversion rate A is higher, I'll go with conversion rate A.
+You need to know what's happening underneath that.
+So in this case here, for example, at the start of the test, it looked like one of these variants, the yellow one, was winning.
+But very quickly, the blue one started to take over.
+And at some point, you're gonna make a decision to lock in a result.
+Otherwise, you're gonna run the test for too long and lose out on possible extra revenue or extra audience engagement.
+I suppose the question is, A, how do you produce this data?
+How do you produce these probabilities or these confidence levels?
+And B, when do you decide to lock in a result?
+So I'm making an assumption here that we're not looking at a multi-armed bandit style scenario, we're just looking at something that is managed by our product manager to look at data and then lock in a result, which is sort of a classic A-B test.
+So I'm gonna run through how we do that.
+And ultimately, we wanna look at conversion rates over time.
+And we wanna see clear separations between them before we make our judgment.
+So, I'm gonna use a very simple and rather silly example, and apologies to all the copyright owners that I'm clearly walking over at the moment.
+So, Can a Candy Crush Bolt is obviously a fictional title.
+And what we're gonna do is we're gonna launch this title and we're gonna try out some different variations of it and see impacts on a conversion rate.
+And the conversion rate we'll look at is day one retention.
+The least understood and most overused KPI in the game industry.
+But that's a topic for another talk.
+So let's imagine our fundamental conversion rate for day one is 30%, which means 30% of users come back on the second day into our game.
+And I'm pretty happy with that, but I'd like to push that up a little bit.
+So what I do is I start playing around with the gameplay.
+I have no idea how you actually play this game.
+I'm actually quite intrigued.
+I might try and code this up someday.
+I suspect it'll slow down the speed of a cannonball style infinite runner, but anyway.
+Imagine we've made some gameplay change, and this is obviously the.
+the change I've made here has absolutely no bearing on the math.
+And there's an impact, obviously, on the game.
+There's an impact on the number of users who come back the second day.
+And in this case, we were expecting a 30-day, a 30% day-win retention, and in fact, we saw no users come back the next day.
+So whatever we did with the game, we've completely destroyed it.
+Now the question we ask ourselves at this point is, after 50 users, we've seen none of them return on day two.
+So that's a really bad result, and I guess the panic attack starts to settle in.
+The question we want to ask ourself is, how bad is this?
+And is it enough information now for me to say, well, I should stop that, I should move and make a change to the game, and revert at the change I've just done?
+That's sort of an interesting question, and I'm gonna sort of ask that question both from a frequentist perspective and a Bayesian perspective.
+So first off, the null hypothesis view of the world.
+This is the way we think about it.
+So the null hypothesis states, well, in the absence of anything else, we assume that the change you've made had no impact.
+And underlying my assumption is that I have a model for how users are coming back to my game, 30% of them return, and I have some idea of what variability I have in that 30% sort of from day to day.
+So that gives us a spread, and this is usually modeled in some sort of normal distribution or a binomial or whatever.
+So my null hypothesis is that there's no difference.
+So having observed the users, I assume from day one that there's no difference between that and my 30% use case.
+What I'm trying to do is I'm trying to disprove that.
+I'm trying to say, well actually, based on the data, the null hypothesis clearly doesn't hold anymore.
+Now if I saw a retention rate, say, maybe of 35%, I don't have enough information at the moment to dispute the null hypothesis, and I'd probably accept it.
+But if I saw a conversion rate that was off the charts, I'd probably start thinking about that null hypothesis is no longer true, and so I reject it.
+So in our case, we've got a 0% conversion rate, which is obviously very bad, and it's off the charts.
+So we would reject the non-hypothesis.
+And this is our frequentest result.
+And that's actually the result of a classic A-B test.
+But what does that result tell us?
+So essentially, it means that the 30% conversion rate that we had previously is unlikely to be the new conversion rate that we're seeing now.
+That's actually all it really tells us.
+It doesn't say anything else about how unlikely that is.
+It just says it's unlikely to be.
+Now we capture that information in what's called a p-value, or confidence value.
+And a confidence value is just based on normal distributions and standard deviations and all that good stuff.
+And what we say is, if the value we see is sort of within 95% of the main center of the bell curve, we accept it.
+If it's outside of that, we reject it.
+And in our case, it's certainly outside of that.
+Now what the p value actually captures is the probability of observing a result which is as extreme a result, assuming the null hypothesis is true.
+So that's a bit of a tongue twister and it's quite hard to get your head around, but it's essentially saying the probability of the observations you see in the data, given the model.
+So we sort of assume the model is true and we look at the data and we try to disprove the model.
+That's how the sort of null hypothesis testing works.
+And what you end up with is sort of a truth table like this where.
+okay, maybe the hypothesis is true and we accept it, which is a good result.
+But maybe the hypothesis is true, there's no difference, but we reject it.
+We see an outlier and we say, actually I think I made a good positive change to my game here and I accept that as being something I'll make a change on.
+But in fact, that's a false positive.
+And that's the root of evil, you know, for null hypothesis testing in the AB world.
+So I'm gonna sort of talk about these false positives.
+A p-value is a number between zero and one, and usually what we say is if it's less than .05, we accept that there obviously has been a big change.
+It's not just due to random noise, and we make the change and we lock it into our game if it's a positive change.
+And a p-value of less than .05 simply says the retention rates are different.
+If you sample this thing 95 times out of 100, that retention rate will actually be a different retention rate.
+And if you dig into it and try and express exactly what that means, it says that the data that you've seen supports a rejection of the null hypothesis.
+And that's essentially saying the probability of seeing a result as extreme as this is less than 5%.
+And that's again really tricky to even communicate to your CFO or to your head of design or anything like that.
+So that's sort of leading to an argument that p-values are difficult for us to intuit about.
+They're sort of unwieldy to work with, and it'd be nice to have something else which was just a probability.
+Is one better than the other?
+Give me that probability.
+And that turns out is exactly what a Bayesian approach gives you.
+And so you don't have to sort of wrangle your head around normal distributions and null hypothesis and rejections and non-rejections.
+The other problem with this approach is peaking.
+So a classic thing people do is set up these A-B tests, and they just constantly observe the result.
+And once the result gets below 0.05, they say, I'm done.
+And that's a really bad thing to do, it turns out.
+What you should be doing is sort of looking at the power of your test, deciding in advance, how big a change do I want to be able to detect?
+So let's say I want to be able to detect a 5% change in retention.
+I need to have, you know, observed that retention change over time.
+I need to know how that distribution looks like.
+So I need to have some idea of the variance of the standard deviation of the retention stat.
+And that gives us a number of participants.
+And typically that number of participants will be, say, 10,000 or 100,000 or...
+It's hugely dependent on the size of change you want to detect.
+If you want to detect a really small change, you know, a shift of retention from 30 to 31, you probably need to observe a very large number of users to essentially compensate for the noise that's in your system.
+So, what does this mean?
+This means people typically ignore this, and say, well, I've computed all this, and I see I need 100,000 users.
+I start my test, and I immediately start looking at the graphs and the p-values.
+And as soon as I see something hitting a .05, I say, stop, I'm good to go.
+I've got the result I want to see.
+And what that means is, it's saying I'm taking the very first time that the noise has pushed my P-score below 0.05, which is a really bad thing to do.
+What that does is, it increases the chances of you getting a false positive, and it's actually quite bad.
+Let's imagine during the course of your test, you were prepared to accept a 5% false positive rate.
+So, you're running a test and you expect that 1 in 20 times I'll accept the result and it'll be wrong.
+If you look at that test 10 times in succession before it's actually reached a conclusion, you're actually increasing the likelihood of you seeing a false positive by a factor of five, which means you need essentially a factor of five more observations to compensate for that.
+So people generally speaking don't realize that.
+It was a good blog post by Evan Miller that I guess anybody who knows about A-B testing has come across before.
+But it sort of, I've just parroted his data here and it's a really good exposition of some of the problems that exist.
+So the second problem, or the third problem, should I say, is the family-wise error.
+And this is, you know, if you have multiple treatments, again, the chances of you seeing a false positive if you have more than one treatment increases every time you add a new treatment.
+So for example, if you have two treatments, your false positive rate for exactly the same test is now up to sort of 9.75%.
+So again, it's nearly doubled.
+And people tend not to correct for that in their AB tests.
+Okay.
+That's the bad news, sort of.
+And now the good news, the Bayesian view.
+The Bayesian view takes a completely different approach.
+And it basically says, we have an expected retention rate.
+It's 30%.
+That's what we saw before.
+So we've acknowledged that our system, without any changes, has a 30% retention rate.
+I'm going to look at the data.
+And based on the data, I'm going to update my view on what their likely retention rate actually is.
+So I have a model of what it was before.
+I have data coming in.
+And I use that to create a model of what it might be now.
+And in this example, with 50 users, all not having been retained, what actually happens is we get now a new expected retention rate, which is 15%.
+And if you look at the shapes of these curves, these curves give us a sort of a, our belief in that retention rate.
+And the first one had a 30% with a fairly large spread.
+The second one is centered at 15%, but a tighter sort of spread, which means that we're actually a bit more confident about the 15% number.
+than we were about the 30% number now, because we've observed some results.
+But the nice thing about this is it still admits the fact that we might be wrong, and it's something that's immediately usable.
+It looks like now the conversion rate is 15%, but I'm prepared to accept more data.
+And when you're dealing with these sorts of systems, runs of failed conversions happen all the time, and you have to be very careful about that.
+So I'm going to go through and talk about this and real examples from games.
+And I'm going to show you how you build up this Bayesian approach to A-B testing.
+But the difference between the frequentist view and the Bayesian view is essentially the Bayesian view gives you the probability of the model.
+given the data.
+If you remember, the frequentist one was the probability of the data given the model.
+So the model in the frequentist view is sort of locked in.
+Here we're sort of saying, as we see new data, we'll update this model.
+We'll sort of learn what the new shape of our probability distributions are and use that to make an assessment.
+So, trying to put some, trying to get a little bit less abstract about that.
+The canonical example is the coin flipping, so I'm going to stick with that.
+You know a coin?
+It has a head and it has a tail, just in case you didn't know.
+And when you flip it, one of those comes up and with a 50% probability it's heads or tails.
+All right, we got that bit.
+So let's say we run an experiment for a period of time and look at the number of flips.
+And just look at this, you can see immediately there are runs.
+So we see series where you get seven heads in a row or five tails in a row, and that's completely expected.
+People get very confused about random systems sometimes and think that mustn't be random anymore.
+But ultimately we get a series of heads and tails.
+And you look at the sort of the trend of those heads or tails over time, you look at the distribution of the, or let's say the percentage of heads and see how that works.
+And what we see is early on it's all over the shop, but eventually after enough observations it settles down.
+So it's settling down to an expected value, which anybody who has a stats background knows this stuff pretty well.
+But the point here is early stages, even something as simple as a coin exhibits a whole lot of noise.
+And if you're sort of modeling that and trying to produce data out of that, you have to be very aware that you need to run a lot of data before you see anything that's actionable that gives you any real value for the long-run average of the coin.
+So just a bit of terminology, just to get things straight.
+So I'm gonna talk about the probability of an event X.
+We can talk about the probability, the joint probability of event X and Y, so X and Y.
+And then we're also gonna look at the probabilities of X given Y.
+So X, assuming Y has happened, what's the probability then of X happening?
+So these three things together are gonna be used in the Bayesian way for us to essentially try and figure out what's the probability of the model being true given the data that we've seen.
+So let's look at our heads and tails model.
+There's a nice sort of function that captures the probability of tails or heads in this case.
+So we'll assume heads represents one and tails is zero.
+And the probability of heads given some parameter of our coin is given by this Bernoulli distribution, which many of you might have seen before.
+This theta thing is the fairness parameter.
+So if it's 0.5, it says it's equally likely to be heads and tails.
+If it's .2, it's more likely to be tails, and if it's .8, it's more likely to be heads.
+So it's a nice parameter that gives us a control.
+Think of that now as your conversion rate, your day one retention.
+You know, theta is your day one retention probability.
+And in this case, we're assuming our day one retention is 50%.
+So every time we flip a coin, every time we play a game, the user comes back the next day or not with a 50% probability.
+So for a fair coin, that's 50% or 0.5.
+And if you sort of push 0.5 through that Bernoulli distribution, you'll see that the probability of heads is 0.5 and the probability of tails is 0.5.
+So there's nothing particularly exciting about that.
+So that's just the probability for a single throw, but we're more interested in lots of users and the distribution of those guys.
+So you build up a binomial distribution by essentially running the Bernoulli process multiple times.
+So flipping multiple coins, and then looking at the proportion of those flips that are heads or tails.
+And in this case, you just have to account for the combinatorial with the NCX.
+So just graphing that, here is 20 tosses.
+And here's the distribution of the expected number of heads.
+And as you'd expect, we'd expect the number of heads to be around 10 if it's a fair coin.
+But we also allow for the fact that there are possibilities it might be 15 or possibilities it might be five, but with significantly lower probability.
+So this captures our sort of view of, you know, how likely it is for a different number of heads to arise.
+Now for an unfair coin, it shifts.
+So this is an unfair coin where it's more likely to come up tails as opposed to heads.
+If it was heads, it would be shifting to the right-hand side.
+And here the theta parameter is 0.2.
+Okay, what we have here is a model of the probability of number of heads.
+We can actually turn that on its head, no pun intended, and think of it as a likelihood.
+Imagine we observed a series of flips, heads and tails, so 20 of those, and we had this data set.
+And the question we wanted to ask instead is, what's the likelihood of theta?
+What's the likelihood of the coin being fair?
+I see 50% heads, 50% tails, that means it's very likely theta is 0.5.
+But if I saw 10 heads and two tails, the likelihood of theta being 0.5 is quite low.
+So we can use exactly the same sort of function to capture likelihood of a particular value of theta.
+And here's some graphs of that.
+So let's say you did two throws and you saw one head.
+One head means there's also one tail.
+So we get this sort of fairly smooth distribution to say, well, there's nothing really to be gained, or we haven't learned very much.
+All we've learned is that there is at least one head and one tail in this coin.
+So the probability of tails being zero is zero.
+As we flip more and more times, we start gaining confidence about what the actual, this model parameter is, this theta, this fairness value.
+And again, think of this fairness value as your day one retention, or your conversion rate for an ad, or the likelihood of someone to purchase an item in a store.
+It's all the same sort of process, give or take.
+So this captures our view of how likely a value of theta is given data that we've observed, which is gonna be useful in a second.
+So, X is gonna be our observations, the number of heads.
+Theta, that we've just talked about, is a model parameter.
+Our model is essentially the binomial, and the parameter is essentially this fairness value that we've talked about, so it's a value from zero to one.
+What we've looked at so far in this likelihood is the probability of a given set of data given theta.
+So the probability of X given theta, and that's what that previous distribution gave us.
+That's actually, if you recall, very similar to what the frequentist view is, the probability of the data given the model, right?
+What we actually want to do is to determine the probability of the model itself.
+We want to say, is it true that the conversion rate is 30%?
+We don't actually want to know, is it likely that we saw a conversion rate of 28% if the conversion rate was actually 30%?
+That's the wrong question to be asking.
+We really want to say, what's the conversion rate and what's the probability that our model is correct, that the conversion rate is 30%?
+So that's what we like to get.
+Now looking at those two, you know, PX given theta and theta given X, it looks like they're fairly similar.
+But be very careful, these are not the same thing.
+They don't interact.
+P of X given theta is not P of theta given X.
+And a nice way to intuit about that is just to put something real in there.
+So this is obviously a different version of LaTeX being used to produce these diagrams.
+So the probability of it being cloudy, given that it's raining, think about that.
+If it's raining, it's very likely to be cloudy, so we'd imagine that probability is high, right?
+It's not equal to the probability that it's raining, given it's cloudy.
+Again, think about that.
+If it's cloudy, the likelihood of it raining is actually a good deal less, maybe 20% of the time that it's cloudy, it actually rains, or maybe less, or maybe more in San Francisco.
+So these two things are clearly not the same.
+And what we want to do is try and find out the right-hand side given the left-hand side.
+So we'll just do a little bit of math.
+And we end up with this rule here.
+I'm not gonna go through the math, but folks who are interested, it's just the conjoined probability expressed in terms of the conditional probabilities.
+So this thing here is basically saying the probability of Y given X is the same as the probability of X given Y times the probability of Y divided by the probability of X.
+And if we expand the probability of X into something a little bit larger, we've actually done something very interesting.
+We've managed to figure out a way to relate the sort of frequentist view of the world with the Bayesian view of the world.
+we now can relate the probability of the model given the data to something which is about the probability of the data given the model.
+And that's exactly what we want to be able to do.
+And Bayes' rule is this.
+This is what Bayesian statistics and Bayesian inference is essentially all about.
+So there's two different forms, discrete and continuous.
+We're working pretty much with the discrete form here.
+And if you start taking this and applying it back to our model of the coin, what does that look like?
+Well first off, the probability of Y given X is what we're looking for.
+It's the probability that our retention rate is 30%, or the probability that the coin is fair, given the data that we've observed so far.
+Given the fact we've seen no users out of 50 users returning, what's the probability that the retention rate is still 30%, that's the question we're asking.
+And we relate it to what we know, which is a model of how coin flipping happens.
+So in this case, it's gonna be our binomial, and that's our likelihood.
+We also have a probability of the model itself.
+And this is one of the really interesting parts about Bayesian.
+We say, what's the probability of theta?
+Now theta, if you think about it, is the fairness.
+So this is a way of you expressing to the system how much you believe that the coin is fair.
+And you might not believe it's fair at all.
+You might have no information, in which case you say, I don't know anything about P of theta.
+Or you might say, well actually, I'm very sure it's a fair coin.
+I'll say P of theta is 0.5 and plug that in.
+And this down here, for want of a better term, is just a normalizing term.
+We're dealing with probability distributions, so they need to sum to one.
+So this underneath it is just the integral of the thing that's on the top.
+So we don't need to get too concerned about that.
+So if you just break that out, and these are the classic terms people use in Bayesian.
+So the probability of the model given the data, the thing we're looking for is the posterior.
+The probability of the data given the model is the binomial thing, and this is the likelihood.
+This is something we sort of choose.
+We choose a model that maps to the process we're trying to test for.
+A probability of the model itself, the model parameter, is our prior.
+And that's the thing that we use.
+That's our industry knowledge comes into play here.
+And we can say, P of theta should be something because I understand that my retention rate should be 30%.
+And I plug that in.
+So it's a really good way of bringing your industry experience to bear.
+And the last thing is just a normalizing factor.
+So this captures, this sort of prior captures our belief.
+Captures our belief in the model.
+How strongly do we think that our prior experience is right?
+And there's a number of ways of doing that.
+And we might say for our coin, well, we think it's pretty fair.
+It's likely that theta is 0.5.
+But we're gonna allow for the fact that, well, we hadn't seen it being manufactured.
+So we're not completely sure.
+We haven't measured it, we haven't weighed it, we haven't looked to see if it's a dual-sided coin, or I mean, a dual-headed coin.
+Or we might decide, actually I've seen someone play with this, a magician has been using it on stage and it's clearly been doctored. So I'll model that by a distribution which is different, which is skewed maybe to the right hand side. It's more likely, I believe, that this coin is going to come up heads.
+And you can encode that straightforwardly into the prior. It's just a normal distribution, it just needs to sum to one and that allows you to capture your understanding.
+So what we do in Bayesian is we plug all that together and we try to iterate based on data towards an understanding of how good that model is.
+So we start off with essentially an initial guess.
+We have a prior.
+We say we believe the coin is fair and we create a distribution based on that.
+We plug it in.
+We know what our likelihood is because it's the binomial in this case.
+We observe data, coin tosses, so we look at 10 tosses and see how many heads or tails there are.
+We plug that into our likelihood function.
+Multiply all that together, and we get a new result at the left-hand side, which is the posterior.
+And this new result is essentially a new distribution.
+It says, based on everything we've seen, our belief in the thetas and our likelihoods, this is our best guess now as to how fair the coin is.
+And it's still a distribution of probabilities.
+And what we can do now is plug that back in.
+We say, all right, we'll use that as a starting point for the next iteration.
+And then we get a lovely sort of iterative loop where we can continually refine and plug in the data that we see, plug in the new data that we get, and evolve over time this probability that the coin is fair or the conversion rate is actually 30%.
+So selecting priors is tricky.
+Now the great thing today is with computers and numerical methods and pi MC and lots of great mathematical libraries out there, we sort of don't have to worry about some of this stuff.
+But typically in the past people used what's known as a conjugate prior to make all this simple.
+So just very quickly I'll describe that.
+This is our likelihood function.
+When you plug it into the previous base, you get something horrible like this.
+So obviously this is a scary function.
+Lots of things can go wrong here.
+But the most important thing is, we've got a prior here and here.
+So we're gonna multiply our binomial by a prior.
+We hope that that will come out to something that's easy to work with.
+And then underneath it, we've got this integral with a prior, again, a bit messy to deal with.
+So is there some way we can sort of stack the odds in our favor and make life easy?
+Well, you can by using what's known as a conjugate prior.
+So we would like that multiplying the prior by this binomial thing gives us something that looks basically like a binomial again.
+So that when we multiply again it looks again like a binomial and we can just deal with this algebraically rather than numerically.
+Similarly we'd like that integral just to be tractable. Ideally it's analytical so I can actually just run a formula and get a number at the end.
+And that turns out to be fairly straightforward for lots of different distributions.
+So that's what a conjugate prior is.
+It's something that just works nicely in this sort of formula.
+And the conjugate prior we use for a binomial is something called a beta, a beta function, a beta distribution, should I say.
+And that's, if you look at the shape of it, just look at how it's written, it's sort of similar to that binomial.
+A binomial is in fact a specialization of a beta function.
+So I'm not gonna get into this, this is the normalizing term, but just to say it's a factorial at the end of the day, it's an integer value, it's really easy to work with.
+So a big scary integral turns out to be just a couple of multiplies on a computer, so it's very straightforward to code out.
+And it turns out this beta function, previously we had...
+the probability of a head or a tail, we can actually create a prior that maps to the number of heads and tails we've seen before, literally by plugging in for this first parameter A, the number of heads plus one, and the second parameter B, the number of tails plus one.
+So if you flip a coin and see 10 heads and five tails, stick in 11 and six for the A and B parameters, and that is a beta prior that represents exactly your knowledge about that coin to date, and you use that to kickstart the system.
+It's really simple.
+So here's just examples of that beta distribution.
+And this is sort of an interesting one.
+This is a, I have no information yet, I've never flipped a coin.
+In fact, I don't even know if there's a head or a tail, so I can't say anything about it.
+So essentially, it's an uninformed prior, it's just uniform, we know nothing.
+After, say, flipping a coin, you might find it came up two tails.
+So what this means is I now have evidence that tails exist but I have no evidence that heads actually exist.
+So I can't say the probability of heads being zero is non-zero.
+So we get this sort of strange slope distribution.
+And as soon as I see a head, I start getting the classic sort of bell curve shaped thing.
+And different shapes of A's and B's give you things that look like exactly like the binomials we saw earlier.
+And that's true because there's always a beta to match a binomial.
+So plug it in.
+Again, it looks a bit scary, but we have our...
+binomial and we have our beta.
+We multiply those things together and we get something that looks like this.
+That also sort of seems like it's relatively scary but it's actually really simple.
+All that's happened is we've changed the values of A and B in our beta function essentially.
+And that turns out that Bayesian update step in a full Bayesian inference engine using binomials which powers certainly the Swerve A-B testing system involves just adding one number to another.
+That's fundamentally what you're doing.
+and then some stuff afterwards to interpret the results.
+So I'll skip over that.
+So putting it together, we first off decide on a prior which captures our belief about how strong the coin is biased and that just is a function with a certain shape.
+We run our experiment and observe some data for heads and tails.
+Based on that, we update our view of what the posterior distribution is or our model is.
+And using that, we can sort of feed it back into the system and keep going.
+And essentially, at any point in time, we have a new belief about how well our model represents the coin, or represents that conversion rate.
+And at some point, you stop and say, I've done enough.
+Some conversion has been achieved, or I see a result that I'm happy with.
+It's gone above a certain threshold.
+And we'll talk a little bit about that now.
+So this is what it looks like when you run that.
+It's an iteration process.
+And all that's really happening is the shape of the beta is changing, representing how confident we now are in this model.
+And at any point in time, we can stop and say, this is what we think our conversion rate is.
+It's, looking at this, it's about 30% with a spread of, you know, 0.1.
+Now if we plug that in to an actual experiment and start running it, so we start off with a uniform prior, that is we don't have any prior knowledge at all of this coin.
+And let's say the coin is actually fair, it's theta parameter is 0.5, and we start flipping it and seeing what happens.
+So we get two heads, two tails, 10 heads, 11 tails, 31 heads, 29 tails, and as we go we can see what's happening is we're increasing our certainty that this coin looks like it's fair, the dotted line there represents the 0.5 line.
+We can see that even though it's still, even though it's centered at .5, we're still allowing for the fact that we might not have seen all the examples of the coin's behavior.
+And so we're allowing for the fact that it could be .6, .7 or something lower.
+But as you see more data, that tightness starts to happen.
+And essentially we get more and more confident about the spread of the actual true distribution.
+So we're pretty sure this coin is fair because it looks like this one is very close to .5 at its peak.
+Let's say we have prior knowledge that the coin is fair.
+So we're actually starting off with something like this.
+This is our prior, and we've drawn this curve ourselves.
+Say previously we saw 50 heads and 50 tails, and now we start the experiment.
+With essentially the same sort of data, run it a few times, and you can see.
+Even though we're sort of getting the same data coming in, it's not exactly the same, but it's pretty close.
+Generally, the shape of the curve hasn't changed at all.
+What's really happened is nothing has come in to upset our belief that this coin is actually fair.
+And in fact, all we've done is we've improved our certainty.
+It's become sort of tighter.
+Let's look at the opposite case.
+where we start off with a biased coin and we start observing what the true case is.
+So we start off with no prior, we've no previous knowledge at all, we haven't seen the coin being made, and we start observing the result.
+And in this case you can see that over time we build up a profile that, ah yeah, this coin is definitely unfair, it's sort of off to the right-hand side.
+Certainly that the mass of our probability distribution is not centered around point five.
+So we'd say that's probably an unfair coin, given what we've seen.
+Now what happens if we start out with a preconceived bias, that we think this coin is fair?
+What does that mean?
+Actually, it changes things, and this is maybe the negative side of priors.
+So if we're pretty certain the coin is fair, and then we start observing it, and then it comes up like a very unfair coin, we see maybe 20 heads and four tails.
+all that does is really shift it slightly because there's a weight of evidence already expressed in the prior.
+And that's where working with the prior is really important.
+You need to be very clear about how much confidence or how much certainty you put into that prior because it'll impede progress in your experiment if you're really sure.
+But that's a good thing because it means that you're saying, I'm really sure the conversion rate is 30%.
+I want to see a heck of a lot of evidence before I'm prepared to accept that it's not.
+So in this case, we're not sure of anything.
+So when do you reject?
+Well, quite simply, we reject based on how far into the center of the bell curve or into the center of the mass is the observation that we have.
+And in this case, we can look at the credible interval.
+And this is just looking at the probability distribution, figuring out where 95% of the mass is.
+This is where it's sort of similar to null hypothesis testing.
+And then checking to see if the 0.5 value is inside of that.
+And in this case, it is.
+So we would express this as saying, we're 95% confident that this coin is fair.
+Similarly with the previous one, with the uniform prior and the biased coin, we're pretty confident, we're greater than 95% confident that this coin is unfair in this case.
+So it's outside that credible interval.
+So the prior captures our belief, captures our experience, and it's a really creative way, mathematically, to get business knowledge and intuition into a system like this, which the null hypothesis approach has no real easy way to do.
+Strong beliefs means that we need lots of evidence to conflict our belief, which is good.
+It means I really need to be convinced before I'm prepared to accept that this coin isn't fair.
+It also provides inertia and it allows convergence a lot more quickly if indeed your belief is true.
+And with enough samples though, the importance of the prior diminishes.
+So that's a good thing as well.
+And it acts like a really nice filter at the start of your test.
+So the noise at the start of your test essentially is reduced significantly by a decent choice of prior.
+And that makes the experience for a product manager or an analyst looking at the A-B tests, it makes it a lot easier for them.
+So let's look at running a test.
+So we've got our kind of canny crush bolt thing again.
+We've got our variation A and B.
+We start observing results for both A and B and looking at the conversion rates.
+What we have now is sort of two of those coin flipping tests and we accept the fact that there's probably two conversion rates here.
+We just want to know which of those is better.
+So with multiple variants, things get a little trickier.
+We're no longer dealing with one distribution.
+We're actually dealing with a two-dimensional distribution.
+And in order to actually evaluate the results, we start getting into a little bit more hairy stuff.
+And that's where the computers start shining.
+So we can start using sort of quadrature rules and other things like Markov chain, Monte Carlo.
+But here's what you're actually doing.
+You're getting surfaces for a two-variant test or a two-treatment test.
+A three treatment test is now a volume, and four treatment, you're into four dimensions, and it gets harder to think about or to visualize.
+But the sort of 2D or 2.5D version is fairly straightforward.
+So this is our conversion expectation for A and a conversion expectation for B, the two different versions of the game.
+And in both cases, it's sort of centered or close to that 30%, which I should have skewed when I.
+And this is what we're actually trying to evaluate.
+We're trying to say, is A better than B?
+And A is better than B if essentially the area under the curve where theta A is greater than theta B is larger.
+That's essentially what we're trying to evaluate, which is this thing here.
+So we just look at the area where theta A is greater than theta B, we integrate under the curve, we compute the volume of that shape, and we say, is it greater on the right-hand side or on the left-hand side?
+If it's greater on the right-hand side, then A is better.
+If it's greater on the left-hand side, B is better.
+And the volume gives us our degree of certainty.
+And it's a really cool way of saying, I am 75% certain that A is better than B.
+It gives us a real number to work with, a probability to work with, which is why it's so useful.
+What prior might we use for our game?
+So in this case, we have a prior which is, say, 30%, but we need to figure out a spread.
+How certain am I about the 30% conversion rate for day one retention?
+Well, maybe I'm not very certain at all, but what I can do is I can look at the history of the game.
+So maybe I've run the game for a month, and I actually have data to say, what sort of conversion rates, what sort of retention rates was I seeing?
+And here's an actual game that's available now.
+with a conversion rate around about 30% for day one, and that's the spread.
+So what we can do is we can just very simply fit a beta to that.
+In this case, it was a beta with an A of 42 and a B of 94.
+Really simple to do with Python and OR.
+And then you feed that into your system.
+And you start running your Bayesian analysis.
+You iterate with all the data you see.
+You iterate with the coin tosses, people do or do not convert.
+And you observe the results.
+And you can observe the results all the time and make a choice at any point in time.
+You look at this and nothing's really settled down.
+So we can see that one variant looks like it's doing better than the other.
+It was oscillating a bit at the start.
+This used the uniform prior, so early oscillation is classic there.
+But we're probably saying at this point that we're 80% sure that the top variant is better.
+it's probably not a good point to stop.
+You really want to let this run for a little bit longer.
+It's only been running for a few days.
+So here's some examples of real tests that have run.
+This is sort of how we read out the result of a test.
+This is a control in four variants, or a four treatment test.
+And in this case, the mathematicians among you should be revolting, because there's no such thing as 100% certainty in any of these things.
+But we round up from 99.99 to 100, so forgive us that at least.
+It just looks nicer on the dashboard.
+So what we're reading out here is the probability of any one of those treatments being the outright winner or the probability that they beat the control.
+And in this case, here's how that test ran for a while.
+So again, it was uniform prior in this case, or an uninformed prior, should I say.
+So lots of noise at the start.
+But it eventually settled down into a very stable result.
+All the other treatments were practically 0% and we were very certain that one of these treatments was by far and away the winner.
+So that became actionable very quickly.
+And here's how the conversion rate looked over time.
+So again, at the start, this is the actual, you know, is it 30% or is it 31% for day one conversion?
+In this case, it was measuring something else.
+But that credible interval that I talked about, we're actually tracking that over time as well.
+And that's a good thing to do because it gives you an idea of the separation of the different treatments and how confident you are.
+What you really want to see is a full separation of your 95% credible intervals to be really sure that these are different conversion rates.
+But again, it depends on how you're setting up the experiment.
+Here's what it looks like when it's not so successful.
+Not so is a bad term.
+This is a successful test, but the result wasn't a success.
+So the change we made didn't actually have the right impact that we wanted to see.
+So this is what it looked like.
+The control very, very quickly drowned out the treatment.
+And after a couple of observations, and you can see there literally the spikiness of this graph sort of represents the number of observations.
+And it very quickly drowned out the treatment.
+So we killed that test fairly quickly.
+and this was the observed conversion rate of the posterior.
+So again, you can see that initially, we've so little data that the probability distributions of both the control and the variant are overlapping.
+Our beta distributions are essentially all over, are overlapping each other.
+And you can think of this as just a visualization of the shape of the beta distribution sort of tightening over time as we become more and more certain about the true conversion rate of each of our population groups.
+Now we're making some big assumptions here.
+First off, that users are independent.
+This isn't such a great assumption to be making, for example, in multiplayer games.
+If you're running a test where there can be an interaction between users, then you have to be very careful about the design of your test.
+It also seems that users convert very quickly.
+In fact, the model assumes users convert instantaneously.
+So that's not great when, say, you're looking at a day 30 retention test.
+So you have to sort of frame that slightly differently, but I don't have time to get into that here.
+And the other thing we assume is that probability, the probability of conversion is independent of time.
+That's also untrue.
+You know, sometimes people might purchase things more frequently during lunchtime and less likely to purchase, you know, at four o'clock in the afternoon.
+So there is a sort of a relationship between time and conversion rate.
+So you have to make sure you counter for that in some of the modeling.
+Really, a lot of the complexity of Bayesian A-B testing really comes in the later stage stuff.
+The implementation of a Bayesian A-B test is really straightforward.
+This is what it looks like if you try to run an A-B test without any corrections on a conversion that happens a long time into the game.
+Let's say, you know, after seven or eight days of play.
+In this case, actually it's not.
+This is probably about three or four hours into play, not looking at the data.
+But you can see that the conversion rate hasn't settled down.
+it's sort of starting to become asymptotic to something.
+So when you're running tests, and if you see something like this in your own graphs, wait until it flattens out so that you can see, my population has actually reached a stable conversion rate and I have a decent estimator.
+So some benefits and features of Bayesian.
+It's continuously observable, and this is genius.
+Unlike the null hypothesis stuff where you have to set up the test in advance and being fairly rigorous about that, Bayesian, you just look at it, and you get a new probability every day, hour, minute, even second, depending on how you implement the infrastructure.
+So there's no need to think about population sizes in advance, you just let your users flow over your test, and you look at the results, and you build up with every new piece of data that you have, a new model that represents what we believe about the game.
+We can incorporate prior knowledge using the prior, which is really cool.
+The ability to bring in your own business knowledge or your own experience from previous tests or experience about what you know about games and bring that to bear and sort of factor that into the mathematical implementation is really cool.
+And the result at any point in time is a true probability.
+It's a value from zero to one that you can sort of intuit about and doesn't have any strange special casing about null hypotheses and false positives or.
+Clearly it can have false positives, but it doesn't have any of the strangeness of a p-value.
+And as well as that, it gives you a magnitude of the difference between population groups, a magnitude of the effect you're seeing.
+Again, with null hypothesis, all you get to know is, is it or is it not likely to be due to that distribution?
+So it's a binary choice, whereas in Bayesian, you get a magnitude in the probability, and that all makes for a much better assessment of the results of the test.
+And frankly, it's a really great framework for building lots of different analyses inside your game.
+So get onto your analysts, get onto your data scientists and your companies, and get them to build a Bayesian framework.
+Because you can start to look at lots of other different things and not just simple A-B tests.
+So some useful links, that's just for those of you who want to download the paper or the talk later.
+I'd particularly recommend that first link.
+If you haven't heard about Cam Davidson's The Probabilistic Programming thing in Python, it's a book written in IPython, so it's fully interactive.
+It's the most genius thing I've come across in the last year.
+So if you just Google for Bayesian hacking, I think it is, or Bayesian hackers.
+you'll come across it.
+Absolutely brilliant book.
+Can't recommend it enough.
+It's not finished, so there's a lot of errata to come, but it's great.
+Other than that, I'd just like to thank you for your time and ask if there's any questions.
+Thank you.
+So we have one question there.
+We might use the.
+Actually, there's one over there, the microphone, so I'm gonna go with him first, right?
+Oh, sorry, he went the previous way.
+Yes.
+Hi, thanks. So, one thing that I think most people who have worked with MCMC know is that it is quite computationally expensive.
+And I'm wondering whether you have successfully scaled some of these approaches to tens of thousands, hundreds of thousands, millions of users, or whether you do some kind of sampling or use closed form kind of solutions, or how it is that you run this at scale?
+Yeah, good question. In fact, the...
+If you're rerunning this or you're computing the results, every new user and every new observation, clearly that's an issue.
+So we batch that up for a start.
+So we look at series of observations and then we sort of recompute at regular intervals.
+To be honest, most of the tests we run are actually straightforward.
+We don't even have to resort to the MCMC stuff.
+And we can use this analytic closed form solutions that exist out there for computing the area under multi-dimensional sort of beta functions.
+So there's a very good Java library whose name I sort of forget at the moment.
+but if you ping me afterwards by email, I'll send it to you.
+And that's a great library that we use internally for computing these integrals.
+Thank you.
+I think it's you.
+So I'm not trying to defend frequentist statistics, but one nice thing about the Naaman-Pearson approach is that it at least gives you a way to think about inferential risk for type one, type two error.
+with respect to sample size, and I'm wondering in your setting, are the sample sizes typically so big that you don't really have to worry about it too much, so that the data just flows in and at some point your credible intervals are obvious and then you're done?
+Yeah, I think you're absolutely right.
+I'm not sure, this is probably an untrue statement, but we haven't needed to really think about that too much because sample sizes are definitely in the hundreds of thousands of users and beyond in which case, you know, you don't really have to think too much about this, which is the good news.
+Certainly, if you were doing a test which had only 50 users, then, you know, obviously you have to be very careful, you know, you have to be careful of degrees of freedom and all that sort of stuff.
+generally by switching to a Bayesian approach and by just relying on the fact that there's lots of observations, we haven't had to get too deep into that stuff.
+But I think you're absolutely right.
+I think there's a deeper set of knowledge on the sort of frequentist approach out there.
+The experimental design research in sort of frequentist is rich and vast.
+What I sort of like about Bayesian is just simple, to be honest, from my perspective.
+So I was able to understand it a little bit better.
+Cheers.
+Thank you.
+It was a very concise talk on Bayesianism.
+And as I'm sure you know, there's always a really big divide against frequentism and Bayesianism, especially in a situation I have.
+I'm dealing with lots of basically stats 101 or someone who has an undergrad with math that really yell out sample size or bring up these things about Bayesianism.
+And what kind of experiences have you had working with companies or clients of saying, hey, this stuff really does work?
+What advice do you have for basically converting people to the benefits of Bayesianism?
+I can only go really from our own experience, because largely, when we talk with companies, we divorce them from the complexities of how we implement this.
+In some cases, we'll talk directly to their data scientists and get into it.
+But in my experience, getting to grips with and creating a very robust sort of frequencist approach to this, we found quite tricky.
+And we went a good deal down the road of doing that, looking at correction factors, and done it and all those other things.
+But eventually decided to make the switch based on some advice that we got a couple of years ago.
+And since then things have just gone so much easier.
+I think horses for courses.
+I think in the high tech, in the computer world, which I come from, the computer science world, I think there's a natural affinity to Bayesian because it...
+It unlocks itself once you have the capability of running these calculations at scale, where you can divorce yourself from having to figure out really complex conjugate priors and can just rely on what are also tricky things, the MCMC methods and things like that.
+It just sort of fits our model view of the world I think a lot better.
+So I wouldn't personally get into the A versus B comparison of those two schools.
+We have just found Bayesian, it suits our team better.
+So that's all.
+Thank you.
+If you start taking advantage of some of the more complex methods you touched on, like doing real values instead of discrete, so let's say you're optimizing for revenue, you're looking at ARPU or ARPDAU, and you also want to do multivariate testing, so you're kind of pushing it to the most of what you talked about, do any new challenges emerge there?
+Or tractability of the computation or needing to switch to different methods?
+I guess so far, maybe we haven't gone far enough into this to hit up against some of those intractability issues.
+We found the majority of the use cases that we've come across can be actually nearly trivially solved with Bayesian.
+Now, you do have to implement hierarchical methods, you have to get into things that are beyond binomial and negative binomial and Brownian and all that sort of stuff.
+But fundamentally, once you choose the right model and once you choose the right Bayesian approach, it all sort of falls out.
+We haven't come across an issue for us in terms of computational tractability yet.
+Now I think the direction that we find ourselves going in is away from the sort of more curated A-B test approach to the more automated optimization and multi-armed bandits and starting to think more on sort of that direction.
+And I think that's very interesting where you can just sort of automate across a parameter space of different options.
+But, and that's probably where we're gonna spend most of our time.
+Thank you.
+Cheers.
+In terms of a company looking to buy a system like this, can you talk about like the return on an investment?
+Like.
+say a company wasn't doing this sort of approach and then a year later was adopting it, what sort of effect would you expect to see in their revenue and business model?
+That's entirely a function of to what degree testing becomes incorporated into the culture of the company.
+So I think you know there's no again there's no silver bullet. A piece of technology or a cool platform doesn't actually deliver the ROI in and of itself.
+It sort of has to nearly infiltrate itself into the the way you develop the game and the way you develop the economy and the way you manage the store or whatever.
+And I think that's still an ongoing story.
+I can't tell you any specific examples of customers working with us, because we sort of measure ROI nearly on an A-B test by A-B test basis.
+But each of those has value.
+An individual test could be worth 100 bucks, could be worth 10,000 bucks, depending on what needle you shift.
+You know, I think some companies have defined their success on the basis of always being testing.
+And so I think it does huge value to embedding that in your culture.
+There's obviously a spectrum. You don't want it all just to be data-driven and testing.
+It's also about design and intuition.
+Okay, so a different question.
+You talked a little bit about how do you tell if a change is good or not good?
+A game has a huge surface area of things you could change.
+If you change everything every day, it's a mess.
+So really, an interesting question is, I have a whole bunch of ideas that my game designers want to do.
+Which one is the one that I should try first?
+Sort of a very interesting one, not quite a philosophical question, but really a kind of optimization problem.
+You know, if in the limit you could express every parameter of the game to an A-B, or an optimization system, a whole point he'd hit a sort of a diminishing law of return that you now just get too complex and are changing too many things.
+I have no idea the answer to that question.
+Our advice to any company working with A-B testing, certainly to begin with, is keep it simple.
+talk to your CFO, talk to the guy who owns the P&L and ask him, what do you want?
+What's the business goal?
+And then work back from that into what things inside the game can impact on that business goal most quickly.
+And generally speaking, that's something to do with the economy or the monetization mechanisms inside the game and things that directly impact on early stage sort of engagement and retention.
+And that's usually where we start out.
+And then over time, you start building more and more tests.
+And I think we're still early, actually, certainly for mobile A-B testing and this sort of technique in general.
+In the limit, you think about an auto-adapting game based on what users are doing, some sort of crazy machine learning system that adapts itself, but I think that's a limit we'll never want to reach, I suspect.
+Okay, listen, thanks very much for your time, and enjoy your beers.
+Thank you.

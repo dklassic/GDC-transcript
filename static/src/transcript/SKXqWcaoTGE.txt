@@ -1,0 +1,288 @@
+Alright, uh, hello everyone. Welcome to the science of off-roading. My name is Ed Pereira. I'm a programmer at Naughty Dog. During this talk we'll be going, uh, bouncing between the high and low level topics as we face, uh, going, uh, as we go through the set of challenges we faced while developing the car that Drake drives around Madagascar in Uncharted 4.
+Let me start with some of the goals we had in mind when we set out to work on the 4x4.
+At its core, we felt it needed to be fun to drive for as many people as possible.
+Uncharted 4 is an adventure game that we felt that anyone should be able to pick up and enjoy, and since the 4x4 is a critical part of the story, we needed to make sure everyone enjoys driving it.
+Secondly, we wanted a sense of realism to keep the player grounded in Drake's adventure.
+Finally, we needed to make sure whatever we designed would work on the rockier, muddy terrain found when driving around the mountains of Madagascar.
+To accomplish these goals, we have to figure out what kind of simulation we wanted.
+When making a vehicle simulation, you kind of have to figure out where on the spectrum you want to fall.
+You can choose the real side with a game like Gran Turismo.
+The tagline is literally the real driving simulator.
+In games like this, you can have a very realistic tire grip simulation.
+Maybe the rubber wears down and the tire loses friction.
+Your motor can be complex with details like how much power is generated when each cylinder fires.
+The shape of the chassis can change airflow.
+giving you different handling and efficiency.
+On the other end, you have games like Super Mario Kart, where simple fun is much more important.
+There are aspects of racing introduced, but they are largely game mechanics rather than a simulation.
+The best example is drifting, where you end up hopping around so you don't take a penalty and play a canned spinning out animation.
+Another aspect is the fairly simple motor with the ad mechanics of boosts, like when you use a mushroom or rev the engine just right at the start of a race.
+So where did we end up with the 4x4?
+We ended up somewhere in the middle.
+In my opinion, when you're dealing with an environment that's going for realism, it's actually easier to run a simulation on the more real side.
+If you try to model it as simple as possible, the complexities of realistic environment require you to add several hacks to get the simulation to look right.
+With a more realistic simulation, you can throw really varied terrain at it and it should remain stable.
+You might still need to tweak some of the parameters to make it feel good, but you won't need to fundamentally change the underlying physical model.
+I'm gonna be going over the physical model in three parts.
+We're gonna be talking about collision detection, so that's the chassis and the wheels and how they respond to collision.
+We'll quickly go over motor simulation and how it generates torque.
+Then we'll talk about how that torque is applied to the wheels and how that generates forces applied to the vehicle.
+So let's go over how the Drakemobile stands on its feet.
+Stated simply, the vehicle is built out of rigid bodies held together using constraints.
+We start off with a single rigid body for the chassis, a rigid body for each wheel, and constraints that keep everything together.
+We use Havok as the solver for these constraints, but provide many of our own inputs.
+We turned off collision on the wheels in favor of Havok's point constraint system.
+The system allows us to pass a point that we want the tires to stick to, and it also generates a normal force based on the motion and mass of the chassis and the wheels.
+Later I'll go over how this normal force is used to compute friction.
+In order to find the point of contact, we use a ray cast for each wheel from what we call the hard point to the furthest point the suspension can extend. The hard point is the point where the suspension is attached to the chassis and provides a nice reference point for the math we'll be doing on the wheels. I turn off the tire display so you can get a better look at the ray cast. In this image, the yellow sphere at the bottom is the detected collision point. So let's take a look at how that all works driving on flat ground.
+So this is a great start. We can make some turns, start driving. I'm a huge fan of getting something up and running as fast as possible first and add features as they go. So this is flat ground. How does it handle on our test track of rough terrain? That's obviously not so good. We seem to have hit an invisible wall. I checked the level file, the designer definitely didn't put one there. So we need to break down the issues. First and foremost, the unpredictable collision response here is a big problem.
+Second, collision response doesn't happen fast enough.
+In this screenshot, you can clearly see that the wheels penetrating the bumps and the depth definitely does not meet our standards.
+So how do we fix these issues?
+First thing, it's obvious that a ray cast just won't cut it.
+We consider options like moving the ray cast forward if the car's moving, but it just didn't seem accurate enough.
+Instead, we replaced the ray cast with a shape cast, using the tire dimensions as a cylinder for our shape.
+Another tweak was to cast the ray from above the hard point, in this case, well above the hard point.
+There are cases where the nose of the vehicle would spin a frame already in collision and get stuck.
+Moving the start of the cast up made sure that never happens.
+This screenshot shows the first collision point detected by the shape cast.
+On this round bump, there are actually several points returned by the shape cast.
+As a first step, we take the closest return point, which looks fairly accurate.
+This is a vast improvement.
+We're getting much less visible penetration, but it's not quite there yet.
+As you can see, under certain circumstances, it can be very unstable response where you see a lot of jittering.
+This is caused by the fact that we're only taking the first collision point.
+So it's ping-ponging between which plank to put the tire on top of.
+We now need to take more collision points and pass them to the point constraint system.
+This allows us to have this.
+This allows us to have the tire sit on multiple planks, which stabilizes the response.
+We limited the number of points we used to three per wheel since we felt more than that would have diminishing returns.
+So this looks pretty good.
+One thing we discovered we don't like is how rough the collision response is to surfaces whose normal is not aligned with the suspension direction.
+You can see from the start of this that hitting that first bump, you completely lose all momentum.
+This is an implementation detail of Havoc that we wanted to work around, so we fake it and tell Havoc that all normals are in the direction of the suspension.
+Smooth as butter.
+We really liked how player-favoring the response is here.
+If you run into any situations like this, we know the 4x4 will keep momentum nicely and not frustrate the player.
+This is obviously quite unrealistic, but this is one of the many times we leaned away from realism to make for a more fun driving experience.
+There is an unfortunate side effect, though, in that the wheels do not respond perfectly to collision anymore.
+You can kind of see the wheels penetrating the bumps now.
+Our solution is to re-implement wheel collision response ourselves.
+Using the highest point from before, we place the wheels so that it tangents the point.
+The first thing we need to do here is figure out where P1 and P2 are.
+These represent two potential points furthest penetrating into geometry.
+Because the wheel could be at an angle, we have to consider either side as the deepest point.
+To compute the points, we take the wheel's orientation vectors up and right and offset from the center point.
+Now we need to see which point is deepest.
+We do this using dot products.
+There are two vectors, one from C to P1 and one from C to P2.
+If we dot these with N, our surface's normal vector, we produce two scalars, S1 and S2.
+S1 and S2 represent scalar distances, meaning how far CP1 and CP2 travel in the direction of N.
+You can see these scalars in their geometric sense in this image.
+Whichever of these scalars is larger determines which of the associated points is deeper.
+In this example, P1 is deeper.
+Now we can't use S1 directly since that's the distance from the center to the corner.
+We have to compute another scalar, S3.
+That represents the distance from the contact point to the corner along the contact normal.
+We do this by taking the vector from the contact point to CP1 and dotting that with N.
+This resultant scalar is the final distance we have to move the wheel by in order to have the wheel's corner rest on the surface.
+Now obviously if we just separate along the contact normal, the wheel will be pulled out of alignment with the suspension.
+So the next step is projecting the separation vector onto the suspension direction and moving along that vector now.
+Let's take a look at how that math works out.
+So responding to low penetration distances, we have a stable and correct looking collision response, which is unfortunate for Drake.
+He's probably asking if we can go around at this point.
+Unfortunately, you quickly run into an issue when you have to move the wheel so far along the suspension direction that it goes past the hard point and into the four by four's chassis.
+To avoid clipping the wheel well, we limit the distance the wheel can travel upwards so that it never passes the hard point.
+To counteract the fact that you would now see the wheel penetrating the ground, we apply an upward force on the hard point and it nets us two benefits.
+First, it will get the 4x4 out of collision.
+Secondly, when you slam it to the ground hard it creates a nice jerk that the player can feel.
+Side note, this force is then delivered to Nate.
+Sorry, Nate.
+By the way, if you're interested in how our character animations are affected by physics, and you didn't catch it this morning, you can check out Mikhail's talk in the vault after the show.
+So with the wheels colliding properly, we ran into another issue.
+As you can see, we need to tweak what we consider valid points of contact.
+Because our cast will detect any collision, these walls count as points to place the tires on top of.
+The limit we made was based on the angle of the surface the wheel probe detected. Taking the angle between the vertical vector and the normal of the surface, we ignore surfaces whose angle exceeds a designer tuned maximum angle. So what does that look like? With the wall collision safely ignored, the 4x4 bumps the wall and continues on. And now another case. Okay, apparently sometimes you do want to drive on the wall.
+To solve this, we gave design the ability to turn off the angle check in script.
+Last issue regarding collision and chassis movement is when you drive off of a cliff into a place that is still a drivable space.
+We wanted to avoid flipping onto the 4x4 side or roof as this would disrupt the player's driving experience.
+The quickest solution is to counter the jeep's rotation using forces based on what direction the vehicle is currently rotating.
+Let's see what that looks like.
+So as you can see, it's a little unrealistic, but it's very important to keep the player happily driving around.
+In fact, for fun, we added some air control where we'd apply forces to the 4x4 if it's in the air, and you're pushing on a direction of the steering stick, constantly keeping the player feeling like they have some control.
+So now that we have collision detection settled, let's talk about powering the beast with our motor simulation.
+We decided to go with a manual transmission.
+It ends up being a simpler simulation when you don't have to deal with the torque converter.
+Who wants to deal with viscosity anyway, am I right?
+Simulating a motor requires a differential equation because the speed at which you're traveling feeds back into the motor's power curve.
+We implement this by breaking the problem into two parts, the motor and the wheels.
+So in this chart, we're looking at how much power and torque are generated by any given RPM.
+This curve is tuned by designers using the x and y coordinates based on the size of the space and how responsive they want the 4x4 to be.
+Basically, the way this curve works is your power grows as your motor spins faster and faster, up to a peak power, at which point you start losing efficiency and the power starts dropping.
+In the simulation, the motor starts at a minimum idle RPM and how much gas pedal is pressed applies a similar percentage of torque generated at the current motor RPM.
+It's a big simplification of how gas is applied to a real motor, but it's very effective.
+So the second part, as I mentioned, is how torque is generated from the motor and transfers to the wheels.
+To understand how that works, I need to mention another aspect of our transmission.
+This is a differential.
+This allows the attached wheels to rotate at different rates.
+So if you slam on the gas and one of the wheels is stuck and locked in place, the other wheel will spin freely and you won't flood or stall the engine.
+During development, we took a look at a lot of different elements of a real car and considered which ones to simulate.
+Looking at the benefit of differentials, this seemed like a good element to include.
+The primary reason we wanted this is to improve handling.
+When the wheels are free to turn at different rates, you get more grip on the outside tires.
+To understand this, imagine one side of the car carving one circle, the yellow circle here, and another side carving another circle, the blue circle.
+These two circles obviously have different circumferences.
+So if the wheels were fixed to turn at the same rate, there would necessarily be sliding because the wheels are traveling different distances.
+The secondary benefit is we get big amounts of wheel spin, so our FX and foreground team have plenty of opportunity to send mud and rocks flying.
+Now with a differential, torque applied to the wheel, torque, now with a differential, torque applied to it will be divided evenly between the wheels attached.
+So assuming a forward and rear differential and a differential between these two, we now have a system where torque is divided evenly among all four wheels.
+Since each wheel is allowed to sprint freely, we then calculate the next frame's RPM using the fastest spinning wheel because in a manual transmission with the clutch applied, the wheels and the motor are directly linked.
+With the motor generating torque, I'm gonna talk about how that torque ends up putting a force on the vehicle to get it moving forward.
+So let's talk about friction.
+We have power transferred from the motors to the wheel, now we need to transfer the power from the wheel to the ground, so the 4x4 moves forward.
+Friction dictates how much force can be applied to before there is slip, and how much slip there is.
+Since friction is between two surfaces, we have to define the friction for the tires and the friction for the geometric surfaces the tires will be driving on.
+In order to accomplish this second part, we break the environment up into several surface types, each with a tuned amount of friction.
+The designers and artists worked together to lay out all the friction types to make for a fun and interesting driving experience.
+Let's take a look at how that surface is blocked out.
+We have our grass here with very high friction indicated by the yellow in this picture.
+A muddy transition point here with what would be an in-between amount of friction.
+Then a very little friction in a muddy riverbed.
+As you can see, it's really broken up very roughly.
+We didn't go into fine details of little bits of higher friction here and there, and it still feels really good to drive across.
+We spent a lot of time tuning friction on some of these surface types to make these money climbs challenging while still being fun.
+You really have to keep throwing at a plate tester with fresh eyes to see how difficult they find it.
+So let's get into some of the details about friction and torque.
+The first thing we need is the normal force N applied to the tire.
+This we get back out of havoc for each wheel once we've applied the point of contact.
+We'll let the solver give us this information because the pressure on the wheel is dependent on the downward momentum of the chassis and the forces generated by the suspension.
+So doing this is needlessly gritty.
+For the coefficient of friction, we multiply the friction of the tire with the friction of the surface it's in contact with.
+This coefficient is then multiplied with the force returned from Havoc to generate a maximum friction force.
+Torque is then the rotational force applied to the wheel.
+With the friction resisting this rotation, the opposite force pushes the wheel forward.
+Our maximum friction force is split into two directions.
+We take the torque applied to the wheel, divide it by the radius, and that gives us a linear forward force.
+Our lateral force is a little bit more complicated.
+We create a lateral slip coefficient based on the lateral velocity divided by the forward velocity.
+Multiplying this by the normal force returned from Havok, we get a nice simulation where you regain control in a reasonable amount of time no matter how fast you're sliding.
+Combining the two directions, we get a total force vector shown here.
+The length of this vector must be below the maximum friction force we calculated earlier.
+Dividing the two gives us a scalar to apply to the input vectors so that our total force falls below the maximum.
+We apply the scalar to both directions so the resultant total force falls below the max force.
+So lateral friction force is applied to the lateral velocity to slow the vehicle down when sliding side to side.
+In the forward direction, we apply up to the maximum friction to the wheel.
+The leftover difference is then applied back to the wheel as extra rotational velocity because the tire is slipping in this case.
+In the other direction, however, if the torque applied is less than the maximum friction force, we apply an opposite braking force on the angle of velocity of the wheel, so it slows to meet the friction if the wheel is over-spinning and slipping.
+One final request from design was, of course, being able to power slide.
+Tossing around some ideas, most importantly, we wanted to make it easy to use.
+We decided to implement a big fake with a hint of realism.
+When you hit the handbrake button, we simply reduce the friction on the back tires.
+This lets the rear kick out, but in a way we can easily tune.
+So that concludes the driving and physical aspects of the 4x4.
+Design would give me a layout that they wanted the 4x4 to drive on, and we'd work together to get the vehicle to feel and look right for the space.
+Now with that working nicely, what do you do if a designer comes to you and says, hey, it would be great if the car drove itself.
+Okay then.
+That sounds like fun.
+So the reason for this tech is so that NPCs like Sullivan or Elena can hop into the driver's seat and drive to Drake if he got too far from the 4x4.
+Thankfully some of the AI work is already done for me.
+I have to tweak some things but the NavMesh search code used by NPCs can be converted over pretty easily so we have static paths generated almost immediately.
+The interesting bit comes when we talk about how to make a car on four wheels drive towards the next nav waypoint.
+Questions to answer.
+How do you actually turn to face the point?
+How fast should you be traveling?
+What if the next waypoint is behind you?
+How do you even know it's behind you?
+How do you know if there's a physical object in front of you that you need to drive around?
+How do you drive around it?
+Some basic principles.
+Cars have a defined turn radius, like we talked about earlier.
+This is the radius of the smallest circular turn the vehicle is capable of making.
+The size of the turning circle changes based on how fast you're traveling, because the wheels won't necessarily grip the ground hard enough to make the given turn.
+The circle also expands the further the steering wheel gets from the furthest edge.
+Understanding these aspects of your physical model lets you make decisions like how far do I have to turn the wheel to make the target.
+Let's go over how to calculate the turn radius based on the physical dimensions of the car.
+I based my math on the Ackermann steering geometry.
+In this image, theta is the maximum angle the wheels can rotate left to right.
+W is the width of the 4x4 and L is length.
+Putting it all together gives us the radius of the turning circle.
+I'm uncertain if this is the perfect calculation of a tightest turning circle the 4x4 could drive along, but it was close enough of an estimate that it worked well for our AI logic.
+Okay so now we're able to calculate if we can make a turn towards the waypoint. We obviously know the location of these circles since they are attached to the car.
+Assuming they're infinite cylinders, we use 2D algebra to figure out if the waypoint is inside of either circle. If the waypoint is inside of either circle, we turn uh...
+We need to put the 4x4 into reverse, turn the wheel in the opposite direction, so now our nose will turn towards the target.
+Once our nose is facing close enough to the target that the target is outside of the turning circle, we can switch back to drive and complete the turn.
+This logic also applies to whether the target is behind us.
+Reverse until we make the turn and continue on.
+Now let's take a closer look at what following a path ends up looking like.
+Nice.
+Next up, let's talk about obstacle avoidance.
+Our NavMesh search gives us a really good path to follow to avoid things like buildings or big boulders.
+But what do we do if another car is in the way and that car does not affect the NavMesh?
+To detect this, we need several ray casts, one per corner, forward and back, whose length is based on the speed the 4x4 is driving.
+When one of the casts detects something, we simply push the steering wheel in the opposite direction based on how close the ray cast detected collision.
+We never forget that we eventually want to steer towards the target again, but the probe tells us when we're clear to start that turn.
+The direction the probe casts is tunable.
+In these videos, the probes are directly in front and behind, but depending on the environment you're dealing with, you might want these probes to shoot out at an angle to give more consideration to what's around the vehicle.
+For simplicity, we assume that design has not caused some kind of traffic jam that we could never steer around.
+This obviously wouldn't work in a city full of cars, but driving around the hills of Madagascar, this is an effective simplification.
+A small feature requested by design was spline following.
+For this, we turn off NavMesh search and simply get a point on the spline curve some distance away from us based on how fast we're traveling.
+Obstacle avoidance is still on in this case, since other objects can get in the way.
+We want to steer around the obstacle and continue to use the nearest point on the spline as our target.
+So with navigation, steering, and obstacle avoidance put together, you've got a pretty good system for getting around most spaces.
+So to wrap up, first we went over collision detection.
+Using rigid bodies, constraints, and our own implementation of wheel response, we created a vehicle that moves around rough terrain smoothly.
+Our motor, with a mix of realism and some gloss over details we created a nice balance between a tunable, realistic motor and avoiding the grittiness of a deeper simulation.
+Our tire friction simulation allows us to actually drive the vehicle and make turns in an easy to use way that most players can grasp.
+We took new requirements from design, where we had to add AI to the car, and brought over navigation from existing systems.
+And we layered on steering behaviors, so the 4x4 can follow the generated navigation paths.
+I want to give a quick thanks to some of the folks in Naughty Dog who helped put the 4x4 together.
+It actually took quite a few people to put all the bells and whistles on it.
+So these are just a few of the names.
+Inkyo made the beautiful visual model that we all came to love.
+Kristof helped with some of the rigging.
+Rob is an audio designer and Jonathan is an audio programmer.
+And together they worked to get things like the motor purring just right.
+Jaros and Travis are programmers who helped with the simulation.
+Kurt and James are designers who helped on tuning and level layout.
+So that's the 4x4, the development is really about problem solving.
+We took a very design-oriented approach to development and always focus changes on the needs for making the game fun.
+Thanks for listening.
+So we have about five minutes for questions, if anybody has anything.
+You mentioned about a rigid body.
+If you want to come to the microphone, please.
+uh uh sorry sorry uh you mentioned about the rigid body I imagine you are not using unity right? No we we use Havoc but it's our own game engine. Okay thank you.
+Um, so I had a similar simulator for driving, and I found an issue with this.
+You glossed over this real quick when you're falling down and you need to take that wheel and push it up so it doesn't go through the ground using force.
+Now you don't want to do that instantly, or you just suddenly pop up.
+So you need to add force over time.
+But if you're falling really far, that's a lot of force and it would bounce my car up fairly high.
+I'm wondering how you guys handled that.
+So, because it's a lot of force in a very short amount of time because that collision when you just hit is very quick.
+So to like move that, I was wondering how you guys handle that.
+So the question is, well, how did we handle the force applying to the vehicle to get it out of collision if it actually is already in?
+We, I'm actually okay with it being in collision for a little bit. So we don't push so hard that it flies out of collision. And so I actually have a tuning where there's a maximum amount of force that's actually allowed to be applied on it so that it doesn't ever get pushed out that far. Okay. Thank you. Up over here. Hi. Uh did you have any trouble like if the vehicle bottoms out and then the collision of the chassis gets snagged on some small rock or something like that? Uh it the vehicle does bottom out a lot, but the Havok rigid body system is pretty good at making sure that it doesn't cause a problem. There are some cases, and you can still see them in the shipped game though, where the rocks and stuff will go flying because the chassis hits that rock in a bad way. It is something I looked into a little bit, but it's not something we cared enough about to have to fix.
+Is the 4x4 a one-off or is Naughty Dog going to look into more vehicle play in the future?
+We had the boat.
+Oh yeah.
+Yeah, I mean we are definitely always exploring what other things we can do.
+Like having the 4x4 in there was a starting off point for making the boat.
+And so they share a lot of the same code.
+So it's obviously a really good jumping off point for making any other vehicle simulation.
+I was developing like a VR truck simulator. One of the problem I got into is like when you got a trailer behind your car, while you're trying to like driving forward, of course the like motor belongs to like a rear wheels of the like the truck head. But...
+how do you manage to like balance those initial like uh uh you know the power when you're trying to do some color uh the power uh uh on inner tile and outer tile they are different. How do you like balance that out? I got a lot of problem with that. Uh...
+I'm not... what's the problem you're having? I'm not sure.
+Uh... when you driving your car too fast.
+Yeah.
+You know, uh...
+we're doing color. In fact, uh, uh, uh, the friction on, uh, on your, uh, inner tire and the outer tire, they are different. Uh, that, that's where my, like, uh, simulator went around a lot of times. I like, uh, the way I'm solving it is that we tuned a lot to make it feel better. I wonder how you like manage to solve that. And, uh, you know, uncharted 4.
+the car is also running on uneven paths.
+Sometimes it's like, they are on the brink of getting in contact with the ground a lot.
+How do you try to make them in that very boundary moment to make the car still getting the force moving forward correctly?
+Yeah, so the question summarizes, all four tires are running on different friction most of the time. As you're going from the riverbed to the grass, one side is still slipping, the other side catches. The differential actually helps in this case because we're splitting the torque to all four tires. That makes it so that it's actually a smoother transition.
+because you don't have a sudden, like, very hard grip on one of the tires and cause it to just, like, stop.
+And other than that, like, we didn't really have any issues in that area, I think, maybe, possibly because of how stable the point constraint system is in Havoc.
+We basically told it the lateral friction we wanted, how much force is being applied there, and it would do a decent job of stabilizing.
+Okay, thank you.
+my question was just also about the chase sequence and the other cars in the chase sequence and the motorcycle, did they use the same model? Um a lot of that is um faked with splines. Um there I think I think there's uh some of the same like the way the tires work and detect collision I think is the same but the actual driving and movement is on a spline.
+and they didn't run like obstacle avoidance or anything? No, no. Okay. Thank you very much.

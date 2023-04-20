@@ -1,0 +1,274 @@
+All right, thanks for coming out.
+They wanted me to remind you guys to turn off cell phones and to fill out your evaluation forms when this is all over.
+So my name is Chad Barb.
+I'm here to talk about some texture work I did for Titanfall 2.
+And hopefully there's some fresh techniques here that might be useful for people and then also it's a bit of a case study in adding streaming to a AAA game.
+So what is texture streaming? I mean, broadly speaking, texture streaming is dynamically loading and unloading texture data as necessary to render.
+What you're trying to do is get the most use out of a fixed amount of memory on your GPU or shared memory.
+And so it kind of is a form of compression and like most compression, if you notice that it's happening, it's not really working. So a lot of games have texture streaming in some capacity, but they don't, you don't see it, so you don't even realize it. It's pretty pervasive.
+Some of the broad common approaches.
+There's a manual segmentation approach, which is sort of the default thing where you divide your world into various areas.
+And as the player wanders around, you maybe drop or load those areas or sets of assets associated with those areas.
+That's kind of like the Jak and Daxter approach, but lots of games do similar things.
+There's bounding geometry tests.
+That's where you have some sort of approximation of your geometry, visibility of your highest MIP levels.
+and you can rapidly evaluate that on the CPU.
+I mean, the simplest example of that would be a model radius where once you get within a certain distance from a model, you load higher MIP levels.
+But you can do more complicated things, A, B, B trees, arbitrary sorts of geometry that you can test rapidly.
+And then finally, and more and increasingly popular, is GPU feedback approaches, where you have some sort of either a separate pass or some sort of additional part of your texture or your...
+that takes notes on what MIP levels are being actually used and what needs to be loaded and what's important and what isn't.
+And I mean the extreme version of that is like, it's megatextures.
+Of course they're also doing there's kind of two parts to it. There's the part where you figure out what to load and then the part where you actually load it in.
+So there's a lot more to megatextures than just deciding what's visible. But that's all I'm talking about with these three points.
+Time for 2. Time for 2 is a fast-paced first-person shooter. That means that the camera is located inside the players head and the player can move quickly, they can turn quickly, they can hide behind cover, come out of cover. There's vertical gameplay, they can eject vertically, rapidly, they can fall rapidly, obviously. There's...
+the game itself is semi-linear. It's not really an open-world game, though the multiplayer is a little more open than the single-player.
+So that means, because the multiplayer is relatively open and you can get around quickly, you know, a fixed, scripted approach wouldn't necessarily work there.
+And also in multiplayer, we had a requirement of wanting a lot of customized skins and weapons.
+So you could be wandering around and see someone else carrying a gun.
+You could see 20 people carrying 20 different guns.
+And if any of those people drop that gun and you go pick it up, you want that to be clear when it comes up on your first-person view.
+And we run at 60 hertz, so we don't, we have a busy GPU, we don't wanna add work to that, and we also have a rather busy render thread that we don't wanna add work to.
+So we wanna do this as efficiently as possible.
+And all this is running on top of a very mutated by this point fork of valve source that we forked around 2010.
+So what platforms are we on?
+Well, we're on modern consoles.
+Most important aspect of those for streaming is that they have hard drives.
+So you get a lot better seek and bandwidth than optical media.
+Also, they have modern APIs for dealing with loading and unloading textures.
+And you can do more direct memory access.
+You don't necessarily have to go through an API all the time.
+On Windows, we're a little bit more in the past.
+We target DirectX 11 because we wanted to have as inclusive a min spec as possible.
+So we're missing out on some of the new goodness.
+And of course, PC players have a variety of GPUs.
+They have a variety of display resolutions.
+And they, of course, have a variety of GPU RAM amounts to work with.
+So whatever we do needs to be able to handle these kind of dynamic hardware specs.
+So another requirement was we didn't want to add a bunch of work for designers and artists.
+We wanted artists to be able to map their textures freely on models.
+So we didn't want to have a rule set. Don't you know don't do that.
+Don't have a don't have a fixed density or.
+We also didn't want to let them.
+We didn't feel like.
+All right, so we wanted them to be able to add as many MIP levels as they want to a texture without hurting other textures.
+So that we can ship with the highest MIP levels available so people on PC that have the best rig can see the best textures and it's not hurting people that are on lower end computers.
+If we did pre-processing, we wanted it to be stable.
+We didn't want the case where if you recompile a map, it would break everything and make everything blurry and look bad for a while.
+So they should be able to do pre-processing weekly or with some latency on a separate machine.
+And we were okay with some manual hinting, and if necessary, though that turned out it wasn't really necessary.
+And it all needed to work with our asset pipeline, which includes the ability to do hot swap.
+So.
+Our strategy, our overview of our strategy is any MIP level below 64 kilobytes is permanent.
+MIPs can be added or dropped one by one.
+So that's in furtherance of the goal that artists can create arbitrary numbers of MIP levels so that we just won't use them if they're not needed.
+We use pre-computed information to build a list of what's important and unimportant and we work toward that list each frame.
+So the goal of pre-computed information being save GPU, save CPU.
+So, core to this algorithm is the idea of a histogram.
+So a histogram, in this context, is a coverage metric per MIP level of a material.
+So, we wanted to be able to prioritize MIP levels by how many pixels on the screen they actually cover, and not just are they visible or not.
+So an example of a problem this solves is you have like a doorway and you have brick behind the doorway and stone around the doorway, you'd much rather load the high MIP levels for the stone around the door than the brick.
+So coverage gives you an idea of how many pixels the player is going to see.
+In our case, we pre-compute the coverage per MIP per material.
+And the part that complicates that is that the player can have different final screen resolutions and a material can have a variety of textures that each have their own resolution.
+So we assume a nominal 4K texture resolution and a nominal 256 by 256 screen resolution.
+And our histogram then is just a value of coverage per the 16 MIP levels at that resolution.
+And so most of the operations then just become shifting and scaling those histograms to accommodate.
+changing circumstances, which I'll talk about in a minute.
+Another problem this solves related to not being able to text your models wrong is, for example, if the artist used fewer texels on an unimportant part of a model like the bottom of a character's shoe, we don't want an automated algorithm to decide hey, we need the finest MIP level available because this portion is using the highest MIP level even though really it's just unimportant.
+So having coverage gives you the ability to make smarter decisions.
+So the pre-computation for static geometry, we divide the world into a number of columns and we use a GPU to render that into a file and that information is then streamed dynamically to drive the texture streaming.
+For dynamic models, at load time, we compute texture gradients for each triangle, so we know what MIP level they use.
+We add the area of each triangle to the histogram bin.
+So, rather than projecting the triangle, we just use the area.
+We had originally thought about maybe projecting it based on various rotations of the model, but it didn't turn out to be much of a benefit.
+It actually introduced bugs where a model would turn around rapidly and something wouldn't be streamed in.
+So we just go with area metric.
+And then from there, you can take the GPU data and combine it with the dynamic data to get your final values, and we use a manually tweaked scale factor to bring that area metric into the same domain as the offline GPU number of pixels visible metric.
+So each frame, then, we make sure we've streamed in the player's column from the disk.
+We add the model coverage to it.
+We take that coverage and we divide it by the texel count for the particular MIP level that it's associated with to get a metric of cost versus benefit.
+And from there we can generate a list of the most important MIP levels that we don't have loaded and the least important MIP levels that we do have loaded.
+And we try to drop less important MIP levels in order to load important ones.
+And this is capped at a sum rate so that we don't burden the GPU too much.
+Oh yeah, an important, so the metric we use, we divide by the texel count, and that has a really good property where if you have like a, let's say a painting on a wall, and the artist were to divide that painting into four sections and make each one of those its own texture, the metric would remain the same, because the texture is smaller and the coverage is smaller.
+So that's, that was an early thing that we discovered.
+they could they could we could unwittingly try to make something look better by putting it in a smaller by making a smaller texture so we kind of for that by having a a proper cost-benefit metric without property so as far as choosing probes you run the tool it instantiates all the static models to computes the bounds of the level it chops the geometry in a 16-foot square columns the probes are placed at every about every upward facing triangle so this is everywhere the player could be standing We add in any hint probes that the level designers have placed, and then we use k-means to combine that into at most eight probes per column.
+Often there's fewer than eight already, and we also log those locations.
+So that goes...
+So we upload the static geometry to the GPU once, and then for each of those probes, we render a cubemap.
+We don't have a frame buffer we're rendering into.
+We do have a depth buffer, but we render directly to the histogram using an unordered access view.
+So once per cube face we yeah we render.
+I won't go through the code, but. The unordered access view is basically an array per material permit level and it just gets built and it's fairly compact so that doesn't take a lot of bandwidth to pull those back down from the GPU.
+From there we can take all of the probes in that particular column and we can max them to generate final data for the column. Take the 512 most important records.
+and then put that in a file, bundle those up so that they can be, you can page in a four by four group at once, and that's all indexed to stable IDs and that goes into a file that sits alongside our level files.
+As far as texture assets are managed, we have a pipeline that generates a single file per texture asset, so then that's compressed and swizzled if necessary.
+As part of our level RPAC process, which is how we load, we bundle everything into a big file that we can just blast into the RAM from disk.
+we peel off the streamable portion of those textures and we put them into a separate star pack file.
+And for shipping, there's a single star pack file for the entire game.
+And one side benefit of this, as far as fitting on disc goes, is that you only have to duplicate the low, the permanently resident MIP levels across your levels.
+So if a texture's used in two levels, only the MIPs below 64 kilobytes will be shared across those.
+will be will be starting out shared a duplicated across this.
+So this is the crediting code on broadly speaking this is just shifting and scaling the histogram to accommodate varying FOV and varying screen resolution and varying texture resolutions for the material.
+For models it's the same thing except we also have to deal with a model getting closer and further away from you so.
+To handle that, obviously the coverage of a model goes down as it goes further away, and then it's going to be using coarser MIP levels too.
+Finally, we can divide that accumulated coverage by our texel count to get the metric, which we sort by, and then that drives our loading and unloading, which has some subtleties, especially handling dynamic changing buffer sizes. So if it's trying to target an amount of memory and we reduce the amount of memory available, it needs to be able to handle that change.
+Or if we increase the amount, obviously.
+So in terms of the actual texture resizing, our original approach was we would have a CPU-writable texture.
+So we did do kind of the by the book thing of create a CPU writable texture, map it, asynchronously load into it, unmap it, copy it to the new GPU texture, copy the old GPU texture to the new GPU texture, and then get rid of those, the old GPU texture and the CPU texture.
+However, this extra creation of a CPU writable texture turned out to cost sort of an unpredictable amount of driver time.
+So we changed to just calling createTexture and passing it.
+ordinary heap memory. So we load into heap and we pass it into create texture.
+Technically that means we're doing an extra copy but it performs better. And then on the console life's a lot easier.
+We can just read things straight into where they'll be used. Our synchronous IO is its own thread.
+It has two requests in flight and textures are the lowest priority item and we carve up those texture reads into 64k chunks so that we can interrupt the reads.
+to load sound if we need to.
+Since the sound is a lot more important to get low latency on.
+So this is a really useful debugging tool.
+This is the At-A-Glance Debug Shader.
+On the right, I have reduced the amount of texture RAM available, and on the left we have plenty of RAM available.
+And on the left, you're seeing mostly green and aqua.
+So there's green here and there's aqua around here.
+Green means that for that particular pixel, we are using the highest MIP level that's currently loaded.
+So that's good.
+Aqua means that in some sense, we're kind of wasting space because we're using a MIP level below what's loaded.
+But of course that could be used elsewhere on the screen.
+And red, as you can see on this gun, means that that texture MIP level that it would like to use just doesn't exist.
+On the right, you notice, if you're not colorblind, that it's yellow.
+So that means that we have a lot of pixels that aren't getting as high a resolution as they'd like.
+This is a really great tool for just running around a level and quickly checking to make sure that everything's streaming in well.
+And then for debugging the offline process, we can wander around.
+We can see the nodes, the probes from which the pre-computed data was rendered.
+We can also get the XYZ coordinates, and we can feed those XYZ coordinates into a special mode of the offline tool that will actually generate a directory full of PNG files, one per material, showing which, where that particular material is visible from.
+And in yellow, it's visible, and in red, it's occluded.
+So that's really useful for trying to find out why a particular material isn't loading, like you're standing somewhere and a material's not loading.
+You can look at its cubemap and you can see, oh, okay, it's occluded, or you can see that the probe is in a bad place.
+Then there's just a bunch of different debugging modes we can set.
+We can tell it to load all the textures, data.
+We can tell it to load none of it.
+We can change the memory limit, and that's exposed to PC players.
+We can add noise on loaded data, which doesn't actually turn out to be that useful because almost everything is gonna be noisy then.
+The at-a-glance shader is a lot more useful than that.
+And also very useful is we have a window that runs alongside the game showing you a report.
+And here you can see at the top, we have links.
+You can click to change the modes, the various operations modes, and the amount of texture memory you're actually using.
+You can see the number of MIPS loaded.
+You can see.
+Below it, what columns are loaded?
+We have a four element LRU cache for those bundled together four by four columns.
+And then below that, you can see sorted list of what it thinks is important, the records of the coverage for each MIP level for each material, and you can explore that list.
+And you can also see a mode where you see what is currently loaded in total.
+So this is the objective, and then you can also see the current actual.
+And also very useful is an IO overview showing you.
+The amount of read you've been doing in the last second, 10 seconds, 100 seconds, and the average bandwidth you're using, as well as the mean standard deviation and maximum latency you're encountering between making a request and getting it serviced.
+So how long did it take? Our game was in development for two years. This took about 10 months.
+There was related work, too, like especially handling PC auto-detection, min-spec and.
+talking to driver people and trying to figure out performance issues of that.
+There was also the asset pipeline work including being able to patch these and then there was work on console to figure out how much memory we have because texture streaming is the thing that gets the rest of the RAM so anything that affects memory is going to affect the texture streaming budget pretty much. So how much RAM do we need?
+Well empirically it seemed to work pretty well with about 600 megabytes.
+And once you get up to a gigabyte, it's pretty hard to find fault at all.
+On PC we ship with a variety of settings based on a card database, which we later shifted to use an actual API to tell us the RAM available.
+And then on the console it's just fixed at 928 megabytes.
+And that's in addition to about 400 megabytes of permanent MIPS.
+which are the below 64k levels, as well as effects, UI, and some distant environment maps that didn't make sense to stream.
+And then there's about half a meg of performance overhead.
+Oh, sorry, housekeeping overhead, like those pages from the SDBSP and tables and that kind of stuff.
+As far as what ends up on the disk, our entire streamable set is 21 gigabytes.
+For the effect and cause level, which is the one we travel through time, you can use up to 12 gigabytes of that.
+That's 14,000 MIPS.
+And the file that contains the static pre-computed data with the columns is 37 megabytes.
+For MPEden, which is just sort of an average multiplayer level for us, it's about the same, but the column file is bigger because the playing area is bigger.
+That doesn't really matter though for the runtime because it only keeps several K of that at resident at any time.
+So if you think about the 12 gigabytes that we can load combined with the four gigabytes that are loaded from the R-Pack, and then you think about the gigabyte buffer with the four gigabytes that are permanently resident, you get about a nine to one compression ratio.
+So back in the napkin, you have about one and a half more MIP levels, which is nice.
+This is our cruncher, four AMD Radeon R9 Fury Nanos.
+And then a CPU that really doesn't matter because this process barely uses the CPU.
+But, lest you think you can run it on your workstation while you're trying to do something else, it bogs down the Windows UI because Windows uses GPU for compositing, so it makes your computer unusable.
+So, we have a cruncher.
+And that guy just pulls things from Perforce, uses Jenkins to render, sorry, well Jenkins drives it, but it pulls things down from Perforce, runs our XE on it, and then commits the results.
+pretty widely varying amount of time it takes for single player levels from 15 minutes to 2 hours, though an hour is average.
+For multiplayer it's closer to 20 minutes and it's an embarrassingly parallel problem so if you divide, you can since you only upload the geometry once to these cards and that's fast you can then just divide the probes up across the cards and there really isn't a huge bandwidth constraint pulling those uh...
+histograms back down so it it's about 4x with 4 GPUs.
+As far as the actual game run time.
+It's about a millisecond, a little less than a millisecond in a kind of a typical busy scene.
+About half of that's doing the BSP crediting.
+There's some time crediting models and the other half is sorting and compiling the final list.
+There's some optimization opportunities.
+We'd like to maybe push things onto some job threads.
+We'd like to maybe amortize across multiple frames because you really don't need to have an up-to-date list every frame because your hard drive can't possibly keep up with that.
+So how did this affect artists?
+Like I said, they disabled it for certain textures, for effects, and for distance level geometry, where it just didn't make sense to stream.
+They liked that there were 4K textures available on all platforms.
+So PC people with their amazing displays and GPUs can enjoy their art.
+There wasn't a wrong way to make models.
+There wasn't busy work.
+One thing that became increasingly obvious as the effort went on was that they really weren't happy when the guns or the Titan cockpits weren't completely loaded in. So we call those view models and we had to handle view models specially. We put a special bump for them that they almost always will completely load in if they're visible. So that breaks the artist can't affect the budget requirement. So now anytime they add a MIP level to a gun or a Titan it's going to definitely take memory and definitely reduce the amount of memory available to other.
+Textures, but that's OK. We just have to be careful there.
+And we try to encourage artists not to use all mode all the time.
+Like, they like to use all mode because it loads everything in and it looks as good as it can.
+But we want them to see what the player's going to see.
+As far as designers, we didn't really use very many hints, ultimately.
+The...
+It saved designer time because usually they have to do kind of a pass late in the project where they look for textures that aren't used that often and get rid of them, but now it just doesn't matter because those not used very often textures will only take 64k or a bit more than 64k of memory.
+And we did achieve the goal of having lots of customized skins and guns for multiplayer.
+We want to add the ability to hint that they're going to load in a model.
+So we don't have a...
+a pre-cache kind of facility so we had to do some hacks where maybe they had a model behind a wall so that when they spawned another one in in front of the player it would already be loaded.
+That wasn't great but that'll get better next game.
+The cruncher stopped a lot.
+So we need to improve our, we're working on improving our build process a bit and for these kinds of automatic processes so that people are aware when they break because we would get bugs and the real cause of the bug was just that it hadn't run in a week so something like a model or a geometry that had been added recently would be blurry and it's just because they hadn't run the tool so it had no way of knowing that thing was even there. And on console also we had to use extra memory for development.
+So console bugs were kind of invalid because the buffer was so much smaller than it was going to be, it was going to end up being.
+So on PC then we used the same size we were using on console.
+So the PC was the kind of definitive, how's it going to look experience.
+And the amount of memory we had available was about a normal GPU, so it worked out pretty well.
+And of course, PC players with really good cards will see even better textures.
+So effect and cause, that's where you go through time.
+You're really going through Z.
+So we pop you up and down, and that just worked.
+because we have columns and we max between the probes.
+So you'd get a probe down here and a probe in the other time and it would just pull in the data that would be needed.
+Even, you know, it would take a little additional load on the cache because you're loading two sets of textures, but that can't really be avoided.
+Ship to ship, that's massive moving geometry.
+So in that level, you have these four ships that are laid out, or more than four, but giant ships laid out in the level.
+And.
+we then sort of translate them at the last minute in the renderer.
+So that worked pretty well, but we had to add a hook where the scripters could tell us which ship you're on, so we could reverse transform the player's camera position back to where that ship was back when we did the precomputation.
+So a bit of a hack, but that worked out.
+On PC, some surprises. We ended up shipping with the lowest buffer size of zero, which...
+Doesn't look great, but we wanted to be as inclusive as possible.
+We also ended up with some hitching due to kind of unpredictable drivers.
+So we've been improving that.
+We moved texture creation to its own thread.
+And we also have a limit where we won't create more than two textures a frame.
+On console, at some point we decided maybe we were going to try to make it so that you could play the game while you...
+We're installing it, but that was just way too much bandwidth to expect out of the optical drive.
+So we ended up abandoning that.
+And of course the buffers needing the space for development like I mentioned.
+And we also borrow memory for loading. We borrow memory from movie playback too.
+Which is not... so behind the scenes it's dynamically changing the buffer.
+And that's fine.
+So where does this break down when you start to talk about having less...
+Buffer memory?
+Well, the biggest one is signage.
+So in this case, we have a high contrast, sharp texture, and it kind of looks bad once you reduce the texture budget.
+All this other stuff is reduced too, but it does OK.
+How are we going to address that?
+We've talked about using distance fields.
+That's what we use for our normal UI, for like text and menus.
+And we also talked about maybe generating some kind of an error metric when we do the mipmap generation to somehow detect when a texture is the kind of thing that degenerates badly and multiply its metric by some constant.
+The other issue we run into is when they make something out of pieces.
+Here you can see this little part here, and it comes from this texture.
+But because this coverage is relatively small and because we're dividing by this entire count of texels for this entire texture, that doesn't load in.
+Eventually, in this case, we just created a texture map for the entire sign, so this was kind of a temporary problem, but it's sort of worth exploring that as well.
+Some code bugs we encountered.
+There was a lot of ways to draw models in our engine, so a couple times things wouldn't be streaming in and it turned out there was some path we hadn't quite explored.
+to get a model into the render list without also doing the accounting.
+And then having to deal with hot swap, because for our hot swap system you have multiple copies of the same texture resident. Only one's live, but they're all resident. So the streaming management code had to kinda keep a pointer to the currently live one and that was additional work and opportunity to kinda get into a messed up state.
+And NANCE.
+Love Nance.
+So what's next?
+Moving to more modern APIs on PC, augmenting some of this with some GPU feedback.
+If we can add cheap instructions to our shader to kind of take some notes on what's visible and sort of mix that in, that would be nice.
+And then looking into texture compression beyond kind of GPU DXC compression and seeing if that's worth the CPU cost.
+working better with moving geometry, streaming more of our textures and streaming geometry as well, like the actual vertices, and then finally, yeah, addressing signage, making it look better.
+All right, thank you.

@@ -1,0 +1,342 @@
+I'm going to have a lot of stuff to cover, so I'm going to go quickly.
+My intention here is mostly to plant a bunch of seeds, and hopefully some of them will take root, and you'll have some takeaways from this.
+So my, the title of the talk is Fast and Funky 1D Nonlinear Transformations, but really this is easing functions on steroids, what we're going to talk about.
+Or what the people in the AI summit would call normalized utility functions, right.
+These are all the same thing.
+So first I want to start by establishing the motivations of why we care about this.
+So I want to see a show of hands.
+Has anyone seen the talk on YouTube Juice It or Lose It by Martin Johansson?
+Awesome.
+Anyone who has not, I strongly recommend the talk.
+It's a really simple talk by some indie game developers who really make the case, brilliantly, for how important it is to really think about is this thing linear or non-linear?
+Does this thing feel mechanical or organic?
+And how to introduce those elements of what they call juice into your game.
+And then this talk on the right, has anyone seen this one, The Art of Screen Shake, by one of the guys from Lambeer?
+OK, not many people.
+Both excellent talks.
+Every YouTube list of videos that every game designer should see has at least these two talks on them, so I recommend them.
+So I'm gonna talk about these easing functions.
+So first of all, raise your hand if you know what an easing function is and you've used one.
+OK?
+Raise your hand if you know what smoothstep is.
+OK.
+About half.
+Raise your hand if you know how to derive that, if you were to invent smoothstep yourself.
+Perfect.
+OK.
+Good.
+Raise your hand if you use POW.
+OK.
+So we're talking about what I'm, again, calling fast and funky 1D nonlinear transformations.
+So first let me talk about the 1D part, which is the parametric nature of this.
+So very quickly, there's a difference between types of equations.
+I'm going to call the main difference being implicit equations versus parametric equations.
+So this is the implicit equation for a circle.
+x squared plus y squared equals 25.
+It's a rule.
+You either pass the rule or you fail the rule, right?
+So, points are either true or they're not true.
+If my x squared plus my y squared equals 25, I am on the circle.
+If not, I'm not.
+It's just a pass-fail test.
+Comparatively, a parametric function is one where we would have some number, typically one number, as the ones I'm going to be talking about today.
+that I'll shove into an equation and I'll get something out.
+In this case, it's small on the bottom here, but if we took the function cosine comma sine, that's the coordinates of a point moving around a circle, right?
+And so as I crank up time...
+or whatever this argument is, this parameter I'm passing in, eventually I'm going to travel around the whole circle.
+So any given value I put in for time, or t, as a generic thing, is going to be somewhere in the circle, and all of the points on the circle can be reachable by some t.
+We can make all kinds of other things parametric. This is from a talk I did a couple years ago here about curves, or parametric. This is a parametric equation for a spiral that's getting bigger and going out along the x-axis.
+You can see on the x it's just moving steadily forward with time, but on y and z it's going in a circle.
+cosine comma sine. And the circle's getting bigger as it goes, right? As t increases, it's like the radius of the circle's increasing. So you get this spiraling cone. But we don't have to have such fancy parametric things. Really, anything that we drive a float into conceptually and get some answer back out is of interest to us for this talk. So it could be something as simple as just a point moving from A to B, right? Where at A, t, the parametric variable, is 0, and then t reaches 1 at the other end.
+So really, anything you can express in terms of a single float as input.
+We can actually have multivariable parametric equations, but I'm just talking about simple parametrics.
+And of course, my presumption is that we use T because it originates from time, primarily.
+I don't know if that's true, but that is one of the most common ways we decide to turn the knob that drives the thing to move or whatever.
+So let's say we have a parametric function, any function, it could be any one of those that we saw, called P.
+So one of the first big points here is what we're manipulating and how we're going to manipulate it.
+Specifically, if I'm interpolating, say, colors, or anything else, like AI state or something like that, the point of this talk is to avoid having to deal with any of that code, right?
+You do not care what P is.
+It could be anything. It could be that spiral.
+Doesn't matter. It's not your problem.
+Your problem is just the thing you're passing into P.
+So we're just going to talk about messing with T, the parameter.
+into any parametric equation.
+And so we're gonna make these functions, these parametric functions like P or whatever they are, more interesting, but we're gonna do it on the outside.
+We're gonna be doing it by virtue of messing with T itself.
+So when we look for opportunities to do this, pretty much any time you have a single float anywhere, you can apply this stuff.
+Anything you can express in terms of a single float, and pretty much any time there's time involved at any level, this is an opportunity.
+So again, the big idea here is you can make any parametric equation much more cool and interesting without modifying the equation or knowing anything about it.
+You're just messing with T.
+Okay, so we're going to be manipulating T, that's the transformations part of this.
+And so it's fairly self-evident in computer science and in mathematics in general, there's two number ranges that I would say are the most significant, most important of all time, and that's the number range from 0 to 1.
+and the range from negative one to one.
+So these are useful for all kinds of stuff, like how much am I in shadow?
+How much brightness do I have?
+Is there falloff at the edge of a spotlight?
+Is something, you know, 65% complete?
+How much damage am I doing in a damage curve or damage potential?
+How much experience do I have?
+How much does something cost?
+Is there penalty? Is there fog?
+how aggressive is my AI on a scale from 0 to 1, what's my chance to hit, my chance to drop loot, my time complete, AI response curves, right, fuzzy logic.
+There's all kinds of things, potential things we can mess with to get juice into the system through this.
+Negative one to one is also cool.
+It's useful for noise in general and perturbation.
+For terrain and map generation.
+In general, when you have negative one to one, those tend to be used where you have some baseline and then you're going to be varying up and down from there.
+So let's say we're doing 2D Perlin noise to generate heights for a Minecraft game.
+We could say by default the ground is at 64, plus or minus some.
+We can use this for distribution or like, say in a population we have a thousand orcs and we want them to all be about six foot three, plus or minus a few inches, right?
+So we could use functions in the negative one to one range.
+And of course anything sinusoidal, whether it's going to be pulsing or fluctuating or just kind of hovering like that.
+And also AI response curves tend to use this as well, where we have both a positive or negative reaction to something, like a disposition towards another actor.
+But today we're going to focus on zero to one.
+So I should have called this Fast and Funky 1D normalized nonlinear transformations, functions that are in the 0 to 1 range.
+So when I say normalized, I mean a couple things.
+Something where if you put in a 0 as your input value, you get out a 0.
+So 0 is 0.
+And if you put in a 1, you get out a 1.
+But if you put out something in between, that's where the interesting stuff happens.
+So specifically I want, I'm interested in talking about functions where the function of 0 is 0, the function of 1 is 1, but specifically it's more interesting than linear.
+If I plug in a .3, it tends to not be a .3 on the way.
+So that's the non-linearity part of this.
+And so some simple example of this would be like moving a position over time.
+A UI widget could come in, right, or a missile could come in or something like that.
+Scaling something up, alphaing in, especially in 2D games.
+We could be interpolating color or strength or aggression into these things, typically over time or something.
+So I've got a demo that's hopefully running here.
+Okay, so here I've got, because we're going to be going back to this a couple times, on the bottom I have a runway, just shows a ball going from left to right, and it's moving at a linear speed.
+And you can see on the top is the graph, where as I move to the right, I'm also moving up by the same amount.
+The right is input, up is output.
+And then next to it I have a double ring that's scaling up using that, the result of the function.
+And then next to it is something that's fading in.
+You'll notice something interesting, the fading in.
+It looks like it fades in most of it right away.
+It's actually a linear fade-in, right?
+This talks back to Jim's point about the perception of alpha being non-linear, which is very interesting.
+And then lastly, you have this thing on the right that's moving.
+And then of course, if I square it, now I have things that are just a little more interesting.
+Like the thing on the right starts off slow, and then it goes faster.
+That's not super cool yet.
+But certainly, x squared is better than just x.
+We're at least starting to get some sort of interest.
+One interesting thing of note, two things of note, I'll say, is when you square something, normally we think of that making it bigger, but of course, we all know when you square something that's fractional, it gets smaller, right?
+So if you take one-half times one-half, it actually goes down to a quarter.
+And so that's kind of unique, is that through this entire range that we care about from zero to one, squaring reduces values.
+Another thing that's unique is when I have a x squared, it looks like a parabola, right?
+And I have x cubed, it looks sort of like this.
+And then x to the fourth looks like this.
+And then x to the fifth looks like this.
+We have odd and even functions.
+That doesn't exist, that distinction in the 0 to 1 range.
+So there are a lot of special exceptions here that we're going to be making.
+And we're going to be able to do some sort of funky things like this, right, as we play with this.
+Okay.
+So, we said these are also called easing functions.
+That's if you're an artist or an animator.
+They're called filter functions.
+Lerping functions, which I find funny because specifically lerping means linear interpolation and they're not linear.
+And tweening functions, which is like more of an animation term for in-betweening.
+So, and a lot of those terms are referring to the same kinds of things, but they have a bias for where they're coming from, right?
+So we said tweening is creating animation frames that don't exist between keyframes, the in-betweening.
+But really, the math is super universal in this, and like we said, you could use it anywhere.
+I'm, for going forward, going to use the word easing a lot, because it's short, and tweening sounds like something your 13-year-old would do.
+So...
+One of, first of many examples is if you're doing something as simple as a range mapping, right? If you have an input and output ranges. Let's say I have a strength from 3 to 18, and I have a damage modifier that at 3 strength I do half damage and at 18 strength I do double damage. A range map would be, I have a 7 strength, what should my damage be, right? Or Celsius to Fahrenheit conversion, anything like that.
+Whenever you do these kinds of conversions and typically throughout all kinds of game code math, almost always there's some moment where the math is in a, temporarily in a 0 to 1 range, and that's your opportunity to do some sort of non-linear easing function on it, right?
+And usually that comes at no cost or no additional cost.
+Okay, so let's build up a library of a couple functions we can use here.
+Let's start with smooth start.
+And that's just X squared, right?
+That was the first one we tried.
+And of course, we can make this be X squared, X cubed, X to the fourth, to make that curve be as dramatic as we want it to be.
+And obviously, we would actually write this with T times T, not pow.
+Maybe the compiler would do the right thing, but probably not.
+And if we look at that...
+Here are smooth start, second order, third order, and fourth order smooth starts together.
+You can see them on the bottom in the racetrack.
+They all start at the same time.
+They all end at the same time.
+But the curve is more exaggerated for the blue one.
+So the blue one has a much slower start.
+And which means that he has to go much faster at the end to catch up, to be on time with everyone else.
+And there's no like fancy solutions to make this happen.
+You just go from 0 to 1 and they just will be on time always, right?
+Automatically.
+So again, they're all based on the same parameter in this case, and they're all going from 0 to 1, and the higher the power, the more exaggerated.
+This particular one, this one I'm calling smooth start, is sometimes called ease-in.
+I find that to be a confusing term.
+So let me take a quick pop quiz.
+When I say the prefix quad, what number comes in everyone's head?
+Right? Quadrilateral, quadruped.
+No, except quadratic equation is second order, right?
+OK, so wait. If quadratic is second order and cubic is third order, what are the terms for fourth and fifth order?
+Who knows them?
+Six people know them. Yeah.
+Quadratic, cubic, quartic, quintic. Right?
+Whatever.
+So when you see, especially, I mean, this is a room full of game programmers, and we only sort of know some of them.
+You have your artist looking at ease-in quad, ease-in cubic.
+Of course, it's very easy to assume that quad is bigger than cubic, right?
+But it isn't.
+So these are terrible names.
+They're actually worse names than that.
+If you imagine a train easing into the station, right?
+The train is coming to a stop, and it eases in.
+And then when it's time to go out, it eases it back out of the station, right?
+that's what it means. Actually, that's exactly the opposite of what it means. Easing in means the beginning of the curve. Easing out is at the end. I think they're terrible terms for a bunch of reasons.
+So I strongly discourage the use of them.
+So I'm gonna use smooth start. Let's say we wanted to add another function now, smooth stop, right.
+This is the same idea, except we want it to start quickly and then stop at a nice smooth stop. So how would we do this?
+Well, our math intuition might be to say, well, let's do the opposite of smooth start, right?
+Smooth start was x squared, let's do square root, right? That's the inverse.
+But that's not the right curve.
+Smooth, square root actually doesn't even have a smooth stop, right?
+And it's expensive. Why would we do that?
+So that's not the right thing.
+And one of the things we want these to be is fast, right?
+Part of why, part of this is because we want to be able to say, sure, let's do that on a million particles, no problem, right?
+We want to just be able to willy-nilly have this as a ready-to-grab tool in our arsenal.
+So how do we go about building and discovering these new functions?
+Smoothstop is not going to be that complicated, but let's go through it and see if we can learn anything from it.
+So we have something in a zero to one range.
+There's a lot of stuff we can do to it.
+Right? We already said squaring is one of those things.
+And squaring is cool, because zero squared is zero, and one squared is one. So it keeps it in the range.
+Right?
+What else could we do?
+We could flip it.
+One minus x.
+What if we flip it, and then square that, and then flip it back?
+That's smooth stuff.
+So let's do that math-wise. So it's flip, square, flip.
+So if we start with x, we do 1 minus x to flip it, and then we square that, and then we do 1 minus that.
+So that's the equation for smooth-step, right?
+Crazy fast.
+Way faster than square root.
+And it was easier for us to invent it ourselves.
+And of course, in this form, now it makes perfect sense.
+I can easily express smooth-stop 2, 3, 4, for 5, 6 different powers, just by increasing the exponent, right?
+So, again, if we look at that comparatively, here you've got a bunch of different smooth stoppers, and the one on the left comes to a smooth stop and that his velocity is zero by the time he reaches there.
+But that's actually kind of like somebody slamming on the brakes really, really hard until they come to a stop at the stoplight.
+You're like, yep, you arrived at the right place at zero miles an hour.
+and it was not pleasant.
+Smooth stop three would be you arrive there and your acceleration, or in this case deceleration, comes to zero right when your velocity comes to zero.
+That's the good driver who feathers off the brake right until the last second, and you just kind of roll to a stop.
+But you still have this sensation of jerk, right, if it's happening very quickly.
+In fact, that is the...
+next order after acceleration. And smoothstop4 has no jerk either at the end.
+OK. So, mathematicians probably, since they love polynomials, would be tempted to multiply these things out, right? We had these beautiful terms here, and they would probably go and ruin them. Which is really dumb, first of all, because the one minus, one minus x is cleaner, and it actually is going to be less code to compute.
+And in fact, this is true with a lot of things like Bezier curves and stuff.
+That you can get some really fast forms if you think of 1 minus t as a separate expression.
+So it's faster, it's clearer, it shows its evolutionary form.
+So we sort of know how we got it there.
+So, so far we've got smooth start, 2, 3, 4, 5.
+Smooth stop, 2, 3, 4, 5.
+So let's build a library of some more of these things.
+And we're going to invent them ourselves, right?
+So we're also going to be building a library or a collection of techniques that we can use to explore and discover these cool easing functions.
+So, so far we've tried squaring things and flipping them.
+Already that's been pretty successful, right?
+Let's get some more of those.
+Obviously when I say squaring, I mean raising it to a power, right?
+So what else could we do?
+Let's say we took two different functions and...
+did a mix of them. Like a 50-50 blend or a 70-30 blend. We could do that, right?
+For example, let's say we had smooth start and we're crossfading it or blending it with smooth stop. What would that be like? I think I have... yeah.
+Okay, so, hopefully this will read. Yeah.
+So if you look at just the top left curve for a moment, the red curve, that's smooth start, right?
+I'm starting smooth.
+But as I move the mouse now, I can easily change it, the mix between smooth start and smooth stop.
+That's pretty trivial to do, right?
+It's just a crossfade.
+And so one of the cool things we can do...
+Oh, and by the way, halfway through that crossfade happens to be linear.
+So we'll come back to that in a second.
+There's some other interesting things we can do here.
+For example, let's say we wanted to use pow, like in Jim's Scamma example, right?
+Where we want to raise something to an odd power, like 2.2 or 2.6 or something like that.
+Or maybe even like to a large power, like for a glossy glare in Specular or something like that.
+Well, obviously pow is slow, right?
+How slow is it?
+Well, it's guaranteed to be at least as slow as square root, because it can do square root, right?
+and you can raise something to the one-half power.
+So by definition, it must be at least as slow.
+In practice, on my machine, it's ten times slower.
+Like 200, 220 cycle latency.
+OK, so can we hack that?
+Well, we know smooth start two is x squared.
+We know smooth start three is x cubed.
+So in general, we're saying smooth start n is x to the n.
+What would smooth start 2.2 be?
+Well, obviously we're just going to raise it to the 2.2 power, right?
+But that's using pow.
+So I'm trying to avoid that.
+Is there a way we can avoid that?
+Turns out that there is.
+With smoothstart, say 2.2, I can do a mix, an 80-20 blend of 20% smooth start and 80% smooth start 3.
+And get something, or a 40-60 blend of smooth start 2 and 3.
+And actually get something that's 99% better, actually much more accurate than that, in the 0 to 1 range, and way, way faster.
+10x is conservative.
+Or I could just write fake pow as a blend of x squared and x cubed.
+OK. We could also do a crossfade, where we're going to do like a mix, but we're going to use, as the blend weight itself, the parameter.
+So now t is the mix weight between the start and the stop functions.
+So now if you look at the red, at the start it's totally smooth start, and at the end it's totally smooth stop.
+So it gets the benefits at both ends of those, right?
+And it's changing on the fly, as it does a crossfade, a live crossfade between those.
+And actually that is smoothstep.
+We just derived it.
+Right?
+If you look at the red and the green balls on the runway together, they're totally in sync with each other.
+So that is one way you can derive smoothstep.
+And smoothstep itself has that same problem where your velocity comes to zero, but your acceleration is still abrupt.
+So you could have a smoother step, et cetera, like is shown in the third picture.
+So what else can we do that's interesting?
+We can scale things, like just multiply them by t on top of whatever else.
+If, as long as we have them in the 0 to 1 range, right, that should be harmless.
+We have 0 to 1 times another 0 to 1.
+We could multiply it by 1 minus t, which I'll call reverse scale.
+In fact, if we do t times 1 minus t, we can get this sort of arch feel, like that.
+That's just T times one minus T.
+Normalized.
+And see the red ball goes out and back, right?
+And I can go further with that.
+I can say, well, I'm gonna take that, scale it with T, so there's an extra sort of smooth startness to it.
+And that's this green one, where it's kind of like smoothing in from the left and sort of a lopsided thing.
+Or I could have it where I'm doing it, reverse scaling the arch again, and so now it's coming in and it's biased from the other side.
+I could reverse scale the scale of the arch.
+I can smooth stop times smooth start.
+I can start multiplying any of these functions times any of these other functions and start getting really interesting things.
+For example, this bell curve six is a sixth order function, which is just smooth stop three times smooth start three.
+And that looks like the green one in the middle there.
+So that's a bell curve that has really, really nice velocity and acceleration at the end points.
+And I can start nesting these things too, right?
+Calling a function, nested within a function within a function.
+And so there's all kinds of cool stuff I can discover that way.
+One thing I can do is have bouncing.
+Like, this is a really simple function, bounceClampBottom.
+This is a zero to one function that returns zero to one.
+All this does is absolute value.
+So if I go negative, it feels like I bounced off the bottom, right?
+And I could write one that's like, bounce off the top too.
+In random order, apparently.
+Right? And I could bounce off the top and the bottom.
+And so I could easily have something like this blue one here, where the function just goes out of range and comes back in range.
+But since I'm doing one minus the value and then absolute valuing that, and then one minus it back, I get a bouncing off the top feel.
+Last but not least, we can always go back to my favorite friend, Bezier curves, and we can use cubic, quartic, quintic, however we want.
+And we can actually optimize them in, we don't need the general case, we can say we assume that they go from 0 to 1.
+So if you have a Bezier that goes through points A, B, C, D, control points, you could just say A is 0, so those terms are just erased from the code, and D is 1, and the code simplifies, right?
+You can even have a seventh order Bezier like that.
+So that's it. I think I'm out of time already. Is that true?
+So I'll take any questions if we have time for a little bit.
+Yeah.
+Yeah, you can get 99% accurate sigmoid, Gaussian, everything you care about, unless it's like hyper-precise.
+Don't use the raise to an awkward power underneath the thing, right?
+This is like 20 times faster.
+Yeah.
+Oh, I'm sorry, the question was, he likes to use Gaussian distributions, which is the official perfect bell curve.
+But in practice, unless it has to be official and perfect, then you don't have to use the real thing.
+Yeah.
+is what? Oh, he's correcting me that gamma is raised to the point four five. It's like a square root.
+The correction, yes. But to get the curve itself.
+Yes. OK. Any other questions or comments? OK. Thank you.

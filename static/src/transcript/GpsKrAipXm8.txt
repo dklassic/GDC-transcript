@@ -1,0 +1,825 @@
+Welcome to this last section of the day, entitled Interacting with Your 3D Geometry.
+You probably guessed I was a professional body builder, but you're wrong.
+I'm actually a graphics software engineer with Intel.
+All right, so games, graphics, there's all sorts of fun stuff.
+You've got particle systems, lens flares, cameras, lights.
+But any sort of meaningful interaction between the player and his environment happens with those geometric objects, whether it's rigid bodies, skin characters, or some of those soft body things that are becoming more and more important.
+And these old things, they all have meshes.
+OK, so we're going to cover a wide variety of things today.
+I'm going to first cover a lot of basics, review for some people, but it's fundamentals we want everybody to know.
+Following that, I'm going to dive deep into convex meshes.
+Then we'll take a look at solid meshes and spatial properties thereof that affect motion.
+And then we're going to finish off with some springy things.
+And hopefully lots of practical examples that'll be fun for you guys.
+And yeah, you're welcome to take pictures, of course.
+And these slides will be available.
+online later on.
+OK, this is math tutorial today.
+So you were warned there'd be some math in this course.
+But don't worry.
+A lot of it is very, very straightforward.
+In fact, just knowing your basic vector arithmetic, dot product, and cross product, that's going to give you guys 99% of what you need in this industry to succeed.
+For example, your standard lighting equation is in your shaders on your GPU.
+I mean, it's n.l to get your diffuse lighting, just dot product.
+You're writing some game script code for, let's say, some robot, right?
+And you want to know, OK, if the player walks in front of you, you have to shoot him down.
+Well, simply take the dot product of the direction the robot is facing with the vector from the robot to the player.
+And if that vector is close to 1, he's in front, fire away.
+If it's negative, save your ammo.
+He's somewhere behind you.
+You don't see him.
+OK, in addition to some of that basic math, there's going to be a few new things we're going to introduce today.
+Shown here on the right are the outer products and the Jacobians and stuff.
+You're probably wondering, outer product, what's that?
+Well, the dark product or inner product is something you're already familiar with.
+You can think of that as a row vector times a column vector.
+And that gives us the scale that we're all familiar with.
+The outer product, now think of it as a column vector times a row vector.
+The rules of matrix multiplication.
+produce, give you a 3x3 matrix.
+You're probably scratching your head wondering, OK, well, I started out with six numbers.
+I've got nine.
+That's like lossy compression, where the result is bigger than the original file size.
+What's the point?
+Well, this is actually useful, and we'll see why.
+But first, let's take a look at a geometric understanding of how the outer product might be used.
+OK, we already know that.
+you know, what the dot product is.
+Let's say we have a vector that's of unit length u.
+And we have some other vector v, and we take the dot product.
+And that gives us this distance of v as if we projected along u.
+Now, that's a scalar.
+If we want, let's say, a vector along that line, then we multiply u dot v times u.
+And that gives us this line.
+So v projected onto that line.
+OK.
+Now, so we have u times u dot v. Can we change the brackets and move it over to the left?
+So it's u dot u times v. Well, that doesn't work, because that's just 1 times v, which is actually v, which is different than this projection vector that we wanted.
+So to do that, it's actually you take the outer part of u with itself, and that gives you a 3 by 3 matrix that if I multiply that matrix by any vector, it projects it onto that line.
+So think of how you might write your.
+player navigation code.
+You got some guy running around your world, and the user hits the W key, and he's running along, and he hits a wall.
+And well, you don't want him to go through the wall, but maybe you don't want to have him stick there.
+You want to have him maybe slide along the wall.
+So you've probably written a routine like this called slide along wall, where you take the intended vector of the user, v, and you have this u.
+Let's say this u vector is now sticking into the wall.
+And you subtract out that component of the motion, and you're left with the green arrow there, so the player's sliding along the wall.
+All right, so in that little equation, we see v show up in there twice.
+Can we factor that out?
+Well, indeed you can.
+And what you get is the identity matrix minus this outer product is now this 3 by 3 matrix that you can use to project vectors onto a plane, of which u is the normal of.
+OK, now why it's better to have some, why it's sometimes useful to have things in that matrix form instead of just some function is, well, certain things you can pass matrices into, like other systems of equations and so on, where you can't necessarily stuff an arbitrary function.
+And we'll see more uses of this later on.
+Now, at first, because there's a lot of geometry algorithms that we've been writing, you know, this is the bane of existence of these things is numerical precision issues.
+If you're doing graphics and lighting, you know, everything just kind of works out, you know, that pixel is always the right color.
+But, you know, the problems are more when you're doing things with geometry like slicing and dicing and stuff.
+Now, it comes to this.
+When we have a line, for example, it's a continuous thing.
+And if you sort of zoom in, zoom in, zoom in to the lowest bits of precision, and you start looking at points along that line, well, they're not really on the line anymore, because you don't quite have the precision to do that.
+And you're thinking, well, floating point, you've got a 23-bit mantissa.
+That should be more than enough precision.
+Well, the problem is still not enough, because you might have a long line segment.
+you're chopping it, let's say, really close down to making something really short. And as a result, you can sort of change the direction of that line a little bit and can throw things off. Or you have those two lines that are sort of like this, you saw examples in the previous talk. Or you might be doing successive operations and you get numerical drift and things get really bad. Okay. And we're gonna see examples of this issue later on because it's just something we have to be aware of. Okay. So geometries. Let's take a look at the building blocks.
+Now, triangles and planes, and your college math class probably taught you that a plane is a 2D subset of a 3D space.
+In games and graphics, of course, our planes and triangles have to specify an above and a below, or on top or in front, behind, whatever you like to call it.
+So for triangles, typically there'll be a normal vector for the triangle saying which way is above, and maybe a counterclockwise convention to the vertices.
+For planes, it's that a, b, and c of the plane equation that define the normal which points up above.
+Also note that I prefer to use the convention ax plus by plus cz plus d equals 0, because then I can think of my plane-to-point test as this 4D dot product of the homogeneous coordinate or homogeneous point with the plane equation itself.
+One more small note, often instead of saying A, B, C, D, people will interchange and say X, Y, Z, W because that's the same convention used for quaternions and homogeneous coordinates and float for registers and da-da-da-da-da.
+So now, one of the things that we're going to need to be able to do is, you know, maybe find the intersection of three planes.
+Where do they all meet?
+You could have three faces on a mesh, and you want to know that vertex location.
+All right, well, this is a classic linear algebra problem of three equations and three unknowns.
+The x and y and z components of your position v are the unknowns.
+So take your three normals from the plane equations, put them in a 3 by 3 matrix, invert that, multiply it by this vector that composes the w coordinates, and voila, you get your answer.
+Now if you have two planes that are parallel, well, that matrix won't be invertible, and there's no answer anyway.
+So all the math kind of nicely works out.
+All right.
+So what if we have four planes?
+Well, OK, I have to explain what I mean by this problem.
+And I'm going to do it with an example.
+Let's say I'm building a house.
+So I start with this floor, and I build up the walls, and then I'm constructing the roof.
+And before I'm done, I want to know, well, what's the top of that house going to look like?
+How do those four planes come together just based on the plane equations?
+And there's three possibilities for that.
+I can have the north-south come together first, or the east-west, or they might all actually meet at a point.
+Well, using what you just learned from a previous slide, you can think, oh, I'll grab three of the planes, generate a point, test it against a fourth plane.
+And yes, that will work.
+But one of the things that we like to do whenever we construct algorithms is, can we do it in such a way where we're not sort of picking, how do I pick the three, who's the odd man out, and so on?
+So instead of that, let's try putting all four plane equations now in a 4 by 4 matrix.
+Now, if they all do maybe at a point, well, then I'll have a solution to the equation that's shown on the slide here.
+But I'm multiplying something by something else, and I'm getting 0.
+That's only going to happen if that matrix is singular.
+And we know a simple test for that already.
+And that's saying if the determinant of the matrix is 0.
+Furthermore, if my plane equations are in this matrix in a nice counterclockwise order, and I don't put any of my roofing material on upside down, then I can use the sign of the determinant to distinguish between the other two cases.
+OK, now you've seen this, but I'm just going to ram it down your throat because everyone needs to know this.
+So sorry if it's for you.
+But intersecting a line with a plane, I've got two points, and I want to know where they meet.
+V0 to V1 is my line segment.
+I can do that test, and I know the distance above and or below the plane.
+OK?
+And so I think of now, as I'm traveling from v0 to v1, think of yourself moving that direction.
+And so it's a matter of just solving, at what time do I cross that plane?
+And shown on the right, that's high school math to find that value of t for time.
+So once you've got that, then you take that value, shove it back in your equation, sort of move along that line, that fraction t, and you've got your 3D point of impact.
+All right, so getting back to doing some interaction in a game, well, things are made of triangles.
+So if, let's say, the user clicks on his mouse, you want to know, well, what did he click on?
+Or you've got some bullet flying through the scene, and does it hit the bad guy?
+So here we have to test this ray, the path of the bullet, against our geometry, say a triangle.
+So the triangle sits on a plane, we find the point on the plane where it hits, and then we say, well, we don't know if it's inside or out, so we test against all of the edges.
+This is the simple, easy, simplistic way of doing it.
+And in order to test against an edge, you have the edge cross product from one of the edge vertices to the point, and if that...
+cross product vector points the same direction as the normal, then, yeah, it's on the inside of that edge.
+On the inside of all three edges, you hit the triangle.
+Outside any of the edges, obviously you missed.
+And that's sort of the simple first implementation that you might write and implement.
+Okay, but things in your game, they have like thousands of triangles on them.
+Well, the answer's simple.
+Just check against all of the triangles.
+Now.
+Okay, that's obviously going to be fairly inefficient, and I invite you all tomorrow to attend Gino's talk on spatial structures, because he'll tell you how to rule out many of those tests altogether. Okay, but just conceptually for now, you can sort of think of it that way. But also keep in mind, depending on how you traverse the spatial structures and what's in your scene, you know, if you detect a hit, ooh, I got a triangle, well, you might have to keep checking, because there might be something closer, right, you know, that hits.
+So as you're checking, you sort of shorten your array and keep going.
+Because you don't want to spray a bunch of bullets against a crowd and have the people in the back fall down.
+No, no, you want the zombies in the front to fall down.
+Next, here's an issue you need to be aware of, is I can have two triangles nicely sitting together.
+And I shoot a ray, and it goes right through.
+But it's the same edge.
+They've got the same points.
+And that's because of this naive implementation.
+When I'm checking against one triangle, I generate a point on that plane.
+And let's say, numerical precision just falls outside an edge.
+Check the other triangle.
+Well, I'm projecting onto a different plane, so I'm generating a different point.
+And so you have to be aware of this.
+A simple fix would be to make the triangles a little bigger or something.
+Or you can go back and study Geno's slides with plucker coordinates and do this all the correct way.
+Now, and finally, your meshes themselves, well, they have to be intact.
+If you've got t intersections that are holes, you can imagine a bullet flying right through where there's a missing triangle.
+And that brings us to this notion of solid geometry.
+And we touched on that a little bit in the last section, you saw that.
+And that's this idea where you have a borderless manifold mesh.
+So anytime you have an edge, there's a face on both sides.
+And the normals are sort of all consistently facing outward and so on.
+And then it's all watertight.
+Nothing could leak in or out.
+And so the mesh itself becomes this infinitely thin boundary representation separating solid matter from empty space.
+And then, given that, I can take a point, and I can say whether that point definitively is inside or outside of my mesh.
+Just simply cast a long ray.
+If you first hit the backside of a polygon, it has to be on the inside of the object.
+Otherwise, it's free and clear in empty space outside.
+All right, so that's a little bit of review for everyone.
+Now I'm going to dive deep into convex meshes.
+Now your university classes or textbooks might have described a convex set is one for which any two elements, if you have picked any two elements in that set, the line segment between them must also be contained in that set.
+OK, now a more intuitive way to understand a convex mesh is to think, any time you've got two neighboring faces, their normals are going to be tilting away from each other instead of towards each other.
+A test for that, take the cross product of face A with face B, and the result should run in the same direction as the edge according to face A.
+You can also think of a convex mesh as a volume bounded by a number of planes, the intersection of a number of half spaces, essentially.
+Or, you can think of every vertex lies at or below every other face.
+So, the reason for convex meshes is that a lot of algorithms become so much easier to implement.
+For example, an in-and-out test. Well, to test if a point's inside a convex mesh, I just have to check with all the plane equations. If you're underneath any all the planes, you're inside.
+I don't worry about those edge tests and corner cases, numeric robustness, and all that. So that gets a little easier.
+Testing a ray, you know, like that bullet flying through space, whatever. For a ray intersecting a convex, well, for, okay, so I've got that ray and then for I've got this thing made out of planes.
+And just for whenever I take all the planes that are facing against the ray, so like the dot product of the ray and that plane normal is less than 0, and then it's just cropping any part of the ray that lies above.
+So here I'm sort of moving the back start of the ray, this v0, moving it up as it's being chopped by each of these planes.
+And then if I'm left with something of positive length, then that v0 is now the point of impact.
+The last plane that sliced it is the normal of impact.
+And this generalizes, of course, to a general line segment with two endpoints.
+And in addition to trimming from v0 with the front-facing planes, I trim v1 with the back-facing planes.
+And if I'm left with something a positive length at the end, then that's what's stuck inside my object.
+All right.
+So convex to convexes.
+Well, there's a nice property here that if two convex objects are not interpenetrating, there'll be a separating plane between them.
+And I'm sure the physics sessions tomorrow, if you attend those, they'll tell you all about fast ways to find these.
+Furthermore, if they are separated, one of the planes that will separate the two will be either a face from one, a face from the other, or something that takes an edge from each and the cross-projects as it's normal.
+Learn more about that tomorrow, I'm sure.
+If two convexes are touching, then the area, or contact patch which they're touching, will be either a point, a line segment, or itself a convex polygon.
+So you can understand why physics engines really like these things.
+OK.
+So I've sold you that, hey, convexes are cool.
+We want to use these for a lot of reasons.
+But I've got things in my scene, and oh, they're not convex.
+What do I do?
+Well, in that case, you generate a convex hull for those meshes, which is simply the smallest convex mesh that contains the original mesh.
+Well, so how do you do that?
+There's something that people have been doing for like 40 years now, and there's two general categories of approaches for generating convex hulls.
+You can start with like a big bounding box, and you kind of shrink it down and slice it, chop it, you know, whatever, until you get something that tightly fits all your points.
+Or you can start really small with like, you know, maybe a couple back-to-back triangles or tetrahedrons, something convex, and then you add points to it, keeping it convex as you grow it out until you've grown it out to contain all your points.
+So the most popular implementation out there is QHOL, based on the QuickHOL paper.
+And it's one of these expansionist types of algorithms.
+It works in an arbitrary number of dimensions, but typically if you're going to use it, you're going to use it for three-dimensional things.
+And it's one of the expansionist approaches.
+And so I've just illustrated what that looks like on the right.
+I've got some convex mesh, and there's a new point that we're going to add.
+Find all the faces for which it's above.
+Okay, then you throw those away, and there's left with the silhouette, and then you fill that hole with a new fan of polygons.
+An issue is you get, oh, and then just continue for the next vertex and so on until you've grown it up as big as you want.
+But at each step, you have this issue where, you know, you have to make sure that things are still intact and convex.
+And even the original quick-haul paper says, yeah, we have these numerical robustness issues, they always show up.
+You just have to, you know, constantly scan for them and fix them when you see them.
+What that might look like is as follows.
+Here I've got some little hole and I grow it with this new yellow point out here.
+throw away a couple triangles and add these three.
+And notice that one of them is kind of skinny.
+So you can see where something skinny like that, the normal might be bent over in a weird way, and it might not be convex.
+And so maybe flipping an edge or something will fix that sort of thing.
+And these algorithms typically work with, you know, WingDig data structures, which are very effective for this.
+But there's also a simple approach for hull generation.
+Just based on triangle meshes, it also works.
+And that's to think of, again, it's one of these expansion approaches.
+So you have this triangulated mesh, and anytime I want to iteratively grow the hull with new points, I find all the triangle structures above, then I take a tetrahedron and I glue it on top.
+So the three points are the three vertices of the triangle that I'm putting it on top of, and the fourth point is my new point up here.
+And then, you know, because we don't want all this stuff inside, we sort of just delete all the back-to-back triangles, and I'm left with just the boundary representation on the outside.
+So, you know, fairly simple, fairly elegant, but it too runs into this numerical robustness problem, because you can generate the folds and stuff even with this approach.
+So, I'm going to sort of dive into an example here to illustrate how they happen and how to fix them.
+So, imagine I've got some point cloud and a bunch of vertices that I'm generating a convex hull for.
+And five of these points, A, B, C, D, E, are at one end of this cloud and they're all sort of coplanar-ish.
+And at some point, I've generated an intermediate hull that's got all the points except for E.
+And now we want to add E to our hull for whatever reason.
+And OK, so I test E with the left triangle.
+And using 6-bit mathematics, it tells me that it's below.
+And then I test with the right triangle, and bad numerical precision, and it tells me, oh yeah, you're above that triangle.
+So then I have to slap a tetrahedron on top of the right triangle, lift it up, and this new vertex is over to E. Well, look what happened.
+I've got this upside down red triangle that's facing the wrong way.
+So as long as I have one point that's inside my convex hull, I can test for these and detect them.
+The solution is as simple as the way we're generating these hulls.
+You just take a new tetrahedron, you shove it in there.
+What it does, it deletes the bad triangle and the one that we didn't lift up in the first place, generates the two green triangles shown on the far right.
+And I'm left with this nice convex hull, everything facing outward as we like.
+And that's how that works.
+All right.
+So a lot of the off-the-shelf convex hull algorithms out there are going to generate your complete hull with all points on the extreme.
+But you may not really need all of those.
+Imagine if you've got a whole bunch of points in a point cloud, and there's sort of this round feature on the side.
+Every single one of those points, if they're extreme, are going to be included.
+The thing is, a convex hull is already this gross approximation.
+I mean, you don't need that many points.
+Maybe 30 will probably be more than enough.
+So the quick hull algorithm, it's order n log n time.
+And that's a contribution in the paper.
+One of the reasons that it is that way is because of the way they sort of order vertices to add to the hull.
+So instead of that, we don't really care about order n log n because this is offline processing typically.
+We're just kind of preparing our stuff to use at runtime.
+This isn't at runtime.
+But let's instead, at each step, let's always pick the best vertex.
+So we're always picking the best one to increase our volume of our hull the most.
+And then we can just stop if adding new vertices doesn't improve it, or if we've kind of reached a threshold, we don't want any more vertices in that.
+Okay.
+So that's the way to, you know, make your stuff game efficient.
+Okay.
+Furthermore, there's this trade-off between minimizing the number of planes versus minimizing the number of points.
+And what I've shown up here is two platonic solids that illustrate this trade-off perfectly.
+One has fewer planes, one has fewer points.
+Now, the algorithms I described for creating simplified Hull work on vertices, and they're triangulated.
+But you can use what's known as a geometric dual to solve for the other one.
+And I'll just kind of leave it as an exercise to look that up and study it, because I don't have a whole lot of time to get into a lot of detail.
+But essentially, by taking the dual— and, you know, so I have all these points that are actually the plane equations from this original full Hull— when you compute a simplified Hull that minimizes vertices, You're actually minimizing planes, take the dual back, and you've got a hull that will look more like the one on the right.
+Vertices will typically have a valence of three, and faces will have five or six sides, as opposed to something that looks triangulated.
+And there's a trade-off.
+Sometimes you want fewer vertices if it's something like you're doing GJK a lot.
+Sometimes if you're doing a lot of plane tests, then you want to have fewer planes.
+So there's trade-offs for which is better.
+All right.
+OK, so you know how to generate convex hulls, but let's say I've got some objects that it's not realistic enough.
+And things are colliding in the air, and it just doesn't look right.
+The fidelity is missing.
+So the solution there is to take more complicated objects and break them down into convex parts so you get a tighter fit.
+And artists can do this in 3ds Max or Maya.
+But fortunately, that can be a bit of work.
+Fortunately, there's a couple tools out there that can help.
+John Ratcliffe on the PhysX team now at NVIDIA, and Cled Mamow, who now works at AMD, both of these guys have written software.
+It's open source, free to download and use, that you can throw in your game engine and it'll do exactly this for you.
+Alternatively, if you've got skin characters, well, you've already kind of done the work, because it's rigged.
+You've got bones.
+You can grab a bone.
+For all the bones, simply sample your skin mesh.
+Find any vertices that are weighted to that bone, and generate a hull or collision volume based on that.
+So an example of that is shown here.
+And OK, I mean, you've all seen ragdolls falling down stairs demos and that sort of thing.
+So here, you see this is the skin mesh that we're drawing and showing.
+But instead of the actual skin mesh doing the interaction, it's really the underlying bones that are doing all the collision detection and interacting in the scene.
+So that would be the way to do it.
+And not just characters like full body, but other types of objects as well, you would do the same sort of thing.
+And there's our ragdoll hand, for example.
+Next, we're going to take a little detour and take a look at Boolean operations, another fun subject in computational solid geometry.
+So this is when you have a mesh, you remember they're solid, they define sort of empty and solid space.
+And if I have two of them, I can do set operations, union, intersection, and subtraction.
+A couple examples are shown in this video.
+Now in the general case, you know, you want to have a good winged edge data structure to implement this and what you would do is you would take all the edges of one, slice them with all the faces the other and vice versa and then whenever one passes in or out of the other you have to sort of tessellate along it, you know, adding new edges and for the other one as well and then match those edges and then sort of take half of one, half of the other, stick them together, you got your Boolean operation.
+Now, what I described in a few sentences is actually a heck of a lot harder to implement.
+You know, you've got all those corner cases, numeric robustness, you know, tolerance issues.
+It's not easy.
+So let's take a step back and think, okay, where are we going to use this stuff?
+You know, certainly level design, modeling, there's applications there.
+But a lot of the R tools, they already have this stuff built in.
+So if you're thinking at runtime, well, hey, destruction is kind of fun, or geomod where I'm tunneling through some environments and that.
+But in these cases, I don't have an artist who's finely tweaking and placing points.
+No, no, I'm checking grenades and blowing stuff up.
+So you might be thinking, OK, is there a quick and dirty, simple approach?
+Maybe something based on convexes, since we've been looking at those recently.
+And sure, OK, let's explore that a little bit.
+So we've already seen mesh cropping or slicing, where we're chopping all the edges.
+If you crop a convex mesh, you have this nice property that you get an open loop, but there's only going to be one.
+In general mesh, you can get more.
+But then that loop is also going to be a convex polygon.
+So it'll be easier to triangulate when you get to that step for rendering.
+So, intersecting two convexes, you can think of it as cropping one with all the planes of the other.
+Okay, but you say, wait, wait, wait a sec. You saw I took a convex mesh earlier and another convex mesh and I subtracted one from the other and the result wasn't convex. How does that work?
+Well, that's because that was a subtraction, not an intersection.
+The subtraction with the solid is the same as doing an intersection with all the stuff around it.
+So you can do non-convex operands as a union of a bunch of convex operands.
+So basically do all those convex to convex intersections and then just throw the result together.
+All right, but even crop, OK, we saw convex hull, you know, chopping a line.
+Even chopping a convex object, you're subject to those annoying numerical robustness issues.
+And you can do things like, OK, check the planes, make sure you're not generating any sort of twist.
+Because if you have a plane that's coming very close to a vertex, if you make a mistake and you sort of chop these edges instead of those ones, you can generate little problems at the corners.
+You know, but and then it still gets more hairy because you know, maybe you might have more than four planes You might have like five or six and so you're probably thinking oh, there's too many corner cases Is there something simple I can do like a snap to grid or something and just not have to deal with any of this stuff Okay, so here's a little trick that I've been doing for GeoMod for a while that it kind of works And that's not snap to grid, but it's something a little different. It's quantize the plane equations So any of the Boolean operands will only have plane equations that satisfy certain conditions.
+And what it is is I take for, remember our plane equations are ax plus by plus zz plus d equals 0.
+If I multiply those numbers by some number, it's still the same plane.
+So I make sure for any of the plane equations there exists some number I can multiply by so that a, b, c, d are all integers.
+Furthermore, a, b, and c are integers less than a small constant.
+All right.
+So now recall how when I have a vertex, it's going to be the intersection of three more planes.
+And how do we compute that?
+Well, we had this matrix, right?
+And that m matrix there of the normals, that's all integer values now.
+I invert it and multiply it by this vector, which are all integer values now.
+And so the result is going to be this point V, of which its x, y, and z components are all going to be rational numbers, where the denominator is no larger than the determinant.
+Because when I take an inverse of matrix, I have to divide by the determinant.
+So that means for any two points I generate, if they're not the same point, they'll have to be at least one over that determinant distance apart from each other.
+Well, what this gives me is a hard-coded, fixed epsilon I can throw in my code to tell me whether two points are the same or not.
+And based on that, I can throw rocks at this piece of glass all day, and nothing is ever going to break.
+Well, the glass is going to break, but the code isn't.
+So now.
+Now, even though I was doing this, there's no integer math in the implementation.
+No, no, no. All that stuff you saw in the last slide, that was just proof that this works.
+The implementation itself is, you know, floating-point math, 32-bit, you know, don't need double precision.
+Normals are of unit length, you know, just as you'd like.
+But the code itself doesn't have all those crazy corner cases, if-then-else statements, and this and that.
+So although here it's running on just a single core CPU, I mean, it potentially could run on a GPU fairly easily, like GPGPU type of implementation.
+And it's fairly efficient.
+I can do many Boolean operations per frame, break lots of glass.
+I can take the part that I chunk out, and I can generate little pieces of fragments or extra rigid bodies from them.
+So hey, that number theory course I took in university was actually useful for something.
+OK.
+Next, we're going to take a look at some other spatial properties of our solid objects.
+So when we have these meshes and they're solid, again, stressing that's an important factor, we can correctly calculate the volume, center mass, and the inertia of our objects, which will affect motions, we'll see.
+So I'm going to cover a little bit of review material or introductory material, depending on your perspective.
+So the center of mass of a triangle.
+Now, there's many ways to define center, but this is the center of mass.
+So if I chuck the triangle up in the air, what point is it going to spin around?
+That happens to be the point where if I take the three vertices and divide by 3, that's that point.
+The area of a triangle, well, if I take two edges, take the cross product, figure out its magnitude.
+Half of that is going to be the triangle area.
+Now, if I have a triangle with a predefined normal, well then, instead of taking the magnitude, I can just take the dot product with that normal.
+And the advantage here is I actually get a signed area.
+So I could have triangles with a negative area.
+And soon we will see why that's useful.
+Now, just to make it clear to everyone, it doesn't matter which two edges you pick.
+When you take the cross product, you're going to get the exact same result, unless you're going the other way, and then you'll get the negative result.
+OK, so how do I get the area of a polygon, something with endpoints?
+Well, break it down into a bunch of triangles.
+Find some reference point P, could be the origin, doesn't matter.
+And for every edge on my polygon, take those two vertices, my reference point, that's a triangle, and just add all those areas together.
+But what if this point P is on the outside of my polygon?
+Or if my polygon is all sorts of concavities and stuff, it's not convex.
+It doesn't matter.
+This still works.
+Because sure, I'm covering a bunch of area that's on the outside.
+But I'm also going to be adding these negative area triangles.
+It's going to cancel all that out.
+So you get the same result. It just works.
+OK.
+Oh, OK.
+So here, if I've got a tetrahedron, and now if I take the cross products from all four of the sides and combine them together, they cancel each other out.
+OK.
+So add these four vectors, and the result is 0.
+Now, remember how we generated those convex holes with the slapping the tetrahedrons together, and then removing the back-to-back triangles, which obviously those two normals would cancel out.
+So by mathematical induction, you can conclude that for any mesh that's closed and solid, adding up all the area-weighted normals is going to add up to zero.
+And that's why this works.
+Generating the polygon, the normal of a polygon with endpoints, and this could be a polygon.
+I shouldn't have drawn a convex one, because it could not actually work with something that's concave and points slightly off the plane equation and stuff.
+It's a matter of adding up all.
+combining all the triangle normals with the same sort of triangle summation, not the magnitudes but you know taking those vectors combining them together and getting this long green vector shown on the bottom right that is the normal of the polygon and length is double the area. Okay and again if this point P lies on lies on further away sure you know those arrows are going to grow.
+on top because there's more area, but there's also negative things pointing down that cancel each other out.
+The reference point P doesn't even have to lie in the same plane as all the other points.
+The only way it's going to break down is that if P is so far away that you're going to run into rounding error.
+All right, so that's the 2D stuff.
+Now let's start looking at the 3D things.
+You may have guessed that the center of mass of a tetrahedron is the average of the four vertices.
+and volume.
+OK, well, that's sort of base times height.
+Let's think of that.
+The base area is, you know, we have that cross product, which conveniently gives us this vector that points straight up.
+OK, so half of that.
+Now, in this vector form, we can take as our, because we don't know the height, per se, but we can take any edge leading up to our fourth vertex and dot product with that, because only this orthogonal component's going to matter, and that will give us our volume.
+But it's actually 1 third, because it's a pyramid.
+So this cross dot combo is also known as the triple product.
+And as mentioned in an earlier talk, it is mathematically equivalent to taking those three vectors, three edges from this tetrahedron, shoving them in a matrix and taking the determinant.
+OK.
+All right.
+So whatever we can deduce through simple geometric reasoning, we can also solve through very complicated calculus.
+So what I've shown here at the top is this is the definite integral.
+where the limits of the integration describe the limits, or the region, of the tetrahedron.
+And I can pass any function I want into there.
+So if I take my unit function, I pass it in, and run off for a few days, and write out all this calculus, and make sure I'm right, all will come back with the formula for the volume.
+If I pass in a function that basically returns the position, adjusted for volume, then I get back my center of mass.
+Now I'm going to invoke this a little bit later.
+I just want to take the opportunity now to scare everybody with it.
+So all right, you don't have a whole lot of four sided, four poly objects in your game.
+You probably have like thousands, tens of thousands of triangles on your objects.
+So how do you get the volume of them?
+Well, now, just like we saw a triangle summation, what we do here is tetrahedral summation.
+For all the triangles, the three points plus some reference point, perhaps the origin, we just add up all these tetrahedral volumes.
+And that gives us the volume of our entire object.
+And again, the same principle of things falling in the outside and negative volume tetrahedrons canceling out, it all just works.
+Center of mass, well, as you'd expect, it's just a volume-weighted average of all the center of masses of all the little tetrahedrons.
+So getting the right center of mass is a good thing to do.
+And here we have this catapult arm sort of thing.
+And we throw it in a physics scene, rig it up with a hinge joint.
+And there's sort of this large volume at the other end of the handle.
+So the center of mass, if we calculate it right, it's going to be somewhere around there.
+And then we just kind of let it fly in a game environment, and I get this nice behavior that we'd expect.
+Now, we didn't have to write any custom code.
+There's no springs here.
+This is just emergent behavior, the way that we like to enable artists to build things.
+Had I taken the bounding box of this object and taken its center and used that as a center of mass, we wouldn't have had this kind of behavior.
+So having solid meshes and solid matter matters.
+All right, so the third aspect of spatial properties that affects motion is the inertia.
+Hopefully, everyone's familiar with the moment of inertia in 2D.
+And you have this idea that if you've got something orbiting around a fixed axis, then for stuff that's further away from that axis, it takes a little bit more energy to get it up to speed.
+OK, so I've rewritten this moment of inertia calculation in a couple of ways here.
+So you can try to understand it as it's sort of the variance along x plus the variance along y to give you the moment of something spinning around z.
+Because when we step up to three dimensions, it's not a scalar anymore.
+We have a 3 by 3 matrix known as the inertia tensor that describes the motion of an object.
+And the form of that is shown in the bottom right.
+And then there's a high relationship between this matrix and the covariance matrix.
+So in order to compute inertia, we're actually going to compute covariance, because with one, you have the other, and vice versa.
+So if you studied statistics, this might look familiar to you.
+If not, it's still pretty easy.
+Imagine if I have an object that consists of a number of discrete little point masses.
+OK, to compute its covariance, it's simply summing up the outer product and all those positions with themselves in a matrix.
+So yes, here's yet another use of that outer product that I mentioned in the beginning.
+So, all right, that works for—that gives me the covariance of something with a bunch of points, but our objects are these continuous solids.
+So what we're going to try to do is one of those tetrahedral summation tricks.
+So now if I just get the covariance contribution from a single tetrahedron, then I'm done.
+So what I'm going to—now I'm going to re-invoke that scary triple integral, but I'm going to shove inside of it that outer product.
+And I did this online on Wolfram Alpha, where I'd shove in the equation, but then it timed out on me.
+So I had to put in part of the equation and then get half the result and then shove in the rest.
+Because the free version online just doesn't give you enough free cycles or something.
+But you have to trust me that the answer at the bottom there is the right.
+So now, I know this calculus might go over the heads of some people.
+Don't worry about it.
+What we have now is a formula for getting the covariance contribution from a single tetrahedron.
+And then, remember, we wanted to get the inertia.
+And so we have this covariance.
+And I've rewritten in the middle line there in another form, because it's a 3 by 3 matrix.
+So each of the ij elements of that matrix looks exactly like this.
+And we're summing over the mesh where u, v, and w are sort of the three vertices of each triangle.
+But because we know things will spin about their center of mass, we can't use any reference point.
+We have to use the center of mass as we do this summation.
+OK, so we got covariance.
+And then to get to inertia, it's that formula that's shown at the bottom.
+If you look at the top left, we see the yy plus zz in the upper left-hand corner of the inertia matrix.
+That's because if you're spinning around x, it's the stuff along x that doesn't matter.
+It's sort of the other two, the relationship between the two.
+But the matrices, covariance, inertia, they have the same eigenvectors.
+They diagonalize the same.
+So it's all good.
+So anyway, enough of that.
+We've got our inertia matrix.
+So how do we use this?
+And what the inertia is, it defines a relationship between angular momentum and angular spin.
+But spin also depends on the current orientation.
+So here we've got some spinning on some.
+spinning objects. They all have, they're all the same object, they have the same angular momentum, but the spin is very different because they started at different orientations. So you can see some things are going to be spinning a little faster because they're going around, you know, sort of the long axis versus the short axis, right? Even though they have the same momentum. So as we knock these things around, you know, we sort of get the behavior, the way things process and all that stuff. Now there's no gravity but...
+You know, hopefully that, yeah, as we hit things, it takes less energy to get them sort of spin, sort of the short way versus the long way and stuff.
+Here I've added gravity back in, but apparently not a whole lot of gravity.
+So this looks like kind of in slow motion, like you've got a GoPro camera and you're like filming your skateboarding tricks or something.
+But hopefully the behavior looks, yeah, this is kind of what you'd expect.
+You know, you could do kick flips in an environment like this.
+There.
+Landed it perfect.
+OK, oh yeah, and the equation is sort of shown on the right there.
+And you probably notice also that the spin vector sort of changes.
+It's the momentum that stays constant, but the spin actually changes from frame to frame.
+So what we looked at so far was the volume integration, or calculating these properties of our objects.
+So now, that's sort of the work half.
+And now let's study the other half, the fun half, a little bit more.
+And that's this time integration.
+OK, so volume integration and then now time integration.
+Well, that's just fancy terminology for how you update some objects from its current state to where it is at the next time step.
+So for position, you've got some guy positioned pt at time t.
+His position at pt plus delta t is simply at his velocity times the time step, and you've got the new position.
+So OK.
+This morning you took a class about quaternions.
+You're thinking, hey, I've got a spin vector.
+I know how to create a quaternion from that.
+that, you know, based on the spin. And so I can multiply that quaternion, pre-multiply that quaternion by my orientation to get my new orientation. And yeah, that sort of works.
+But one of the things, and we'll see why in a minute, is that we what we'd like to do is form these time integration equations as adding instead of multiplication. So the form on the right here is where I've got my next state. My next orientation is my current quaternion, current orientation, plus this derivative, plus a derivative, i.e. how that quaternion is going to change, times the time step value, like how much I'm going to change, or how much time has elapsed. Okay, so it gets a little trickier.
+Another important thing is that, remember that spin vector we saw that was sort of changing?
+The thing is, when I'm doing this orientation update, and this is the problem, that it's only valid at the beginning of the time step.
+So I can't really apply that same spin for the entire time step.
+You get this thing called numerical drift.
+And it's best explained by the classic example of you're following the path of a circle.
+So say I'm following the path of a circle.
+What I would do is I would look down, what's the tangent?
+Take a step.
+Look down, what's the tangent or the derivative?
+Take another step, and so on.
+But if I'm taking big steps, as shown in the little picture there in the upper right, I'm going to be slightly getting further away from the origin or falling out of orbit.
+And that's what happens with the typical what's known as a forward Euler update.
+You take that derivative from the current time step and you apply delta t time to that.
+So now instead, let's say I'm going to use a different approach to follow the path of a circle using this Runge-Kutta technique.
+What you do is, you look down at the circle, you say, what's the tangent?
+OK.
+Then instead of taking a full step along that tangent, you sort of look half a step forward in that direction, look down, what's the tangent at that point, or the derivative at that point?
+OK.
+Now you've got a new derivative.
+Lean back.
+Take a half step along that direction.
+Look down.
+What's the tangent or derivative here?
+OK.
+Got an instant value.
+Lean back.
+Now reach, lean sort of forward a full step with that latest tangent vector.
+Look down.
+OK, what's the derivative or tangent out here?
+And then, instead of using that last one, you take actually this weighted average of all four of those derivatives, or all four of those tangents, and you.
+And that's how you advance yourself.
+And this works great for people who like to walk around in circles.
+And it's a perfect way to update our orientation in our games.
+So first, I'm going to show objects with a very high angular momentum.
+And I'm going to turn on that forward Euler update.
+And look what happens.
+My object gained a whole bunch of energy.
+And the spin sort of converged to one of the principal axes of the object.
+Here I'm doing that Runge-Kutta update, and it's not gaining energy.
+This just kind of works.
+It's sort of spinning, getting that nice behavior, as we'd expect.
+And the spin sort of orbits around the momentum, which is what this shape of object is going to give us.
+All right, so we've looked so far sort of at rigid body objects and how they kind of work.
+Now we're going to explore the soft stuff a little bit.
+So instead of an object with a position and an orientation, don't worry about orientation, but every vertex on the object has its own position.
+Now.
+But all these vertices are going to be connected with some sort of constraint or spring.
+Okay, so when we build these sorts of things, there will be a visual mesh for objects, but the way we connect them with these springs or constraints might actually differ from that.
+Cloth is a classic example, so let's take a look at how we build a cloth mesh for simulation.
+You've got a whole bunch of vertices or points, and you're going to create these strong connections with their immediate neighbors, because cloth doesn't really stretch or compress all that much along that dimension.
+And then, okay, there's going to be some sort of...
+I'll do an example here if this works.
+It might shear a little bit like this, but there's be some resistance to it.
+So for every vertex along the diagonals, you're going to create some sort of connection with maybe a slightly less stiff connection between them.
+And to resist bending, something bending over like this, you have connections between every vertex and two over.
+in each direction.
+And you'd have stiffer connections for something like leather, or for something like silk.
+They'd be very weak or non-existent.
+And it's not just cloth.
+I mean, you can build rubber ducks or things out of 3D lattices of all sorts of connections.
+So for implementing these, it really comes down to the time integration.
+How do you simulate these soft objects?
+And there's two schools of thought.
+There's the kinematic approach and the dynamic approach.
+Now, the kinematic approach is to think of any time I have a connection between two vertices, that's a constraint.
+Those two things belong at this distance apart from each other.
+And so for the implementation, every frame, you'll see if two points, oh, if they're further away than they need to be, then you sort of nudge them closer.
+Maybe not move them all the way.
+Maybe you nudge them a little bit closer.
+Maybe do a few passes or something like that.
+Or if they're too close, then you just kind of nudge them apart.
+So it's very easy to implement.
+Just your basic vector arithmetic that I'm sure everyone's familiar with.
+Oh, plus you also have to know how to take a square root.
+Assuming you can do that too.
+Then you can implement this.
+And you can find many reference implementations and papers on how to do it.
+A nice thing is that these systems, they don't explode, because you're always pushing stuff closer to where it's supposed to be.
+You're not going to get any weird behavior where things all of a sudden vaporize and go off in space.
+And not surprisingly, it's the most common system used out there in games and physics engines.
+The only caveat is that because of the way you're sort of implementing, if you have things that are under sort of a true stress, either compression or a stretch, are they guaranteed to converge to some sort of force correct state?
+I'm sure there's implementations where people have figured out how to do that, but the alternative is to use a dynamic approach to solving cloth.
+And this is, you know, more of the pure physics approach, and it's to think, whenever I have two vertices that are connected, they're connected with a spring that applies force.
+Okay. So, if I've got springs that are fairly weak in force, it's easy to implement.
+You just sort of, you know, add a little velocity to each of those endpoints, and it moves, and so on.
+But if I have, let's say, a very, very stiff spring, And let's say, because a character in a game kind of moves to an end point or something, now I have this string that's stretched out.
+And if it's a very high force and I want to simulate that, even if it's only 1 60th of a second, I can like, you know, bang to pull it back together.
+But it'll overshoot because the forces are so high.
+And then it's like, oh, now it's even more out of whack.
+And then it shoots.
+And then boom, boom.
+And these things just explode, right?
+So even if you try to run Kata integration, well, you're sort of looking at half steps, but I mean half of a huge number is still a pretty huge number, so that doesn't work.
+The only way to actually integrate these properly is with implicit integration or backward Euler.
+And we're going to take a look at that.
+But first let's compare with the kinematic approach.
+Now it's easy to implement.
+You can have like this is actually running on a single core, lots of cloth.
+It's easy to do.
+Now excuse my shading.
+It might look a little plasticky.
+But you know, hopefully you think and look at this thing.
+Yeah, that behavior works.
+You know, fairly responsive.
+I could use this in a game.
+And Yeah, it kind of does the job.
+And chances are, this probably is good enough for most people.
+The only caveat, as I mentioned, is I'm sort of pulling on things.
+I have all these constraints that are sort of fighting against each other.
+And the way these things are connected, you can kind of get this continued oscillation.
+Because you're not sort of, it's not getting this relaxed, forced, converged state.
+It's no, no, you're constantly fighting.
+So that's the only case where these things may break down.
+It might depend on the implementation, too.
+But we're going to now take a look at the implicit integration approach, because it's kind of interesting.
+You might actually learn something.
+And like I said, it's based on forces and springs.
+And the forward Euler approach is as follows.
+You have, for every point in your cloth or soft object, it's got a velocity and then all these springs connected to it, and gravity and wind or whatever else.
+So at each point, there's a net force being applied to a point or a vertex.
+So the forward Euler update would be to, OK.
+Divide that net force by your mass, which is your acceleration.
+Apply that, and you've got your velocity for the next time step.
+We've already described why that's going to break down, because things might explode.
+So the implicit approach, what you do is, instead of applying the forces at a point based on the forces at the start of the time step, you use the forces from the end of the time step.
+But wait a second, those are forces from the future.
+We're not there yet.
+We don't know what they are, because we don't know where everything's going to be.
+I mean, how can we even do that?
+And so that's why, for this approach, you end up creating one of these linear systems and solving for those forces.
+And in order to do that, you need to know the derivatives of the forces.
+That is, how the force at a point will change based on a change in position and a change in velocity.
+So.
+Now, the thing is with force in springs in a 3D world, it is a 3D vector.
+And I can move something.
+As I move a spring, I can move that point in 3D.
+So the derivative is now this 3 by 3 matrix known as a Jacobian.
+And the general form is shown in the upper right.
+So that's what we would have to derive to implement these systems.
+Now, we don't have a whole lot of time left to go deep, deep into calculus.
+But fortunately, we don't have to.
+Let's try some geometric intuition instead.
+When I have a spring, it's a simple, kind of a linear thing.
+So let's first look at how does the force change, this derivative of force, along the spring direction.
+Well, if I have a spring, and let's say one point's at the origin and the other point's at point P, or you can think of it as vector P because one side's the origin.
+If it's compressed, then there's a force at the end kind of facing out, away from the spring.
+As I move that out and I stretch it, now there's a force coming towards me.
+So the change in force for a change in position is simply minus k, that spring constant.
+Not surprisingly, if the force is minus k times p, well, the derivative with respect to p is just minus k, standard calculus.
+Well, that's only half the equation.
+Now, consider if I move that end point sort of up or down.
+If my spring is at its rest length, and I grab this other point, and I have to move it up or down, there's no force, and there's no change in force for a small change up or down.
+But the story changes.
+If my spring is now stretched out, and I'm holding it up here, there's a force coming down towards me from that end point.
+I move my arm down, and now there's a force coming up towards me.
+So there's a change in force from this to this, right?
+So the change is up.
+But if it was compressed, now I've got this force.
+pointing up, and as I lower the endpoint, now I've got a force pointing down.
+So my change in force for a change in position, you know, anything orthogonal to the spring direction, now depends on where we are relative to the rest length, r, which is shown in the bottom right there.
+So for somebody, if they actually went off and they solved all that calculus and came back, they would have come back with this, right?
+That's what the calculus would have given you.
+But hopefully, you know, if you follow the geometric intuition and remember what I talked about at the very beginning with those outer products, this should look obvious, because it's simply minus k times that first thing in the brackets there, that's, you know, p outer product p divided by p, which is essentially a unit length vector along that direction, outer product with itself, okay? And that describes this motion, and then the perpendicular motion, simply i minus that for the other term, right?
+So cool, now you understand what a Jacobian is.
+The spring equation is probably the easiest difference equation, so this is probably the easiest example for trying to learn what a Jacobian is that you can think of.
+Now you do the same thing to get change in force for change in velocity, because that's the other, you know, some more derivatives you need.
+And then you have all these things, and you can put them in the linear system.
+Now, I don't have time to go into all the algebra and all the details of it, but essentially it's one of those things where you've got one of those big matrices, you know, AX equals B, but X, the unknown, is now delta V, and A, this matrix, is sort of identity minus that term and so on, and B's the other vector.
+And it's a little more tricky because, okay, you know, it's not just, you know, one 3D vector, but you, you know, your velocity state and your position state are basically this concatenation of all the points in your spring mesh. And this, so this A matrix becomes this big sparse linear system and stuff. All that stuff's, you know, there's sources I can point to later that describe it all, but I just kind of want to get some of this geometric intuition so you can kind of see how these things work.
+OK, so I'm going to illustrate what that can look like at runtime.
+First, we'll see what the weak springs look like with that forward Euler update.
+And you see, oh, OK, this is kind of jello-y type behavior.
+Maybe you could do some ocean waves with this, but it's not real cloth.
+If you want something to touch and feel like real cloth stuff, you've got to use those stiffer springs if you're using the spring-based approach.
+So here, there's the underlying spring network that you would have.
+And yeah, OK, I mean, you already saw this kind of stuff with the kinetic approach.
+or, sorry, kinematic approach, what's the advantage of the implicit integration?
+Well, here it is.
+It's when you have these things under stress.
+There's no jitter, no billowing, no energy leaking the system.
+In fact, when you pull back a slingshot, because you're actually calculating the forces on all these things.
+So if you put a projectile there, you would know how much force to apply to it so you could launch it.
+It's all sort of force correct.
+And here's examples of sort of like 3D objects kind of connected with a bunch of stiff springs.
+All right.
+Okay, now that was kind of a big whirlwind of topics and you know we started off looking at some basic stuff, you know how four planes come together to meet, you know, building that roof or so on. Now and we looked at sort of solids and motion and all those kind of things.
+The main objective here was to try to get people to, first of all, to think of their meshes as not just a bag of triangles.
+But once you start thinking of a mesh as a solid, you know, and you can have this tetrahedral decomposition or breaking stuff into convex meshes for collision detection, you know, you have this more intuitive, powerful understanding of your geometry.
+And furthermore, then we sort of looked at, you know, things in motion.
+A lot of people with graphics, you get this fairly good understanding of, you know, you're basically in algebra.
+But when you start exploring some of the physics space and geometry space, you step a little bit beyond some of that math and learning the value of things like outer product and Jacobians and all that sort of thing.
+And that can open the door to new and interesting fun things you can do in your game experiences.
+So.
+Now, admittedly, that was probably quite a lot for some people to digest.
+And you might have questions, and you might not think of them right away.
+You might think of them like an hour after you leave here.
+I'll be around all week, so feel free to flag me down.
+Just look for the bodybuilder in the crowd.
+That's me, and we can have coffee, and I'll explain things further.
+In the meantime, if there's any questions that someone has right now, I think we might have a few minutes left to answer.
+Yeah, got a couple minutes.
+Someone has a burning question.
+I had a non-math related question, which is just, what kind of input were you using for those hand gesture demos?
+Oh, it's like a depth camera based thing.
+So.
+But like, is it a connector?
+Well, in this case, I was actually using a time of flight camera.
+So what I do, now just, I just got my paper published.
+And a co-worker demoed this at i3d last week, a demo poster session.
+We take the depth, you know, we have a sort of a model of the hand And then we take the depth data and we want to fit that model to the depth data I mean, there's a lot of people been trying to solve this problem I'm sort of like a math 3d physics guy and I like, you know, I was tasked with like You know assume that I already have this and then build cool experiences and interactions I'm like but but I need software to track the hand so I had to like build it because nobody had it So yeah, I took the depth data, and then I basically got like a rigid body model of the hand and all constructed.
+And I've got, you know, the...
+Oh, okay, I'll... sorry, I'll try to be quick.
+The, you know, the, you know, the constraints...
+You'll learn about this more if you go to the physics class, you know, because it's really just an extension of like a physics engine.
+You know, you have all these connections, you know, that are constraints on the joints.
+You have collision constraints.
+And then all those little depth values are like little magnets or something, and you just kind of like pull on the surface.
+You know, there's a few things you want to do.
+You make them a little weaker because you might mismatch, you know, points to where they lie on the surface.
+And it relies a little bit on temporal coherence because, you know, if you're starting from a bad frame, it's not going to work.
+But you kind of need to do that anyway, because the depth data is pretty bad, right?
+Like for the speed and fidelity, because there can be depth noise and occlusions and all that stuff.
+So you really kind of need to take advantage of typical coherence anyway in the solution.
+But yeah, we can talk about that online.
+I can show you.
+I got like a camera here if you're interested.
+Yeah.
+But yeah, it's not really related to this talk, but sorry.
+Any other questions?
+Sure.
+Hey, thanks for that.
+Touching that last part with the spring network.
+And when you do basically integration of within that time step, do you have to?
+take into account all the springs next to your current.
+Basically, if you have a mass node with springs, You have you have mass nodes and they are interconnected with springs Yeah, so basically all the all the nodes next to your current node They kind of have to affect the position or Or the next position of the node Do you have to cache all those like the states of all those nodes that affect your current?
+Yeah, do I understand? I'm having problems expressing myself.
+Yeah, so when you're solving any sort of these systems, like even a general rigid body system, you have to solve a lot of these equations simultaneously.
+And then with the implicit integration, it's even worse because you're sort of solving kind of future, like velocity and position kind of simultaneously as well.
+So it does get very tricky because everything connects with everything else, and they have to solve them all together.
+So you end up...
+And you know you end up sort of adding all these little Jacobians You know in that system and then sort of solving into sort of an answer that will You know, you know energy minimizing type of type of thing. Yeah But in the middle, you will then have quite a lot of data, basically, more data than you begin with to kind of hold all those.
+It's going to be order of the size.
+So it's going to be the topology, like the connections of each point.
+Every point can be connected to 12, say, neighbors.
+And so you're going to have an amount of data to process like your math equations are going to have that much stuff in them. So it's going to be like, you know, you know, over 10 times the number of points in your matrix or in your mesh. Right. And it's in 3d. So it's I mean, these are, you know, and with position and velocity and other other things going on. So yeah, there's a bigger data footprint. It's certainly the kinematic approach. I mean, they have a very small data footprint. It's very What helps make them more efficient is that makes it cache efficient as well too because they have a much smaller data footprint.
+You're absolutely right, there's a huge data footprint cost as well.
+Specifically, I'm just trying to create this really flowing water surface and try to get away with as little problem.
+Yeah, water you can start out with the forward Euler systems, because you get that nice wavy behavior.
+And that's a good place to start.
+And then for the implicit.
+type things, I mean, there is a damping to it that just is natural with the integration.
+So like the cloth will sort of settle and it's, you know, sometimes you have to do things to kind of create that life back into objects.
+Of course.
+Because it's, even without adding damping terms, it will dampen itself, which is, you know, something that can happen.
+Well, I've been using the data from the previous step.
+to integrate, like within the integrations and I've been getting away with it.
+For some reason it works, maybe my coefficients are low enough for it to work.
+Yeah, the coefficients are low enough, the forward order is easy.
+I'm probably going to get into a lot of trouble if I just ignore about this.
+Yeah.
+Okay, thank you.
+Yeah, no problem.
+Thanks.
+Oh, sorry, one more?
+So, a lot of this is actually really new to me, but also seemed really interesting.
+So, if we're actually trying to like...
+understand the concepts more in detail and really like get it down. Would you recommend more just jumping in and trying to write tech demos that kind of follow this?
+Or would you add any books?
+Absolutely.
+Even if you're using at work, if you're using an off-the-shelf physics engine or something, it's nice to write your own code of the same thing.
+Like, when I used to work at Agia on the PhysX SDK and stuff, one of the things that helped me be of benefit to my employer was the fact that I had done a lot of that kind of stuff on my own in the past before, like similar things.
+Maybe not to the same extent, because it's quite a large engine.
+So yeah, I would encourage anybody, like, you know, try writing a GJK algorithm or a, you know, a little, you know, little solver for springs, you know, and constantly challenge yourself, because then, you know, even if it works, you're using off the shelf systems, I mean, you'll understand those systems and the and the issues involved with them, right? Like that famous force, that the mass ratio issue with rigid body, ragdolls and stuff, right? Like, what is that if you've ever kind of thinking with the equations, it's like, oh, you got it. And then you'll be the guy in the room that you know, Everyone's like, ah, we can't ship our game because it's broken.
+And you'll just know.
+So yeah, I would totally encourage that.
+It's the same thing as if you take a math course without ever solving any of the exercises at the end of each chapter.
+You're not really going to learn the math as well.
+So that's my personal opinion.
+But yeah, definitely, tinkering is always worthwhile.
+But you have to balance it out because you want to get paid, and you can't spend all your time reinventing the wheel and stuff.
+I guess I was a little lucky because I'm a little bit older, so like when I was a buyer in the 90s, none of this stuff existed and we just had to kind of reinvent, you know, I got the opportunity to kind of implement all this stuff when it was first around.
+So I know it's a little harder for, you know, new guys coming in the industry because all the stuff's already written, no one's going to pay you to write the stuff that I got paid to write, you know, 15 years ago.
+So sorry about that, but, you know.
+But yeah, definitely, you know, hack on the side.
+I can't stress enough, that's a very good way to learn.
+Thank you.
+Yeah.
+All right.
+Well, is that all?
+Thanks guys for coming.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.
+Thanks.

@@ -1,0 +1,428 @@
+All right, without further ado.
+Hello, everybody.
+I'm Robert Meyer.
+I'm a game designer focusing on AI at Avalanche Studios.
+Welcome to Tree's Company, Systemic AI Design, and Just Cause 3.
+To just quickly introduce myself, I attended NYU, New York University, where I studied film, but also dabbled in what was then the infancy of the NYU Game Center.
+After that, I worked at a couple of smaller and indie game studios around New York for a while.
+And for the last three or so years, I've been an AI designer at Avalanche Studios.
+And of course, this talk will mostly focus on my time as an AI designer on Just Cause 3.
+So what is AI in Just Cause 3?
+Well, Just Cause 3 is a chaotic, over-the-top, open-world action game where the player has incredibly powerful traversal and combat mechanics.
+There are destructible environments, loads of dynamic objects, and tons of ways for the player to mess around with the AI.
+The player can hijack AI vehicles, shoot AI out of their parachutes.
+The player can use their grappling hook to tether a character to their jet and then fly them halfway across the world.
+Basically, there are an extremely high amount of unpredictable things that can happen to or near the AI at any given time.
+So how did AI process everything around them, all this information, and make any sort of decisions?
+Well, we use behavior trees, which of course is not that uncommon in AI design.
+This is what our behavior trees looked like for our combatants in Just Cause 3.
+Each agent runs one of these trees, sort of as their brain.
+For now, just think of the leaves at the bottom as basically sub-trees, different states that the AI can be in that sort of exist in a dynamic, prioritized list.
+inside each of these subtrees, if you were to expand it, you know, double click it, go into it, it would reveal much, much more behavior tree script that controls all the actual decision making and processes that this state performs.
+But for now, we're just gonna look at this higher level abstracted view.
+Now, in addition to behavior trees, agents in Just Cause 3 also utilize various utility functions for the purpose of computing things like ideal positions to move to or which eligible targets to focus on.
+A utility function is a function that ranks a bunch of different options according to their utility to an individual.
+So here, this agent is ranking each position you see a sphere at based on a variety of things like proximity to the target, line of sight to the target, distance from other allies, etc.
+The greener positions are the ones with a higher utility score and so those are the positions that the enemy character you see is going to prefer to stay around.
+Note that this utility function evaluation does not actually take place inside the behavior tree itself, but rather in code outside of it.
+The behavior tree simply requests, give me a good combat position to move to, and then utility function does its thing and returns the position to the AI.
+So in a sense, you can think of the AI in Just Cause 3 as being composed primarily of behavior trees and these utility functions.
+Now, the problem I'm mostly gonna talk about today stems from a few things.
+Firstly, Our behavior trees are very bottom-up.
+Each individual is making their own decisions.
+We have very few coordinators or managers of any type.
+It's a very individualistic system.
+Originally, this was built for the robust and emergent systemic behaviors that would flourish in the open world, but not for any sort of scripted content.
+And the behavior trees are pretty complex.
+They're complex enough that content designers are not gonna be able to open them and look inside and modify them or understand what's going on.
+But of course, we're still an open world game with story, missions, set pieces.
+Occasionally we need the AI to do specific, predetermined things, like waiting for Rico, the main character, to use their grappling hook retract ability to open a gate.
+In this scene, Rico the player can be seen in a military station with his ally Mario, right after a fight is finished.
+This being a very early mission, we reinforce the power of the grappling hook by asking the player to use it to open a gate so a rescue vehicle can come in and pick up Mario.
+Of course, Mario's behavior here feels very scripted and instructed.
+He's waiting for the gate to open, playing a special animation that points at it, and once the gate opens, he then scrambles to get into the vehicle.
+So the goal of them is, of course, to create a technical design for our AI, an interface that allows the AI to still be built on these systemic behavior trees and utility functions, while also still empowering content designers to create whatever scripted content they desire.
+When I talk about empowering content designers, I'm specifically talking about mission designers to create whatever objective sequences they can imagine, world designers to create unique open moments and open world locations, and encounter designers to create these sort of bite-sized narrative bits that we have procedurally generate in our world.
+And I think to understand some of the solutions that I'm about to talk through, it helps to understand the division of labor of designers at Avalanche Studios New York.
+The AI designers, like me, we're the ones that do all the scripting of the actual behavior trees themselves.
+We work with AI programmers who help us build all the lower level building blocks, but we're the ones who actually put the behavior trees together.
+We also tune all the utility functions.
+We say it's really important to stand where you have line of sight to the target.
+In fact, it's five times more important to stand there than it is to stand this amount of distance away from an ally, for example.
+We create a variety of AI templates and packages for other designers to use.
+Really, anything technical design related to the AI, we do.
+Whereas the content designers, as we call it, are people who might be level designers or mission designers or world designers.
+They're the ones actually placing the characters in the world, and importantly, they can fill out the exposed arguments and parameters on any of these character spawners.
+Another way to think about this might be by looking at the tools we use.
+This is our proprietary behavior tree scripting tool, and so this is what me, as an AI designer, this is what I'm looking at most of my day.
+Now, for now, just note that if I select the root view, the very top of this behavior tree, that gives me the ability to expose certain parameters, certain arguments, variables that the content designer can then fill out when they're placing this AI using this behavior tree in the world.
+Now, the content designer, they work in our level editor, our engine, and so here they've placed an enemy character using a character rule, which is a thing that just spawns a character.
+And when they select that character rule, they'll be able to see those same arguments, those same parameters that I as an AI designer set to be exposed from the behavior tree.
+So this is basically what we have to work with to solve this problem.
+The AI designer can write the behavior tree, set what arguments are exposed.
+The content designer has access to those arguments or parameters whenever they spawn a character.
+So the content designer can fill them out, and then whatever they fill them out with, that's data that can be read and used inside the behavior tree.
+Now, the last thing I want to cover before I get into the core solutions and methods is that I'd like to help you form a mental model of how our behavior trees actually work.
+A lot of people do it a little bit differently.
+So pictured here is how our behavior tree flows on the first frame of a combatant's life.
+Basically, this GIF is a debug view of me kind of just stepping over all of these subtrees.
+You can see that each node can return a success, working, or fail state every frame.
+So that's what that check mark gear icon or X icon represents as you see me step over each subtree.
+So starting at the top, right on spawn, you see this yellow circle.
+That's what we call a sequence.
+It will run all the nodes under it from left to right.
+So first it runs this init subtree, which just initializes a bunch of data, like the AI looks at what weapon they're spawned with, and so they kind of set up some things based on that.
+but that only ever needs to run once.
+Then it moves over to this yellow square called a parallel.
+The parallel runs all nodes under it every frame.
+So first it runs an update subtree, which looks at a bunch of different data in the world and sets up a bunch of internal data.
+Probably the most important thing that our update subtree does is it selects what combat target this AI should focus on.
+Then the parallel moves over to this green circle called the selector.
+Now, don't worry about remembering any of this vocabulary.
+It's not that important.
+Just kind of try to grok the general flow of things.
+So the selector first says, do I have any special behavior to run on spawn, an intro behavior?
+In this case, I don't, so I'm gonna move along to this green square at the bottom called the dynamic selector.
+The dynamic selector checks every node under it all the way from left to right every frame.
+It's sort of like a prioritized if-else list.
+It checks all these different subtrees to first find the one that's valid, and once it finds a valid one, it's happy, and that's where it runs.
+If we were to look at the next frame of this combatant's life, the second frame after they've spawned, we see that they no longer need to check their init subtree or if they have a special on-spawn behavior.
+At this point, they're just checking their update subtree and the main dynamic selector of possible behaviors below.
+And if we look at a further frame, where this AI is actually in combat, we'll see once again, they're only checking their update subtree and the dynamic selector, but at this point, the dynamic selector only needs to advance as far as the combat subtree.
+Because the character is actively in combat, this combat subtree returns working, and so the search and relax subtrees don't need to be checked at all.
+At this point.
+those trees are completely irrelevant because this AI is occupied in a higher priority behavior.
+So you can see in this way, the dynamic selector kind of controls implicit conditions and transitions between these substates below.
+So, jumping back to our abstracted view, looking at what we have, how can we use this as AI designers to solve the problem we talked about earlier?
+How can we keep things systemic while still allowing content designers to create their own custom content?
+Well, the very first thing we tried were these built-in on-spawn behaviors.
+Basically, maybe you could give a character a point, and if you gave them this point, they would know they wanted to move there on-spawn.
+So you give them a point, they run there on-spawn.
+You give them a path, a spline, they move along this path on-spawn.
+But as soon as we baked in those options, content designers just started asking for more, right?
+We immediately were faced with argument creep.
+If it's a helicopter, do we want them to land at the point or hover above it?
+At what speed should they move along the path?
+Do I want them to stop at the point or move through it?
+It's hard to really build in any of these custom on-spawn behaviors with only one or two simple arguments.
+In fact, this really didn't scale well at all.
+Pictured here is just an in-development look at a portion of a subtree for a drive-to-point style microbehavior, as well as a screenshot for all the exposed arguments, different parameters a content designer might want to set up for how a character could go about driving to a point.
+We've got should drive around traffic in there, should I reverse to the point, should I wait at the point, how fast do I drive to the point?
+There's like literally 50 parameters about driving to a point in there.
+And so obviously I couldn't bake this into the main behavior tree because 99% of the time, of course, our characters are not driving to a point on spawn and content designers cannot just sort through all this.
+So obviously, the natural intuition was that any sort of these micro on-spawn behaviors, they need to be split out of the main behavior tree and made into these modular pieces somehow, pieces that could be nicely compartmentalized.
+This led us to the concept of external behavior trees.
+And this concept is twofold.
+Firstly, content designers who are working in the level editor could add a new type of object called an external tree object.
+And this object simply holds another self-contained behavior tree.
+So whereas this character rule object you see here spawns a character and provides it its default behavior tree, this external tree object doesn't do anything.
+It just holds another external behavior tree.
+But the content designer can specify, OK, which behavior tree is this external tree object going to hold?
+Let's say, for example, the content designer selected a take cover in area micro behavior to live on this tree.
+Well, now as the AI designer, I can set up the main behavior tree to expect one of these external tree objects as one of the arguments to be fed into it.
+So now the content designer can pass in this external tree as a parameter to the main character's behavior tree.
+And then this external tree could basically be run inside that main behavior tree as if it was another subtree within it.
+So this enabled content designers to basically feed in modular, smaller microbehavior trees as arguments into the main big behavior tree.
+So now we could have things like drive to point or take cover an area as compartmentalized objects that would live on their own and then be fed into the main character's behavior tree.
+And let me show you exactly what that looked like.
+So here, a content designer has added an external behavior tree object to their scene, and the first thing they have to do with an external behavior tree object is pick what behavior tree it's gonna use.
+So down here, they've selected a helicopter fly-to-point microbehavior.
+As soon as they select the helicopter fly-to-point microbehavior, that's when this bt args, behavior tree arguments, section fills out.
+And so all these parameters are just about how a helicopter should fly to the point.
+So this content designer has fed in the point they want the helicopter to fly to, they've checked a box indicating they want the helicopter to land at the point, and they filled out the speed they want the helicopter to fly there at.
+Then they take that external behavior tree object and feed it into the thing that actually spawns the helicopter pilot, and the helicopter pilot can now run that helicopter fly to point behavior with all those parameters baked into it.
+And we didn't have to add all those helicopter fly to point arguments to the main behavior tree arguments.
+So now we have the concept of these external tree objects, allowing us to create these modular micro behaviors and feed them into the main tree.
+So while they're provided into the tree view via the main behavior tree arguments, the main tree itself still has to choose where and how to run these passed in subtrees.
+Of course, just doing things on spawn, which is what we've talked about so far, is the most obvious use case, but this isn't enough for content designers to do everything they want.
+Sometimes you want an agent to be purely systemic on spawn, but then use an external microbehavior at some future time under uncertain conditions.
+If these different places or conditions for triggering microbehaviors got too numerous though, we'd once again end up with a mess of arguments and an unintuitive interface.
+Ultimately, we realized we could do well with just three different points of ejection, as I called them.
+These external behaviors into the main tree could only be fed in at these three points.
+But with just these three insertion points, we found we could achieve almost every desired custom behavior in the game, and we did it by only adding a very small amount of arguments to the main behavior tree.
+Here's a look at kind of where those three different insertion points actually fed into the main behavior tree.
+So you can see we had the intro behavior, an interrupt behavior, and an idle behavior.
+And here is kind of how the content designer saw those arguments.
+They had options for the idle behavior, interrupt behavior, and intro behavior, and an object they could pass in for each of those.
+Now, I think it's worth taking the time to understand why these points of injection were chosen and what they're actually good for, and then why we didn't add any ones beyond these.
+So let's take a look.
+Intro behaviors were the first and most classic use case.
+Of course, on spawn do X, very simple.
+Here I spawn a rebel and I give him an intro behavior to just run to the right side of the screen.
+Doesn't need much further explanation than that.
+Now, there is still a few things to note about this implementation.
+Note that the runExternalTree node for intro behavior still takes place after the init and update subtrees have had their chance to run.
+This is because the init and update subtrees handle a lot of complex, important tasks like target selection, and it's good for the microbehaviors that might be run in the intro behavior to be able to rely on the fact that the main behavior tree has already taken care of these things.
+If it weren't for that, we'd have to reinitialize a bunch of stuff in all the microbehaviors themselves.
+And of course, we want to keep these microbehaviors as lean and modular as possible, so we run them after that main AI has had the chance to update a bunch of internal facts about the world and themselves.
+Also note that the intro behavior is under this green circle, which is a selector.
+For now, you can just know that all this does is ensure that the intro behavior only gets attempted to run once on spawn, and then it never needs to get checked again after that.
+Now there was one extra parameter that came with intro behaviors, which is a bool or flag I simply called always finish intro behavior, and this turned out to be incredibly useful.
+Basically, each agent in their update has the ability to kick themselves out of their own intro behavior based on various heuristics that are running in parallel to determine if something more important has presented itself.
+If you set this always finish intro behavior flag to true, then it basically turns those heuristics off.
+So for example.
+A world designer places an enemy helicopter on the other side of a mountain for some sort of epic entrance.
+She gives the helicopter pilot a special intro behavior to fly a specific path around the mountain that she thinks will look really cool.
+Now, our player has a grappling hook and a wingsuit.
+So let's just say they get to the top of the mountain one second after the helicopter spawns.
+And now that epic path that she outlined doesn't look that smart anymore because it takes the helicopter right past where the player is already standing.
+Well, with the always finish intro behavior flag unchecked, the enemy pilot's heuristics will detect, hey, I know I'm supposed to fly this path, but my target is right here in front of me, so forget the path, I'm just gonna fight the target where I am.
+Whereas if you check the box, if you don't check the box, then the AI will, yeah, if you don't check the box, they'll automatically exit, or if you do check the box, they'll be enforced to finish the whole path no matter what.
+Now you might think it's always smarter to not check the box, let the AI systemically exit if they think something more important has happened.
+But if you're creating a mission where this is an escape helicopter that's trying to escape with stolen data or pick up a critically wounded ally, then it would make perfect sense to check this box and make sure that this AI prioritizes completing its path.
+The next up injection point I want to talk about is the interrupt behavior, which also came with a trigger event.
+An interrupt behavior is sort of like an intro behavior, except the AI doesn't attempt to run it on spawn, but rather listens for an event in their update tree every frame.
+And if this event is received, that's when the AI will automatically make this interrupt behavior their topmost priority.
+So here we have a rebel that's fighting an enemy soldier, and about a second or two into the fighting, I send an event under the hood to the rebel, telling them, stop what you're doing, get up and run to the square on the right side of the screen for whatever reason.
+Obviously, this is a too micro and suboptimal use case for interrupt behaviors, but it showcases what I mean, that they can take over the AI at any point.
+What's great about interrupt behaviors is that content designers define the trigger event themselves, and so it enables them to do it on a case-by-case basis, and they can be fully responsible for it.
+meaning if a content designer has a timer that they want to wait 30 seconds before triggering an event, or they have a counter that's counting a certain amount of things, anything the content designer has that can send events, they can use to trigger and interrupt behavior.
+As you'll see later, this slot turns out to be particularly useful for communicating with the mission objective system.
+And of course, when the interrupt behavior is done, or if it's invalid, or it can't run, the AI resumes its main dynamic selector and is as functional as any other character in the game.
+Lastly is the idle behavior.
+If provided, this simply just runs with a higher priority than the systemic normal relaxed behavior.
+So a normal systemic relaxed behavior might have a character roaming some sidewalks or just hanging out, but you can offer them a specific idle behavior using this.
+So here I have a rebel that's fighting an enemy soldier.
+When they're done fighting the soldier, instead of doing their normal relaxed behavior, I tell them to walk over to this arrow on the right side of the screen and stand guard there.
+So I've just authored a manual idle behavior for this rebel to do, instead of their normal default systemic relaxed behavior, which would probably have them wander off screen somewhere.
+As you might expect, idle behaviors are great for staging patrolling characters around a military base or around a town.
+And you might ask, why is the idle behavior before the relaxed behavior and not somehow overriding it?
+Well, this is kind of an important theme.
+Imagine you have an enemy that's patrolling a military base in a Jeep, and they have a special idle behavior to drive a patrolling Jeep around a military base.
+That's their external idle behavior.
+Now the player comes in.
+They hijack the jeep, they throw the character out, the player drives the jeep away and then destroys the jeep.
+Okay, this character is gonna go into combat for a while, trying to shoot at the player while they drive away, then they're gonna go into search, but after a while they're gonna go back to their external idle behavior and they'll say, okay, time to drive my jeep around the base again.
+Of course, their jeep no longer exists because the player blew it up.
+but because we didn't override the default relax behavior, this character can now simply fall back to that normal relax behavior and be as functional as any other AI, so they'll probably just find a good systemic spot to stand guard near the base and they'll look perfectly fine there.
+So why didn't we just provide options to run these micro behaviors everywhere?
+If inserting things is so safe and the behavior tree is so robust, why didn't I just provide all the options to the content designers?
+Well, this is in order to preserve the integrity and the consistency of the AI.
+The decision of whether to enter combat or search, for example, is very involved and meticulously crafted.
+It's very important to keep transitions between combat and search consistent and clear so the player can learn them and begin to anticipate and predict them.
+Furthermore, it's important that the content designer can't accidentally override places where the AI is about to play a special animation or a key reaction, because if they could, they would accidentally compromise the visual integrity of the AI as well.
+In many ways, this is the same reason why we don't expose that much tuning data as behavior tree arguments either.
+This is all, all the tuning data is mostly decided internally by the AI designers.
+Instead, we only expose the few things you see on the right there.
+For example, one thing that content designers often requested was an overridden range they could give an enemy.
+So let's say they wanted to put a sniper rifle using enemy on the top of this one tower because the mission takes the player right by this tower and it's going to be awesome if an enemy can use a sniper to shoot at them from the tower.
+But a sniper's default range is 120 meters and this tower is 140 meters high.
+Can't I just give them an ability to override it just this once?
+Sadly, I can't because I want every sniper enemy in the game to be perfectly consistent and have the same range so once again the player can learn this range and learn to anticipate it and play around it.
+So yeah, we designed these points of injection to maximize simplicity, flexible control, robustness, behavioral consistency, and visual integrity.
+Now part of the reason working with this micro behaviors were so easy and I could keep them so lean is because we used a header file system for our behavior trees as well.
+Just like you might have a helper function and header file and code, we had header files for our behavior trees as well that could hold very frequently used AI subtrees.
+So here we have a run and shoot subtree, which handles all the inner workings for how a character fights as they run to a point.
+And we put that in a header file.
+We include that header file in our main behavior tree so that during standard systemic combat, the character can use that function and run to a position determined by their utility function for a good place to stand in combat.
+We can also include that header file in our microbehavior for running to an area.
+A-O-O stands for area of operations.
+The only difference here, the same subtree gets used, but the destination is an area provided by the content designer instead of one internally figured out by the AI.
+Of course, the benefit of reusing these subtrees everywhere is that as I improve the subtree once, all the behavior trees using it get that same improvement.
+Now we have this general interface and I could focus on building this library of modular microbehaviors that felt the most useful or most often requested.
+Each of these microbehaviors could of course then have their own particular arguments which would be nicely compartmentalized and I could focus on making sure that these were dependable and reliable.
+But the system still kind of had a pretty big problem.
+What if a designer wanted to create a mission where Mario, the character in Just Cause 3, the ally character in the blue shirt, has to first take cover, then fight with the player for a while, then wait for the player to kind of open the gate so they can escape, and then get into the systemic vehicle that comes in, and then fight from within the vehicle once it comes in.
+Right, that's a pretty beefy micro-behavior, and this is, again, is not gonna emerge naturally from our behavior tree system.
+At first I had no choice but to create these giant mission-specific intro behaviors, and this would of course take a lot of my time to write and debug, and it turned me into a bottleneck for the mission designers when they wanted to change how things in their mission worked.
+Obviously, this was not a scalable solution.
+There needed to be a way for mission designers to craft their own sequences without ever needing to touch behavior tree script.
+Well, let's take a look at what the mission designer really needed to do here.
+They roughly want Mario to perform this sequence of behaviors.
+Well, if we abstract away all the mission-specific details, at a glance, we have an intuition that we can maybe puzzle this out with the micro behaviors and the system we have now.
+Maybe take cover an area can be Mario's intro behavior, then we kind of release him into systemic combat for a while, and then we trigger these other three sequence of micro behaviors as his interrupt behavior when it's time for Mario to wait for the gate to be opened.
+But wait a minute, I know what you're saying.
+Sequence of microbehaviors, how do we do that?
+We only have one slot for an interrupt behavior on our behavior tree arguments.
+Well, so we enter the meta utility tree.
+The meta utility tree is basically just an intermediary tree that can package a bunch of smaller microbehaviors into a single behavior tree that can then be fed into one of the main behavior tree's arguments.
+These could be as simple as a sequence that just runs three other trees, one after the other, after the other.
+So this is what it looked like to the content designer.
+They had their character spawner for Mario, and Mario had two things passed into him, an interrupt behavior, which was a sequence of micro behaviors, and an intro behavior, which is just to take cover in area external tree.
+The sequence of behaviors itself had three external tree arguments, and those are where the three external tree objects are fed into that.
+Just quickly want to touch on these intermediary trees.
+You don't need a lot of them.
+We only needed three.
+One, which was just a sequence of trees, as we've talked about.
+So this was useful when you had a character that wanted to do something like enter a car, then drive to a point, then exit the car.
+A selector of behaviors is more like or statements.
+This is like try tree A, and only if that fails, try tree B.
+This is pretty useful in a just cause game where you might want to have a character say, try to drive this car to that point over there.
+But if for some reason that car gets destroyed as you're moving to it or you're driving it, then get out and run to the point instead.
+Lastly is an external behavior with autocomplete.
+We don't really need to dig into that one, but it basically, it enabled us to autocomplete or auto-abort out of a bigger sequence or selector of behaviors whenever we needed to with just a single event.
+Designers could stitch together or nest these meta-utility trees as much as they want.
+You could have a sequence of sequences of behaviors, you could have a selector of sequences with an autocomplete event.
+You can infinitely nest these as much as you want.
+Well, probably not infinitely, but pretty close.
+And the system was very intuitive and flexible enough for content designers to use.
+It scaled really well, and we had basically a working way now where content designers could sort of script their own AI.
+You'll notice that every layer at play here is a behavior tree.
+The micro behaviors, what they're organized into, and the main tree that they're inserted into.
+And this is actually beneficial for us for a few reasons.
+The first is that the AI designers can do all of this.
+We can quickly create different meta trees, micro behaviors, and work those into the main tree without requiring any AI programmer time.
+Since each layer is a behavior tree, they all fit together seamlessly in runtime, and that means that we can debug them with our behavior tree debugger, which is really good, meaning that I could sit down with the mission designer and debug any layer of this whenever I wanted to.
+Lastly, because these all use the same AI header files we talked about earlier, it was very easy to share subtrees and share behavior tree script across these different layers.
+And finally, to quote Damian Isla from his famous Halo 2 AI presentation, only by placing the stimulus behavior into the tree itself can we be assured that all the higher level and higher priority behaviors have had their say before the stimulus behavior can consider taking action.
+By having this all be a behavior tree, we were able to keep it very robust as well.
+And yeah, this three tree type interface, this of course is the titular trees company that I know you've all been waiting for, so there you go.
+But speaking of trees, we're not out of the woods yet.
+We still had a pretty big problem with the mission system interface.
+Picture the mission sequence from the Mario example earlier.
+Here's a mapping of the player objectives in the top row of the mission, and Mario's behaviors in the bottom row.
+Imagine that each one of these player objectives on the top is sort of a checkpoint for that mission.
+So if the player dies while opening the gate somehow, then they'll respawn at opening the gate.
+They won't have to do the defeat enemies checkpoint again.
+But what happens if the player fails during the escort objective?
+Mario's AI has been fed a sequence of behaviors and will want to restart this sequence from the start.
+But the mission will have checkpointed to the point where the gate is already opened, and so now our AI and our mission system would be out of sync.
+Initially, mission designers started to make alternate copies of spawners with different behaviors cut off and to accommodate every possible mission checkpoint, but this was of course very unwieldy for mission designers to handle, especially as they iterated on their checkpoint system.
+The solution, of course, was to assign trees to the mission objectives themselves, not to the AI directly in these cases.
+So for example, we would assign, each mission objective object had what we called a character controller object for all of the key characters.
+So each mission objective in this mission has a Mario character controller.
+we could feed the behavior tree that we wanted Mario to run during that objective to that objective's character controller, and that would automatically be passed to Mario as the mission progressed.
+So if at objective three, we know we want Mario to run a sequence where he animates at the gate and then enters the car, we can pass that sequence just into objective three.
+And whether you're respawning, restarting the mission from objective three, or you're starting it from objective one, Mario will get this behavior tree right on time, and it'll work perfectly.
+So by assigning the AI on a per character per mission objective level, rather than on the per character for the whole mission level, we successfully synced the system with our mission system.
+Now, all this functionality also benefited a lot of systems beyond the mission system as well.
+In this random encounter, you can see that the AI were staged into custom intro behaviors and animations, setting up a firing squad type scenario.
+But once disturbed, they all break out into their emergent systemic behavior, and the results are all the sort of emergent chaos you'd expect.
+The rebels start investigating some enemy corpses, other enemies happen to drive by, and a fight ensues.
+And because we were able to have this sort of intro behavior that can release into normal systemic AI, there was no stress that any of this was gonna work fine.
+The design also allowed world and location designers to set up custom patrol paths.
+Here we see custom idle behaviors at work with some patrolling enemies.
+Rico and a rebel drive up, they disturb the enemies out of their patrol, they go into combat, Rico runs away, eventually those enemies go back to being relaxed and the enemies who are lucky enough to still be alive, they resume their patrol as intended.
+Now is the time in the presentation where I want to take a step away from talking about behavior trees.
+There were other ways that we went about creating systemic AI in our game and other ways where we needed to kind of control that AI, but we used methods that had nothing to do with behavior trees.
+The first thing I want to talk about is that often you need to get a character on foot in combat from point A to point B. But points and splines are fragile stuff that I want to get away from.
+Stuff in a Just Cause game moves around a lot, a lot of things get in the way, paths that initially seemed smart start to look dumb.
+I mean, it's Just Cause, the player can basically debug, spawn, attack, whatever they want.
+So the better solution is to utilize our pre-existing concept of areas of operations, or AOOs.
+An area essentially crops the positions that a character wants to consider moving to, and so it confines the space where they'll next reposition.
+Here you can kind of see some of that repositioning in action.
+This is a mission where the player is fighting along with two friendly AI, Annika and Tio, and throughout the mission we kind of advance through this warehouse together.
+Now, rather than me telling Annika and Tio exactly where to move or how to move, I simply update their area of operations in the back of their head.
+The area of operations guides them to where they want to consider repositioning to the next time they want to reposition.
+And Annika and Teo make all the decisions about exactly how to fight, where to stand, where to take cover themselves, just within this bounded area that the content designer can provide them.
+So here, it was Annika's decision to run up to that cover and take cover there.
+All they have to do is just stay in this general area.
+Here's kind of a debug screenshot of how an area of operations works.
+It basically crops the utility map that they use for positioning.
+We normally wouldn't make one this small.
+In general, again, you want to have these areas be as big as possible because you never know what could be happening, and the bigger you make it, the more flexible and robust it is, but of course, the content needs will dictate the size.
+And remember, a normal utility map, as we saw earlier, is pretty huge.
+A character considers about 150 square meter area of possible positions, and so when you crop the AOO, you're cutting this down pretty drastically.
+One important theme to this, though, is that we still let the AI make their own systemic decisions, in this case, about exactly where to stand or where to take cover.
+We're just constraining their decision space, but within as generous a bounds as possible.
+And we'll see that come up again.
+Another subtler but really effective improvement came when we stopped telling AI exactly when to do things.
+For example, exactly when to move to the next area.
+Just because we assign them a new area doesn't mean we force them to move there right away.
+Instead, we wait for the AI to tell us that they want a reposition.
+Characters in combat in Just Cause 3 want to reposition fairly often, so it was good enough to update the area they want to be in, and then let them finish what they were doing before they decide to reposition.
+This helps avoid cutting off animations or firing patterns too awkwardly, and it also gives a nice staggering effect.
+You can notice here that Annika decides to get up and start running, but the other character, Tio, he's kind of already running by at this point, so you can see that kind of staggering effect in action.
+Again, this happens because we just update information in the back of their head instead of telling them exactly what to do or exactly when to do it.
+A different sort of example of affecting how AI act in a space while still leaving decisions up to the individual is this concept of restricted areas.
+If a content designer wants an area to be aggressively guarded by enemy AI, where they will warn the player and eventually open fire if the player stays there, they can author one of these invisible restricted areas.
+Importantly, the content designer does not need to assign certain characters to be the guards of this area.
+All they have to do is place the restricted area.
+Why is this better?
+That instead when the player enters a restricted area, all nearby AI get alerted to it?
+Well, this is because we have no way of knowing exactly which enemies will be where at any given time in a just cause game.
+In the first example in this video here, of course these AI are expected to be in this restricted area, and so they warn the player properly when he enters.
+But in the next clip, AI just kind of happened to be nearby this restricted area.
+And it would look really silly if they also didn't respond to the player entering this area.
+Luckily, because we don't need to stage particular guard AI, we just have the restricted area alert all AI nearby.
+This kind of takes care of itself.
+So maybe you're starting to sense a theme.
+And that theme I want to try and illustrate through my own attempt at a grandiose GDC quote on AI design, which is, the more chaotic and unpredictable your game, the more of an intelligence edge the runtime AI will have over the designers.
+I'll take a break so you can all take photos of this and I know you'll want to let it soak in, post it to Twitter, hashtag GDC, et cetera.
+Okay.
+Now, seeing as Just Cause 3 ranks very highly on the chaotic and unpredictability scale, which is part of what makes it great, this of course is a very important thing to respect for us.
+But, fair warning, your level designers will not necessarily appreciate you constantly telling them how much smarter your AI is than they are, so choose your words carefully.
+Maybe just tell them the AI will have more up-to-date information.
+That seems to go over okay.
+But anyways, following this principle, it becomes clear why this kind of annotation for the AI in a game like Just Cause 3 is so useful.
+By annotation, I'm referring to the way that content designers can mark up a space in order to influence AI to use it in a certain way.
+The restricted area we looked at before is actually one kind of annotation.
+A more traditional kind of annotation is cover points.
+All these little green spheres you see here, these are debug drawings of particular places where an AI can consider taking cover in battle.
+And again, they use a utility function to rank all the covers based on things like angle to the target, distance from other allies, distance to the target, et cetera.
+They score each cover, and they pick the cover with the highest score when they decide that they do want to cover.
+Another annotation example that's not combatant-focused at all is what we called systemic context actions.
+These are essentially animated looping behaviors that can be reserved, occupied, and engaged with by an AI for a time.
+For example, a wait at the bus stop systemic context action could be placed on a bus stop.
+Any eligible roaming civilian walking by can reserve that CA, move to it, enter it, and will now loop the special waiting for the bus animation.
+All sorts of places could be marked up with a variety of these that would enable AI to contextually interact with their environment and express various themes of the world through their animations.
+And this is much more dynamic and lifelike than simply staging AI who are always static and in place.
+It's much nicer to see AI coming and going from these different types of behaviors.
+Also, once again, this emphasizes directing the AI by authoring a space with optional or suggested behaviors that the AI can then, in real time, decide whether to utilize or not.
+It's better to give the AI an option to wait at the bus stop rather than force them to, because this way the AI can easily opt not to if, say, there's a tank at the bus stop or a crazy fight is going on or there's a bunch of stuff on fire nearby, all stuff that's more likely than not, to be honest.
+Now, when you're working with annotations, often it makes sense to build some of these annotation objects into the base templates of things themselves, the entities or the prefabs.
+For example, that wait for bus systemic context action, maybe we want to build that directly into the bus stop object so that wherever we place a bus stop, it comes with one of these wait for bus stop context actions.
+Maybe we want to build cover points into a concrete barrier so wherever world designers place these concrete barriers, AI can automatically take cover there.
+When this is done, these annotation objects would automatically, of course, accompany all instances of these entities in the world.
+And there's a lot of benefits of doing this.
+One of the benefits is, of course, it just saves a lot of authoring time.
+These things don't need to be manually placed.
+It usually makes sense, and it's very easy to perform mass edits on these things out in the world if they're all on the entity level.
+And the best part is sometimes it creates emergent, unexpected, and awesome moments.
+In this screenshot, we had decided earlier to build in cover points to any car wreck.
+Some vehicles get destroyed in the heat of battle, and now all of a sudden rebels are taking cover behind a vehicle wreck as they fight this enemy in the distance.
+And it's just a completely emergent scene that happened just because we built cover point entities into car wrecks.
+Now, there are some drawbacks to doing this.
+The biggest is that if you build these annotations into entities, things might start to feel too samey.
+If every instance of an entity or a prefab generates the same annotations, it can start to feel repetitive and gamey.
+If you see the same animation of a guy or a girl waiting for the bus at every bus stop in the game, it's gonna start to feel a lot less lifelike and a lot less interesting.
+Generally, we kind of just went for a hybrid approach where we built some stuff into entities, we tried to build a variety of things into the entities that it might randomly choose from, but more importantly, we still did a lot of it by hand, and we strongly believed that having this hand-touched flavor, especially to the more important locations in the game, really helped a lot.
+In summary, to wrap up the talk, we created an interface that empowered content creators to safely yet powerfully script their own AI without ever having to open a behavior tree while making sure the core of the systemic brain was preserved.
+We did this using modular micro behaviors on external trees that could be packaged with meta utility trees and inserted into intro, interrupt, or idle points.
+We successfully synced this with the mission system's check pointing by having mission objectives provide the behaviors to be run during them.
+And we influenced AI using more bottom-up, systemic, and annotation-based tools that could guide the AI, but would still let them decide things on their own terms.
+And this, of course, is much more accommodating to a just cause level of unpredictability.
+So thank you all for attending and listening.
+You can find some contact info on here, and I wanna make sure to give special thanks to the people you see there who help me with feedback or gathering assets for the presentation.
+Thanks.
+I'm not sure what time it is, but any questions, feel free to ask.
+And if there's no questions that anybody wanna ask, oh, there it is, great.
+Hi, great talk.
+I just wondered if you had thought about and discarded using a planner for something similar to this as opposed to behavior trees?
+Yeah, the question is if we considered using a planner more than just individual behavior trees.
+We've definitely thought about that, and on further projects, we're exploring it.
+It really depends on the type of game and the type of problem that you want the planner to solve.
+In our case, for a just cause game, you probably don't need that much tactical maneuvering to happen for the AI, because that's not really what the game is about.
+And so it almost is better suited to have a bunch of individuals running around, like, trying to manage the chaos the best they can.
+but there are a lot of valid cases where it would be nice to have a planner.
+For example, deciding which characters should kind of enter combat with the player and which should kind of keep their position and hold off.
+That's something that a planner could have helped us a lot with in Just Cause 3 and maybe we'll explore in future games.
+Yeah.
+So you mentioned the utility functions a number of times.
+Where do those live?
+Do those live in each AI, or do they live in the objects that the AI runs into?
+Right, so the question is, where did the utility functions live?
+So the utility functions all live in just C++ code, but each.
+AI can run an action in their behavior tree that basically requests the outcome of that utility function.
+So for example, there's a node in the behavior tree called get combat position that talks to C++ code and runs the utility function there and then returns the best position.
+Or the AI might run an action that says, give me a good cover nearby.
+That action communicates with C++ code that calculates the best cover nearby and then returns them the entity handle of that best cover.
+So the utility functions are calculated in code, and the behavior tree can converse with that.
+OK.
+Hi.
+Hi.
+So Just 2.3 is an open-world game.
+So probably something like microbehavior tree is tagged into some asset and loaded into this so syncutaneously, or that kind of stuff can be available.
+Sorry, can you repeat the question?
+So can you lower some asset with other asset like animation or sound with?
+micro behavior tree.
+So yeah, it's the question that can you put behavior trees on other assets like animations or sounds or objects or smart objects?
+Yeah.
+Yeah, we didn't really do that that much in Just Cause 3, but we can do that.
+You could, for example, potentially put a behavior tree on a building and have it like kind of listen to the world and like play different lighting effects or dialogues based on if it detects like explosions or whatever, and you could use a behavior tree for that.
+We didn't end up investing in that too much, but that is something that you can definitely do and that we want to try doing is using Whether it's a behavior tree or some other type of script, this type of scripting that can live on other animations or objects in the world.
+OK, thanks.
+Yeah.
+Cool.
+And I'll be around in the hall afterwards if there are any other questions that people want to come chat.
+Thanks.

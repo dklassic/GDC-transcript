@@ -1,0 +1,518 @@
+Hello and welcome to Simple and Powerful Animation Compression.
+I am Nicolas Fréchette, a programming consultant.
+And the work I'll be presenting today was done for Eidos Montreal earlier last year.
+I am to remind you to please turn off noise-making devices.
+And at the end, if everything goes well, we should have time for questions.
+And I'll be waiting as well at the wrap-up room on 3022 on this floor.
+Before we begin, I'd like to thank two other contributors who helped me along with the work I'll be presenting here today.
+First, Frederic Zimmer, with whom I bounced every idea here as well as many, many more that didn't make it into the presentation.
+And both him and Luke Mamakos contributed immensely with their past experiences working with animation compression and the results and lessons they learned doing so.
+And of course, none of this would have been possible without Eidos Montreal.
+We'll first begin with a bit of context, why we needed to revisit character animation compression in 2016.
+and what essentially prompt all of this.
+We'll then move on and take a quick look at the classic solutions in the industry to this well-known problem and what we looked at to inspire from.
+And of course, we'll finish with our own special blend, a new twist on an old technique and the surprising results that we got out of it.
+So last year, I was contracted by a game team working with a game engine from Rise of the Tomb Raider, which was released in 2015 on the Xbox One.
+And of course, they already had character animation compression, and in fact, they dated as far back as 1996, two decades.
+So they've been thoroughly battle-tested, they've been used in dozens of AAA titles, and the primary compression algorithm is based on linear key reduction.
+And they also had a fallback, less aggressive algorithm based on simple quantization.
+And we'll cover both of these flavors in a bit later.
+Now, the primary compression algorithm offered a pretty good size.
+And it hadn't been an issue so far in the past or even today.
+But as we were ramping up the number of characters on and off the screen that were animating, we started to notice that decompression was a little bit slower than we would have liked.
+And we were starting to get more and more issues with accuracy.
+Unfortunately, the legacy algorithm did not expose parameters that were very intuitive to tweak.
+And animators failing to get the accuracy that they needed on a clip-per-clip basis would revert to the less aggressive algorithm.
+And this was slowly pushing the size and the memory footprint higher and higher as time went on.
+And eventually, this culminated in a big problem for cinematics.
+Cinematics of course need very high accuracy.
+They're iconic moments in our game.
+There's a lot of time and energy and money that goes into making them as nice as we can possibly make them.
+They're also somewhat exotic.
+You can have all kinds of things and characters that get animated from animals to props to destruction.
+And the camera can get very close to them.
+So it's very important to get very high accuracy.
+And of course, size and the memory footprint still matter for cinematics.
+You walk into a room, and if you need to load from the disk a very large cinematic, then that takes a lot of time.
+And of course, you have to live with a runtime memory footprint as well.
+But the problem grew bigger than that.
+And we reached a point.
+where about 40% of our clips use the less aggressive algorithm.
+And that's a significant amount.
+And the reason we got here is because the quality is getting higher and higher as we collectively push the quality of our games higher.
+And so time is really the enemy.
+And this number will only ever go up with time.
+So it prompted us to revisit the animation compression.
+But unfortunately, the legacy code was not quite ideal to work with.
+By virtue of being very old, it aged somewhat poorly, like a lot of code tends to do.
+And sadly, the data format was not streaming-friendly, so we couldn't use it as a technique to fix our issues with cinematics.
+We needed a new approach.
+And, last but not least, nobody really wanted to get near it. The code was in a state where it wasn't particularly, and a number of people had tried in the past to improve on it and failed to significantly do so.
+So faced with these problems, we designed a number of goals to come up with a new solution.
+First and foremost, we wanted to tackle cinematics first.
+They're a more isolated problem.
+If we ever end up breaking anything, it only affects a small part of the game, and we don't grind the whole production floor to a halt.
+And it's also a little bit easier, because we can use streaming if we need to.
+And they're also very good candidates, because they have the highest accuracy requirement.
+We wanted to keep it as simple as possible.
+The time budget for this was only 20 days, which is very short.
+In those 20 days, I had to, of course, take a look at the old legacy code, figure out if there is anything to be done with it, implement whatever new solution that we can come up with.
+And of course, if we need to do streaming, it needs to fit in that time frame as well.
+If we're going to build this for the future, we want the decompression to be as fast as possible.
+We want it to scale to large numbers of bones, which are always increasing with cinematics.
+And the recent and not so recent hardware trends is for more memory and more cores, but each individual core is not dramatically becoming faster and faster.
+And essentially this means that it's becoming more and more common to have a slightly larger memory footprint if it means that we can work a bit faster.
+Essentially memory is becoming cheaper than cycles.
+Of course, we want very high accuracy, as I've mentioned.
+It's an important problem for us, and we don't want to go back to yesteryear where we had foot sliding and these sort of vibrating artifacts.
+We also had a small set of secondary goals.
+Obviously, we wanted to keep the size as small as possible, but it wasn't the primary issue for us.
+Primarily because we were hoping to fix that through streaming if we had to.
+But we don't want to leave any stones unturned, of course.
+Ideally, we want nothing or very little to tweak for our animators. I think we could all agree that animators' time is much better spent creating content, polishing content, than it is spent tweaking compression settings in the hope that the algorithm is not going to butcher their work.
+And last but not least, it would be really nice if we could supersede that decades old code and failing to do so, at least replace the weaker algorithm used by 40% of our clip.
+So armed with these goals, we took a look at the existing solutions in the industry that we could inspire from.
+And they roughly fall into four families or categories.
+signal processing, curve fitting, linear key reduction, and simple key quantization.
+So we'll talk a little bit about those.
+First up, we have signal processing.
+In this category, probably the most common or famous is based on wavelets.
+But you also have things like principal component analysis and various database approaches.
+Now, unfortunately, they're way too complex.
+And even a cursory overview in the presentation here today would be far too long.
+So I will redirect you to my blog if you're curious about this.
+There's a link on the last slide.
+And I go in depth as much as I could on the topic.
+We chose not to inspire from this technique, primarily because it was far too complex for our needs.
+Next, we looked at curve fitting.
+Curves are a very elegant solution for animation data.
+It's what is typically used in Maya, Max, and Motion Builder to represent animation data to animators.
+And the reason is very obvious if you look at the graph here on the right.
+The green curve.
+fits on about 60 keyframes or so.
+But I only need 10 control points to represent the whole curve.
+So it's very dense data-wise.
+It's very compact.
+And it can very accurately represent the animation data.
+So on the upside, it's a very sensible choice.
+It makes sense.
+It's common because it's apt.
+And it's also very compact.
+But the downsides are that for us, the original curves from Maya were not accessible through our existing pipeline.
+Essentially this would have meant that we would have had to recalculate the curves from our already discretized data.
+Decompression is also somewhat slow with this technique.
+primarily because you, for every track, rotation, and translation, you need to search which control points you need to interpolate from at a particular point in time. And you need to search over and over. Now, you can keep it fast by sorting your data and introducing a cursor, but that's somewhat medium implementation in complexity.
+You have to write a lot of code to get it right and get it competitive.
+And I wasn't sure if I had enough time in the 20 days that I had.
+It's also not so great for motion capture data, or any sort of data that is very noisy, such as offline simulation, destruction, clot, or hair simulation.
+And the reason for that is that the data, by nature of being very noisy, is not easily representable as a curve.
+And the overhead of each control point becomes too great.
+We also looked at linear key reduction.
+It's conceptually very similar to curve fitting.
+Instead of using a spline interpolation function, such as Hermite, we use linear interpolation.
+So we have our discretized samples, and we'll iterate on them and identify keys that can be linearly interpolated from their neighbors.
+And when we find them, we can just drop them, because they're trivially reconstructable.
+So the technique is reasonably simple and quick to implement.
+It's also reasonably compact.
+We make some minimal amount of effort to exploit the redundancy in the data.
+And it's very common.
+It was similar to the legacy implementation based on it.
+So it was very, already known by the animators and the other programmers working with this.
+Unfortunately, it was also similar to the existing.
+technique. As I mentioned, others had tried to improve on it and failed, and I wasn't sure in the amount of time that we had that I could significantly improve on it using the same technique.
+It's also like curve fitting, suffering from the same issues of slow decompression. And again, you can use the same tricks to keep it fast, which require some time to implement and get it right.
+And again, it's not terribly great for motion capture or noisy data, because again, there's not a lot of redundancy to exploit.
+And the last technique is the simplest one by far.
+It's just simple quantization.
+We have our discretized samples, and we make no effort to remove any of them.
+We retain everything and instead just focus on using a reduced number of bits to represent them.
+So it's really dead simple, which means that it's very fast to implement, very fast to decompress as well. There's hardly any code that goes into this.
+And it's also a solid foundation upon which to build on, because the other two techniques, like linear key reduction and curve fitting, essentially build on top of this. The remaining keys that you use to interpolate or the curve control points are generally stored on a reduced number of bits as well.
+So of course, the downside of the technique is that it's not very compact.
+The old legacy implementation that was causing our size to balloon up was essentially built around this, and it was an issue.
+But we deemed it good enough because we knew we could get it in a streaming-friendly format very quickly and solve our problem through that.
+So we decided to build on simple quantization.
+And then later on, if we have more time, we can build more complex solutions on top.
+So our solution essentially breaks down into four categories, or sections.
+We'll first talk about range reduction and how we use it to increase accuracy and be more aggressive with compression.
+we'll talk about uniform segmenting and how we use it for the same purpose as well as to speed up streaming. We'll talk about constant tracks or, and animated tracks and the ratios that, that we see in the wild. And of course we'll talk about quantization and the number of bits that we use per component.
+Range reduction boils down to talking about our tracks, or animated tracks, in terms of their range of motion.
+So for example, in a specific clip, I might have my elbow rotate by 120 degrees around some axis.
+Of course, the theoretical range is the full 360 degrees.
+But in this particular clip, it's only 120.
+If I want to quantize it on four bits, The natural thing to do is to split the full range onto 16 intervals.
+And that gives me a precision of 22 and 1⁄2 degrees.
+And it's immediately obvious what the issue here.
+I have a lot of intervals that fall far outside the actual effective range of my clip.
+So the smart thing to do is, of course, instead to partition our effective range into our 16 intervals, which increases our precisions by three in this example here, up to 7.5 degrees.
+Of course, the trade-off is that we now have some overhead.
+We need to store the range minimum value, as well as the range extent, in order to reconstruct our values.
+we have to normalize our values within that range as well, which is good for us, because it means that after this step, our rotation, translation, and scale data is now used in the same units.
+It's a scale value within the range between 0 and 1.
+And of course, reconstructing the value and performing range expansion is trivial.
+It's a multiply and add, which is very efficient with the hardware.
+We need six scalar values to represent a full track range.
+Each track type, rotation, translation, and scale, they all have three components.
+And we need the minimum and the extent for each.
+We store these six scalar values as full precision floats in our clip metadata, which boils down to 24 bytes per animated track.
+So with this, it means that we can increase our accuracy with a small overhead, which allows us to be much more aggressive in the compression of the actual track data.
+We can be more lossy, because the loss is not as visible anymore.
+Sadly, this is not great for short clips.
+If I only have two or three key frames, obviously, the overhead of the range information is going to offset a lot of the gains that I'm otherwise going to have.
+But in a general case, it's absolutely worth it.
+And range reduction is a cornerstone of our algorithm.
+Next we have uniform partitioning. We decided to split our clips into blocks of sixteen keyframes for three reasons. And why sixteen? Just because it seemed the sensible values, but in truth, we haven't had time to try anything else, and it worked out all right for us. So the primary reason for uniform partitioning is that, is that it makes seeking within the clip very fast and easy.
+for a specific point in time that I want to sample, I can quickly, within a simple index table, find which blocks I need to interpolate from.
+And this, of course, also makes it very easy to perform streaming ahead of time, finding out which blocks I need and bringing them into memory.
+And last but not least, it allows us to do range reduction again a second time per block.
+So we have two levels of range reduction. First at the whole clip level, and once more for within each block. And, again, we store the range information metadata within each block. Our six scalars this time are quantized onto eight bits, because they're essentially between zero and one.
+and that yields six bytes per animated track.
+You do have to be careful, though.
+Because we quantize the range information here, it means that the normalization step is now lossy, and you have to take into account that loss in order to get accurate results.
+We also have a lot of constant tracks.
+A character might have 200 bones with three tracks per bones.
+That's 600 tracks.
+But obviously, not everything is animated in every clip.
+So I wanted to know the proportions that we had to try and figure out what was the best way to take advantage of that.
+So I analyzed about 3,500 clips from various main characters.
+And I found out that bones are constant about 65% of the time.
+And the bind pose, 45% of the time.
+And that makes sense, because facial bones, IK bones, camera bones, they're only ever animated in the clips that actually need them.
+Tracks are also constant 87% of the time, and the bind pose 79% of the time.
+And again, this makes sense, because while rotation is very often animated, the translation and the scale is very rarely animated.
+In fact, scale in my data set was the bind pose 99.8% of the time.
+So to take advantage of this, we use two bitsets that we store in our clip metadata.
+we have one bit per track. That tells us whether the track is the bind pose or not.
+And if it is, then of course we can drop the entire track, because it's trivially reconstructible at run time. And our second bit set is again one bit per track, which tells us whether the track is constant or not. And if it's constant, then we store the one key that we need with full precision in our clip metadata.
+And from this follows that if a track is not the bind pose and it's not constant, then it's animated and variable, and it's quantized and compressed normally.
+And that takes us to the quantization step.
+And originally I did, like, almost all the implementations out in the world do, and I hardcoded the number of bits to 16.
+and I've seen as low as twelve in the wild.
+And that was that, and it worked, and it was entirely equivalent to the old legacy implementation.
+But one day, in the shower, I had a, a striking moment where I, I thought, well, what if I try to brute force search what is the best bitrate per clip?
+it's not that hard. So we try sixteen, fifteen, and then we go as low as we can up until we exceed some error threshold. And that worked out, and that gave us good gain. And then I started thinking, well, now that my bit rate is not hardcoded anymore, it's variable, how far can I push this?
+So a logical next step was, you know, to to observe that the rotation, the translation, and the scale data is, it's very different.
+The units are different. The data behaves very differently. It makes sense to, to store our, our bitrate, one for rotation, one for translation, and one for scale independently.
+And so that's what I did. I brute force searched three bitrates per clip for each track, track, track type.
+And again, that gave us very good gains.
+And if we can do it per clip, it's also very trivial to now do it per block.
+And this takes us to the last logical step that we can take this to.
+And it's, well, can I find the best individual track rate per track per block?
+And of course, this is really the holy grail here.
+because this new variable bitrate is absolutely ideal for animation data. It's ideal for our hierarchical data. Like everybody else out there, our animation data is compressed in local space of the parent bone. This means that every bone has a little bit of error due to compression, and the error accumulates down the hierarchy when we reconstruct it for skinning, for example.
+So of course, parent bones contribute more error by virtue of being higher in the hierarchy.
+So they need more bits to retain more precision.
+And conversely, children don't need as much precision because they don't contribute as much error and they only require fewer bits.
+And with a variable bitrate, we can entirely do this.
+We also have exotic tracks.
+We might have a track that's very noisy for some reason in the clip, or has a very wide range of values, which requires unusually high accuracy, or more bits.
+And with a variable bitrate, we don't need to bias the whole clip negatively.
+It's also great for temporal coherence.
+In cinematics, it's not unusual to have all your characters animated in sync.
+with clips that are all the same length.
+But if a character is off screen for a while, he's still animated, but he doesn't move.
+And with a variable bitrate, we can, of course, use fewer bits, if not zero, for the parts where they're not moving.
+And this, of course, adapts to all kinds of animation data, regardless of how it looks.
+We settled on 16 possible bitrates.
+zero, three, four, five, up to sixteen, and twenty-three.
+And the reason why we need it higher than sixteen is that some clips have unusually high precision requirements.
+For example, world space cinematics might have the root bone be very far, or a camera bone move very far, or maybe you're throwing a weapon very far ahead, like an arrow.
+So you need more than sixteen bones in a few rare cases.
+Unfortunately, 23 was perhaps a bad and naive choice, chosen a bit prematurely.
+Initially, I just selected it because it was the same as the float mentissa minus the sign bit.
+And that seems like a sensible choice at the time.
+But of course, as I was writing the presentation, I realized that the dequantization step requires our integer to be uniquely representable as a floating point number.
+and accurately representable. And of course, it turns out that a 32-bit float can only accurately and uniquely represents integers up to six significant digits.
+Essentially what this means is that there's some rounding happening here that we hadn't foreseen. So maybe something like nineteen might be enough. But really, in truth, we could probably really measure it. I don't know whether the rounding is really a big issue or not.
+or if 19 would be better, there's definitely room for improvement here.
+We do have one edge case, which is when a track bit rate is zero.
+It means that the track is constant within the block.
+Now, of course, if the track is constant, then we don't need range information, because our track extent is zero.
+And when that happens, we reuse the 48 bits that we had for our range information, and we store our constant key at that memory location with 16 bits per component, which is typically enough precision for what we need.
+So, so far on the compression side, almost everything is very, very trivial.
+We have our bit sets, we have our normalization within the range that we're calculating, it's a bunch of min-max, it's very trivial.
+The only really complex step is the bit rate selection.
+And to figure out how to do that, we need to talk about two things.
+First, we need a way to compare bit rates. Which bit rate is superior or inferior to which other bit rate? Now, it's obvious that a bit rate is better if it's slower, because it means a lower memory footprint. But it's only acceptable if it doesn't make us exceed some error threshold. So it's very important to be able to accurately and precisely measure the error that we introduce. And so we'll talk about our error metric function.
+And we also need a way to be smart about attacking the problem.
+Up until now, I've been brute-forcing which bitrate is the best.
+But now that I reach this point, I have 600 tracks, only a handful, or 50, 80 or so, that are animated, but I have 16 permutations to try per track.
+It's a huge search space.
+We can't afford to brute-force anymore.
+So we need a smart way to attack this.
+So measuring accuracy, it's really, really important.
+And in fact, it's an absolute cornerstone of our algorithm.
+And you'll see why later.
+It's important because our algorithm uses it to converge on a solution.
+And of course, we use it as well to compare our results with the other compression algorithms in the engine and other engines.
+You might be surprised to learn that it's often overlooked and poorly implemented, even in state-of-the-art game engines, such as what we had before.
+And there's no standard way to do this, either in the industry or academia.
+They all have their own special flavor of how to measure error.
+And of course, we are no different.
+And I will be presenting our own flavor here today.
+There's three criterias that an error metric really needs to meet that are critically important.
+It needs to account for the fact that our data is hierarchical in nature.
+It needs to account for the aggregate transform, the rotation, the translation, and the scale.
+And it also needs to account for the fact that we have a visual mesh, something that we often forget with animation data, because we're working with a skeleton.
+So the hierarchy is very important.
+As I mentioned, the error accumulates down the hierarchy.
+This makes it very obvious that if you use a local space error metric, you're not getting the full view of the true error that you're introducing.
+So that's bad.
+We really want to be using an object space arimetric because it allows us to see the full impact of our changes in bit rate selection.
+The aggregate error is also very important.
+It's very common, sadly, to measure the error with the bone position or the leaf bone position.
+But of course, it ignores the rotation and the scale contribution of that individual bone.
+And we need to take into account the full transform, because the error can be anywhere, not just on the translation.
+And last but not least, the error that we might measure on the skeleton is not.
+the same or equivalent as we would measure it on the visual mesh. The skeleton is never really visible, right. The visual mesh is what the users, what the designers, what the animators, what everybody sees.
+And the error is not the same, because with rotation and scale, the error actually increases the further away you get from the bone. And we can visualize it like this here.
+Suppose I have a bone with some rotational error.
+If I have a vertex that's skinned on that bone and it's very close to the bone, the linear displacement as a result, in red here, from that rotational error is gonna be fairly small.
+But if my vertex is much further away, for, with the same rotational error, all of a sudden my linear displacement is much larger. So, of course, it's a very important property, and we need to take it into account in our error metric function.
+And we can observe that the vertex displacement on the visual mesh is really the true measure of our accuracy. It's what everybody sees.
+It makes sense. That's what we should be measuring.
+And we end up with skinning being, essentially, our error metric function. And it satisfies, of course, all three criteria that we just talked about.
+Now unfortunately, it's way too slow.
+A character might have 200 bones, but it could easily have 50,000 vertices or much more.
+The mesh information might not even be available in your animation compression pipeline at that point in your pipeline.
+And you might not even know the true mesh if you're doing mesh sharing between the skeletons.
+And of course, some bones don't even have any vertices that are skinned on them.
+IK bones, camera bones, or the root bones of the characters, they don't have any vertices that are directly skinned on them that we can use.
+So instead, we use virtual vertices.
+These allow us to approximate the skinning.
+They satisfy, of course, all three criteria by virtue of being the same process.
+And it's also very intuitive to tweak.
+It's simply the vertex distance from the bone.
+So we approximate the skinning with a uniform shell, if you will.
+And the output is, of course, an object space displacement, like we want.
+In practice, internally, we settled on 3 centimeters for our normal bones, which comprise 99% of all our bones for main characters, props, and so on.
+And we also have one meter for high-accuracy bones.
+And which is which is, of course, animator-defined and data-driven, with the exception that the root bone is always considered to be high-accuracy, just because I wanted to be extra conservative with the data.
+So now that we can properly measure our error, and which bitrate is superior or inferior to which other bitrate.
+We need a smart way to trim our search space.
+So that we can compress, you know, in this entry.
+So we decided to do a two-phase approach to tackle the problem.
+We do a first pass to find an approximate solution.
+And then we do a second pass to refine it to the local minimum.
+And this is an important distinction.
+The algorithm I'll be presenting here today does not find the globally optimal solution of what is the best bitrate for all tracks and all blocks.
+We simply find a decent local minimum, so there's definitely some room for improvement here in the future, perhaps.
+And the way the algorithm works is like this.
+Initially, we'll set all our tracks to have the maximum amount of accuracy.
+The highest bitrate possible here, 23.
+And then we begin the first pass.
+And the goal of the first pass is to lower all the bitrates simultaneously in lockstep.
+As much as we can, up until we exceed an error threshold, and then we stop.
+with the exception that the root bone here on the top left remains locked to full precision during the first pass.
+And the reason for this is that in world space cinematics or any clip that requires unusually high precision on the part of the root bone here would negatively bias the first pass.
+So we leave it fixed for now.
+And so we lower our bitrate as much as we can, up until we can't anymore.
+And then the second pass begins.
+And the goal of the second pass is to iterate over each track individually and lower the bitrate as much as we can, up until we've processed all the tracks without exceeding our error thresholds.
+So in a sense, we minimize the bit rate very aggressively here.
+It also means that we maximize the error up to our threshold very aggressively.
+And it'll be made obvious in a future slide.
+This makes the threshold critically important.
+If it's too high, it's immediately obvious because we maximize the error up to it.
+I tried one millimeter in object space.
+and it proved far too high. For a third-person camera on a normal character, there was no error that was visible. No foot sliding, no vibration. But as soon as the camera came up close to the character, you could see the artifacts somewhat fairly obviously, which this essentially made it absolutely unsuitable for cinematics or whenever you're backing out on a wall and the camera's pushed in closer to the character.
+We settled on hard coding a tenth of a millimeter as our accuracy threshold.
+Now, a tenth of a millimeter, to put it into perspective, is about the average width of a human hair.
+So this is really awesome.
+It essentially means that our animations look pretty much like they do in Maya.
+There's no visual difference that you can see.
+And now we get to the results, the fun part.
+Unfortunately, the game this is going to be futurely shipped on has not been announced yet.
+And so I can't show any fancy videos.
+And even if I could, they would look essentially like they do in Maya.
+So that would not be terribly fun.
+Instead, what I did is I ran the compression on a large number of clips.
+I aggregated the results.
+I generated a bunch of charts.
+And I took out some concrete examples to kind of give you a glimpse of how it performs in the real world.
+So I aggregated about 3,900 clips for various characters, including the main character.
+The total compression time was 3.2 hours on a single thread, or 10 minutes multi-threaded on my desktop.
+The total sum of the clip length is about 5.4 hours at 30 FPS.
+So it's definitely very significant and representative of our game as a whole.
+Here we have the distribution of the number of key frames per clip.
+And there's really only two things I want to point out here.
+The first is that we have about 22% of our clips that are very short.
+They use one block or less.
+Those obviously are not going to compress too well by virtue of having more overhead.
+And we have, in fact, up to 11% that use half a block or less, which is not great.
+Fortunately for us, we have about 49% of our clips that use three blocks or more, and that are going to compress very well.
+The total size on disk was about 168 megs for the sample set.
+And in comparison, the legacy size of the same set was around 300 megs.
+Now keep in mind, this was for 60% linear key reduction and 40% the legacy simple quantization.
+The average number of animated tracks is 56.
+Here we have the distribution of the error per clip in millimeters.
+And this slide makes it bleedingly obvious that the algorithm maximizes the error up to the threshold.
+As early as the 15th percentile or so, already the error is almost equal to the threshold.
+But never exceeding it, which is what we wanted.
+Here we have the distribution for our compression ratio in logarithmic scale.
+And we can see on the far left that there's a lot of clips that don't compress too well, as we suspected.
+They're probably very short.
+And even the median, 18 to 1, is not terribly great.
+But there's a lot of clips on the right that compress very, very well.
+And there's even quite a few exotic clips that compress abnormally well.
+3,000 to 1 is definitely not representative, but there were definitely about 10 to 20 of those.
+So I'm not quoting the average here, because it would obviously be very biased and meaningless.
+A quick word about the compression ratio is that it's absolutely meaningless unless you and I use the same formula to calculate the raw size.
+And here, my formula is the number of keyframes times the number of bones times 36 bytes per bone.
+And the 36 bytes comes from the fact that every bone key has three tracks, and each track is three components or three floats, which yields 36 bytes.
+And here, here is probably my favorite slide.
+This is the distribution of which bit rates ended up being selected.
+So horizontally, we have our bit rate buckets, 0, 3, 4, 5, up to 23.
+And vertically, we have how often it was selected by the algorithm.
+And there's two distributions here.
+is in our second phase of our algorithm.
+When we go over each track individually and we lower the bitrate as much as we can.
+In blue, we started at the root, going toward the leaf's bones, or parent first, children after.
+And in orange, we do the opposite.
+We start with the children, and we go up towards the parent and the root.
+Originally, when I wrote the algorithm, I started at the root going towards the leaves, and it seemed like a sensible choice to me.
+And then as I was generating the slide, I wondered, would the distribution look really different if I flipped the loop and went the other way around?
+And it turned out that it did.
+And we can see on the far left that, in orange, by starting with the children first, we have a larger incidence of lower bit rates.
+Zero, three, four, up to eight, we have much more of them.
+And this makes sense, conceptually, because we have more children than we have parents.
+But of course, by starting with the children first, it forces our parents to retain more precision for the same error.
+And so we also, on the right of the graph, we can see, starting at 13, 14, 15, 16, and 23, you can't see them.
+They're not zero.
+They're just very small.
+But they're all higher, starting with the children, going towards the parents.
+And essentially, the net result of this is that starting with the children first, going up, is 2% smaller in memory for no change in compression time, no change in accuracy, no change in decompression time.
+And of course, there's probably other ways, other orderings that you could think of to try here.
+I did try to take the best of the two, essentially doubling the compression time, but the result was less than a tenth of a percent. So definitely not worth it.
+So essentially we ended up with about ten percent of our tracks using three or four bits or less per component. Almost a quarter, twenty-two percent, using up to six or less.
+and almost half, 47%, using eight or less.
+And this is really what surprised me the most about our results.
+If a year ago you had come to me and told me that I could store a significant amount of rotation and translations on three or four bits per component, which is 9 or 12, a byte, a byte and a half for a whole rotation or a translation, and do so with sub-millimeter accuracy, I definitely never would have believed you without data to back it up.
+And it turned out that it was entirely possible.
+Here are some concrete examples that I pulled out from the set.
+These are all for our main character.
+We have a short scramble animation, which is very fast.
+We have a normal idle slow animation.
+We have a regular walk cycle.
+And of course, a very long cinematic.
+The number of animated tracks ranges from 11% to 16%, so fairly low.
+We have, of course, the raw size, compressed size, yielding us a compression ratio, which is very decent between 20 to 1 and 32 to 1.
+And we can see the cinematic compressing very well with 28 to 1.
+I also extracted the average keyframe size, because I thought it was very telling.
+This is the number of bytes to represent all tracks at a particular point in time.
+So a whole key frame across all tracks.
+And what we can see here is that essentially fits between three and five cache lines.
+So when we're sampling our clip, we need to interpolate between two key frames.
+So we need to read twice that amount of bytes, essentially, to interpolate.
+Of course, there's other things like the range information that you need to read.
+But the track data is very dense and compact.
+It's all linear.
+And it contributes directly to our decompression speed being very, very fast.
+These numbers are on the Xbox One in microseconds.
+And they range between 27 and 33.
+And there's a number of things that we can say about this number here.
+The first is it's about half or twice as fast as the old legacy linear key reduction algorithm.
+And it's also much more predictable and consistent.
+The old algorithm varied a lot in decompression time, depending on how far along in the clip we were.
+Whereas here now, it's always very predictable.
+It also probably could be a little bit lower.
+I did not get to spend as much time on it optimizing as I would have hoped.
+And there remains some low-hanging fruits.
+Another reason why the decompression is very fast is that our compression format for rotations is the same as at the runtime when we're blending our poses.
+And that format is the quaternion logarithm.
+It's essentially the rotation axis multiplied by the rotation angle.
+So three floats.
+So that means, essentially, that there's no conversion to or from quaternion.
+There's no square root to reconstruct anything.
+That keeps it very fast.
+These numbers are also somewhat of a worse case, because they're for the main character, which has more bones, typically ranging between 180 and 200, I believe, for the cinematic.
+Whereas our NPCs have, of course, far fewer bones than this, and will decompress even faster.
+So in conclusion, we've really hit a sweet spot with the technique.
+It's very fast to decompress, and it would be hard to make it significantly faster.
+It's also reasonably compact, so much so that we decided to use it across the board and supersede all the legacy stuff.
+And we did not even need to resort to streaming, because the memory footprint was good enough at that time.
+And it's also very high accuracy and tunable, which makes it future-proof.
+If the number of bones increases, if the data increases in complexity, the algorithm will adapt very well.
+It's also very versatile.
+It works out right out of the box, regardless of the animation, the rig, or however the data looks, if it's noisy or not noisy.
+It adapts very well.
+There's nothing to tweak for the animators.
+It's excessively rare for us to go and mark a bone as high accuracy.
+And when we do, we typically do on the rig.
+And then it just works everywhere else.
+And it's good enough that we don't need any more fallback compression algorithm for when it messes up, because it always meets our accuracy requirements.
+So one algorithm.
+for all our animations. And of course, it's bleedingly simple. It took twenty to twenty-five days to implement, and there's so little code and it's so easy to comprehend that there's been no maintenance on it. Only a single bug surfaced in the first month, and it's been in use for over a year now. And this makes it very easy to build on and improve, and I'm sure you can think of many ways that this could be improved on.
+And that's it. We reached the questions. You're free to go on my blog. I discuss all of these techniques. And I'll be posting the content of the presentation in deeper detail as well in due time. And if we exceed the time for the questions, I'll be at room 3022 at the end of the hall.
+Hi, great talk.
+What was the workflow for animators?
+So you'd create an animation clip, then you'd have to go through this algorithm.
+How did that work out?
+Right, so before, animation clips would be imported into some animation set for a particular character.
+And typically, it would use the default algorithm with the default settings.
+And then if in game they saw that the accuracy was not as good as they would like, they would go and change the compression settings as needed and typically fall back on the lesser compression algorithm.
+But now with the new algorithm, there's nothing that's exposed for the animator to tweak.
+We hardcoded the threshold to keep it simple.
+But in truth, it might be a bit overly conservative.
+So the compression was already part of their workflow?
+Yes, absolutely.
+It was always present for the last 20 years.
+It was just old.
+Thanks.
+Hi.
+You say you store the quaternion logarithms?
+Yes.
+And that avoids a square root.
+But if you need the quaternion, you'd need a cosine, right?
+Is that?
+Yes.
+Internally, when we're blending our poses, we use quaternions logarithms during the blending process.
+So we only ever convert to quaternions at the very end once we have the final blended pose.
+We convert it to quaternions and matrices, and then we work with that for skinning.
+OK, I was just curious about, yeah.
+So we use quaternions throughout, so I was.
+Yeah, it was a very unusual.
+choice. It was the only engine I ever saw using quaternion logarithms for blending.
+But it remains a very sensible choice for the compression format because it's three floats as opposed to four for quaternion. And it may not be the best representation, but it's definitely legit.
+Q I think you touched on this a little bit, but did you notice any artifacting with going between any any additive animations being at a different compression rate than the animation that they were being applied to?
+The, well, with a tenth of a millimeter, it was never very visible. The only instances where we saw artifacts were with very, very large props, where the vertices were much, much further away than our one meter threshold allowed. And in those instances, because the actual value of the vertex distance was not exposed, only the boolean for default or high precision, we added intermediary bones that are never animated just so that the final bone that we're skinned on is actually closer to our threshold and that was good enough for us. All these bones, by virtue of being never animated, they compress trivially.
+So you saw it in your attachments, not in your blending.
+Yeah.
+Hi, excellent talk.
+Regarding the measuring accuracy, you said you used a mesh vertex to join data.
+I was just wondering, would the curvature of the track would be a better heuristic to choose a bit rate?
+I'm sorry, can you repeat?
+What would be a better heuristic?
+The curvature of the track, because it kind of tells you the acceleration of the value.
+would that be a better heuristic?
+Right, so you're wondering if using basically the velocity would be a better measure.
+To store the precision better.
+Right.
+It's possible. You could definitely factor it in into the metric function.
+Okay.
+The metric function you can make arbitrarily complicated.
+And you could definitely use this, for example, with blend shape animated coefficients, but then the data is not hierarchical anymore. You would have a different error metric.
+But you didn't try that.
+No, we haven't tried that.
+I went straight to this because it was somewhat close to what Unreal 4 uses, for example.
+But I generalized it with virtual vertices over every bone and not just the extremities.
+Cool.
+Thank you.
+Hi.
+What was the worst case steps in terms of hierarchy of the bones of the animation that you compressed?
+That's a good question.
+I think for most characters, it doesn't really go...
+Most of our characters are humanoids, so the depth is maybe five or six.
+We did have some animals, though.
+I believe we had some sort of large predatory cat, feline, which obviously had much more bones for the tail.
+and the paws and the spine was also a bit longer.
+And that particular character is really what caused the most issues and prompted the whole discussion over the compression artifacts in the first place.
+Okay, great.
+Because we had a case where the character actually carried a chain or something then.
+That was a nightmare.
+So we had to actually flat the sinks out in terms of skeleton.
+Yeah. That's why an object space error metric is very important, because that way, regardless of how deep the chain is, you always have the true measure of the error that's introduced.
+But that sounds like it will start out maxed out from the beginning, so yeah, probably wasn't effective. Thank you.
+All right.
+So I believe that's, yeah, almost all the time we have.
+All right, thank you.

@@ -1,0 +1,446 @@
+Hi, I'm Josh Menke.
+Welcome to my talk on machine learning for optimal matchmaking.
+Now, I've been working in matchmaking for over 16 years at this point, and I actually do have a background in machine learning, but I've never actually seen the two combined.
+I've used machine learning to figure out player skills, but that's just a number that goes into matchmaking.
+I've never actually used machine learning to do the matchmaking itself.
+And in this case, I'm not actually the creator of what I'll be talking about today.
+I'm a consumer of it, a client.
+The person who actually did all the work and the research and came up with this really nice method, his name is Tom Minka, and he is a researcher at Microsoft Research.
+I work for 343 Industries on Halo, and I'm one of the clients of this work, along with Ryan Clevin, who is...
+worked on Gears of War at the Coalition.
+We both had interest in improving matchmaking through machine learning.
+And I will say in my over 16 years of matchmaking, this is probably the biggest leap forward I've seen in terms of how you do matchmaking.
+So I hope you enjoy it.
+I think it's great.
+And let's get on with the talk.
+So let's first explain what type of matchmaking we're actually talking about.
+Matchmaking is the way that players in competitive multiplayer games find other players to compete against and play with.
+And so the way this works is you have a group of players who wants to play a match, and these players could be submitting a request to matchmake from all over the world, not necessarily together, but they want to match. And so they send some information to a matchmaker, something about their skill, their location, other information that could be useful. Don't worry too much about that yet.
+And then that information is then used by the matchmaker to place these players into matches and into teams to play against each other.
+That's the type of matchmaking that we'll be working with today and talking about how to improve.
+And since we're talking about using machine learning, we should probably define that as well.
+So for this talk, a simple definition we can use of machine learning is an algorithm that tunes itself using data rather than being tuned by hand.
+Now, we may be asking, how do we put these together?
+Well, matchmaking algorithms are traditionally tuned by hand.
+And what we're going to suggest is we can use machine learning to tune our matchmaking algorithms automatically instead from the data.
+So let's talk first about how matchmaking is done today.
+So the state of the art matchmaking today is pretty much like this.
+You put the players go in, the matchmaker kind of hopes that it can make the best possible match out of the players and then it waits and eventually it settles for something worse.
+And that goes across whatever you're matchmaking on.
+But for example, for skill, the matchmaker sees a player and it hopes to find the same skilled player for that player to match with.
+And if it can't, it'll wait and eventually it settles for an imbalanced match.
+And that's basically how matchmaking has worked for a pretty long time, when we're talking about automated matchmaking.
+And this is kind of how it goes, again, just in review, how it works over time.
+You have our matchmaker, and a player comes and says, hey, I'd like to play.
+And then he waits, because there's no one else to matchmake with him yet.
+Then another player comes along, and the matchmaker says, well, these two aren't quite a good match.
+I'll wait a little bit longer, because there could be something better come along.
+Player three comes along and it says, well, player three's still not great, but player one's been waiting for a while and it's better than matching against player two.
+So I guess we'll create that match.
+Player one and three, they'll play together.
+And then player four comes along and it's like, oh, player four would have been the perfect match with player one.
+Oh, well, too late now.
+I guess four will get to go play with player two and we'll just settle for it.
+Now you notice what I mentioned, that it could say to itself, oh, player four would have been perfect.
+And that's because if the matchmaker knew what was coming, it could create optimal matches.
+It could have waited for player four.
+It would have known, oh wait, player four is gonna come.
+I know it's gonna, I know player four is coming.
+And so I'll wait, and then when player four comes, I'll give player one a better match than I have been giving him.
+And so if matchmakers knew the whole future, then you could solve matchmaking just with combinatorial optimization over the known future.
+So the idea here, the key point for this presentation for how this method works is we'll use machine learning to predict what's coming. And then because we know what's coming, we can just use optimization methods to create these matches. But before we get to anything too fancy, let's start with how conventional matchmakers work today, and then use that as a jumping off point to see how we can improve them and where the machine learning comes in.
+So when we first create a matchmaker today, we generally start by setting up a set of rules for the matchmaker to use to create matches.
+And here I've given the example of the types of rules that we need.
+First, we definitely need to define what a match looks like. So in this case, we need to let the matchmaker know that, hey, we need eight players and we need them as two teams of four. Then often you have some kind of Expansion over latency, where you say, hey, we really want the latency between the players and the servers are playing on to be no more than 50 milliseconds, but as the players wait, we'll increase that tolerance to allow up to 200 milliseconds.
+You also tend to do a similar thing with the skill gap.
+It starts small and grows over time.
+You also have some bookkeeping type of variables to match on, like the build versions need to match.
+The players need to be playing the same game.
+The game needs to be able to talk to the server.
+And playlists must match, which in Halo, we use playlists to identify what players are asking to play.
+Players can only play with each other on game modes that they both want to play together.
+So you have some simple values like that.
+So you have this set of rules that tells the matchmaker, these things need to match up for our players.
+For fun, here's sort of an example of what that looks like in like JSON.
+The highlighted areas show kind of how we would set up an expansion rule where we're saying, hey, you know, we want them to have, start off at a difference of 0.2 in skill in this case, but you can increase that over time by a certain amount up to a certain point.
+And don't get too hung up on that, but that's kind of how that works.
+This is how we're setting up rules.
+The key thing to notice here is that a rule is generally a set of numbers.
+And that's where later on, to give a little bit of a hint, we're optimizing over a set of numbers, which there's a lot of pretty straightforward ways to optimize over numbers if you know what to look for.
+So again, the matchmaker has this set of rules and over time players are coming in and it's looking at those rules and using them to set up those matches.
+And an actual request from a player will look something like this.
+The player is sending over a creation time because the matchmaker needs to keep track of how long has the player waited.
+It's sending over an ID of the player so it knows who is who.
+It tells us how good the player is, something about their location, and maybe in the form of a latency table.
+I give the example here that if a player's favorite data center is East US, then you could also just say that they are an East US player rather than keeping all of the ping information.
+It just depends on what your goals are.
+And like I said, again, the player's gonna indicate their playlist ID, what they actually want to play, and they're gonna have some information about their build version, other more bookkeeping type items.
+And so the matchmaker compares requests of this nature between different players.
+It checks each rule that it has and decides whether or not Bob can match Alice.
+So for example, it checks, hey, is the skill gap between these two less than 10?
+In this case, it's five, Alice is 32, Bob is 27.
+So they can match, that's okay.
+And if all the rules pass, then two players, two teams, whatever have you, are able to match and play together.
+Now, there's some issues with this approach, though, as you'll notice.
+First, these rules apply globally to all players in the world that are matchmaking, which means the same thresholds, the same gaps that are allowed are the same everywhere.
+And this can be an issue because it may be that if I'm in the UK and I have to play against a US player, I may want a tighter skill gap in that situation than I would be willing to accept if I were to play locally.
+I might be okay sacrificing a bit of fairness if my latency, if my connection to the server is better.
+So that creates a bit of an issue already.
+And also, these rules tend to be static.
+They tend to be the same whether you are in a time of high population traffic or low population traffic.
+And what that means is during off-peak hours, the players will always wait for your rules to expand if you're using rules of that type that expand.
+If your rules are saying.
+look for a good match, but then wait for a while and accept a bad match, then you are building in wait time that is unnecessary in your off-peak hours because those better matches, they're just not ever going to happen. So why are you making your players wait for them? And that's a general point of this talk, is if your matchmaker was a bit smarter, it would never make your players wait for matches that it knew were not going to happen.
+So if your only takeaway that you take back to your game is hey let's measure some real-time statistics on our population and on our ticket rates and then don't expand and so just change our rules real time so that when the pop goes down they are immediately start off pre-expanded you will already have a nice improvement for your players in terms of wait time at least. So static rules are inflexible causes some problems.
+And there's some consequences that all of these kind of come together to cause, in terms of both you're making players wait, yet you're not dealing with the regional versus global differences between them.
+And here's kind of what happens when you do that.
+So, before I get into that, let me define a term I'm gonna show to show you what happens because of this.
+And that term is predictability.
+Predictability is a measure we use to tell us how often the better team wins.
+And so it's sort of a measure of unfairness.
+So if it was 50%, that would mean that this match is unpredictable between the two teams and so because it's a perfectly fair match, it's close to a draw.
+But if it's like 90%, that means the better team is winning nine out of 10 times, and it's just not as fair.
+So I will be referencing predictability as a measure of fairness throughout the talk.
+And that's what that means.
+Can the worst team have a shot at winning that match?
+So let's look at some graphs again to show the consequences of using this conventional matchmaking.
+So on the left, what I'm showing here in the first graph is how many players are looking for a match.
+And you'll notice there's a pretty wide swing between the bottom and the top here.
+And that wide swing is what leads to some of these problems that we've talked about.
+And that first one is here is the wait time.
+That during high population times, players are waiting for about 20 seconds for a match.
+But that goes up to close to 60, 70, 80 seconds of wait time.
+So their wait time is increasing a lot because of that shift in population.
+In addition, you see the same type of effect on other metrics that may be important to you.
+Like on the left here, there's that predictability metric I mentioned.
+Player fairness is going from being somewhat fair at about 70% chance for the best team to win, all the way up to like near 100% chance they will win every time.
+But this is a pretty big change.
+over time in consistency of the match fairness.
+And you see a similar issue with latency, that players during the good population times of the day, high traffic, they're having very, very good latency.
+This is excess latency, meaning over what you would get on, compared to what your best you could have, in which case players are on average going from around 10, 12 latency, all the way up to close to 100 milliseconds of latency as the day changes.
+Now with this graph, I'm trying to illustrate an even worse aspect of having these static rules for matchmaking.
+What this graph shows is the tradeoff between wait time, which is on the x-axis, and predictability on the y-axis.
+You want that predictability to be close to 50%.
+You want it to be as low as you can go.
+The optimal point of this graph would be the bottom left corner.
+And along this curve, you will see what your options are for that tradeoff.
+How long do you want to make your players wait to get what predictability you want?
+Now in static rule matchmaking though, you usually pick a predictability and you just deal with whatever the wait time is.
+But this graph shows us that there's sort of an optimal point at that knee of the curve, depending on what's important to you as a designer.
+But ideally, you're not gonna wanna make a player wait, as if you look at this graph, you're making them wait 134 seconds for a match that is 52% predictability, and that's pretty good.
+That means your worst players are having a 48% chance to win.
+You could, but if you were going for 51%, you'd have to more than double their wait time, it looks like here.
+So at that point, is it really reasonable to keep increasing the fairness, where the amount of fairness you're gonna get out of a long wait time isn't worth it anymore.
+It's just going up too high.
+Now, that tends to be a problem with the static rule.
+It's never gonna capture what this graph looks like because this graph changes.
+throughout the day. There's going to be a different good point to pick depending on what time of day it is. If it's a low traffic part of the day, you're going to want to wait much less. Waiting a long time is not going to buy you very much in terms of how good your match is.
+So this just shows another kind of trade-off between just fairness and wait time that's important to matchmaking.
+So again, let's review the consequences of choosing the current conventional way that we matchmake. So conventional matchmaking, what we have there is a we ignore the real-timing incoming request rate at a given time of day.
+We don't take into account that there's a lot more people looking for matches right now than usual or vice versa. We also would ignore the skilled distribution at that time of day. Like we don't look at are there good players around right now and we don't look at regional distribution infos. Maybe the population traffic is low globally but it's high in say the EU at which point we would want EU players to be able to have a different matchmaking preference.
+And so this results in either long wait times as players wait for rules to expand and for it to learn that as the system tries to account for the fact that population traffic has changed, or we have to deal with it and accept matches that we know are bad in order to have faster wait times, neither of which are really that great.
+So, and why would we give players an extra long match, an extra long wait time followed by?
+just as bad a match. It's like the worst of both worlds. They're getting both long waits and bad matches. So we need a more optimal approach to do this. And this is where we come into the approach that we decided to look at. And before we talk about optimal, we have to define what is optimal. And for us, in order to define that, we came up with a utility function. So we can actually put a number on optimal so our matchmaker could optimize over that value.
+In addition, this approach uses real-time statistics.
+We look at both the arrival rate of players and their skill distribution, and we take into account that by region.
+So we know how many players in each region are coming in for matches, and we know what their skill distribution is at any time of the day.
+Then we use machine learning in order to predict what's going to happen in the future, so that we can then use an optimizer to optimize over those future matches that we predict will happen.
+And so let's define again what optimal is, because we have a utility function that gives us a number that we put on optimal.
+And then to do this, we just weight a number of metrics we feel are important, or we let our designers weight them.
+And the metrics we chose for our approach were wait time.
+We assume that players don't want to wait forever.
+We assume skill gap is important, and we represent that as predictability, as I explained earlier.
+We also have something called equal win rate, which is basically do bad players win just as much as good players?
+And is that important to you or can you have?
+Decent skill gaps, but it's always in the favor of the of the good players Is that important or not and of course latency how important is it that players have good ping on the service that they play on?
+And so what this method does, which we call true match, is it adapts in real time to optimize those metrics and matches.
+So again, it is using real-time statistics, predicting what's coming, and then just optimizing over our utility function to give the type of matches that our designers have told us are important.
+So before going into any more details, let's look at a high-level comparison between our proposed changes and conventional matchmaking.
+So here's some of the important aspects we want to call out.
+First, tuning.
+Rather than tuning the values of your matchmaker by hand, TrueMatch will do for you real time throughout the day and automatically, you don't have to do those hand tuning.
+And this means that instead of being able to only tune once a month or whenever players complain, you just let TrueMatch do the tuning for you all the time.
+And in addition, an important aspect of what you can do with TrueMatch is that instead of your rules applying only globally to everybody, TrueMatch can customize those rules to apply to players and regions specifically.
+So every region and every skill bucket has its own set of rules to help it optimize its own matchmaking.
+And in addition, this allows us to do predictions at a region and a skill level.
+So we can tell a player how long they will wait, and that wait time is customized by that player's region, where they're at, and what their skill level is, which is great for players.
+It also means that because we have these predictions, if a prediction doesn't look like what actually happens, and this happens consistently, that we can do some form of automatic alerting.
+We can have the system let us know, hey, there's something wrong going on.
+TrueMatch isn't able to predict correctly that something's going on that's unexpected.
+Right now, those types of things are a lot more difficult to catch in standard conventional matchmaking.
+When matchmaking is not working out the way you think it should, you often don't find out about it until players start complaining.
+So it gives us some nice.
+automated monitoring and alerting.
+So in addition, right now, this system, which we call TrueMatch, has launched with Gears of War 5, and in Halo 5, we've switched over to it.
+And there's some potential here to make it a standard service that third-party folks can use as well.
+So, let's get back to talking about our utility function and re-review that.
+So we have this, what we call, unified objective function.
+Every match is going to have a wait time, it's going to have a skill gap, it's going to have all the players' latencies from within the match, and we can measure win rates over sections of our population.
+That can all go into a single value that represents the utility of our system of a match, of a certain amount of time of day, of a region, whatever we would like that utility to be.
+And for those that like equations versus looking at graphs, this is kind of what our utility equation looks like.
+It's a weighted sum over these items that we think are important.
+Now, something that we tend to do to make it easy for designers to use, we set the wait, wait, on wait time to be just one.
+And what that means is that all of the other weights represent how long you would wait to have, one more better of each of those.
+So for example, if you set W3 for latency, if you set that to 10, you're willing to wait 10 more seconds for one millisecond better of latency.
+And that makes it easier for our designers to trade off how important each of these items are.
+They can trade them off directly on time.
+1% more predictability is one second more of wait time.
+That's what we tell, that's what we can put into our utility, which is very nice.
+And there's some nice ways we can use these utility functions.
+We don't have to use them at the global level.
+We could actually put a utility function on every game title and even drill down to every player.
+They can each have their own utility function to tell the matchmaker what's important to them.
+They also are really nice to use to evaluate any change you make to matchmaking, because if you already know what is important to you, then changing other aspects outside of that will change the utility, and you can then see if that utility is still what you wanted it to be, if you're still meeting the goals. Now, if you have some already existing thresholds and gaps that you're using in your matchmaker, we have a few ways we've used that I won't go too much into detail on right now for time, but it's not difficult to reverse engineer those values to what weights they would want to be in your utility function. And so now let's step back at a high level again and look at how the TrueMatch algorithm actually works, what its sort of path is that it takes, what the actual steps it goes through. So first it's going to count the requests it's seeing by type.
+So on regular intervals, TrueMatch measures how many players are we seeing in each region in every different skill bucket that's important to us.
+And that lets TrueMatch have a good idea of what type of players are coming in, what does the population look like right now.
+That lets us predict what is going to come soon.
+And so then we have an optimizer, which then chooses the best rules, given what we expect from that population count.
+to create the best matches, to create the best utility, because it now knows what's coming. And after we've chosen those rules, it then matchmakes, and players play matches, and they see what happens, and then after that, we measure the results. TrueMatch will look at, okay, I made these types of matches. Did they match what I'd hoped would happen with these players? Did they get the matches I wanted them to have?
+And did the population behave how I expected?
+And using those measurements, TrueMatch then updates itself.
+It updates the way that it understands how to connect those counts it's getting with what actually is going to happen when we match make.
+And after it's updated itself to be more accurate for that time of day, it then goes back and recounts again to see what population looks like.
+And we keep going on this cycle.
+A typical cycle time could be about 15 minutes where it is constantly remeasuring the population, changing the matchmaking rules themselves, and also improving its own ability to do the matchmaking, to do those estimates, to create those rules.
+So we'll take some time and go into these sections a little more in detail.
+So let's talk about the components of TrueMatch.
+I talked about counting.
+So the first component we have here is the population tracker.
+That's kind of where this counting happens.
+The player requests for matchmaking go into the population tracker and it tracks how many players are coming in of each different type.
+It then creates a population model, which is just a simpler version of all the requests that are coming in to explain to the TrueMatch system what it expects to happen, what the population currently looks like, sorry, not as much what's gonna happen, but what the population looks like right now.
+Then we have a little system called the metric predictor.
+Its job is to take the current model of the population and use that to predict what would happen given the matchmaking rules.
+So there's already some rules set up, there's some default rules that are made at initialization that exist. The metric predictor will take the rules state as it is right now.
+and take the population model, and then it will predict, this is where some of that machine learning comes in, it'll predict, okay, if this is the population, and if these are your current matchmaking rules, then this is what I expect to happen if you matchmake that way.
+So it then tells the optimizer, this is the expected utility of the matches that will be made because of the rules that you gave me.
+This lets the optimizer decide whether it likes that expected utility, and if not, it can change itself before any matches actually have been made.
+It can change itself based on the predicted utility and create better rules for matchmaking before the players use them. And it could go through a few cycles of this, improving the rules before they're actually applied.
+So again, we model the population, we predict based on the rules and that model, what's going to happen with those rules, and then we tell the optimizer to do a better job so we can do that.
+So let's dig in a little bit onto how that population tracking actually works.
+Just a little bit. The population tracker needs to take a stream of requests coming in from the players and create a population model to inform our metric predictor.
+And the way we do that is we assume that the population isn't changing too fast, that the population rate isn't gonna change too much right now.
+And that actually tends to be reasonable.
+And then we need to be able to return to the metric predictor what we can about what the population looks like right now.
+And there's a few ways to do that.
+A simple way would just be to use a circular buffer where you just hold on to the last, say, 1,000 requests.
+And then you use those 1,000 requests to calculate on the fly the statistics of the players that have come in and hand off, just basically to say, okay, in the last 1,000 matches, this percent came from EU and this is what the skill distribution of those players were.
+That's kind of what the metric predictor needs to know about.
+maybe a more compact way would it be to be something more like a histogram, where you're tracking the counts of the number of players you've seen within a certain bucket of skill and within the different buckets of regions. And that's more in practice what we do, so that we can in theory have millions of players being represented in just a compact histogram. And to go into a little more detail onto what this ends up giving us is we stored those request rates and given a request type, we can then return the rate of that type at any given time.
+And by type, I mean I'm combining what skill bucket were you in and what region bucket were you in.
+And so the example here at the bottom is what it might look like.
+I'm a Brazilian player, in Brazil, we are seeing 0.01 requests per second, for example, for players between skills 0.3 and 0.4.
+So we've got a skill bucket.
+and we have a region, and for all the regions and all the skill buckets, a population model can tell the metric predictor what those rates look like.
+So it knows what the population looks like real time.
+And again, customized by skill and region.
+And so what the metric predictor can do with that is if it knows the population model, and it also knows the rules that the matchmaker is currently using, it can predict using those rules, what kind of matchmaking is going to happen.
+It'll predict for every region and for every skill bucket, the wait time for those players, what their pings are going to be, how fair the matches are going to be. And it makes those predictions for every single match. And then eventually it gets back what actually happened.
+It finds out per ticket, how long did this player actually wait? What was his real latency?
+What was the fairness of that match?
+And because it gets those actual metrics back, the metric predictor can then use machine learning to update its own internal model of how the population and the rules connects to those predicted metrics.
+And because it becomes more accurate, it's feeding that information later into the optimizers, which can then optimize more accurately.
+And we'll go a little bit more into more details about that, because that metric predictor has what are called free parameters inside of it that are tuned with that feedback.
+So let's go a little bit more in.
+So yeah, let's go more into that, how that metric predictor works.
+So for each of those metrics, for latency, for fairness, for wait time, each of those has its own formula.
+You can think of that formula as a mini little machine learning model.
+Each of those formulas, because it's like a little machine learning model, has some parameters inside it that are updated and adapted over time, given the reality of what happened, so they can be more and more accurate about its predictions. And that's important. And so maybe we'll step into a little bit of a quick example of how one of our formulas work.
+And that is the wait time formula.
+This is pretty important because this is how the model knows what the wait time is going to be.
+It's going to predict on average how long players are going to wait.
+And that prediction is important to the optimizer because it's going to update the rules based on the predictions about the wait time.
+And so the optimizer can look at this prediction and say, oh, if I make the rules this way, players are going to wait too long.
+So let me adjust the rules.
+And then I will ask the metric predictor again, okay, what about this set of rules?
+How long will they wait with this set?
+And the metric predictor can then give back a prediction and the optimizer can then say, okay, that's fine, I don't need to change anymore.
+So let's talk about what just one of those formulas look like that I call sort of a mini machine learning model.
+So this version on this slide is not the adaptable adaptive sort of machine learning version.
+This is just a static approximation to what the wait time will be given.
+what it knows about how many requests are likely to be able to match with Player T.
+So I got this for every player who's Player T, there's some set of matches that he can match with. Given that, this formula, don't worry too much about the details of this formula, it's not as important just to know that there is one. You could reverse engineer this if you want, don't do it in your head right now, but this will return a wait time for 1v1 matches.
+So that's the first problem, right?
+Our matches are often 4v4.
+So in order to make this better without having to manually figure out all the different aspects of matchmaking and population dynamics that will modify this equation, we just add some parameters.
+We add a scale, which is the C, and we add a shift, which is B.
+And both of these values are just learned from the data.
+So it just learns based on the type of data it's getting back what it should actually, how it should modify slightly this formula to be more accurate in its predictions.
+And so for a little bit of intuition here, that C value goes up depending on how many players are in each match.
+So if it was just 1v1, then the value is 1.
+But as we add more players, we are now calculating how long do I need to wait for one more player and then another player.
+So that just scales up correctly.
+In addition, the buffering time, that gets more to the point that most conventional matchmakers, and we did build this on top of a conventional matchmaker, will allow some amount of time to gather the tickets together. And that is a sort of a buffer, fluff time that needs to be worked in to the formula to account for. And so that it will learn how long that amount of time is for your particular matchmaking.
+population and matchmaker. So this is just an example of the fact that it will improve and adapt the way it even just predicts wait time all throughout the day appropriately and without having to be manually tuned. And again, there's a formula just like this for every other aspect of the metric predictor.
+And we don't have time to go into each of them, but there's a similar one so that it is even, it's able to refine and become more and more accurate on how it predicts what's gonna happen to fairness when we tweak a rule, what's gonna happen to latency when the rule's changed.
+So that is an extremely valuable input for our optimizer, which we will get to.
+So the optimizer.
+So I keep talking about this optimizer that makes rules somehow.
+Now, if you remember, if you think back, I showed you sort of an example of what our rules look like at the very beginning.
+And there are a bunch of numbers, right?
+It's usually some variable, like skill gap, some attribute, like the skill gap, and a value that says the skill gap can't be more than some number.
+So the rules in our matchmaker, we don't actually have the matchmaker write out a whole bunch of random rules that it comes up with.
+We actually pick the form of the rules.
+We still have some attribute and a number that it's worked on by that attribute.
+The difference here is that instead of us manually choosing what that number should be, we let the optimizer figure out what that number should be. It picks that number value.
+So in other words, the optimizer is just searching over this vector of numbers, or each number is just a number that goes into one of our rules. And there's a lot of very straightforward off-the-shelf ways to do that. You could use gradient ascent, you can use branch and bound. But at the end of the day, at this point, You just have a vector of numbers that you can tweak, your algorithm can tweak and move them up and down.
+And you have a utility function, which is coming now from your metric predictor.
+You're trusting that your metric predictor is telling you how those rules are going to affect the matches.
+You're trusting that it is accurate about simulating in a matter of sense, what type of matchmaking happens given your rules.
+So now you just use optimization.
+You give it a set of numbers and you tweak those numbers, and then you ask your metric predictor what the utility was, and then you can keep going and refining those different numbers in your rules until you have what you hope is an optimal set of rules.
+So again, our rules, let's talk again about what these rules look like.
+So here's a fairly classic rule, it's a starting point.
+So skill gap, this is a rule that says, hey, you know what?
+The skill gap between any two players has to be less than some parameter.
+That's our number, that's what that red parameter, that's what's going to be optimized.
+Now the question is, is this a good rule to use?
+Is this the type of rule we should be using?
+This is a very conventional, classical way to do this that most of you out there are probably using.
+And when you do this, you end up with that graph that we talked about again.
+This graph is what is going to be optimized over.
+This is the predictability represents the skill gap, and then you have the wait time on the bottom.
+So you want to pick what the optimizer is going to do is pick the point on this blue line that gives the best utility. Now if you decide that both predictability and wait time are equally important that will result in you picking something on the knee of this curve and that's the line you're optimizing over. So an important thing to think about is that the form of rule you choose decides what this line looks like.
+And so you can ask ourselves, are we picking the best form of the rule?
+Is there a better line we could actually get?
+And this line's different, again, every time of day this line changes.
+So at different times of day you're going to re-optimize, but even still, at a given time of day, is this rule creating a good line or could I create an even better line if I changed what the rule looked like?
+And that's the question Microsoft Research asked, of course, because they're brilliant.
+They wanted to ask and make sure they're picking the right line.
+And to do that, they had to change the form of the curve, of the form of that formula first to an equivalent form.
+It's the same, it's just as equivalent, you can still do a raw skill gap like you were before, but they're putting in a form that allows them to search conveniently over all possible curves to optimize on.
+So we're not just optimizing on a curve.
+First, we're gonna optimize over what's the best curve to pick to optimize on.
+So what they did was they did a bunch of math, they wrote a proof, I'll spare you for now on, but they proved you can rewrite this type of rule differently.
+Instead of being just give me, the skill gap needs to be less than some number, you can instead say, no, some function of the skills, the difference in a function of each skill can just always be less than the number one.
+So you don't need to change it, it can always just be one.
+Your rule doesn't need to actually change what the skill gap is.
+You just change that function.
+And I give a little example here.
+Don't get too caught up in it if you don't want to, but basically if you wanted the rule to be the skill gap can't be more than 0.5 between two players, then you basically make that F function just be two times the skill.
+and that'll get you right back by using that form to the skill gap can't be more than 0.5.
+Now this is already I wanna point out as a nice improvement because now what this is telling you is you don't actually have to change the rule in your matchmaker.
+The matchmaker itself could have the exact same rule which is just.
+A minus B has to be always less than one.
+What you're changing is what you're putting in for A and B.
+You're changing the player skill that you put in rather than actually changing the matchmaker.
+And so if you can't, again, if you don't have time to fully implement TrueMatch, implementing this aspect is very convenient because it makes it easier for you to real-time tune, potentially, what the gap is.
+So instead of actually changing the skill gap that you allow, you just change the skills as they go in.
+And I think that's a pretty cool way to do it.
+So, they used this form that I spoke about.
+They used that form of rule to search over all possible rules to find the best rule they should be using so that you can search along the best curve.
+And they did it, they found the best curve.
+But we don't actually use the one they found in practice because they found one that's almost as good but really simple to use.
+Well, relatively simple.
+Let's go over what they found that is easy to use.
+And again, what I mean here is...
+Well, I'll show in a second, we'll review the curves again.
+But first, let me tell you what we found.
+We found that instead of saying, hey, the skill gap can't be any more than some number, we've mapped the skills first.
+And in this case, the mapping we use is we take the player's skill and we find what percentile is that skill in?
+Is this player a 97 percentile player or is he an 80 percentile?
+What is the percentile?
+So we're no longer using the raw skill, but we're using a percentile of the skill.
+And then we scale that percentile, that scaling value, that is the parameter that actually gets changed, that actually gets optimized over by true match.
+And what that does is whatever scale you put in there, it represents how wide of a percentile you're willing to match make over.
+Instead of matchmaking on the raw gap, you're saying, instead of saying this player could match between.
+1.5 and 2.5, you're saying no, this player can match between the 80th percentile and the 82nd percentile. So the gap is always a percent of the population, which means that the gap is the same for everybody. All players get access to all the same amount of other players.
+And because every player sees the same number of players they can match with, wait time is constant across everyone.
+And that's why in the slide I say map the skills so the wait time is constant.
+Everyone has the same wait time.
+And so let me go through an example to illustrate it because it's a little tricky of a concept.
+So let's go through this example.
+And remember, a gap of one is okay because we don't actually change the gap that's required.
+So our rule will always allow if the gap is one.
+and we're gonna pick a scale of 10, which should mean that players can match between 10% of the population, give or plus or minus.
+So let's kind of look at this.
+So we have some players, A, B, and C.
+Now their skills are as written, .5, 1.0, and 1.5.
+So these are above average players.
+Let's assume that the middle is about zero.
+Now, if we just stopped here and used our rule, did no other transformation, Well, remember a skill gap of one is okay.
+So player A and C, okay, maybe they're right on the border, they can match, but A can match, B and B can match C.
+That's the kind of skill gap approach.
+But now let's map them onto percentiles.
+These are the percentiles that would be associated with these players if those skill values were from a normal distribution, a standard normal.
+So here's those percentiles.
+A would be in the 69th percentile.
+C is a good player in the top 93rd.
+He's a 93rd percentile, so top 7% player.
+Now again, if we're allowing a gap of 1, and we do nothing else but just map them to percentiles, these players could all match each other because they're all within 1. But remember, the scale is 10. So we would multiply each of these by 10 to get what is actually the final scaled skill used for comparison. And again, we've said that a distance of 1 is okay. So in this case, A cannot match B because they are not within 1 of each other. However, B can match C.
+So unlike our raw skill approach, this is changed thing where changed things that A who is closer to the middle of the distribution, A is gonna be a little more finicky in who they will match skill wise because the population is denser there.
+Whereas B, and especially C as they move out farther along the population density, they have a wider skill, raw skill gap, but they still see the same amount of population just over a wider gap.
+And again, this allows us to ensure that the wait time is the same for all of our players.
+Now you may ask, okay, so you've told me, what, like, why are we doing all this?
+So let's get back to that.
+We did this because we're trying to ask ourselves what type of rules should TrueMatch be optimizing over?
+And we wanted to search the space of all possible rules, which Microsoft Research did for us because they're very smart, and find what rules should we use.
+and I submitted that we use a rule that does this type of transformation. And the question is, is it really that good? And here is a simulation we did to show how good it is. So given the same type of data, the yellow line is our original classic standard skill gap type curve. So if we were to use the original curve we picked, the original rule of just has to be smaller than some skill gap, we're stuck with that yellow curve. That's the best we can do is to search along that curve and find the optimal point for our utility. But like I said earlier, you want to be in the bottom left corner, that's the best you can be. That blue curve, that's what you get if you choose that other form of rule, that constant wait time, that scaled percentile type of rule. So we have found a more optimal rule space to search this way as well. So not only do we optimize over the best set of rules to pick, we're not only optimizing each rule's setting, we are optimizing the form of the rule itself.
+And so this is a great type of rule to use.
+So another takeaway you could pull from this, even if you can't implement full TrueMatch, is instead of matchmaking on the skill gap, matchmake on the percentile gap.
+Matchmake so that players can matchmake, say, within one or two percentile of where they are at on the skill curve.
+So again, at the end of the day, this is what we ended up with for our rules.
+They compare skill percentiles instead of skills, and everyone sees the same size pool of players to match with, and we can scale those percentiles as the population changes.
+During our high traffic times, we can say you match within 1% of the population.
+During low traffic, that can be dialed down to within 10%.
+And again, it's like doubly optimal, right?
+We've got the optimal curve, and we find the optimal point on the optimal curve.
+Now, what about regions? How does this work?
+Because we've talked a little bit about regions.
+Well, basically the way we implement this is that every pair of regions has their own optimized rule.
+So when I am comparing a US player to an EU player, there's a rule just for that comparison, which makes it so that we can optimize over what...
+that gap should be between those players.
+And let me do a little example to walk through what that effectively does.
+So here we go, we have an EU player.
+She is waiting for matchmaking, right?
+Now, if this was conventional matchmaking, she would say timeout after waiting for five minutes because there's just not enough fish in the pool.
+She's fishing, she's waited five minutes, she was not able to find a full match that way, and so she's done.
+And so in the conventional approach, when this would happen, she would say, well, I cannot find a match in the EU, so I will manually choose to allow matching in the US, which she's not as happy about because US matches have worse latency, but she'll deal with it just so she can find a match.
+Now, this is somewhat suboptimal because she just wasted five minutes finding this out.
+Now, here's the true match approach.
+Instead of first trying in one pool and then trying in another pool, she will search both pools at the same time, but with slightly different sized nets. Her net for the EU pool will be larger, meaning that she is willing to accept a larger skill gap than she would accept in the US, just so she can get more players from the EU to play with.
+So she's fishing with a larger net in the EU, and in the US, she will cast a net at the same time that will be smaller, so it's less likely to catch fish from the US pool.
+So basically what she's able to do is represent her personal preferences for where she wants to search by the size of the nets. Now the match will be made as soon as there are a total of say seven fish in both nets. So she could catch some from the U.S. and some from the EU, but in theory she'll still see the same slice of the population as everybody else and be able to match make in a reasonable amount of time with a good trade-off in her preferences.
+So let's look at what happens when you apply TrueMatch to a real-life situation.
+The example we are taking here came from Halo 5 in six-player free-for-all, which is six players who are all playing against each other to see who can win. This is a good choice for us for TrueMatch.
+because this is a playlist that has a very wide request rate over the course of a day.
+The amount of tickets that are coming in at a trough time can be a tenth of what we'll see at our peak times. It is not a crazy popular playlist for us, one of our not as popular ones, so it actually makes it a good example for what happens when you apply TrueMatch.
+So let's see what happens when we use it.
+So what I want to show here, I need to be able to compare it to something so you have some sort of idea of whether it's working right or not. But here we're looking at the actual utility over the course of time that we ran this. The utility from using TrueMatch is that yellow line and you'll notice that over the course of a day it is relatively flat, meaning that yes, it was impacted by the lower population but it did okay.
+Now what the blue line is, is something we call an oracle, because this is what would happen if I did have to choose conventional static rules, but I knew the future.
+So I could pick the very best static rule for the whole day, for just that one day.
+And that's what you see here. You'll see that it was not able to maintain as high of a utility despite perfect knowledge during the lower pop times of day. And that's going to translate to some interesting artifacts in our other metrics that we care about. So let's go look and see where these true match made these trade-offs. So here's the skill gap as represented by predictability.
+You can see here that what happened was that TrueMatch decided to raise the predictability, which is equivalent to raising the allowed skill gap, making matches that are not as fair.
+And so it decided to maintain the utility that it was asked for.
+It would create matches that are less fair so they could still be somewhat timely.
+whereas the static rule decided, or basically doesn't really have as much of a choice because it's more static, but the best static rule we could pick did not do that and for the most part kept that predictability the same. So the matches were more fair on the oracle during those off hours. But we'll see that the trade-off may not have been worth it as we switch to look at what the wait times did.
+So what you see here with the wait time, TrueMatch kept the wait times down to still under five minutes, whereas the Oracle, if we just pick the best static possible rule known ahead of time, is taking players up well past the 10-minute mark into even 15-minute wait times, just to keep a difference of about, what, 10% or so in fairness, which perhaps does not seem to line up with our utility.
+So again, we see the nice benefit of using TrueMatch is that despite wide variances in the amount of players who are available to play, we can keep those metrics more flat.
+So the takeaway from this experiment is we're able to get the same utility as the oracle during our normal population hours, but cut in half relative to the oracle during the off hours.
+This allows us to drop the wait time by 72% compared to using static rules, even if we knew the perfect static rule.
+And yes, we are trading 13% predictability, fairness, for those, we're trading that off instead of waiting an extra 600 seconds or an extra 10 minutes of wait time, which seems fine from the design intent.
+We generally don't ask our players to wait three times as long in order for just 13% more fairness.
+So the takeaway there is TrueMatch is doing what we expected as we asked it for from the design intent.
+So let's go into what some nice takeaways overall from TrueMatch are.
+First of all, because we have a utility function that trades off wait time, This allows our designers to weight the importance of different characteristics of matchmaking directly against how long players will wait to improve each of those different metrics.
+You want a better latency? Well, how long are you willing to wait for one millisecond better ping?
+You want it to be more fair? Okay, how long are you willing to wait for 1%, 3%, or 5% improvement in fairness? We can do all of those directly through the utility function.
+Another really cool aspect of TrueMatch is that because we have that metric predictor, predicting all your metrics, we can tell players individually, customized to that player, how long they are likely to wait for a match.
+We can give nice, customized, personalized, predicted wait times.
+This is something that's sort of been a holy grail for me in my career in matchmaking, to set player expectations on how long they're going to wait and have those be accurate by not only taking into account how much traffic we're seeing right now, but how many people are coming through from your region and how many players are coming through at your skill level so we can set those expectations.
+And we're using real-time statistics in TrueMatch and real-time feedback so that we can create optimal rules and optimize how well we're predicting the effects of those rules all throughout the day in ways that you just can't practically do manually.
+So the machine learning is helping us tune real-time.
+And this results in some nice real-time optimized matches for our players.
+We're trading off the wait time, the skill gaps, the latency, all the things that are important to us real-time based on the time of day.
+Now, I wanted to go through some simple improvements that I've covered somewhat of in this talk just to remind you of things you can do even if you can't implement all of TrueMatch today.
+And one of them is what I talked about with using percentiles for matchmaking instead of matchmaking directly on the raw skill gap.
+And to do this, one way to do it is to just, as often as you can per hour, say three or four times an hour, update your own model of the population.
+Have some way, maybe you're just tracking simply the quantiles across your skill distribution during every time of day.
+Just have an idea what those are.
+And then, and how, what the amount of population you have.
+And then you have to have some kind of mapping that maps player skills to their percentiles.
+If a player skill is 5.2, what percentile is that? That's the 87th percentile or whatever it may be.
+And then, once you have a way of mapping players onto their percentiles, you matchmake on percentile instead of matchmaking on the raw gap.
+And you use your real-time statistics to change the scale based on how much population you have at every given time of day.
+That alone is definitely not as good as full true match, but it will let your players feel like they don't have to wait an extra long time during low traffic times of the day to get what's going to be a bad match anyways.
+So just something to think about if you can't take away everything from TrueMatch today, take away some of these points to use. And that's all I have. Thanks for coming. If you have some questions, you can tweet them at me. You can try to contact me in my Discord. You can use the comments section. I really am enjoying using TrueMatch myself in Halo 5. It has solved a lot of the sort of issues I've had over time in matchmaking, and I hope this has been useful to you as well. Thank you for coming.

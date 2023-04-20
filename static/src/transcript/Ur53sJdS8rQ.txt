@@ -1,0 +1,520 @@
+Hi, and welcome to Zen of Streaming, Building and Loading the Ghost of Tsushima.
+So I'm Adrian Bentley, I'm the coding team lead at Sucker Punch Productions.
+I've been working there 17 years, and I've started on Sly 3, worked all the way through Infamous series, and most recently published Ghost of Tsushima, which is what we're gonna talk about today.
+So first we'll talk about some initial sketching process, which I'm going to call napkin math, and then talking about some of the tools and optimization stuff we relied on, a rendering overview, a deeper dive into our fine-grained streaming system, and a little bit of tips on loading and kind of a conclusion.
+So I also encourage you to check out some other GEC talks I'm going to reference in this presentation.
+There's Bill Rowe's presentation on particle and cloth simulation, used to sort of keep our world pretty lively. Matt P is going to give a presentation about samurai landscapes, the tools and procedural systems we use to build the game.
+Eric W is going to give a presentation about procedural grass, which is a really big part of the mood and the look of the game.
+And then later this year, Jasmine's going to give a presentation at SIGGRAPH on lighting and rendering.
+So here's a video, just for context, to show you what Ghost is like.
+I swore to protect this island with my own life.
+Never once betraying my code.
+day.
+Fun stuff. Alright, so let's talk about the key technology we used starting early. It's napkins. So where do we start? Let's go back to shipping a superhero based game called Second Son in 2014. And we basically built this whole game as a dense urban environment.
+It's our version of Seattle. And with fixed times of day, which we leveraged a bunch, and lots of jumping around and climbing over things and zooming around the city. It's pretty It's pretty different from what we're doing now, but I did a presentation on some engine tech for Second Sun several years ago, and I'll recap a few bits here for context.
+So we had about 100 meter tiles, about 250 of them used to make up the world in Second Sun.
+And there was a lot of proper use, but less overall than you might think for some of the larger stuff like ground and buildings and big, big structures.
+Obviously, the Space Needle is one of those.
+So one of the techniques we use to kind of ship the game reliably is we basically have fixed budgets.
+We have an assembly system that our build tools do where they take small assets and pack them up into what we call packs. And in Infamous, this included textures. It was super simple and it guaranteed we fit in disk and memory and it also allowed artists to make trade-offs and fix problems themselves in the run-up to ship.
+So this worked great.
+Here's a breakdown for the disc for Second Son, which barely fit on a one-layer Blu-ray.
+There's definitely some duplication in there in terms of texture assets, but it mostly was pretty good because we had this core asset pack that we would put stuff in there to reduce duplication.
+to reference everywhere effectively.
+And this took a bit of artist management, but it wasn't too, too bad.
+The tiles were themselves were about 72 megabytes total.
+Most of the time you were running around and only streaming in the smaller chunks of 22 megs and such, and then you'd get the higher res 48 meg chunks of texture, high res textures, when you got to the sort of nearest four of these tiles.
+And we had 16 or so loaded at a time, so.
+But how does that compare to our new game?
+So Tsushima is a very different place.
+It has an expansive organic areas with minimal artificial lighting.
+It has a totally different style, lots of trees, bushes, and long sight lines.
+And what about the size?
+Here's actual Seattle versus Tsushima Island.
+It's clearly bigger, 708 square kilometers versus 214.
+And if you look at, there was concerns that the 708 was just too, too big.
+You get bored riding a horse across it.
+So we got smaller, about 64 square kilometers, still about 20 times seconds sun's area.
+So let's do the math.
+6,400 tiles, 720 megs, 72 megs is 460 gigabytes, which is clearly way too much.
+And if you say half a disc or so, that's about four megs a tile.
+It's really not a lot of space, especially for textures.
+And so we have a bunch of work to do.
+And I mean, it's smaller on disk means that you won't necessarily have to worry about read speeds as much, but it's still a big concern.
+But to figure out how much work, let's look at the density we sketched out.
+We guessed something like 2,500 trees per 100 meter tile, 10,000 maybe medium-sized boulders and other things, bushes, and whatnot, and potentially more small stuff, especially if you're talking about grass tufts or flowers or things like that. So that's one every one to two meters, and if you multiply that out by the current instance sizes we had, it would hit about 12 megabytes per tile, which is clearly more than four, and thus way too big.
+And so here's some early estimates for what we needed to do to make this work for a giant world.
+Some of these are pretty big and obviously and we had a long road ahead of us.
+So basically what this says is that very few of the constraints will actually, we used the last decade, will actually continue to work.
+Basically all of these were no-goes except for the pack aggregation and some of the building structure reuse that we used in Infamous.
+we needed to do tech to match the vision.
+In addition, we also needed to avoid drastically increasing our team size.
+So we had to emphasize scale basically everywhere.
+We did defer some decisions on texture thinking and that multiple cores could potentially solve problems that we had, but I kind of had an inkling that fine-grained texture streaming would be important in the future, if not this project, the next.
+So we'll talk about that, how that went in a little bit.
+So where do we land?
+Effectively, we had a bunch of content, but not a ridiculous amount because we're hyper-focused on construction efficiency and reuse.
+And that lands around 700 gigabytes and half a million files synced for most people.
+Some people would have more if they were working on like facial blending technology or high-res textures for certain domains could have a bunch more space.
+But most of this isn't changing daily.
+And so it wasn't a huge, huge problem.
+Got a little bit harder toward the end of the project, especially with work from home.
+And here's the stats for the final disc.
+Most things grew, especially textures and dialogue.
+Terrain was clearly new, but we basically had compacted so much of the other game data that this was all much smaller than it used to be.
+We ended up fitting comfortably on a two-layer Blu-ray after compression.
+So for memory, we had one gigabyte of texture space to load into, a significantly smaller footprint for streamed meshes, up to 1.6 gigabytes of packs, and the rest went to render targets.
+Slot heaps and other general heaps were the remainder.
+So talking about performance, our frame is structured fairly similar to Second Son.
+We had an extra half a core and extra five low priority job threads.
+And the phases of the game were pretty similar with update and solve and render all sort of sequenced the way they were before. The main changes we did were a lot more threading and a lot more async GPU compute. And that's the big thing that I think helped us a ton.
+So here's an example frame, and this is about as tight as you can get.
+You can see sort of how packed the little blue bars are at the top.
+The main thread and such in the CPU code sort of is running, but then there's also a whole bunch of background stuff you can see at the bottom that are overlapping with the CPU getting interrupted and coming back to fill holes.
+So here's zooming in on the main thread and high priority jobs.
+You'll see AI at the beginning, it's what we call update, solve in the middle where it does animation jobs and physics and such, and then rendering at the end.
+This scene is particularly render-heavy since it's inside of a city with lots of NPCs and combat and such.
+So here's a GPU frame.
+There's a lot of standard stuff here.
+We did a bunch of async compute, which you can see circled at the bottom, and there's a whole bunch of extra deferred passes and optimizations we had done throughout that process.
+And here's some file I O since we're talking about loading.
+Basically, as you run around the game, we're constantly churning texture reads.
+This is a little noisier than it is normally.
+I guess not noisier, but it's, the spaces in between are not going to be quite as big because this is a dev scenario.
+And so file opens are slower, but the actual read speeds are probably slower on the target hardware.
+So there's, this is a similar to what you'd actually see in the game.
+So I'm sure this is a common experience, but we shipped Ghost working from home for the last five months of the process.
+It's pretty rough.
+But during the panic transition, we kind of moved VPN and some other bandwidth hogs to AWS to avoid our office network being a super tight bottleneck.
+And while there was a bunch of difficulties, we benefited from a couple of things.
+So an efficient build system that we have is basically not reliant on distribution.
+It does caching and some other things, which we were able to kind of massage around a bit to work from a home environment better.
+And it also helps that we have a decent idea of where we were taking the game in the finishing process.
+So it worked out okay, but definitely wouldn't want to do it again.
+So building Tsushima, effectively, let's talk about how we got there.
+So one of the things we, the newest things we had to deal with was terrain.
+And so our first strategy was to leverage what we knew and try building larger worlds in Maya.
+We did a bunch of tools work with terrain stamping and procedural placement, and this worked okay initially, but eventually it had performance and reliability problems at the scale that we needed.
+And we also didn't get enough context with buildings and props and trees and in-game lighting and lots of stuff you need if you want it to be texturing or massaging things or moving things around. Um, it's, it's difficult to do if you can't get everything in context.
+So we would switch to the sort of the other direction, which is an in-engine editor, where we would do painting and procedural systems to flush out the world.
+This is similar to a lot of other stuff, but it took a lot of work.
+And maybe somewhat differently, we actually leveraged the GPU really heavily for this work, trying to make it as super responsive as possible.
+So things like, if you'd paint the ground, it would sort of auto regrow the trees around you and stuff.
+It sort of gave you roughly instant feedback, which was pretty useful.
+All the GPU compute stuff and virtual texturing was all aiming for a low memory footprint and low CPU and improved GPU performance as well.
+But also it was intended to provide good support to the procedural tools for placing stuff.
+So you could pretty efficiently fill out records to say, here's where the new trees go.
+And it would work really quickly.
+So if you want to know more about any of these bits, you should go check out Matt P's Samurai Landscapes GDC talk. He'll be talking about all the procedural stuff and a bunch of GPU optimizations and things, including the GPU culling. So let's talk about how we split up the world. Here's an EBUG display without our procedural growth of our 200 meter tiles. And yes, that's JIN in the lower right. And yes, it's quite barren because all the procedural growth is a huge chunk of what we actually have in the world.
+So 200 meter tiles, why that size?
+It produced fewer files and less duplication waste in the, uh, in the sort of the scale that we were looking at.
+And we did end up adding about up to about 2.5 megabytes of terrain related stuff, um, lots of texturing for, for texturing stuff, but also things for metadata, for placing grass and controlling water flow and things like that.
+So here's a picture of our seven level quad tree, which we use to manage the streaming process for this stuff.
+The leaf level you'll see in green there is a three by three grid of tiles that you have at the finest detail level.
+And it gives you about 200 meters guaranteed sight lines for content.
+So the first set of optimizations we went for was the obvious ones.
+We store one copy of the height map and then after we read it in, we make it visible to CPU physics, kind of using it directly rather than trying to construct a BSP or some other crazy structure from it.
+We also forwarded a bunch of this data to AI and sound effects, so grass depth, for example, you want to be able to know for awareness, guys can see you in the grass.
+And one of the other cool things we had done was taking our virtual texture worth of material IDs and forwarding that to the CPU. So you can get a centimeter level or so precision on if you stepped on the ground, hey, is it on in a puddle? Do I need to create a mud splash and have that work? And that was pretty neat. It gave us a lot of really good detail.
+Another thing to keep an eye on, that we had to keep an eye on, I should say, was at 8 kilometers, you do start running into precision problems working in world space.
+We really didn't need to do anything drastic in the end, just lots of little fixes, liberally applying the general maxim of you subtract before you multiply for dealing with inverses of matrices and things like that.
+So one of the techniques we use pretty heavily when trying to optimize is compile time data merging.
+And so effectively you take something that's a big expensive full-fledged object with scriptability and various other things and you make a lower level version of it.
+and you allow that version of it to merge and instance itself in a really compact way.
+So Geometry, for example, normally does this in something like six byte records, but that's per LOD per shader. I'll talk more about how we optimize that later.
+But basically, that instancing process is what allows us to kind of make things really compact.
+And we do this for building VB.
+and sort of renderable occlusions, data structures, and for arrays of cloth, obstacles, parkour splines, breakables, et cetera.
+And so that allows you to do a bunch of interesting stuff there.
+We switched away from some of our partial offline rebakes for impostors and infamous.
+Basically, we had this problem where you'd have the geometry update up to date one place, and then the baked texture would be sort of in a different spot, and they'd get a little bit scrambled. And having that out of sync was really annoying. And so we basically just merge everything right now, just straight up as part of the build system to try and keep everything up to date throughout development.
+Index ranges are one of the techniques we use to help keep overlap low. I mentioned everything's in these big arrays, right? So oftentimes the arrays are small enough that you can refer to a set of things with four bytes, so two byte, two byte, mega max. And to do this, you basically can sort by parent chain, and so that basically puts things in an order where if you refer to a node higher up in the tree of instancing tree, you can say, hey, take all the geometry or all the physics below me and.
+treat that as a min and a max.
+And then you can add remove it when something breaks, for example, and it works pretty well.
+So if you need a subset of content, that's another thing that is kind of optimization for merging.
+Obviously, if you're merging tens of thousands of files for the FAR LODs, for example, you want to memoize the file so you don't like have to reread them millions of times.
+And so, but...
+if you sort of merge everything into one big tree, you'd end up with cases where there was just lots and lots of little bits of content that didn't have anything in them that was far LOD relevant.
+And so we just, it was the overhead built up a lot.
+And so what we changed to do was to filter as you merge.
+And that basically means that you're doing it once instead of 10,000 times kind of thing.
+So that was super effective.
+It brought some of our merging times down from five minutes to 30 seconds in one case.
+And we've brought it down farther since then.
+But.
+That's pretty good.
+So here's an overhead view of some of the far growth with a merged enemy audio map on the right.
+So just an example of the kinds of things we'll merge up to the world level.
+Obviously the camera is not a sort of a view you would normally see in the game.
+And so we didn't really optimize for that.
+The tree, the sort of card based trees are really optimized for sort of long horizontal views, which is primarily what we would have in Ghost.
+So talking about packs, these are our kind of aggregate files, and basically all of the things we load that aren't textures and a couple other types of things are basically this format.
+And so the idea here is you have a header and a table of contents, and those are cached.
+the first read them only once. And after that you basically have a couple reads and then you can get to you can you can get to sort of usable data.
+So it's built for the memory format that it's going to show up in and it's got all its pointers references in a sort of a compact way of figuring out where everything goes and ready to get be ready to go really quickly.
+So.
+And the other thing we do here is we leverage virtual memory to avoid fragmentation. We used to use sort of fixed size pages, but that was kind of annoying for some for a variety of reasons.
+And the fragmentation problem just goes away with virtual memory, which is, and it's great.
+So, and we do subdivide reads for better deadline scheduling or other content like audio.
+And we have something like 1,700 terrain tiles and a thousand other packs, mostly missions and regions to make up the whole game.
+So we don't have a ton of these.
+They're sort of the merging process.
+We have multiple tiers of that.
+And the last linking step to build these packs kind of simplifies the game down into a relatively tight structure.
+So in terms of spatially streaming, one strategy to keep terrain tiles small was to take the sparse complex data and put it into sort of co-located region packs with larger budgets.
+So here you can see a zoomed out view of a bunch of different regions, a big city, a few medium villages, and a bunch of small landmarks.
+Authoring bounding volumes for these is kind of how you get that shape.
+And it allows us to know what sections of terrain tiles those regions can overlap.
+So that we.
+which ones to load correctly and also know which ones are, we have all the physics loaded in order to do simulations and pathing and stuff accurately.
+So what about missions?
+We have spatially streamed those as well.
+Most of them do, but some of them don't.
+And it's not always easy to do that for some cases where you have like, I'm going to follow this guy across the world for this silver path mission and such.
+So it's not a complete given.
+We've used TaskRast for a long time and we did the same thing for this game.
+And this time we built bigger components that were kind of more meaty and had a lot more built in behavior for designers to use.
+And this basically allowed us to have less programmer help needed to accomplish their goals.
+And they made a ton of content and got pretty far with that.
+We did this all in game, which is critical for some things like snapping to physics and debugging visualizations and things like that.
+And all, you know, as I mentioned in my last presentation, all our dev UI is remotable. So here's an example of our super useful history debugging applied to animation. So you can scrub back and forth and get a bunch of debugging info about what's going on under the hood. You can see the ground estimate of the landing sort of updating as it goes.
+And we applied this sort of concept to animation, missions, AI, conversations, a whole bunch of stuff.
+And it's super useful to be able to have a ton of context and detail when you're trying to work out what's going on with something and try and finesse and polish things and such.
+uh missions at scale it's kind of a problem we we realized kind of part way through that because of all the large-scale changes people were making moving terrain up and down and around changing the growth a lot you could end up with breakages and we did all the time and then it ended up of being a major problem.
+So the way we combated that was basically to do stuff at compile time.
+So validation and fix up.
+The main fix up model we used was terrain snapping.
+So things wouldn't drift out of sync with the terrain.
+They would update if they were procedurally placed and such, but basically at compile time, you load the height map and then look up the correct location and adjust the height of where things were to sort of keep things in sync.
+And that really helped.
+Other things like validation of object references.
+So when a mission wants to open a door in a city, it makes sure that an artist can't move that door into a spot or delete it or something like that so that the mission can't find it anymore.
+And sort of hardening that relationship helped a lot in keeping things, making sure people are aware of the changes they're making, what side effects they're having and such.
+So another important thing to mention is respawning.
+And so one of the things that players that we do is we respawn players to the closest safe breadcrumb or the nearest respawn point as they approach content.
+In addition to being good for player understanding, this really helps load time since you're closer to the same content when you respawn.
+And you'll see as he's running forward here, the little green dots are moving around as you get closer to them and such.
+And that's the that's the breadcrumb. And.
+When he falls down, he sort of stands back up at that particular location.
+So let's talk about CPU performance a bit.
+While streaming is best because things don't exist, and that's sort of the best state of being for stuff to exist, for stuff to work in, you can also have lots of static sleeping objects.
+And we handle that with something what I'm going to call a static distance heap.
+And so this is effectively a way of computing travel, comparing total travel distance against a heap of items.
+And it gives us an amortized constant time update of a single moving reference point versus all that stuff.
+So in this debug display, green is a awake object and red pings mean we've made a distance check.
+And you'll notice we're only doing a couple of those every frame.
+And when you're near a boundary, that little circle, the updates are happening a lot more frequently.
+And so this is pretty efficient, and it basically gives us better performance over time than something like re-computing every 10 meters, or even than raw SIMD could do.
+So for example, we spent about 12 microseconds updating hundreds and hundreds of volumes against the hero. And before that, before we applied this, naive sphere checks were costing us sort of over 300 microseconds and such.
+So here's some condensed pseudocode.
+Effectively, you have a heap based on travel distance, as I mentioned, and you recheck the closest object and updating their location in the heap.
+So your current travel distance plus how far it is to the boundary is the next time that object can wake up, for example.
+So as you reach that threshold, you might wake them up or you might not, you might sort of put them back in.
+And we also include a rebase operation to keep the precision good.
+Every 100 meters, we just subtract 100 meters off of everybody.
+And the sign distance function here also allows you to sort of say, hey, if you're really far inside the boundary, you know, you're awake and going to be awake for a while, we don't have to check the distance to that object as often either.
+And so for efficiency, the items have backward back indices to allow for quick removal from heap and active lists and things like that. So this is super useful.
+It doesn't work for all use cases, obviously, if you have a lot of moving objects or constant camera cuts and teleportation, it would reduce its effectiveness.
+and you'd want to use things like BVHs or something in those cases.
+But really this applies to a ton of cases that we find are useful.
+And it basically has become kind of a magic bullet for us.
+So let's talk about tasty, tasty baked goods.
+So I mentioned doing things at compile time is really useful, and it's great, but there are situations where that doesn't work.
+So for example, if the dependencies are really hard, that can be a really big time suck because people are constantly rebuilding. If you kind of have to say, well, if anything changes, let's rebuild. Or if it generates a ton of data or the input is really huge, sometimes it's, it's, or even if it's just really expensive to do and it happens often enough, sometimes those are bad ideas. So we basically took some of the sort of small data output, but large sort of expensive inputs cases, and we would.
+For example, growth and blends, we would do this sort of thing.
+And we did it on a form of PS4s, 10 PS4 dev kits.
+And this worked pretty well, but, you know, there's definitely some quirks involved.
+So what about the big stuff, though?
+We don't want to have a ton of big, big data on disk, because disk is one of the things we're optimizing for, right?
+So pathing is one of those things.
+In Second Son, we manually authored all our path meshes, and it was really error-prone.
+change the environment and missions would just be broken.
+And at ghost scale, it would never work.
+There's no way.
+And so we did a bunch of work to automate this system for the most part, and basically projected into and then automatically generate pathing information on a 20 centimeter grid, mostly for terrain, but for other stuff as well.
+So when a subgrid wakes up, that's one of those like partial tiles there.
+We would cast hundreds of thousands of rays against the terrain and physics.
+But these are all vertical rays.
+Then we kind of coalesce a bunch of the calculations so we don't spend a huge amount of time on them.
+And then we deflate and build connectivity to sort of get you the right sort of player shape cut out and offsets from the walls and things like that.
+And to see quick checks to say, hey, can I make it over there and whatnot?
+And so that that's kind of.
+the general model there. And buildings would generate grids as well from custom meshes and link up with terrain. And basically we ended up using Hierarchical A-Star with authored portals like ladders. You can see kind of a little reference to there. And some automatically generated portals like gap jumps, for example. In this case, if you want to go to the porch, from the porch to the awning there, you'd run inside and climb up the ladder and jump out the window. And so all of this calculation is amortized in the background jobs over time.
+And so it's not going to block time critically.
+Generally, it worked pretty well.
+In the end, this saved us basically all of our pathing data that we thought we were gonna have to deal with.
+Made testing much easier since it's all live while editing.
+So if you're moving rocks around, everything's up to date.
+Super great.
+So we shipped a multiplayer mode called Legends.
+It was fun, it was super successful, but I would like to note that networking in the streaming world is very hard.
+I don't have enough time to go into details, so let me just say the generation numbers, migration, and packet loading, oh my.
+So let's talk about an overview of our rendering approach.
+So in Second Son, everything was a mesh.
+And we used large blockers and static time of day to solid effect.
+I mentioned dynamic BSP.
+That was all large buildings that were mostly closed that we could drop down.
+convex objects to kind of build edges out of and occlude things on the CPU.
+It's pretty cool, but it totally doesn't work in the new environment because in Ghost we have paper-thin walls, quite literally in some cases, like paper doors.
+And we have interiors, so things aren't solid anymore.
+And there's pinpoint holes with slats and things and windows and vegetation everywhere.
+It's very different from a city environment.
+So we ended up with some obvious optimizations.
+Z equals is a really good one for vegetation, for example.
+And some, you know, some obvious stuff, hype map stuff.
+We leaned a lot on GPU occlusion.
+I'll talk about a tiny bit.
+And the real time time of day was another big wrench.
+I'll cover a little later.
+So.
+For height maps, we used a fairly simple approach, kind of based on the terrain rendering of frostbite article I referenced down below.
+It uses basically sort of neighbor index buffers and then make sure everything is only one, one sort of power of two resolution away from their neighbors.
+And we just sort of populate everything.
+We also did, I mentioned, perversal texturing, and that's sort of the more interesting aspect of this, and helped with amortizing expensive blending up calculations and tons and tons of decals to allow us to build the world kind of partially out of decals.
+So like all the roads are made for just placing down chunks of decals into the terrain.
+And you'll see, you can look at Matt P's talk for more details there.
+So, GPU compute is one of the major things I wanted to talk about a little bit.
+It's not, I'm not gonna talk about the implementation, that's gonna be another MatP thing, but I'm gonna talk about the memory implications.
+So, the occlusion calling we did, initially was, it's all last frame sort of based, and, which is not my favorite thing, but we mostly got it all fixed up.
+But its main target was really minimizing our memory footprint.
+So it's less flexible, but it's much more space efficient.
+You can see here the structure.
+It's about 24 bytes of instances.
+We have a larger version for more accurate stuff where you need to match the rotation on building walls, for example.
+Our tile count could fit.
+that we estimated before could fit about one third of a meg instead of 12.
+And all far LOD geometry in the world merged up into the every tree or medium-sized boulder or larger thing took a total of 10 megabytes for this sort of structure, which is pretty great compared to what we had before. So the GPU is great at handling occlusion culling efficiently.
+Although we had to jump through some hoops to get all the way there, we ended up throwing the terrain triangles at it as well.
+And this was really, really powerful to get a ton of stuff on the screen.
+So you can see Matt P's talk for more implementation details.
+We have some 4LOD stochastic stuff, which is pretty cool.
+One of the things that we added was to support a lot of the diversity that they ended up needing for characters and for biomes was shader swapping. We had this before, but we've really sort of amplified it a bunch by building kind of systems to do this at a very low level, basically for free in the runtime, and for authoring tools to basically use inheritance to kind of only override certain things so that they could keep things in sync pretty well. And this includes...
+support for GPU-culled assets, they would do bucketing in order to kind of have the right set of swaps available for a particular SIMD array of GPU-culled assets.
+So this worked really well.
+Grass is another really big thing for the game.
+We do this fully procedurally because there's no way we could store it all, but it's kind of baked into the terrain structure.
+A lot of it's based on GPU compute.
+It also leverages the culling code I talked about for other stuff.
+the pampas grass and spider lilies and things like that, and it was instrumental in kind of building this nice mood atmosphere that kind of would give you a lot of the wind and character interaction and feel of the game.
+So for more details on that, see Eric's talk on the grass and ghost in the advances section session.
+So we pushed the GPU computer further by basically, adding extra inputs to our particle system.
+So particles were a big deal and infamous.
+We had superpowers everywhere, lots of dynamic, crazy stuff.
+You could dynamically go through the environment up and over things.
+In this game, we don't have any of that, but we do have lots and lots of leaves and lots and lots of nature.
+And so once we started using wind as a core gameplay feature, that really unlocked the ability to do cool stuff with our systems.
+And so we added a bunch of things there, like terrain and water access and whatnot.
+And that made it really, really useful.
+We also, in order to keep things alive and moving, you really had to have a ton of simulation on NPCs.
+So GPU cloth is one of the things we did.
+We took our system and made it way, way, way, way better.
+And we have a bunch of tricks we use to kind of keep it cheap so we don't have to do tons and tons of iterations and constraints and layering and a bunch of others.
+I was shocked how much.
+we got out of this.
+So, you should totally ask Bill when you look at his presentation about the horse reins.
+And so, you'll wanna go visit his for details on a lot of the tricks we used and, you know, techniques there.
+So time of day, in Infamous it was fixed and we optimized around it heavily, but in Ghost for 20 times the size there's no way we can make this work. We could compress it in such and that might work, but then you know you have many times a day to worry about and you'd have to interpolate and some games do that, but it's really just too big for us to be able to deal with.
+And so instead, what we do is we do relighting, effectively.
+And really, you want to be able to have the time of day change as you ride through the environment, because it can take a long time to go from place to place.
+It gives you different moods.
+And at night, it makes more sense to be able to do stealth attacks and things like that, as a gameplay opportunity.
+So it's really a key part of the game.
+And so effectively, I mentioned we kind of relight data, and then we bake, store, cache some far shadow maps and such, and all of the far distance stuff you're seeing is just lit geometry like we normally would do.
+Maybe it doesn't have quite as much specular response in some cases and things like that, but it's generally pretty thorough that way.
+And it goes off pretty far.
+Like we don't render trees all the way to the end of the island.
+There's some stochastic LODing going on, but it works pretty well.
+So I'm just relighting.
+We do that with our 16 nearest cube maps.
+They do some self-shadowing stuff, which is kind of cool.
+We also do our classic TET mesh visibility that we have.
+And we have a sort of a coarser terrain based far-distance lighting that we use for non-cities and sort of the whole world basically at a time. And a lot of this stuff is is pretty simple it's like using a sky visibility and with some bounce sort of compression approach.
+and it can be represented pretty small, so like 44 megabytes for all of the terrain probes in the world.
+We relight those, as I mentioned, in Async Compute to really make that work.
+I did mention the Cubemaps.
+I would highly recommend you check out the Runtime BC6 Compressor that Christophe has here at this link.
+It was super great for helping with cache performance and memory overhead.
+But it saved us a couple of megabytes of memory.
+So here's a shot of our tet mesh at like a Mongol roadblock.
+You can see it's populated sort of in and around the stuff.
+And here's a shot of the coarse terrain probes we stored at various heights above the terrain.
+So there's like three layers and gives you kind of a sort of a soft version of data.
+If you're in the middle of a forest, it'll be darker and more green, things like that.
+So there's a lot of other things to account for, though, in Ghost.
+So one of the things I mentioned before was thin walls.
+Those are a big challenge.
+We have the sort of interior mask approach that we use for those.
+And the atmosphere of the game is a pretty big part of it.
+So real time clouds and volumetric fog, those are pretty, pretty key.
+We have a scattering aligned color space kind of.
+technique that we use there. And almost all of this code is running in async compute to try and keep it nice and amortized and so it doesn't actually slow the game down too much.
+If you want to hear more about the details here, you should definitely check out Jasmine's SIGGRAPH talk later this year.
+So we did a ton more optimization screen space shadows of the most S's allowed us to drop small shadow geometry from from their shadow passes. And that's not just the tiny, tiny stuff like sub pixel like we would drop before this is really medium sized things like you know a two-foot bush for example and that that helped a ton thanks to Ben Studio for for some help there. We use PGO to change shader scheduling around and really make the async compute overlap really nicely and a lot of other sort of standard approaches like scalarizing and branching in certain cases to make sure that we have better register use and things like that and a lot of different shaders.
+Generally though, it was a big team effort.
+When we shipped our E3 demo, we were reasonably over performance, and it was a problem.
+We hadn't done all the LOD work we needed to, or really kind of the optimizations on occlusion or shadows for trees at a far distance, things like that.
+And so, you know, over time, we definitely invested a ton of time into making things go faster, and the artists really stepped up and did a ton of work to really solidify the game.
+And by the end of the ship, it was pretty solid.
+So it was a good team effort there.
+So doubling down on Second Son's photo mode, that was actually a big part that we thought was super successful when we released Second Son.
+And we decided to sort of do the same kind of thing again.
+You have a dedicated button for it, and we added animation to the world, which is kind of interesting, a little different than most other games.
+So basically at any point in the game, you can pause what you're doing, including in middle of combat, and take a video of what's going on in the scene, sort of the mood.
+with particles going by and wind changing and cloth moving in the breeze and such.
+And it's really amazing to see what users can do if you have a beautiful game and give them fun tools to play with.
+This is super great.
+So let's talk a little bit more in detail about texture streaming.
+So we started a bit optimistic.
+We thought we could handle it maybe with Core.
+I started a sort of a future-looking experiment for texture streaming sort of on a fine-grained level.
+And it turned out that it really wasn't that, you know, future looking.
+E3 2018, we basically started getting blocked by problems running out of memory on dev kits even.
+And that was a huge issue, so we ended up making a panic switch to this new system without any of the other tech that we really needed to make it work for real, like prefetching and such.
+Which was super exciting because we had a lot of cutscenes in that demo, and to deal with the prefetching there, I had to sort of throw it all together last minute.
+So the system itself is basically the similar to a lot of other studios.
+I imagine it's got defragmentation of a, of a big heap.
+And it's optimized maybe a little bit differently than some things to sort of have a giant manifest of data.
+So textures don't have to go through multiple reads, a single read per texture.
+And we load that manifest at boot time to kind of keep things super, super simple.
+And it includes lower level LODs.
+So you can basically draw everything at a blurry distance, like you can see an example here.
+In this example, we're basically jumping about 200 meters away, and you can see the terrain loading in the background, the grass popping in and such, and it takes like three seconds or so to load the more important stuff up front in the camera and get it to the point where it's hard to see any other changes happening as we kind of load the more prefetching and more other textures we think might be relevant. And you can see the defragmentation happening at the bottom. We move about 25 megs a frame, and we end up issuing asynchronously. And again, this is sort of a dev scenario, so it's probably a little bit faster than in shipping hardware, but you could sort of see what it might look like.
+Um, and so I mentioned the manifest at boot. It's a single file that's kind of collected from all the texture data.
+Um, the idea there is that, is that you basically have a representation all the time.
+And there's this one file which is collected, um, and it's, so the whole system is sort of much simpler because of that.
+You don't have to rebuild packs when textures change at all.
+They just are in the manifest if, if they're there and that's it.
+Manifest is rebuilt.
+only ends up reading the textures that have changed because they can look at the MD5s and say, hey, this isn't actually different.
+I'm just going to skip this one and keep what I've got.
+The textures themselves are this header plus metadata which ends up in the manifest, but also the runtime MIPS exactly in the layout that we need it in.
+You can basically do a single read and then you're done.
+No fix up at all and you're there.
+And so in order to do this work, we basically had to do it in sort of a threaded way.
+And the kind of, to do it in the background, you really want to have safe data to access.
+And so we basically did this copy operation to let the threads party on it with no worries about if something was adding or removing stuff from that list.
+And after a couple of layers of optimization, you basically want to modify or set it up so that objects when they change, because most objects aren't changing, can poke their data into this big array.
+And it becomes kind of the copy ends up becoming really literally like almost a memcpy. There are some exceptional cases where if you find an, like a character that has changed costumes, you need to recompact the SIMD data for the geometry.
+So you have a minimal set in that case, but for the most part, it's just memcpy. And at that point, the overhead becomes a big problem.
+So for example, we found that.
+that running copies from multiple threads is actually a bad idea. Copying less than 16k from threads is a bad idea. Atomic increments are a really bad idea because they just, the overhead adds up. And so your profiler is really your friend when working on this stuff.
+So let's look at the profiler. So here's what the streaming code looks like. These are all, these are mostly background threads. You'll see the half millisecond down there of the copy operations that are going on. And then.
+we go wide to measure distance per shader effectively, and then we sort of multiplex the shaders together and say, you know, hey, what's the scale on each texture?
+And then keep track of the top 16, bottom 16, things like that to read or to throw away if we're gonna make space for new textures.
+So here's the pseudocode. It's a structure of arrays, sort of SIMD-friendly approach.
+We find the triangle area and the desired texture size with some fixed point precision so the UVA scale can work pretty well. We end up...
+keeping the top 16 I mentioned by screen size.
+And so the idea there is that if you have something up front or getting close to up front that needs a higher MIP, you really want it to show up.
+So you don't like it doesn't show up and it's really blurry in front of your face.
+And the 70 is kind of fun.
+I had fun writing this and I found like a cheap, cheap ceiling of a log is like a integer ad kind of thing and a round operation.
+It's pretty, it's pretty cool.
+So.
+There are some tricky cases though for texture streaming.
+I'm sure there's lots more, but the two that popped out for me were particle atlases. So we had this way of drawing all our particles in a single draw call and it had an atlas and that sort of didn't work very well. We ended up having multiple atlases because of texture size and it turned out to be just as efficient to switch it to a bindless model where you can just sort of scalarize based on texture index and you're good to go.
+Virtual texturing was also kind of weird where in some rare situations you would be moving around and a decal hadn't loaded yet.
+And so it was sort of a blurry version of the ground.
+In order to keep that from sticking around forever, we basically added this round-robin update that would eventually catch up to things.
+It's not perfect, but it works.
+So one of the two big things that's hard in texture streaming, in my opinion, are the UV heuristics.
+Now UVs are really complicated. We ended up trying, the goal was to really get it down to a single 16-bit integer so that we can kind of...
+so that we can have SIMD kind of operate on tons of these things at once.
+And we tried a bunch of heuristics to bake it down to this, and it was pretty tricky.
+We ended up landing on a log bucketing approach, where you basically take the size of the texture that you're measuring, you take the log of that, and you put it in a bucket based on that log, and then...
+And then you add up the area of triangles in that particular bucket.
+And then when you're trying to figure out, hey, what's the actual, and you kind of do maximums and averages on the actual texture size to figure out what the worst one is.
+And then you kind of say, hey, take the area as you go up these sort of buckets.
+And once you hit half of the mesh, you kind of know the general you kind of.
+texture usage for at least half of the mesh and then 80% is where we sort of really draw the line and say hey you basically if you have a really tiny thing that's trying to amp the texture up to like four times the size just just ignore it so but it also helps you hide avoid things where you get to generate uvs from something like a log generator that happens to be inside of a a big log that's on a beach for example, and that avoids those sorts of situations killing you for texture bandwidth or texture size. Bucketing was slightly faster than sorting. You could probably do the same thing with sorting.
+So this worked well enough to ship, but there's still some weird cases that this sort of 1D approach doesn't really handle like counter UV stretching.
+If you kind of stretch one direction and then stretch it back up in the in the UV scale and shader, it gets confused in some of those sorts of situations.
+So there's still some some work to do here next time.
+So I mentioned we have a one gig budget.
+What do you do if you're over budget?
+We use a simple penalty scheme where effectively every frame we sort of penalize it more and more globally until you get to a point where all the textures you're asking for will fit.
+And then once you've finished reading all the stuff you need at that level, we'll try a sort of less penalty until you get to the point where, you know, you're stabilized in the level you wanna ask for.
+So.
+This system worked pretty well, but it required a lot of debugging and so we added some debugging tools to help artists sort of diagnose problems. You can see an example of that here with the bounding boxes for these little spikes surrounding the Mongol war camp.
+And you can basically see the debugging setup where we can filter on texture name or shader name, or you can look for textures by badness. That's like sort of a low screen area versus a high resolution requested. And that was pretty useful in order to see, hey, what the heck is this?
+Why is this taking up so much texture space? Or, you know, where is this one 2k map coming from?
+Oh, it's that log way over on that beach. Things like that.
+So one of the other things that's really critical to handle correctly is pre-fetching. So pre-fetching is super important if you want to avoid Halo 2 style cutscene pops where you look at the face and the face gets a normal map and it's like those drive me nuts. So every camera cut or character coming into existence needs a bit of foreknowledge to really get the right data. And there's no magic bullet here it's just a bunch of work plumbing to make sure that you've got the camera cuts available you know what cutscenes you might be starting and making sure that the rigging knows you know how far ahead of time you might need them because you can't just load all of them all at once. And even then like you run into situations where you don't want to load more than 1k map for most of the time, even in a lot of cutscenes, 1k is totally fine.
+But if you're going to be doing a super close, close up on somebody's face, that becomes a case where you really need to load more.
+And so we clamped basically a 1k most of the time and then would unlock it for photo mode and for some cutscenes to get those close up shots looking really good.
+So, bounding boxes add up a lot.
+So we mentioned sort of the 24 byte instances.
+Those are pretty efficient, right?
+Well, if you need a bounding box for every piece of geometry per shader, per LOD, for each one of those instances, it sort of negates the whole thing.
+And so instead, what we do is we basically bucket on a grid, and this is to avoid some of the more N-squaredness of the next phase where we will bottom up merge bounding boxes in order to get a smaller number of these things.
+And we do this until we hit something like a square root of the number of the of items that we're worried about.
+And that we apply that to growth to kind of minimize that overhead.
+I think it's something like 10% bigger than the 24 megabyte cost for most for most purposes.
+For terrain, something like the texture, ground textures and the grass information.
+We did something simpler and we just split the tile up into 16 chunks and stored one.
+one per each of those things.
+And we do have a sort of scales of terrain, so the larger terrain have coarser texels.
+And to avoid those trying to say, I just really have really giant bounding boxes and such, we have a minimum camera distance that we clamp a lot of that stuff to, to make sure.
+A similar thing that we use for tree imposters, because you aren't gonna get any closer to a tree.
+imposter than say 120 meters because at that point we'll switch to the actual tree, right?
+And so there's there's a bunch of clamping that we can do in order to optimize those situations.
+So we did end up applying this to mesh streaming as well. Characters were getting tight with all the flavors they wanted to add and environment was over core and it was it was pretty tight on a lot of those situations. So adding meshes into the mix like textures.
+works really well as well. It's a very squishable problem just like textures and unlock the constraints for how many characters we could have in a particular mission or things like that. We just stopped worrying about that for the most part.
+All the measurement and over budget logic is running is similar and running at the same time.
+So it's actually relatively cheap performance wise.
+The main complication is our stipple based loading.
+LOD fading is kind of doesn't really it's hard to make that understand the loading process as well.
+So we needed to add sort of promote a bunch of that information about what mesh groups are relevant for particular log branches into the into the sort of the visibility and the proxy.
+The GPU calling code in order to make it.
+so that it knew what to do and how to say, oh, actually, that doesn't exist.
+I'm just going to always draw this side and such.
+And don't worry about stippling.
+I'll use virtual memory for this, like we do with packs.
+And this worked much better than the defragmentation system, was way simpler.
+You can kind of instantly reclaim memory and reallocate it.
+There's some, you know, there's definitely a CPU cost to doing so, but it's much simpler, and we're going to use this going forward in the future for textures and for everything else.
+So here's the structure for mapping LOD ranges to memory offsets. I mentioned before the textures are a single read. Same deal for LOD ranges. It's just, you know, the vertex streams in chunks that kind of you need for, you know, LOD 5 through 2. Great. Take that chunk. We use a compressed distance byte for all LOD distances just because this is a really easy way to get at this stuff.
+So conclusions and some interesting things about loading.
+Our cold boot times are pretty good.
+They're not amazing, but they're okay at about 44 seconds or so.
+But the fast travel and death reload times were fast enough that users and press actually noticed.
+It was kind of weird for us because we've been living with it for so long, and it is a thing we tend to focus on, but it was nice to see people really appreciate it.
+And oddly, we ended up needing to slow down our death reloads because users could start seeing loading tips and then they would go away immediately.
+And that was just too weird.
+So we kept them up for a minimum amount of time in order to make it so they're readable.
+And we actually currently load as fast as on PS4 as we do on PS5 in BC mode.
+And that was actually due to an unfortunate typo we found kind of late.
+And we're hoping to fix that in a future patch, but we'll see.
+So the spirit of matching tech to vision, the vision of the game actually really helped to kind of smooth a lot of the stuff out.
+One of the touchstones when building the game was we wanted to reduce the noise and make sure that the game had, you could basically be calm in it and relax.
+And we have a lot of variety, but it's a little bit more spread out than it was in Infamous.
+So that helped a bunch. The design also helped with the breadcrumb responding I mentioned, responding in the same place. It helps intuition and also reload times.
+So one of the, probably the main trick we pulled was to reduce textures by about three quarters during warps.
+So if you're going to an area, our kind of conservative estimate says you want this, just throw away like three quarters of that and it should be mostly fine.
+This does mean there are some cases where you can't do this like cut scenes.
+So if you're going across the world to a different set of characters with a different cut scene, that warp sort of warp will be slower.
+I mean, we have a couple of cases of that in the game, but not very many.
+So the general techniques for doing this are to you really want to minimize reads per file.
+So you aggregate lots of small files into big chunks of things.
+And as I mentioned, we do this with like literally pointer patch and you're good to go with PAC data. You want to sort of do lots of optimization and kind of flattening and simplification into low levels data structures during asset compilation, which means you need relatively smart build tools that don't need to rebuild when that piece of that file didn't actually change that you really need to look at. And you need to keep them fast so iteration doesn't slow down too much and things like that.
+And we obviously need to spend a bunch of time optimizing.
+That's the other thing.
+And we leaned on GPU compute really heavily and obviously we pulled a few tricks, but that's kind of the general approach we used for this game.
+So in the future, we'd like to obviously extend what we've been working on here and work on sort of do more virtual memory tricks and the like. The GPU compute was really effective so we're going to double down on that probably going forward. Fine-grained streaming was also really effective and so we're going to need to see how we can make something like animations or sounds squishy enough to really make that efficient.
+And obviously there's lots of other work to do, solving some of our quirky things like complex UVs or tools work and build time work, lots of stuff to do.
+So I'd like to thank everybody. I was not certainly the only person working on this stuff.
+There's lots of programmers that did a bunch of this work in this presentation.
+So thanks to everybody then there.
+And thanks to the art team and everyone else for helping to ship a really great game.
+And so if you'd like to work on things like this, we are hiring.
+We're looking for programmers of a variety of positions and junior and senior are welcome.
+So please check us out.
+And here is a fun extra if you would like to see it.
+Every game has retargeting problems.
+This is just a weird one.
+I don't know how Jin's horse got assigned to be his opponent in a duel, but he did.
+There you go.
+And there's some networking sort of stuff.
+We had this cool virus that happened while we were shipping, after shipping actually.
+We had to sort of patch the game to sort of eliminate it.
+So anyway, thanks for watching.
+Cheers.

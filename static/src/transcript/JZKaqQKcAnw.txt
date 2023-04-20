@@ -1,0 +1,534 @@
+So hello everyone, I'm Simon Clavet with Ubisoft La Forge.
+La Forge is a little research lab here in Ubisoft Montreal.
+So today this is the recording for the talk I was supposed to give at GDC.
+So I'm just recording it here with the camera.
+So the talk is called Ragdoll Motion Matching.
+And since people normally skip the first eight minutes of every video, I've put the result right here in the first slide.
+You see this guy there?
+This blue guy is a physically simulated ragdoll, like a virtual robot.
+It's self-powered with little motors, and he's trying to follow interactive motion capture while getting lots of cubes in the face, trying to survive difficult perturbations.
+So that's the purpose, the goal of this talk.
+There's two goals.
+I guess my first goal is to take a wild guess about where game animation might be going in the future.
+The second goal is to provide intuition about the specific solution to the reinforcement learning problem.
+The reason for that is because reinforcement learning is a big part of what makes this possible and I think it's a good idea to get a good intuition behind this specific equation.
+So we're going to actually go deep and find an equation that you can actually get a feeling for that's useful and that's very general and really fun and beautiful I think.
+So let's start with this question, just to give the why.
+Why would we do that?
+And I want to start with this weird question.
+What's the difference between a character playing an animation and a character actually doing something in his virtual world?
+That's a weird question, but look at this guy there.
+So I would claim that this guy is actually there, like he's there doing a thing in his virtual world.
+He's not just, he's playing animations, but he's actually like, he's very well integrated in his world.
+And this is like the emotion I want you to feel now.
+This is something different than what video games do today, because he's actually there, like.
+That's actually happening.
+So we need to get better at physically-based animation.
+So lots of people have been trying to figure this out.
+This is the same problem as robotics.
+So lots of different ways to approach the problem.
+Lots of people in very different domains.
+So robotics people, game people, academics people, there are different papers every year at many conferences.
+So if you meet one of these people, just tell them thank you, because they actually figured it out.
+But most of the recent research is pointing in a fun direction, which is reinforcement learning.
+So that's why we dive right now into this primer.
+Let's understand what reinforcement learning is about.
+So I even put like result videos.
+inside this primary so you can't skip it.
+Don't try to skip the video to the result at the end because results will be right in there.
+So hold on, we'll go, it's going to be fun.
+Let's dive in right now in reinforcement learning.
+So reinforcement learning is this.
+There's lots of little words and arrows there.
+So there's env is the environment and there's a policy.
+There's states, there's actions, and there's rewards.
+So what are these things?
+So the environment is the game world and its rules.
+So here's a little environment with a little character trying to move around, collect coins and stars, and avoid stepping in lava.
+And the policy is the decision maker.
+So that's you when you press buttons on a controller, maybe.
+And so the state in this case for this environment is just where you are on this grid.
+The actions that the policy can make is just little arrows.
+So you step in direction.
+So each possible actions are up, down, left, and right.
+And the rewards will be like plus 1 if you get a coin and plus 10 if you get the big star and minus 1.
+So it's like a cost when you step into the lava.
+And a policy now is really, you need to think about it as a function.
+Policy is a function.
+It's a mapping from state to action.
+So it's really a function that you give it a state, spits out an action.
+So you see all these little arrows there.
+The state gets in the policy, get an action.
+The environment takes the old state, and in the action, you get a new state.
+So every step in the environment, like over time, every frame in the game.
+And you get a little reward, which is just one number every frame.
+So a policy.
+What is a policy?
+It's these arrows.
+So this is one possible policy.
+So a policy would be like just arrows there on the floor tell you when you're in this state, go in this direction.
+So now the policy can be a little bit random, like stochastic.
+So sometimes we might have a probability of making different choices.
+So for example, for a baseball pitcher here, there's a couple of different throws he can do with different probabilities.
+So that's a stochastic policy.
+you can do different choices for us.
+So it means that one way to think about it is the action is not just equal to policy, but it's sampled from probability distribution.
+It just means that the policy doesn't always give the same result for the same input.
+So in our little world here, it means sometimes there's different probabilities to go in with different directions.
+And now, so we need to define more things.
+So when you evaluate a policy in an environment from some starting state, so the starting state is decided by the environment.
+So every time you start evaluating a policy, the environment can put you in a state.
+And then what happens is you get a trajectory.
+Can also call it an episode, it's the synonym.
+And so this is a trajectory that you get.
+It's a little path in the state space.
+If the policy has some randomness, you could get different trajectories, even if you're with the same policy.
+So let's say you get this and this, different trajectories with the same policy.
+And now we need to define another thing.
+So what's the return of a trajectory?
+So it's the sum of rewards along the trajectory.
+So you just sum all the rewards that you got along the trajectory.
+It gives you a return.
+So like this trajectory there, you sum the rewards you get, plus 1, plus 1, plus 10.
+So the return of this specific trajectory is 12.
+But then with the same policy, you get different trajectories with different returns.
+And now we can define, uh, like the important thing is the average return that you get with this policy.
+And now the goal of reinforcement learning is to find the policy with the highest average return that you get with all the trajectories you get.
+Maybe trajectories are start with different start states also.
+And since the policy is a little bit random, you get different trajectories.
+Also the environment itself could be random.
+So yeah, so that's the reinforcement learning problem.
+And yeah, for this example here, you see the average return of this policy would be the average of the returns you got.
+So that was the beginning of the tutorial.
+Let's take a little break and look at the result a little bit.
+You see this guy.
+So it's hard to see how what we just discussed will help us with this little problem of a guy trying to climb these stairs there.
+So the trick is to now we're going to see the actions in the state as continuous and high dimensional.
+So it won't be like little discrete actions and discrete states.
+It's going to be continuous actions in states in high dimensions.
+So RL in big continuous spaces.
+So how to think about this?
+So we're gonna, the idea for our environment is gonna be a guy that tries not to fall.
+Sometimes he falls, sometimes he doesn't fall.
+And the rewards will be, you get rewards when you're not falling, and you get penalties when you fall.
+So but I will explain the details of our specific environment a little bit later.
+Let's continue with our little tutorial.
+So we'll go back to deterministic case, like let's forget about randomness for a little bit.
+And now the states is a point.
+Let's say there's four dimensions, continuous little point there with four dimensions.
+And the actions also is a continuous point in some other space.
+Let's say there's three dimensions there.
+And let's try to see what the policy is now with this.
+So we're going to plot actions with respect to state.
+It's just a little function.
+Just to see it, let's think about just one dimension for state, one dimension for action for now.
+And so yeah, so when you're in this state, 3.8, you get the action 9.9.
+And you can think of a policy being this function.
+So the goal is now not to find an action necessarily, but really finding a function.
+So we're going to discover the best function.
+that gives us the best reward.
+So you see reward is still just one number.
+It's not a vector.
+So here's a simple policy you can come up with.
+This, that's a policy, that's a valid policy.
+That's a little equation that takes as input the state and returns an action.
+Looks like this.
+So you see there's numbers there, the .3 and .2, that's just the parameters of this line.
+And in general, you see you can have parameters.
+Let's call them theta.
+Theta zero and theta one would be the parameters of the function.
+So you see there's inputs and parameters.
+It's two different things.
+The parameters are like hard-coded numbers inside the function.
+And we can place them also in a little vector.
+So we have a little vector of parameters, we call it theta, and that's the parameters of this function.
+So now the fun things today in this day and age of deep learning, the functions can get pretty big.
+And one thing we can say is that if the equation is big enough, it becomes naturally a neural net.
+A neural net is just a big equation with lots of parameters.
+That's a little bit hierarchical, but we don't actually care about the details of what a neural net is for now.
+Let's just think about it as an equation with parameters.
+It could be the weights of the neural net.
+And yeah, so when you change the parameters of this function, you get different functions.
+So now finding a policy means finding a vector theta of parameters that gives the best rewards.
+So what do we do with that?
+Like with our environment, we're going to start at some state.
+We S0, and then we give it to our policy.
+We get an action, A0.
+Give that to our environment, state an action.
+And we get to a new state, and the environment gives us a little reward.
+And repeat, and repeat, and you get our trajectory like this.
+So now the goal is to tweak data.
+Like, we're going to change data a little bit to get more rewards later in the future.
+So one thing we can do is plot it like this.
+So we're going to put on this axis there, theta, the parameter.
+Let's say there's just one parameter.
+Let's install a neural network with just one neuron or something.
+And so all policies are somewhere on this axis.
+And we're going to try one.
+Let's try one neural network with this parameter.
+And we're going to run many trajectories with this policy and compute the average return.
+Average return would be like average summed over all steps, over all trajectories, all the episodes that you do.
+Maybe divide it by number of trajectories, but we don't actually care.
+And you get this number that says how happy you are with this policy.
+And you can try it again with different vectors of parameters.
+Look around, see what's happening there.
+And you see, like, virtually, like, magically, there is this world of policies, and you try to climb some, hopefully there's some mountain there that you try to get to the top of.
+So that's finding this data best with the best average return is the goal of reinforcement learning.
+And one way to do it is to start with a guess, a guess policy, and try to climb, to find a slope where in the...
+parameter world you should go in this direction to improve your policy.
+So for this you can just as I said just try a bunch of different policies and the problem is policies it's really neural networks like it's parameters of neural networks you can really try them randomly that's gonna that might be hard but you can still try it it leads to evolution algorithms that's what evolution is is trying different Policies you could do it with like particle swarms or evolution like genetic evolution you could have Genetic evolution is part of that so each of these little dots there is one policy one vector of parameters And you can evaluate the average return you get lots of average, lots of return in the white part there.
+So, generations after generation, you're going to hopefully explore in the policy world and focus and focus on the solution.
+So what's hard with this is that when theta has lots of dimensions, it's hard to sample when there's too many dimensions because of the curse of dimensionality. You can't really explore efficiently. It's very difficult.
+But the actual problem with evolution is not that the actual problem with evolution is like need to die a lot in order to learn something like it's learning by dying. It's not super efficient.
+That's why it took like billions of years.
+Or millions, I don't know.
+So and also the other problem is we're not using all the available information on good and bad actions.
+You just know that like at the end of the episodes it was bad but you don't know which actions were actually responsible for the problem.
+And it would be better to use all the information.
+For example, these little cats there, they learned that if they press the button, they get some food.
+But the reason why they managed to learn it is because they get the reward just not too long after they did the action.
+So we're going to try to use this knowledge to improve our algorithms.
+So if you pick up a book on reinforcement learning or Google online, you'll see there's a whole zoo of methods you can use.
+And evolution is just one of them.
+There's a bunch of different words there, like roboticists spend more time on one side of this.
+And you see Q-learning there.
+That's one that we won't talk about today, but it's really good for learning video games.
+So we're going to focus on this region there, policy, gradient, and actor-critic, because there's some good intuition to be gained there.
+And it actually works in a surprisingly general way.
+So let's take a little break and look at our guy again, try to guess what's happening.
+And he said his goal is to follow motion capture, but also to not fall by, he decides where to put his foot.
+So what's the plan for inventing this fun algorithm of policy gradient?
+So we're going to forget about most things and really focus on this simple idea of trying to make good actions more probable.
+So OK.
+So we'll have a policy.
+It's going to be a little bit random.
+It's going to take different actions.
+Find good actions, make them more probable.
+So that's the idea.
+So sometimes you make an action.
+You're in some state that look a little bit the same.
+And your policy will give you different actions.
+At every step, there's going to be lots of different actions, lots of dimensions.
+But let's say at some point, you make this action.
+And another point, another try, another episode, you make another action.
+Like you see 3.7 got a better result.
+So like you see like the returns after the 3.9 got to zero because he fell.
+So we like better 3.7 in this state should do this action.
+We don't care too much about what this action means. Maybe it's a torque, maybe it's a motor activation in the knee or something deciding to put the foot somewhere else to avoid falling.
+So yeah, so we're going to find the high return actions and change our policy to make them more probable.
+So there's two things we need to think about now.
+So let's start with the second one.
+So how to make good actions more probable.
+Let's say we already know which ones are good.
+So we go back to this little drawing there, a random policy.
+There is the action there.
+We're in a fixed state.
+Let's say the state is fixed.
+And now this graph is the probability of picking the action.
+But now we're in continuous space.
+So it's more like this.
+So we're sampling the action from a probability density.
+This curve there is a probability density.
+The sum under the curve should be 1 because it's a probability.
+And you see there's more probability of being in the middle there.
+And now we have a sample, this action 3.7, and we like it, because we think it's a good action.
+We want to increase the probability of doing that more.
+We want to do it more in the future.
+So what it means, good returns.
+We want to increase this probability.
+So we want to make a little bump there in the curve.
+But that's weird, like how are we going to actually do this?
+So we need to be more specific about the form of our policy.
+We won't do like a big table, like the tabular thing.
+We want to be more specific.
+So the simplest choice is to just pick a Gaussian, like a simple curve with just two parameters, the mean and the standard deviation.
+And now the idea is that our little neural network that was supposed to give us our action now will give us instead the parameters of this distribution of action.
+And this is the weird part.
+You need to stop and just think about it for five seconds.
+Now our neural network, that's our policy, gives us the parameters of a distribution of actions for each state.
+You see the state is still an input, the network.
+It outputs, the neural network outputs two things now, the mean and the standard deviation, the variance of this Gaussian.
+So now we have this good action.
+We're going to increase the probability there.
+So we can think about it for a couple of seconds.
+What's going to happen with the mean and standard deviation if we want to increase the probability there?
+You see, the first thing that comes to mind is to move the mean in this direction.
+That's going to increase the probability there.
+But the other idea with the standard deviation, what should happen to it if the good action was near the tail?
+It might be a good idea to make the Gaussian a little bit more fat, like to explore more.
+So when you get good actions in the tail of your distribution, it makes you think, OK, I should explore more because I got good actions really far.
+So that's like, feel smart.
+And you're going to do both.
+You're going to change the mean and STD.
+But you see there's an indirection.
+We won't change the mean and STD directly.
+What we want to do is to nudge theta, the parameters, so that the mean and STD changes, so that you increase the probability of your good actions.
+You see there's three levels of indirection.
+That's what makes it weird a little bit.
+But it works.
+And when the good action is close to the middle there, what's going to happen?
+It's going to get spikier.
+And this is where you're going to focus on the good solution.
+So what happens when you have two-dimensional state and one-dimensional action?
+You can have this fun little visualization here.
+You see each of these little curves is for one state.
+And you see the action is one-dimensional.
+So as the thing is learning.
+it becomes more focused on the solution.
+It's like a little breathing of exploration and exploitation.
+Exploitation, the exploration dilemma is a really big thing so we need to be smart about it.
+So it's like breathing your exploration like this.
+So let's get a little bit more precise.
+What we actually want to do.
+This new policy, what's gonna happen is that we're gonna do lots of actions, lots of states, a big batch of actions.
+And now, with this batch of actions, for each of them, we're going to nudge our probability, like change our probability so that the good actions will be more probable.
+So look at these curves there.
+New probability, old probability at this action.
+So one idea is to pick the ratio of these two.
+What's the ratio of these things?
+In this case it's like 3, it's like 3 times bigger approximately.
+We want this to be big if we were happy with the action.
+So the trick is to just multiply it with some number that tells us how happy we are with the action.
+So we have an equation here.
+Yeah, so how happy with the action?
+Let's put this number.
+Let's make sure that it's negative when we're unhappy.
+So it's going to bring it down the ratio.
+It's going to go below 1 in this case.
+So that's like the force that we want.
+We want to nudge data to pull this number up.
+That should work.
+So how do we actually do this?
+Like you see the new probability is a prob- it's a function of data and the current action.
+So- and we want to nudge data.
+What does it mean to nudge data with the trick to nudge things in machine learning and every like optimization world.
+If you know a little bit about these kind of things, it- it means taking the derivative of the thing with respect.
+to the thing that you want to nudge.
+So that's the slope of the thing with respect to the parameters theta.
+So that's the big equation.
+So what it means there, we're going to update theta to go in the direction of the slope.
+So that's a big thing, but that's it.
+That's the big equation I wanted to get to.
+So you see where the 0.01, that's like a learning rate.
+We're going to nudge the parameters in this direction.
+That should make the good actions more probable.
+So yeah, so that's where we are now.
+We need to decide what, how to decide if we're happy with an action or not.
+And if you look here, the only data that appears in this equation are there.
+Like the other things are just sampled, there's no derivatives.
+But this thing, derivative with respect to data of a neural network, that's what TensorFlow and PyTorch and all these things are good at.
+That's what they do. That's what deep learning is.
+It's to find derivatives of.
+things with respect to parameters of neural networks.
+So that's what we like.
+It's autodiff.
+That means finding derivatives automatically, and big batches of that on GPU to go super fast.
+And that's given for free with TensorFlow and PyTorch and all these things.
+So the last little piece of the puzzle, how to find good actions.
+So yeah, so there's lots of things to think about.
+So let's look back at our little cats and our little beaver there.
+But let's look at one trajectory there.
+Different actions, let's say all the little a's are different actions, and you get different rewards.
+Look at the little rewards.
+You got a minus 30 there, that means that's bad, and a 40 there, that's fun.
+So it means probably that these actions that led to the good reward were good.
+And the bad actions before the big bad reward, those were bad actions.
+So so maybe one of these actions is the thing that caused the problem.
+So trying to decide which actions are responsible for good and bad things that happen later in the future.
+That's the credit assignment problem.
+It feels like an easy problem when just looking at it like this.
+But there's like.
+how far in the future should you look for the rewards and how to decide which actions cause the problems, that's a hard problem.
+And one easy way to think about it is to think about this question, like do you prefer some money now or a little bit more money but far in the future?
+Maybe you prefer $1,000 now, that's possible.
+So that means that in your head, you discounted the rewards that are too far in the future with some discount factor that you have in your brain.
+So let's say the discount factor, gamma, this little Greek letter there, 0.9.
+We're going to scale the future rewards with this number and more and more scale down as you go far in the future.
+So for example, what's the discounted return of this action that you made there?
+So how would you compute this?
+Like the idea is to compute it like this.
+So you get the first reward.
+That doesn't get discounted.
+The second one in the future, this minus 30, we're going to multiply it with 0.9.
+The next one, multiply it by 0.9 times 0.9.
+See, if you go further and further in the future, you're going to multiply it by a smaller and smaller number.
+See, to the three here and continue to the four.
+And it gives us this little equation for a discounted return.
+So that's why you're going to see always this little thing there, sum with gamma to the t.
+So that's discounted return.
+So from now on, when I say return, it means actually discounted return.
+So that solves this part for deciding which actions are responsible for which rewards.
+Now, let's say we're in some state that looks a little bit the same.
+Let's say S3 is some state.
+Don't really care too much what it is.
+Let's say it's a state that looks a little bit the same.
+And with our policy, we did different actions randomly, with our stochastic policy, with the different actions.
+You see actions are a little bit different.
+And we're trying to decide if we're happy with this specific action that we made at this point in our big trajectories.
+So to know if we're happy, we're going to look at what happened after.
+Compute the discounted return.
+You see, maybe was that good?
+Like there's a minus 35 there, so maybe we're not happy, but we also need to look at the other ones and that's the main idea of this slide.
+If you look at the other one there and the other one here, that's even worse.
+big negative numbers there.
+So it means we are actually happy with this.
+Minus 35 was not too bad.
+So it brings this intuition that what we actually want to compute is the return that we got minus the average return from this state.
+So average return from the state is an important concept, like roboticists and everybody really focused on that a lot.
+That's called the value.
+That's where every time you hear value or reward to go, or cost to go if you're a little bit pessimistic, like roboticists.
+So that's the value, it's important.
+And the trick is to actually keep track of that.
+another little neural network that we're going to try and train on the side.
+And that's almost supervised learning with a moving target, but still a little bit supervised.
+So it's kind of simple in a way because you can always compute the discounted returns that you get after.
+some state and then train this neural network in a supervised way.
+It's just, you know, the answer like, and you just train this on the side with your main policy network.
+So some people call this the critic.
+And we have our real policy network that we're going to actually ship at runtime when you want to test the thing.
+You just need the actor.
+You don't need a critic anymore.
+So that's where the actor-critic ID comes from.
+And now, as you train this, you get a little dance between the actor and the critic.
+The actor decides what actions to do, and the critic is judging and trying to guess how much discounted return you're going to get from this state with this policy.
+So yes, so that's about it.
+Like you can plug this in our equation that we found a couple of slides ago.
+We plug this and there you have it.
+Like this is the thing.
+This is the equation I wanted to get to.
+That's the policy gradient.
+It's a beautiful equation.
+This is the thing that gives more probability toward a good actions.
+And this is surprisingly general.
+It's really surprising that it actually works because it feels really awkward.
+But you can actually solve video games with that.
+You can solve robotics problems with that.
+The Berkeley people and OpenAI people really like this algorithm a lot.
+And there's lots of variants of that.
+Here's the actual math.
+If you want to read this, and you'll see in the books, that's exactly what we talked about, but in more mathematical form.
+Here's some code, lots of implementations of that on the web.
+You see everything we talked about is there, how happy with actions, the losses, the episodes.
+That's my suggestion.
+If you want to learn this, because I think it's cool.
+I think everybody should try to learn that if they can, if they want.
+I think the steps would be to read this book.
+This book is really good, Reinforcement Learning by Sutton and Bartow.
+And then watch this boot camp, bunch of little videos on YouTube.
+Watch this.
+And then if you want to run some code, start with this spinning up in Deep RL by the OpenAI guys.
+That's a good place to start if you want to just try different algorithms, see which one works on your little environment that you want to try.
+So, yeah, so that's what that's the our primary.
+And now we can look at our specific environment.
+So our initial problem.
+So the environment is everything that is not the policy.
+There's going to be lots of different pieces in our environment.
+But the one-liner is this.
+Our environment is a self-powered physical character that is rewarded when it follows motion matching.
+Motion matching is a thing that was made for a foreigner a couple of years ago.
+The main idea is to just, you have a big pile of animation, big database of animation, and every frame, we're gonna find the little piece of mocap that fits your current pose and where you wanna go.
+So it's actually not too complicated.
+So the input would be just raw mocap.
+Some guy like here is a style, very tired.
+You see like the kind of detail you wanna get.
+So you just have a guy randomly going on the mocap floor for a couple minutes.
+Then you plug that there, clean the game.
+And the idea is, yeah, so every couple of frames, maybe, you choose which little piece of animation to play.
+You see all the choices you have there.
+And that's what it looks like at runtime.
+The red arrow is me controlling the stick in Forerunner.
+There are more details on that.
+There is another GDC talk for 2016.
+You see the blue path here is the currently playing piece of mocap.
+The red path is the desired trajectory from the gameplay.
+You see that the blue paths try to match the red path.
+You see we jump everywhere in the mocap all the time.
+To see the animation switching, the trick is to disable the animation blending.
+If I disable blending, you will see.
+It switches all the time.
+You see it pops.
+That's normal.
+It's because we switched animation without blending.
+See, we don't even wait until the step is finished.
+We just switch when the input switches.
+So that's the idea of motion matching.
+And now the goal is to follow this with a ragdoll that's self-powered with motors.
+without cheating, without God forces.
+The God forces are the forces that people use sometimes with ragdolls that attaches your bones to like world points.
+That's not allowed.
+And so yeah, so you have the white guy is the motion matching guy.
+He's randomly playing motion matching and the blue guy is trying to follow.
+You see the reward signal at the top.
+So at the beginning of training, he falls all the time.
+He falls on his face all the time.
+Then after a couple hours of training, he starts to get better, tries to follow the white guy a little bit better.
+And at the end, you see the white guy interactive animation that I control with the sticks there and the physically simulated guy there.
+So you see the kind of quality we're trying to get.
+Different moves, you can crouch, you can walk backward.
+Okay, so that's the problem and the solution.
+But now let's look at this.
+So this is the big diagram.
+Everything that's not the policy is the environment.
+There's lots of arrows there.
+Let's focus on this part here first.
+You see that that's a state that we give to the policy.
+See the two arrows there?
+On the left, there's the motion matching part that gives an animation state, like a kinematic state.
+And on the right, there's a physics engine that has a physical state for the physical character.
+We give both as a state to our policy.
+This is what it looks like.
+It's like lots of red lines there.
+That's what the policy sees.
+It sees the animation, sees the robot.
+Sees also the future ground to help it a little bit, predict what's gonna happen.
+You see the white guy is actually doing the decision of going up because there's animations of going up and down.
+There's inverse kinematics also on the white guy to help a little bit.
+So the blue guy really just has to avoid falling.
+And then the action.
+The action, in our case, we decided to do the following.
+The action will be an offset from the reference animation, from the white guy.
+So you see every frame, we're going to have little offsets and angles for a subset of joints.
+We're going to have this offset to get the green guy.
+You see we're going to add it to the animation state.
+So the green guy is what we're going to give the physics engine as a target pose for the ragdoll.
+So it's a PD control target for people that know what proportional derivative control is.
+So we're going to give that to the physics engine.
+And the physics engine will find the torques that are necessary to go to this pose.
+So this is what it looks like.
+See the way the green guy shakes?
+That's the balance feedback.
+That's deciding, OK, I need to tweak a little bit where I'm going to put my foot to avoid falling.
+So that's what the network learned to do.
+And then the last little bit is the reward.
+When you compute the reward, just a single number, we can subtract the physics and animation and take the inverse of this, like these little distances.
+So the reward will be a combination of many things.
+Could be like trying to get the correct velocity, the correct pose.
+and avoid falling, so there's going to be multiple little things, not just...
+And in the end, it goes to zero if the tracking is bad.
+So you can devise different ways to compute the reward, but basically it boils down to trying to follow the enemy.
+So if you're not careful and you forget to follow the style, you could get this.
+This is what happens when you forget some terms in the rewards, like forget the style.
+You can get some weird things.
+So yeah, so we train this, multiple guys during the night.
+Takes a couple of hours, maybe 10 hours, maybe 40 hours if you're not lucky and the admissions are too difficult.
+See many guys at the same time training this during the night.
+And yeah, so for more details you can check out this paper that we got accepted at SIGGRAPH Asia last year with Kevin Bergamin, a student at McGill. So read this paper if you want.
+And yeah, so let's look at this guy again because I want to go back to like the actual feeling that you get when you see this guy. So you just met this little character but you already care for him I think.
+Because he shares things with you, like you have to deal with gravity in your own life, he has to deal with gravity.
+So it makes you feel sad when you fail.
+So maybe we should do something about it.
+See, the problem with this is that the animation system is completely isolated from physics.
+So to get the get up, like the fall and get up, if we have that in our database, to actually pick up the get up, we need to feed back the physics inside the kinematic part.
+And that's the next part.
+But that's just...
+subject for another talk maybe but the main idea is sometimes we would like to bootstrap the physics state inside the kinematic state to find a pose at the beginning of a getup that matches where the ragdoll is Presently like the current ragdoll pose your current robot pose So this is what you saw there. The white guy is going to grab the the physics guy in the correct pose And so we get some sort of fall get up behavior.
+So yeah, virtual torture of our little guy.
+It's beautiful.
+Well, that's not the end of it.
+There's lots of things to do.
+It's just the beginning.
+I think it's very exciting.
+I want to finish by saying, as I always say, this to me is.
+the natural next step for video game animation, going from animation playback to actual virtual robotics that we could actually play our video games on real robots.
+But that would be dangerous, but yeah, anyway.
+So that's what I prepared for you today, thank you.

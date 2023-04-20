@@ -1,0 +1,417 @@
+All right.
+Welcome everyone.
+I'm gonna get going right on time here because it's 30 minutes and it's full of stuff.
+So please turn off your cell phones and don't forget to fill in your surveys.
+If you don't know me, my name is Andreas.
+I head up the tools and infrastructure team at Insomniac Games.
+And today I'm here to talk to you about our cache simulator called CacheSim.
+So this is a tool that we've developed for programmers to use to measure how well they're using the cache.
+And I'm excited to announce today that we're going to open source this tech and that you can all, well, in fact, you already have access to it if you had only known the URL.
+So the thing I want to show you first, what we're going to talk about here, just in case you woke up frozen in a time machine or something, memory sizes and cache sizes.
+So I hadn't really seen a 2D breakdown of things.
+So if you think about a big block of memory like this, and then you put the L2 from a Jaguar next to it.
+It's kind of tiny.
+And then if you put the L1 next to it, yeah.
+But if you think about this, why are we making these caches so small?
+Well, they're really fast.
+That's the thing that goes along with this, is that if you can hit the smaller thing, it's a lot faster.
+We're talking about orders of magnitude.
+And we forget this too much as programmers.
+But it's really when we can hit these orders of magnitude improvements that we get the really big payoffs.
+And I think it is true personally that most programming languages make it really easy to screw up.
+You can add memory operations that you didn't even realize were memory operations because programming languages like to abstract this stuff.
+They make it easy for you to destroy performance.
+So as programmers trying to fix performance problems, typically with working on the cache, we just need access pattern information.
+And that's not something that is easily gleanable from the code.
+Like, you actually have to dig in.
+So what are we going to do?
+Well, if you're doing anything like this, you're probably using a sampling profiler, right?
+Because they've basically won.
+Something happened 10 years ago, and everything else just disappeared.
+And it's easy to see why this is true.
+They're non-intrusive.
+You can just run them, and they tell you with a pretty good guess about what's going on.
+And they can also give you hardware statistics, like the number of cache misses and things.
+And they use hardware statistics to do so.
+So they're actually pretty accurate.
+But, and that's a big but, they have a big limitation.
+They interrupt your program every so often.
+N instructions, and that N is pretty big.
+And even if you can try to make it smaller, there's actually quite a big gap.
+So now you have something that you're curious about finding out, why is this taking half a millisecond?
+I suspect that there's something bad going on in the system, but it just pops in two or three samples in there, and that's essentially useless.
+Outside, though, of the sampling space, there are tools like Valgrind.
+that take a completely different approach.
+So this is a tool that sets up a synthetic CPU and then runs your program on that CPU.
+And you can instrument and do stuff with the program.
+And part of that stuff that they do is cache grint.
+So that's a module that you can run on top of Valgrind.
+And what this does is it will break down your instructions, reads and writes, and simulate them on top of a cache.
+And then you can get this awesome, sort of super detailed output at the end.
+So, it's easy to see why that will give you a completely different picture because you're not looking at every end instructions or like that entire block, you're actually pinpointing everything down to a particular instruction.
+But it comes with a bunch of cons for us, right?
+Our games don't run on Linux, where this thing runs, and it's all or nothing.
+So you can't decide to do this halfway through.
+You're going to be navigating your menus and loading your level and doing all the things at like a hundred times slowdown.
+Which, needless to say, is not particularly great if you're trying to get to that particular gameplay thing you're looking at.
+There is a tool that is near and dear to my heart from the previous generation of consoles that I won't mention by name.
+It allowed you to do something similar for a short period of time and then run unimpeded again.
+And I really felt that we could use a tool like this.
+If you have a tool like this, I'm going to show you just in case you haven't used a tool like this, why you want them.
+Here's some high level rendering code from our push buffer.
+So the purpose of this code is to say, well, I have a bunch of textures, and I'm going to convert it to lower level data that's going to be fed into the GPU push buffers on the next frame.
+And the details aren't super important, but what I'm calling out here is that this is a relatively well-tuned code, something that I wouldn't expect to be a disaster.
+And I found, using tooling, that this particular axis of 16-bit flag was missing L2 2,800 times in a frame, which is a huge deal.
+And sometimes it's just the small things.
+Why did it happen?
+Well, it wasn't some sort of ominous bad guy putting this in.
+It happened accidentally because the object it was accessing had been organized into a hot part and a cold part, and during maintenance, because something grew or shrunk or someone added something without thinking it through, again, programming language abstracting things for you.
+This little poor guy had dropped from the hot cache line into the cold cache line.
+How do you fix it?
+You swap two lines in the header file.
+And you save up to a quarter millisecond depending on view.
+That's what I'm talking about.
+And your time investment to do something like this is like half an hour.
+And there are other reasons that you want tooling that help you along the right path.
+Sometimes you have utility functions.
+Like I'm sure if you look at a profile for any random game, you'll see things like mem compare standing out when it really shouldn't.
+Or just accessing a position will show up in the profile output.
+So in this case, what I'm showing here is that our scene object class has a way to query for, hey, what's the position of this thing?
+And it's pretty easy to see what it's going to do.
+It's just going to access a row from a matrix.
+And if you see this sort of thing showing up in the cache report, you're going to be like, I can't optimize this, it's just a return statement.
+What are we going to do?
+Well, that's the wrong way to think about it.
+What we need to optimize are the people who are giving this poor guy cold this pointers.
+They should be doing something else.
+But in order to do that, you have to figure out who is calling this guy with all these cold pointers and propagate the blame up the stack.
+So I did that, and our tool does this.
+And I have found that one particular programmer was responsible for 12,000 out of the 14,000 L2 misses in getPosition.
+So again, I'm not going to bore you with all the details of the code here.
+But basically, it was a loop like this that said, I am going to go through and do a broad face, is what the comment said, to quickly.
+get to the set of things that I need to look at, the things that are around the camera.
+Very prototype-y, very sort of first pass, but like, you know, things like this happen.
+Okay, so it's burning through 10,000 or so, 12,000 in fact, placed things by designers, and then figuring out which ones are actually near the camera.
+This thing, 12,000 L2 misses in the frame from this one particular location.
+I mean, to put things in perspective here, this is like one millisecond.
+This entire system was one millisecond per frame on PC.
+So if you've done any console dev, yeah, it's not one millisecond.
+So looking at this thing, I'm like, wait, what's going on?
+I need to fix this.
+Well it's good that these things that it's accessing over and over again with these super expensive L2 misses, they always return the same result because these things never move.
+So my fix for this particular problem then was to say, well, because they never move, I only need to update this array when these things come and go, which is super, super rare.
+And I can then get rid of this getPosition call entirely.
+And that saves you 650 micres per frame on an i7.
+It's a bigger project.
+It takes a couple hours maybe to reorganize it.
+But there are real wins.
+So to do something like this, to actually simulate what is going on in a program, it seems so easy if we could just be superhuman.
+Because it's all there in the instruction stream.
+Like all we have to do is look at what the instructions are doing, and looking at the addresses and the operands, and saying, if this was cached, and if this was not cached, and somehow count that up.
+So to do that, we would basically flip a switch when we have gotten at full speed to some point of interest, and then start single-stepping the instructions and seeing what are they doing, update some cache simulation, and then turn off the trace and report.
+And we'd live happily ever after.
+How do you even do this?
+So, at Insomniac we pitch things and we practice, you know, explaining the value of things.
+And it helps if your boss understands you.
+This is my boss.
+He doesn't understand me.
+And so I said to him, I think there's something here.
+We should have our own cache simulator that we can apply for all these things that there's no off-the-shelf tooling.
+And I think my subject was, I can see CrazyTown from here.
+He said, sure.
+So I did that.
+And my first approach, which went nowhere, really, but we'll see why, I started looking at binary instrumentation frameworks.
+So if you're not familiar, these are tools that will allow you to sort of muck with your executable as it's running.
+So you can say, oh, go find this function.
+I'm going to rewrite it to look like this.
+And you can actually go way lower level, too.
+You can say, oh, let me patch up all these SSE instructions to do something else or whatever.
+There's Dynamo Rio is one popular one, and Intel has one called Pin.
+But remember the scope of what we're trying to do here.
+We're trying to look at every single instruction that touches memory.
+Let's just say that that's not really in the design wheelhouse of these frameworks, because the metadata that they need to track to undo these patches and all the things, it's hundreds and hundreds of megabytes.
+I don't know about you, but executable is kind of big, right?
+Triple A games.
+But I think I was interested in this space.
+And if you're going to look at these frameworks, I would encourage you to look at them for how can I put cheap D-trace-style probes into the game that I can enable, and they're zero cost when they're not there.
+Things like how often is this zero?
+How often is this min-max value between whatever?
+Like if you're doing your own custom stuff without having to recompile the game.
+All right, so that was a bust.
+And so I said, OK.
+Next approach, I'm going to write a function somehow.
+It's going to be called trace function.
+You give it a function pointer.
+And then, magically, it's going to disassemble each instruction, it's going to find the memory dereferences of the instruction, and update the simulated cache.
+And then, because I don't want to emulate the entire CPU, like I'm going to rely on the CPU to do the heavy lifting.
+It's going to actually execute the instruction.
+And to do that, like isolate the instruction in a temporary buffer, run it, and then return back to me so I can keep doing this.
+That doesn't sound too bad.
+Yeah.
+As soon as you hit a branch instruction, your party comes crashing down because, oh yeah, they're all relative offset coded.
+So if you copy the thing elsewhere and branch, it's going to just branch into garbage memory.
+OK, maybe we need to emulate them.
+And then you've got the RIP pointer.
+So if you're not familiar with x64 assembly, there are a lot of places in x64 assembly where you use implicit references to the instruction pointer with a 32-bit signed offset.
+Now, if you're moving the instruction, let's just say that those deltas are no longer what you want them to be, so you'd have to either patch them, which you sometimes can't if you move it to a different 4 gigabyte range, and OK.
+But on top of this, we're also violating the Win64 ABI, because in Win64, every non-leaf function is associated with a stack unwinding data block.
+If you don't have that block and you take an exception, your program dies.
+There's no trying to fix that up.
+It just goes away.
+And you might think, well, that's just if you divide by 0 or something, which we wouldn't do.
+But no, if you've ever used output debug string or any other number of Win32 internal things, they use exceptions internally.
+Even if we fixed all of those problems, it's still a pretty intrusive approach, right?
+Because even if we had this magical trace function, we would have to have everyone opt in to being traced.
+They would have to start this frame saying, oh, are we tracing?
+Then let me run to this Rube Goldberg machine over here, or otherwise I'm just gonna do things normally.
+So, I was almost ready to give up.
+But then, it hit me.
+E-flags.
+is the flags register of xv6, right?
+And if you've done assembly programming, you know that this is where the carry flag and the zero flag and all these things are.
+There's also this guy, the trap flag.
+Intriguing.
+This is how your debugger F11 steps, right?
+If you're looking at this assembly and you're hitting F11.
+it sets the trap bit.
+And then the CPU continues running, but after it's run the instruction, it's before it runs the next one, it will actually generate an exception.
+So, okay, can we leverage this?
+It turns out you can route this exception through the Windows Structured Exception Handling machinery.
+And you can put a handler in for it, which means that if you set this flag, if you do it in your own thread, you're going to have little problems.
+But you'll basically get called back for every instruction.
+You can choose when you want to do this or not.
+But it still seems like it would have the sort of opt-in problem that I just talked about, where everyone who wanted to be traced would have to have a structured exception handler and jump through all this stuff.
+But aha, since Windows XP, there's this little known thing called vector exception handlers that allow you to set a crossbar handler for the entire app.
+So with those crazy building blocks, to do this, we can install a vector exception handler across the entire app.
+And it's going to listen for these trap exceptions.
+Then we go find the threads that we want to simulate, and we set their trap bits.
+We're now getting called for every instruction on all those threads into our handler.
+It's trapping us.
+So at this point, we disassemble the instruction from the text segment.
+We're not moving it anywhere.
+We find the memory operands, and we update our cache simulation.
+And then if we want to keep tracing, because this bit ought to reset, we set it again so that we get called back for the next instruction.
+And then to stop, it's pretty easy.
+all we need to do is basically stop setting these trace bits.
+So, I was excited to get two integer additions working with this approach.
+There are some other problems.
+First of all, your debugger relies on this.
+This is its space.
+We just barged into its party saying, hey, what's going on?
+And because the debugger gets the first chance of trapping all these exceptions and will, it gets super confused.
+You'd have everything from the debugger crashing to doing all the things.
+Remember, it will normally have set these single trace flags, and so you can take your debugger down very easily.
+Just run outside of the debugger was my solution.
+The more serious problem is that I had deadlocks in NTDLL for actually running this on a full game executable.
+So there's a lock inside of NTDLL, not to bore you too much, that protects this vectored exception handler dispatch list.
+And the idea is that while a handler is being run, you have to protect this list with a lock so that you don't remove the handler while the list is being traversed and all these boring things.
+And the thing is, all the threads were blocked on this lock, but no one held the lock.
+So that's great.
+I'm not really sure, but if we step back and look at what we're doing here, we're running a full AAA game executable.
+And for every thread, for every instruction, we're sandwiching in this cache simulation handler on using the structured exception handling machinery, which is that it inverts the normal work of the program with cache simulation by, I don't know, five orders of magnitude or something.
+So let's just say that no one, probably, at Microsoft, anticipated anyone to use it this way.
+And nothing was obviously wrong.
+But if I had to mentor a guest, I think it is that critical sections that are in the process of being entered, if you then take a trap and you go in and take another critical section in the trap handler, I think that is bad news.
+Anyway, I wanted to get something done.
+So my solution was this.
+And you may or may not agree with my reasoning here.
+Vector exception handlers are exotic.
+We are not shipping this feature outside of, you know, I used to say office, but that's no longer true.
+But I hope you're not shipping this to players because we certainly aren't.
+So what I do is I go find this handler that takes a lock and will iterate the list of exactly one handler and call that handler, which is always our handler, with a jump to our handler.
+Yes, it is ugly, but on the other hand, it works.
+And I also got rid of all the operating system dependencies from the cache sim module itself, so it would never try to do a syscall.
+So at this point, it works.
+And beautifully, instruction streams start trickling into these things.
+And because we can now inspect them one by one, the next step is to look at, okay, what memory addresses are they looking at?
+And in terms of disassemblers, I used one called UDIS86, which is nice.
+And there's a fork of it made by the Radar2 project that is even better, because it gives you the memory access operands.
+So here's what I'm talking about.
+You basically, from the context record of the thing that interrupted you, you get the instruction pointer.
+And you disassemble straight from the text segment.
+And then you just have to figure out what addresses are involved in computing this instruction.
+It should be easy.
+You know, here's a simple example.
+There's a move.
+Clearly it's moving 32 bits from EBX into the pointer RAX.
+Well, that's the theory.
+But if you've done x86 assembly, you know that there's tons of stuff that touches memory but doesn't have a memory operand.
+And there are things that have memory operands but don't touch memory.
+So string instructions are a good example.
+It uses implicit registers.
+You get your stack traffic, which will also pollute your caches.
+Even calling and returning from functions will mutate the stack.
+And there's Lea, which is super common.
+Your three operands with Arm and I for computing things, which has a memory operand but doesn't touch memory.
+And so if you get this wrong, you just have really bad results.
+And there are also crazy things like there are long knobs that you can use to pad that have memory operands, which I found really interesting.
+And there's floating pointer stores and prefetches.
+Needless to say, you can take all of this and you can put it in a somewhat awful switch, but you can handle all of it in like 200 lines of code.
+which is better than doing every instruction.
+So once we've figured out what the memory accesses are, we're ready to go poke our cache.
+And so the first thing we can do is go poke the cache to say, well, we know that we're going to execute the instruction, so make sure that we do an I read from this address.
+And then we have our reads, so we poke the cache again, and we do a read simulation, and then we do write simulation.
+Which then opens the question, how do you simulate a cache?
+Well, if you're familiar with anything about caches, they have associativity, set associativity.
+And so you can basically break them down as a two-dimensional array of ways and sets.
+So to see if something is in the cache, or indeed entered into the cache, you take the input address of whatever you're looking for, and a certain number of bits depending on the number of sets that you have.
+And then you go look at those lines that are associated with that particular set.
+Those are called the ways.
+And you run a comparison against all of them.
+Hardware thinks that this is a really nice problem, because all it needs to do is do a parallel comparison, which we can't do in software.
+But anyway, that's the theory.
+I was interested in simulating a Jaguar core, because that's the CPU that we know and love.
+So you have two modules.
+They both have a shared L2 and four cores, and each core then has its own D1 and I1.
+And a particular quirk is that it's inclusive.
+So if you have a line that is for something to be a hit, it has to be in both L2 and I1, for example, if you need an L1 hit.
+So what's left to do is to figure out the associativities, which are no secret, they're right here.
+I want two-way associative, D1 eight-way, for example, L2 is 16-way, and we have the sizes.
+And with a bunch of helper glue that I'm not gonna show you in this talk, you can go look at it yourself, we can declare these two-dimensional array type helpers.
+And I set up this module thing that is, okay, four D1s, four I1s, a level two, and a pointer to the other module.
+And this is important because if you're writing to something, real hardware is going to do a line reservation of the thing you're writing, which the cache synchronization protocol is going to make sure that it's kicked out of the other guy's L2.
+So we need to simulate that, or we're just lying about things.
+So for each cache line we're accessing, depending on generated from these reads and writes, if you are straddling a cache line boundary, this will apply for both the cache lines you're reading.
+If we're writing to that cache line, we had better go kick it out of every other core on our module and the other module's L2.
+And then we can do a lookup plus record.
+So I'm treating the CPU here as an in-order CPU for the purposes of the cache.
+So I'm going to pretend that whatever you asked for will be cached by this.
+But what we're also looking up is to see if it's already in the cache, and that's how we can determine if something is a hit or a miss.
+So we independently hit the L1 and the L2.
+And because it is an inclusive hierarchy, it has to be in both to be considered an L1 hit.
+If it's only in the L2, it's an L2 hit, and otherwise it's a mess.
+So it's reasonably simple.
+All right, so with all this stuff, I now have hooked up to a keyboard shortcut, but I'm sure you can find other ways of doing it.
+And then I run a frame on this in the game.
+Like, this is a full AAA game I'm talking about here.
+It takes a couple of minutes to do this, which is still pretty awesome, given what it's actually doing and how hacky it is.
+And, you know, out falls 200 megs, maybe 100 megs, depending on exactly how much of data.
+And I'm so happy to say that the goal is there.
+Like it achieved this goal of saying, once it's done this slow thing, it resumes running at full frame rate.
+So if you want to do 15 of these, you can.
+There's no problem.
+So with the data we get out, as I mentioned, we capture call slacks too, which is integral to this data.
+That's why it's so big.
+And we track L1 hits, L2 hits, L2 misses.
+And we also put in a special thing to track prefetches, explicit prefetches, put in by programmers and see if those prefetches hit things that are in the cache.
+So that's a pretty good bullshit detector to say, yeah, I saw you put these prefetches in, but 95% of the time, they're prefetching from cache.
+So I'll just briefly show the GUI tool that comes along with this.
+This is a flat breakdown of things, which you can use to scan for anomalies.
+Like this should not have this many L2 misses or something.
+Because we tracked the call stacks, we can turn this into a tree that shows you from all the way from this root symbol across all the threads, like how the L2 misses and hits and everything breakdown.
+And you can reverse the tree, which is helpful when you're looking for who is to blame for this function missing cache.
+And that's how you can find things that are similar to that gameplay example that I showed previously.
+And finally, there's a way to go from symbol to source, and then see how the L2 misses and everything break down for those source lines.
+That's it for the tooling, really.
+A couple of things, like we wanted to make it obvious in the source, and you'll see that in a minute, how, like, what bad looks like.
+So we came up with this badness factor, which is the number of L2 misses squared divided by the number of instructions to really make it obvious that this line maybe warrants some attention.
+And in general, because it takes a little while to do the captures, I just found that it's worthwhile to put a bunch of views in here so you can reuse and go back to dumps after a while.
+So you'll see that if you look at the tools, that for example it resolves the symbols and then sticks them in the dump.
+So it's independent from the program and things like this.
+So just a real quick...
+Intro to how I found that first issue, right?
+If you look at the flat profile, you see, wait, why is this relatively well-optimized rendering code showing up here with 2,800 misses?
+When you go to the source view, that's the badness factor.
+This line is doing nothing but missing cache.
+This needs to be addressed.
+And from there on, you can relatively easily see what's going on.
+So to wrap up, the pros of this approach is that you get every memory access of the program.
+It doesn't cost you anything in terms of like you need to link with crazy things.
+It's not encumbered in any way, so you can just play with it.
+And because it works on Windows, you can go all the way into graphics drivers and the OS code if you want.
+It's kind of scary in there.
+So that might be interesting if you are a Windows dev and you're trying to look at some particular problematic PC architecture cache.
+And it's open source, like I mentioned.
+So if you need something that walks every instruction and every thread slowly, you can do this.
+As I mentioned, capture speed could be better.
+I'm sure we can optimize it.
+It only works on Windows.
+So yes.
+But you can still pretend that you're simulating a Jaguar cache, which we do.
+And it's not as bad as you might think, because if you ignore DX11 stuff and the operating system stuff, it doesn't really matter if your high-level rendering code or gameplay code has been compiled by Clang or MSVC.
+The number of memory accesses and where they go is pretty much the same.
+And of course, it's not 100% hardware accurate, right?
+Because we are treating the CPU as an in-order CPU here.
+It doesn't account for the out-of-order schedule in the window, which if you saw my talk from last year, doesn't account for that much anyway.
+Like, if you're seeing triple digits worth of L2 misses in a thing, like, it'll suck on out-of-order too.
+Like, it's, there's no magic fix.
+But it's a caveat.
+And there are a bunch of smaller issues, like it has to use virtual addresses to simulate the caches.
+The replacement line policy is not perfect.
+Array prefetchers are not yet simulated, so if you have very heavy sort of SIMD code walking arrays, like it'll over-report them pessimistically.
+So yes, some care is required.
+And that's what I hope to address in the future, some of those things, right?
+Make it faster and fix some of the prefetching stuff on the race.
+And I would like to implement all of the special things like non-temporal stores and loads and then whatever extensions you guys have.
+So that's my prepared talk on this.
+And you can get this right now at GitHub and play with it.
+And we have, I think, three minutes for questions.
+There's microphones.
+Hi, great stuff.
+What's the chances of actually being able to put this on a console platform if, for example, you didn't actually have a Windows build?
+Can't comment.
+All right.
+I should talk to some people.
+You should know and I should know that we can't talk about that.
+Yeah, I know.
+I know.
+We can talk about it offline.
+All right.
+Let's do that.
+Anyone else?
+All right.
+One more.
+Hi.
+Do you support multi-core interactions and evictions from the different clusters?
+That sort of thing?
+So yeah, in case not everyone heard, it's multi-core interaction supported in here.
+Yes, like all the threads are running independently, but because they're running through the Windows exception handling machinery, it won't be perfect, but it'll be.
+really kind of good.
+Like the Win32 scheduler gets all aggressive about this because all the threads are sort of spin locking and interrupting each other.
+So there's a good mix of things coming through.
+And the way the simulator works is that you pin all the threads that you care about to a particular hardware core.
+And then all the accesses that Win32 thread runs, regardless of physical core on the machine, is going to be simulated as if it came in always on, for example, core 4 on your Jaguar.
+Cool.
+Would you see statistics as well for false sharing on cache lines?
+Do you ever expose that in your GUI?
+The question is, do we expose false sharing?
+No, we don't.
+Cool, thank you very much.
+How do you think it compares to Linux cache grind, which you mentioned early on?
+Sorry, one more time.
+You mentioned Linux cache grind from Valgrind?
+Yes.
+And how does it compare in terms of results or effectiveness?
+It does basically the same thing, but it does so in an opt-in way, you could say.
+So yes, it is comparable.
+I was just curious if you had a chance to look at the Intel hardware counters or anything like that.
+I don't know how well they're exposed in anything except Intel tools, but there's some kind of hooks into cache performance.
+Right, and that's what sampling protocols use.
+They're built on those hardware counters to get cache metrics.
+So the question is, how does this relate to hardware cache metrics you can get from the CPU?
+Yeah, I mean, I know things like VTune, I don't think it's presented very well, but they do have some information about like L1 and L2 access.
+That's what sampling profilers rely on, is sampling those hardware counters.
+I think there are four debug registers you can set, and you can sample up to four.
+There's 30 sensors or so that were things that you can read.
+And then the sampling profiler lets you pick a few of them.
+But it doesn't really know what instructions cost the L2 misses.
+That's the problem I'm trying to solve here.
+But that will give you accurate numbers for a run of instructions on a particular CPU that is in your machine, whereas this simulates that you're running it on a Jaguar CPU, regardless of what platform you're on.
+Hello.
+One question I have is whether you track how many times each instruction is executed.
+Because this sometimes gives valuable insights of whether you have a lot of cache misses, but also how many times that instruction was executed.
+So you basically have a cache miss rate.
+So you can know if there is a tiny loop which is executed many times and missing many times.
+I think the question is, do we count the number of times an instruction is executed?
+Yeah, kind of an instruction trace.
+Yes, we do.
+And that's the badness factor is actually based on the number of L2 misses squared divided by the number of instructions executed.
+Right?
+Okay.
+Okay.
+That's pretty cool.
+Thank you.
+Cool.
+All right.
+That's it.
+In case there are additional questions, find me outside in the conference and thank you.

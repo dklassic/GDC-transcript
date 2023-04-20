@@ -1,0 +1,304 @@
+Hi, my name is Bill Rockenbeck, and I'm an engine programmer at Sucker Punch Productions in Bellevue, Washington.
+Today, I'm going to talk about various techniques that we used to add windblown motion to our game Ghost of Tsushima.
+Ghost of Tsushima is an open world game which takes place in 13th century Japan on the island of Tsushima.
+You play as Jin Sakai, one of the few samurai to survive an invasion by Mongol forces.
+In Ghost, the guiding wind is a central gameplay mechanic, replacing the traditional heads up display or compass to show the direction towards various gameplay waypoints.
+This keeps the UI uncluttered and helps keep up the illusion that you're playing inside of a samurai film.
+It goes without saying, but wind itself is not actually visible.
+Wind is not something extra added in a cohesive rendering pass, like draw the stuff and then draw the wind.
+The wind is, of course, motion built into many different rendered objects in the world.
+These include particles, foliage, grass, and cloth.
+The wind direction is controlled by gameplay mechanics and can change at any time.
+It's not in general possible to bake the motion into a pre-rendered offline animation, and we prefer procedural or simulated motion systems.
+In addition to the gameplay aspects, all the large and small secondary motions arising from the simulations make the game less static and make it seem more realistic and alive.
+A couple of words about this presentation.
+I've been lucky enough to be with Sucker Punch for the whole PS4 era.
+Infamous Second Son was one of the first games to be released in 2014, shortly after the PS4 launch, and Ghost of Tsushima is one of the last AAA games to be released before the next generation came along.
+The techniques described here were based on the quality performance trade-offs that we needed to make on the PS4.
+As the next generation comes along, we may need to revisit some of these decisions.
+The techniques I'll describe today are not pushing the boundaries of accurate academic simulation technology, like you might find in a movie where the effects are all done offline, or in a tech demo, where a large fraction of the available computing power can be used to simulate a small scene.
+We're more in the realm of heuristics and hacks, which allow us to blow millions of verts around, using only a small fraction of the PS4's computational capacity.
+For the purposes of the game, these simulations don't need accuracy, per se, but they do need volume.
+And for better or worse, Sucker Punch is a nearly entirely homegrown engine.
+In this talk, I'll describe some of the nitty-gritty details of how we implemented things.
+I'm not claiming that all the techniques we used were a shining example of the best way to do things, but they are what we actually did, and maybe that's a useful data point.
+So the model we use for the wind velocity is quite simple.
+For the most part, it's just a single vector pointing from the hero towards a current goal.
+Or in cut scenes and other non-guiding wind situations, there's just a single authored vector, which might vary with the weather and be longer when stormy.
+We're not doing any real modeling of fluid dynamics.
+And the main wind vector has a constant direction, but we vary the magnitude a bit from place to place using time-varying Perlin noise.
+This is visible, for example, on large fields of grass, and you can see gusts of wind blow through.
+Particle systems will also often add in some higher frequency curl noise to sort of make things swirl around more.
+Particle systems also have access to a system we call vorticals.
+These are invisible wind generating particles which can be sampled by other particles.
+They're potentially quite powerful, but we use them only in a few sort of one-off places.
+Particles, grass and foliage also have access to some inputs that let us model local disturbances caused by footfalls or the passage of characters.
+These aren't wind per se, but they do move things around in a similar way, so I'll talk about them as well.
+Probably the most obvious thing moved by the wind in the game is particles.
+The air is usually full of leaves, dust, smoke, fog, pollen.
+Since the very earliest days of the PS4, Sucker Punch has been using a proprietary particle system, which has served us very well since we introduced it with Infamous Second Son.
+The core architecture has changed actually very little from the second son version.
+I gave a GDC talk in 2014, which covered the system in detail.
+So this talk is going to gloss over the implementation.
+But here's a high level overview.
+Our particle system is entirely GPU based system where each particle is touched only by compute shaders, running an async compute.
+So it's fairly high performance.
+And its biggest advantage is that it's extremely programmable.
+Instead of fixed function features that sets, you can just sort of turn switch on and off.
+It's based around these complex text-based expressions, which just get compiled into optimized GPU code.
+And this lets artists mix and match features and sometimes surprising and wonderful ways.
+I'm mostly going to talk about new functions we've added to this framework.
+And our lead artist, Matt Vainio, has an excellent blog post back in January about the effects and goes to two issues, which I suggest you look at.
+There are a lot of leaves in Ghost, like a lot.
+There are thick carpets of leaves coating every surface across large areas of the island.
+Obviously, we're not modeling all billion leaves at once.
+And in the distance, the leaf cover does just become a texture.
+But most of the leaves in the immediate area around the character and the camera are in fact live.
+And they do respond to wind and disturbances.
+There's something like 10,000 active leaves in a typical scene.
+Here you can see how many of the leaves on the ground are actively simulating particles, which react to the hero's movement.
+And they're kicked up when he moves past them.
+There are some complicated expressions on the leaves, which model them as disks, so that as they hit the ground, they rotate according to the torques and things, and they sort of touch and spin and settle down.
+We switched our main train implementation during the development of Ghost to a height map based approach with a hierarchy of tiles containing various resolutions of height map that can get paged in and out.
+We gave the particles access to this height map via a terrain pause function, which just snaps the given particle down onto the ground.
+We also use it for larger scale wind gusts.
+As I mentioned, we're not adjusting the wind direction in general to flow around mountains in a complex way.
+And this is fine for most things.
+But it looks bad if wind carrying stuff is flowing straight into the side of a mountain and the stuff is just kind of disappearing into the ground.
+So we are doing the most basic approximation of fluid dynamics for just this case by taking several height map samples out in front of each particle and sort of giving it an upwards velocity in advance so that it goes up over things nicely.
+The technique we use to add a bit more interactivity to the particle motion is what we call vorticals.
+These are a special flavor of particle which don't actually draw themselves but are visible only through their effect on other particles.
+They're basically like little spheres of wind.
+They output a position, an orientation, and a radius, and also a vector which determines the direction of the wind.
+using a coordinate system which is attached to the surface of the sphere.
+So it has like east-west, north-south, and up-down components.
+So just by pointing this vector around in different directions, you can model several interesting shapes of wind, including circular vortexes, linear gusts, and sort of outward facing blasts.
+Vortical emitters atomically append these into a single small array, listing all the vorticals in the world.
+And regular particle emitters can access this array through a new function which samples the accumulated vortical contribution at a point.
+And it's doing this in a really bright brute force way, just running down the whole list and adding up all of the contributions.
+And it somewhat amazingly works even up to like hundreds of vorticals.
+This isn't an automatic thing, particle emitters only opt into this in a voluntary fashion for relatively few places where it kind of helps.
+And since it's another building block function, emitters decide for themselves what to do with this information.
+They might just sort of in a straightforward way, add the vertical wind under their acceleration vector.
+And so they sort of get blown around by it, like these leaves over a campfire, where there's some upward facing verticals emitting from it.
+But we can also use vorticals spawned by sword strikes and character motion to, say, extinguish candle flame particles as you go near them, or to scare away animals, like crabs.
+Or an arrow shot that shoots a little vortical that makes them say, hey, I need to dig myself into the sand now.
+During the game...
+Tsushima is overrun by Mongol armies, and so there ought to be actual armies.
+We have all these amazing, beautifully sculpted and animated character models and rigging for regular gameplay, but those are pretty expensive.
+The CPU has to compute all the AI and animations, render 100,000 polys with lots of fancy materials.
+And we can afford to have a few tens of these heavyweight NPCs in the game at once, but there are some scenes like the initial invasion where you'd really like to see a horde.
+Enter animated particles.
+Here's a scene from the very beginning of the game as the Mongols are overrunning the beach.
+Most of the ones you see are full NPCs.
+But if I fly over here away from the main action, sort of into the distance, you can see that there's a whole crowd of Mongols there in green who are actually a particle system.
+Then all those green ones are super low cost GPU only particles.
+Here's another example. This is the Samurai's fortification, seen in the background at the very beginning of the game.
+It's just kind of a little bit of set dressing.
+All of the Samurai here are particles.
+Up close, they're a far cry from the real models, but at any distance at all, they're remarkably complex for taking basically zero CPU.
+We added this feature specifically for armies of people.
+It turned out to be even more useful for all kinds of critters, like butterflies, birds, crabs, dragonflies.
+This crane is a particle, as are the seagulls up in the upper left and the whole flock of starlings.
+Animations for an animated particle are compiled into a fat texture containing the local skinning matrix for each joint at each frame.
+This can get large, so it's best suited for simple objects and maybe only a few tens of joints.
+Each particle can individually specify which clip and which frame within that clip it should display at each time step.
+Since animation state is just another building block, artists have great freedom to use it however they want.
+Artists have done some amazing things with multiple animation clips like frogs which float on the surface of the water until the player gets near to them.
+And then they swim away and spawn a little water ripple particle as they go, or if they're on land, they hop away.
+So animated particles were easy to implement and they gave a really big bang for the buck.
+Ghost is set in feudal Japan, and most of what you see is natural objects, and especially trees and shrubs.
+Nearly every vertex of all of these is in constant motion, influenced by the wind.
+Most of our trees are modeled in SpeedTree, but the runtime is entirely homegrown.
+The motion of the trees is implemented by effectively skinning the geometry onto a simple skeleton, just three levels, trunk, branch and sub branch.
+The actual drawn geometry is attached to the skeleton.
+These aren't implemented as traditionally skin joints where a separate stage of computation builds up these joint matrices.
+They're actually run entirely in the vertex shader using only local information stored at each vertex.
+So each vertex stores extra data in the vertex stream about the branches it's attached to, basically just the beginning and end points of both the branch and the sub branch.
+So the vertexes are thus fairly fat.
+It does have the advantage that it supports an extremely large number of branches.
+When you add wind, the vertex shader takes the wind vector at the tree's location into account, it rotates each branch around its origin away from the wind to get the whole tree to bend.
+And we also add a little bit of sinusoidal motion from each branch to make it bounce back and forth.
+And the phase of this motion is based on a hash of its position so that the additional adjacent branches and adjacent trees don't move quite the same as one another.
+This wind sway is running on pretty much every vert and all of the greenery you see in Tsushima, including most imposter level geometry for trees covering distant hillsides.
+We also optionally take the displacement buffer into account using very similar code based on the same skeleton so the branches can get bent out of the way as Jim walks through them.
+Now we come to grass, which covers most of the ground on Sushima.
+We have a whole GPU pipeline for specifically grass blades.
+We handle numerous different styles of grass with no limit to how many different styles can be drawn in the same frame.
+A typical grass heavy scene like these will process a little more than a million separate potential grass blades.
+And after we've put this number down using a variety of heuristics like visibility calling and distance limits, we end up drawing around 100,000 blades.
+Each one of these reacts to the wind.
+I should note here that the pampas flowers you see so many of here are not drawn through the grass pipeline.
+They're actually more akin to foliage and are drawn through the same GPU code path that we use to generate large instance to draw calls for trees and rocks and stuff like that.
+The basic flow of a grass system is this.
+Of course, it's all done on the GPU.
+There's a compute shader which generates each blade of grass, each frame. We dispatch one instance of the shader for each terrain tile out in front of the camera with one thread per potential blade of grass.
+Each thread first does a look up into a grass kind map to figure out whether there should be grass here at all and uses the terrain height map to position it.
+It prunes against the view frustum and occlusion buffer and fades with distance.
+We have a bunch of different grass in the game, so there's a big array of constant data for each kind of grass.
+So, blades which survive this pruning get a bunch of parameters computed like their height, width, bend, etc.
+And are appended atomically onto a buffer in fast GPU memory, along with accounts that we can dispatch an indirect draw.
+The draw shaders also consume the grass parameters to place individual verts and color the pixels.
+This is arranged so that we can do most of the heavy lifting only once per blade of grass.
+Since there are hundreds of thousands of blades of grass being drawn in many scenes, the blade list could get big.
+So we dispatch the compute and draw shaders in a pipelined manner with a double buffered blade list, so that one set of blades is being drawn while the next one is being set up.
+The actual vertex shader for the grass is straightforward and takes all the blade information from the per-blade compute pass and adjusts the verts to bend and color, et cetera, the blade.
+The motion is much like the foliage, with a sinusoidal sway added to the top of the general bias away from the wind.
+It also considers several other factors, like bending each blade away from the center of its clump and bending them downhill.
+Wind includes both high and low frequency noise based on the position.
+There's also a TD displacement buffer around the camera, which we write into using a special kind of particle.
+As a hero passes by, the blades will bend and tilt accordingly.
+My colleague Eric Walla gave a GTC talk this year.
+It goes into much more detail about how all this works.
+So I recommend you see that.
+Being set in old Japan meant that we ended up with a lot of cloth in the game, armor, kimonos, those Sashimono banners that the foot soldiers wear.
+We started off with a CPU cloth implementation left over from Second Son, which could handle a few characters, each with a few pieces of cloth.
+As Ghost took form, the number of cloth sims kept growing.
+There was a bit of an arms race at times with artists adding more cloth and kind of tanking the perf and then me hacking the code to try to make it run faster somehow and so on in what I suppose was a virtuous cycle.
+In the final game, we usually have several hundred cloth sims running on screen, sometimes as many as a thousand.
+In this scene, there are about 250 cloth sims for clothing, banners, tent flaps, for a total of around 70,000 simulated vertexes.
+And it's taking about 2% of this PS4 GPU.
+In addition to cloth and leather, we use cloth sims for a few things which strictly speaking aren't cloth, like strands of human and horse hair and even hanging bodies in some cases.
+Our cloth sim starts with a sim mesh authored in Maya.
+Here, it's just a nice rectangle, but in general, it's not quite so regular.
+This mesh is used to generate basic damped spring mass system with nodes at the verts and springs in between.
+Here are the stretch springs.
+And we also add springs crosswise for shear.
+There are even further springs to handle bending, but we actually do this a little bit differently.
+We also support one-dimensional chains or ropes.
+Since meshes in Maya are lists of faces, you can't have a linear mesh with just vertexes and edges, and we use this a lot for individual strands of hair.
+The nodes store information about the base position, which in general can be skinned onto a skeleton.
+And they also have a vertex painted maximum distance that they're allowed to move from this position.
+Most nodes get a big radius so that they can move freely around.
+But some of them, like the couple in the corners there, have a distance of zero, which makes them stick to the underlying model.
+That's how you attach the things.
+So to draw a piece of cloth in the world, we need to author two separate meshes in our system.
+One is the SimMesh, which we saw before, which describes how the cloth moves and deforms.
+And we have a separate DrawMesh, which also contains the shaded triangles to draw into the scene.
+And the DrawMesh is often similar to or identical to the SimMesh, but it might have more detail, provides a place to attach, rendering specific stuff like vertex colors and UVs separate from the Sim.
+The actual connection happens in a kind of skinning.
+Each sim vertex creates a joint, which generates a full transformation matrix.
+From the point of view of the draw mesh rendering code, these are just like regular joints.
+But under the hood, they take a different code path than regular animated joints, because there are just so many of them.
+There are hundreds of thousands of them in a scene.
+So these are generated by the cloth sim on the GPU and are never even touched by the CPU.
+As models get further away from the camera, we often switch out draw meshes for one to the simpler level of detail.
+In these cases, we don't switch the cloth sims generally.
+We'll replace the draw mesh, but keep the higher res sim running with the new draw mesh attached to the same sim, so that we don't get a pop when we switch from one sim to the other.
+We do fade out cloth sim motion entirely once they get further enough in the distance.
+This depends on the size of the object.
+So little tassels might fade away after a few meters, but a large banner that you can see in silhouette might never light out.
+We had to actually push out the sim-laud distance for horses really far, because their mains are actually modeled standing straight up.
+So as they got to the laud distance, they'd get Mohawks.
+The basic data flow and organization of the GPU cloth is this.
+Each piece of cloth in the game gets a single compute shader dispatch running on a single thread group in async compute.
+It consumes some fixed data like the topology of the springs.
+And since we're using standard Verlet integration, it only needs to keep track of each node's current position and previous position.
+From this, it can compute the current velocity.
+The shader computes the updated positions of the nodes for the next frame and writes them back to main memory.
+This memory is overlapped with the previous node positions and will become the next frame's current.
+They sort of ping pong back and forth between the two buffers.
+It also computes the new joint matrices for each node and writes them into the appropriate place so that they can be picked up by the drawing code later in the frame.
+During the solve, it also uses some fast GPU local data store to store intermediate results.
+This includes the base skin position as well as updated position at various stages.
+Since we're using a single thread group, we can sync data across threads between stages with a simple instruction without having to do multiple dispatches or complicated cache flushes.
+This does mean that only 512 threads at a time are active per cloth sim, and that's too small to get good resource usage, so we do rely on overlapping multiple separate cloth sims with the graphics pipe so that we can keep up overall performance.
+Although we only run 512 threads, we can actually support more nodes than that by looping the shader so that each thread updates multiple nodes.
+The fundamental portions of simulating the cloth are reasonably straightforward.
+The usual Fairleigh integration to take little time steps and apply all the forces and solve where each node should be in this frame.
+And taking all the constraints and forces into account in general reduces to solving a giant end by end matrix, which if you have enough processing power, you can just do directly.
+And for better or worse, we're not doing that.
+A big difficulty with the spring mass model is that it requires many small time steps for stiff material.
+It's fairly easy using traditional methods to believably simulate a bunch of like bowling balls connected by springs or big sheet of heavy rubber.
+Integrate through these little forces, everything moves nicely.
+But for real-world materials like leather or ropes, these things are stiff and don't stretch much at all.
+And the way to model this accurately is to use really stiff springs, so that even a small offset from the rest lengths generates a large restorative force.
+But that starts running into numerical difficulties.
+We're doing this with numerical integration, taking little time steps and applying the forces.
+If the time steps are too large for the accelerations involved, things go bad quickly, you might start overshooting and getting further and getting a positive feedback thing, and eventually things just go crazy.
+You can solve this in general by taking really small time steps and taking a lot of them, but that takes a lot of computation and we're going for fast and dirty here.
+So we're using a giant hack.
+Instead of using Hooke's Law to calculate spring forces and integrating as usual, we're applying springs in a separate step and just restoring the spring some fraction towards its rest length.
+So even with a big time step, we never overshoot the rest position of the spring, so it remains stable.
+The big issue this causes is that we lose our time step invariance.
+You can tune the restorative percentage to get things to be more or less stiff.
+But if you change the number of iterations, it behaves subtly differently.
+This is fine as long as the frame rate stays the same, but it has caused us problems when we've changed the clock speed for cinematic effects or when running in backwards compatibility mode on PS5 where we double the frame rate.
+To get the same running in a fully parallel way, we want to compute many different springs at once.
+We could just run them all at once with one thread per spring, but this does present a problem of how to combine the inputs from the different springs and avoid multiple threads sort of stomping on each other's outputs.
+The way we're dealing with this is to classify the springs into a bunch of separate spring sets, so that no node is updated by more than one spring within each set.
+So we might first apply here the blue spring set, sort of one spring per thread, updating each endpoint from a single thread, and then black, orange, etc., and syncing in between each so that they can see each other's outputs.
+For this regular grid, it's really easy to find a coloring which satisfies this requirement, but most of our cloth isn't quite so simple.
+This is an example of the NP complete graph coloring problem.
+It's basically just solving Sudoku.
+A simple greedy algorithm does a pretty decent job, but I did squeeze a few more percent out of it by writing a simple genetic algorithm to try to choose minimal sets.
+The solution of computing all the nodes in parallel has some big problems.
+Foremost among them is that each node is only really interacting with its immediate neighbors.
+It takes many iterations for a change at one end of the SIM to make its way all the way to the other side.
+Let's imagine the common case of a banner hanging horizontally from a bar.
+When we integrate the motion of this, all of the nodes move down by some amount according to the time step and the gravity, except for the nodes on top, which are attached to the pole.
+This causes the attached strings to spread.
+And so as we take a step, they pull back towards their rest positions, but only the ones attached directly to the stretched springs feel this pull initially.
+If you add more iterations, the wave of spring tension moves through the cloth and eventually things will even out and things will contract as desired.
+But for a detailed SIM with many short springs, it's more iterations than we're willing to compute.
+This is particularly noticeable when you have cloth hanging from something.
+The visible effect is that the cloth becomes super stretchy.
+Even though the individual springs are stiff, the whole sim is very much not.
+With the parallel implementation I've described so far, Jim's robe looks like it's made of rubber.
+It's especially noticeable in the white tassels at the corner of the building, where they stretch unnaturally and are several times longer than they were authored.
+A hacky solution I used is to identify during compilation nearby anchor points.
+These are the ones which have a maximum distance of zero from their skin positions and so are fixed in place, the top row here.
+Each node remembers the index of its nearest anchor point and the original distance to that point.
+At runtime, once we've applied the offset from integration, we enforce a distance limit so that the anchor point doesn't get farther than that from the anchor point.
+This can be done entirely in parallel for each node.
+The allowed distance to the anchor might be slightly greater than the initial distance let stretch a little bit in general, it's pretty close to unity.
+In this way, we can apply the impulse from the anchors directly out to each node directly without having to go through all the intermediate springs.
+I think of it kind of like in addition to the wobbly springs and masses, there are these inelastic pieces of invisible fishing line connecting each node to its anchor.
+They can't stretch any further than that, but they are free to move around within those radii and that allows plenty of wind flapping and movement.
+There are some common cases where a single anchor doesn't work well enough, and so we support two anchors, and this handles like the case of a rope hanging suspended, and it gives a nice caponary.
+Here's the version using anchors.
+The cloth still moves around quite a lot and looks loose and blowy, but it doesn't stretch like even all the way to the ground.
+And the tassels are short and stiff, just like we want.
+And here's a debug view showing where the anchors are attached.
+There's some cases which are not well handled by anchors, which I don't have time to describe in detail.
+It does work quite well for the majority of cases, though.
+Cloth doesn't exist in a vacuum and it needs to interact at least somewhat with the things around it.
+In the important case of clothing, it needs to drape around the body of the character.
+We only support a very limited form of cloth collision.
+It's entirely separate from our general physics model and built up of just a couple of kinds of simple shapes.
+We support ellipsoids, but most of our character cloth collisions are built up of a particular shape we call a sphere pair.
+It's just a capsule consisting of a pair of spheres and the frustum connecting them.
+We collide only the nodes themselves against the collision shapes, which is insufficient to be really accurate.
+Both spheres are optionally skinned on animated joints, so it's possible to attach these to the actual joints of a character and they can build up a halfway accurate approximation to the shape of a human.
+They also support a single collision plane which can be set up to automatically match the ground beneath the character.
+Here are the collision volumes used by Jen and his horse.
+The difficulty with collisions, especially only checking the vertexes like we do, is preventing sudden movements from completely penetrating the cloth.
+This is especially problematic because since this is a video game, for combat and gameplay reasons, sometimes the hero can change poses at superhuman speeds.
+His arms, say, can be animated outside of the current cloth between one frame and the next.
+And once this happens, it's kind of difficult to know what to do.
+Each vertex can get pushed outside of the volume, the collisions, but some of them are now on the wrong side, and the collisions are working to keep them there.
+So we're computing each vertex in parallel, so it only has local information, but this is kind of a global problem you need to solve to get one manifold.
+manifold outside of another, we have a trick for maintaining cloth on the same side of a collision volume. For some collisions, in addition to pushing the node outside the volume itself, we look at the original skin position of the node before any simulation has occurred. We find the nearest point on that shape and construct a plane tangent to that point, but didn't set it backwards by some amount, and we can train the sim mode to stay on that side of that plane.
+We want it to be able to deform and slide around some, but if it somehow gets too far around, we'll stop it. This works pretty well.
+You won't be surprised to hear about that.
+We're not doing full cloth versus cloth collision.
+Doing that right is a big N squared problem, but we do support layering one piece of cloth over another in a very limited way.
+We do this by making use of some machinery we already have in place.
+You remember that each node has a maximum distance it can move from its skin position.
+Now imagine we want to layer this light blue cloth sim over the black cloth sim.
+We're going to use the same kind of max distance radii, but instead of centering them on the initial position, we offset them outwards and skin them onto the base cloth layer.
+This means we have to remember an extra position and skinning information at each layered point.
+But we said use that instead of the original radius when we're doing that max distance check.
+This allows each node to move around, and the spheres move with them, and it only works if the top cloth layer doesn't move very far relative to the bottom, and if the bottom cloth doesn't deform extremely, but it's pretty effective for many common cases.
+The Khan's costume is a good one to see this layering in action.
+The separate layers show quite a bit of movement relative to one another, but they don't usually clip through one another.
+Even like the chain things on his back are layered outside of his cape.
+So that's it for my talk. Thank you for coming.
+Thank you for listening.
+And I'll do my best to answer questions in the chat or in this email address.
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!

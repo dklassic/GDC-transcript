@@ -1,0 +1,498 @@
+Hello and welcome.
+My name is Mikkel.
+I'm a graphics programmer.
+This is Mikkel who will do the second half of the presentation.
+Mikkel is a very technical artist, as you'll see.
+We both work at a company called Playdead that once upon a time did a game called Limbo.
+And neither of us worked on Limbo, but we have worked on the follow-up title, Inside, that just shipped in June on Xbox, in July on PC, and will ship next week on PlayStation 4.
+And that's what we're going to be talking about.
+More specifically, we'll be talking about the rendering of Inside.
+And we sort of picked some topics that we thought would be relevant to other games, and then we thought that...
+that you guys could steal and implement in your own games the same as we've stolen tons of stuff from other presentations.
+So, I'll show briefly a trailer so we sort of know what the game that we'll be talking about looks like.
+Right, so now that the game's actually out, just out of my personal curiosity, how many did actually play the game?
+Excellent, it's like half of my fan base.
+All right.
+So as you can see, and as many of you have already experienced, it's a 2 and 1 half D game.
+It's a puzzle platformer, and it's made with a fixed perspective.
+So the camera is always fixed.
+This means that our artists, when they create the art, they can make sure that they know that when the game is shown on a gamer's screen, it will look exactly like it looks on their screen.
+that sort of means that they can go and tweak every pixel for perfection and they can sort of rely on really subtle details being the same on the monitor when the game is played.
+This sort of in turn means that we can't have too many distracting artifacts because we have these very subtle details that need to remain on screen.
+So that means we can't have sort of banding and flickering and aliasing and that sort of thing.
+So that's something this talk will return to a couple times.
+From a technical point of view, just to get that out of the way, we shipped at 60 FPS at 1080p on all targets.
+And we are using the Unity engine.
+We have a source license for that, so we made some modifications for that.
+uh... from a rendering point of view I'll be using a light pre-pass rendering which looks something like this so we have our first pass over the entire scene which is a base pass that outputs depth and normals we then have a light pass that goes through all lights and samples those depth and normals and then outputs the lighting. We then have a final pass that that applies the materials, samples the lighting, then a translucency pass, and sort of a post-effects pass to wrap the whole thing up.
+So one thing that turned out to be important rather early on was fog to sort of create the atmosphere and the mood of the game.
+So initially, actually, quite a lot of scenes were literally just geometry and this depth fog.
+which, sort of in line with Limbo, relied a lot on silhouettes to create the mood.
+So to kind of show you how much mileage we get out of that, this is a scene without any fog and then literally just adding a linear depth fog we get something like this, which is already rather moody.
+The only interesting bit we're doing here rendering wise is that we're capping the intensity of the fog to a maximum level so that really bright light sources will shine through.
+Whereas if you're using exponential fog, of course you converge towards one and bright light sources will always shine through.
+So, on top of that we have this sort of fake fog scattering, atmospheric scattering pass.
+The reason why I'm being very unspecific about that is because it's really just a really white glow, so we're blurring the entire screen and adding that back on top.
+So this was something our artists did rather early on, and I think they used it for great effect, but really rather easy to do.
+So now that we're using glow to do this fake atmospheric scattering, what do we do about glow then?
+Well, we have a second path that does these really narrow high-intensity glows.
+So the way we do that is like many other games, that we write out a mask from emissive materials.
+and then we sort of remap that mask to a HDR value between one and seven, and we calculate glow from that.
+So one thing that's obvious in hindsight, but wasn't really while we did it, was that of course when, because the bloom sort of is an indication that you have a high intensity pixel, if you then don't render that pixel with the high intensity, that looks odd and looks like.
+you have nothing glowing that's giving off this massive glow.
+So it was really important to actually write back the HDR values for it to look more natural.
+So that means that we have a post effect pass that looks something like this.
+So we have a temple anti-aliasing pass first, and then we have the two glow passes.
+They're really separate, but interleaved for performance reasons.
+It's important that we have the temple anti-aliasing before the HDR bloom, because if we have too much aliasing with the high intensities that we use in the HDR glow, leaving a little bit of aliasing will make it flicker quite a lot.
+We then have a combined post-effects pass that applies the glow and does this HDR result we talked about before, some lens distortion, some color offset and color grading.
+I'll talk a little bit more about that.
+So the chromatic aberration like this lens, red, green, blue offsets.
+Most of the time we do it like most other games where we just sample red, green and blue separately with a little bit of radial offset.
+But in situations like this underwater we use rather large offsets, which means that we then get this sort of triple image effect that looks weird, whereas really what we wanted was a rainbow-like effect.
+So a trick to fix that is something we found in the demo scene, which is to use a red-green-blue texture and then we do a radial blur and then in our samples of the radial blur we then also sample through the red-green-blue texture to get the weights of each sample.
+So that's the way we get coloring.
+Of course the reason why that works is because we're using, or when sampling a texture we get bilinear filtering.
+uh... for free using that so that was uh...
+a nice trick that we didn't come up with ourselves but uh...
+completely so so uh...
+one another thing we do in the final post effects path is that we uh... we want to make sure that we want to be able to adjust the brightness and the way we do that is just as simple as possible we have uh... sort of a photoshopped levels filter where we are able to adjust the black level and white level uh...
+And the issue with that is that it's very easy to cut off the whites and get these burned out white areas.
+So what we did was that we used what's called smooth minimum functions, smooth minimum, smooth maximum functions.
+we use, we take the smooth minimum between the brightness adjustment curve and then one.
+And that means that we get this sort of smooth falloff.
+And that's code in the slides.
+That's a ShaderTor implementation of that.
+So this worked out really well for us and it was also really easy for the artists to tweak because they just had one parameter which was how smooth should the kink between the two be.
+All right, so I'll leave the post effects and get back to the atmosphere that we were talking about before.
+So the fog, we figured out rather early that we needed more than just this global fog to get the effects that we wanted.
+So we did this local implementation of this local fog, whereas this scene is an example.
+The flashlight is rendered using this effect.
+And how we did that is that for every pixel, We sample all the way to the depth buffer, and for each step, we sample the lighting function, so the projected texture and the shadow map and falloff of the texture.
+And if you do this in sort of a naive way, then you end up with something that's very slow.
+In this example, 128 samples to make it look just okay, and that takes more than roughly a frame and a half.
+So if you try to make that faster just by reducing the number of samples, you get something like this with quite a lot of artifacts and quite jarring artifacts as well, like these really sharp lines.
+So what you can do of course is that you can go and add a little bit of random into your ray offsets.
+So if you do that, then you get something that looks a lot better.
+It's a lot slower though now because when you're actually sampling your...
+uh... your textures than the texture cache is working a lot worse because now you have random jittering uh... in your samples but but looks a lot better and and uh... the reason for this is the eye is actually quite forgiving towards noise so that's something we uh... we chose to look uh... into a bit further So this is the same example but with three samples rather than 24.
+And that's a lot of noise.
+You can only almost make out the actual light and shadows in this.
+So what we can do then is we can use a different pattern to do the jittering.
+So rather than using white noise as we are here, we can use a biomatrix.
+And already that looks a lot better.
+The reason why that looks better is because within a sort of small region, a biometrics is guaranteed to have all values.
+within that small region. And that's really good and the reason why it looks better. But whereas the eye is very forgiving towards noise, it really isn't very forgiving towards patterns. So we're looking for something that has this locality property at the same time as not being a pattern. So what we ended up finding was what's called blue noise. So that's essentially white noise that's high pass filtered. So...
+Blue noise can be still uniformly distributed.
+So that means that within a small region, because it changes rather rapidly.
+which changes rapidly and is still uniformly distributed.
+That means we have this same property as the biometrics, except, of course, we're not guaranteed that every value is represented.
+But it's very likely that most values are represented.
+So we still get really good sampling without it being a pattern.
+So that worked really well.
+And it meant that I think we reduced the number of samples to half around somewhere around that.
+Alright, so I'll leave the sampling for a bit and talk about how we actually go and distribute the samples.
+So the way we set up these local fog volumes in the game is that we insert boxes and within those boxes we have fog.
+So of course we don't need to sample outside.
+those boxes because there's no fog.
+We also don't need to sample outside the lights.
+So what we do is that we do a geometric intersection between those boxes and the light frustum.
+And that sort of boils down to just clipping the light frustum with each plane and then patching up the holes.
+So that means that we have this two-pass algorithm where first we write out the front faces of the clipped geometry, and then afterwards we render the back faces and then we sample the front face depth, and then we have the front and back points that we sample in between those two.
+And that gives us sort of an optimal range that we need to sample.
+So this thing about using boxes is something we actually use for effects.
+So in this scene above water, we're using two boxes, one above, one below.
+And the one above is just sampling the light as is, whereas below we're using this animated texture to fake caustics, which is working really well.
+So something that you may have noticed, that many others have noticed before us, is that this is actually quite a smooth effect.
+So sampling this per pixel is rather overkill.
+So of course, we don't do that.
+We sample it at half resolution instead.
+We could probably get away with sampling it at even lower resolutions, but this was sufficient.
+So that means we then have this three-pass algorithm, so the two first passes are the same as before, only at half resolution, so we write out the front face depth, we then do the ray marching, and then we have this third pass that does upsampling from half resolution to full resolution.
+And while we do the upsampling pass, we also add a little bit of sort of a noisy blur into the...
+into the upsampling.
+And the reason why we do this is to get rid of this half-resolution structure that we still have.
+An additional reason why that's a good idea is because we, as you may remember, have a temporal anti-aliasing path.
+And at least in our implementation of the temporal anti-gazing, we're using what's called neighborhood clipping.
+And the way that works is that for each pixel, it looks at the immediate neighborhood, and any value that's within the immediate neighborhood is accepted.
+So that means that it's very good at picking up per-pixel noise, but it's not very good at picking up half-resolution noise.
+So converting this half-resolution pattern into a full-resolution noise was something that meant that it sort of played into the hand of timbral anti-aliasing a bit more, which is a trick from DICE, I think.
+All right, so this is the final result.
+This is shown with six samples at half resolution.
+This takes just less than a millisecond if we were to sample every pixel on screen, which of course we don't.
+We only sample within the actual light cone.
+Also, most of the time, we're actually using three samples per pixel at half resolution.
+We're not using six.
+So that means that we are doing just less than one sample per full resolution pixel to get this effect.
+So the reason why we've been obsessing so much about the number of samples, of course, is that the effect is bandwidth bound.
+Like it's bound by the number of samples we do.
+So we also do all the other things that we can to reduce the number of samples.
+Oh, sorry, reduce the bandwidth.
+So we lower the resolution of the projected texture, we lower the resolution of the shadow maps.
+Of course, we can get away with this because it's, again, it's a rather low, it's a rather smooth effect, and we also, there's quite a bit of blurring involved.
+So we can get away with that.
+So the way that fits into the pipeline is like this.
+So during the lighting pass we save off the shadow maps that we know we're going to need.
+Then we do the two first passes of our algorithm rhythm.
+Then we save off this ray-matched texture and then in the translucency pass we re-render the clip geometry and sort that with other translucencies.
+Okay, so I'll leave off for now and talk about a different thing that was very important to get the look that we have in InSight, namely banding.
+So this is a, well the effect is still, the artifact is banding, the effect is still there.
+So this is a...
+a scene from the game and I've sort of upped the brightness a bit so we can see what's going on and if we look at this then you can see some of the things I've talked about in the beginning we have these very smooth transitions and there are a lot of sort of details that you can almost notice So this image actually has quite a lot of noise in it, which hopefully you can't tell too much, but if I remove that noise, then it looks like this.
+Has quite a lot of artifacts, it has these sort of sharp lines all the way through the image.
+It has these sort of rainbow-like effects, and also it animates, so it's really rather distracting compared to, in relation to this art style where we want subtlety as well.
+So of course what's going on is that we're rendering out into 8-bit color buffers.
+And 8 bits per channel really isn't sufficient.
+The human eye is able to perceive something along the lines of 14 bits.
+So what we could do, of course, was to render to higher precision buffers.
+But on some platforms, that would be slower, even too slow to work.
+And so something else we could do is use the sRGB targets, render targets.
+But again, on some platforms that has interesting implementations to say the least.
+So we chose to sort of explore dithering instead to solve this issue.
+So the way that works, this is an example where the orange line is the signal we are trying to represent.
+And if we look at the value of 0.75 bits, we then add one bit worth of entirely uniform noise.
+That means that when quantizing, 75% of the time we end up quantizing to the value above the signal and 25% of the time we end up quantizing to the value below.
+And that's because the noise is entirely uniform.
+So that means that on average we're actually getting exactly the signal that we started out with.
+So just so you can tell this is not completely black magic, this is how you would actually go about implementing it.
+So this is a pixel shader and on output, you just add a random number.
+You can get this, like you can calculate this or you can get this from a texture, it doesn't really matter.
+So I just wanted you to keep in mind that this is actually spectacularly easy to add and rather cheap as well.
+So there's really no reason why any game should ship with Bandit, including indie games.
+So, just to explore this a bit further, so above, on top, we have, again, the signal we're trying to represent, then we have the rounded, quantized output in the second row, and then we have the error in the third row.
+And if we then go and add noise to this, it looks like this.
+Now, already, that's really good.
+It's a lot better than before.
+But if we then go and animate this, move it about, you can see that we have sort of these bands of no noise in the second row.
+So, what's going on there is what's called noise modulation, and it turns out to be a property of the type of noise we're using, because we're using entirely uniform noise.
+Noise modulation means that the error in the output image compared to the signal is dependent on the signal.
+And that's a property, of course, we don't want because, yeah, it looks weird.
+So...
+So fortunately we can just change the distribution of the noise.
+So if we use a triangularly distributed noise instead, we get this.
+And now we don't have noise modulation, so we don't have, like, the final error is completely independent of the signal.
+So if we go back and try to apply that, we see that we get the same smooth gradient that we did before.
+And if we animate it, we can see that we no longer have these bands that we noticed before.
+But now we have quite a lot of noise.
+That's because we've now added two bits worth of noise rather than one to compensate for the triangular shape of the distribution.
+So what can we do about that?
+Well, we can go back and use the blue noise that we also looked at for sampling.
+And if we do that, then of course we need a triangular distribution for that, but if we go and use that instead.
+we get something that's visibly less noisy, but also doesn't have these bands of noise again.
+So the way we implemented that was to just pre-calculate blue noise into texture, and then we sampled that everywhere on screen.
+That gives complete texture cache coherency between edges and pixels.
+So that's actually really fast.
+So in the few cases where we are actually bandwidth bound, we then use an ALU version where we calculate two white noises and add them together and add that to the output.
+All right, so now that we know how to dither an output, we should think about what to dither.
+So this is an example of a single spotlight that shines a very bandy light onto the scene.
+So of course, the first thing we do is that we dither the lighting pulse.
+So if we do that, then it looks like this.
+And that's already a lot better.
+But we sort of have these waves through the light.
+That is not due to the type of noise, as you might think.
+But of course, because the final pass is reading the lighting buffer, and then applying materials, and writing that into an 8-bit buffer.
+So of course, we need two to do the final pass as well.
+So in doing that we then have an entirely banding free output in this scene.
+So afterwards we have the translucency pass and the translucency pass might be the most important pass to dither because during blending you tend to read and write the same values over and over again into the render target.
+and so you end up re-quantizing to 8-bits multiple times.
+So of course we need to dither that pass as well.
+The post-effects pass is also surprisingly really important to dither.
+You tend to read and write from 8-bit render targets quite a lot in the post-effects pass because...
+bandwidth tends to be a limiting factor during that as well.
+So here, as an example, our wide glow path, we actually ended up using a 10-bit render target and sort of power of two compressing it and dithering to get something that was entirely banding free and at the same time didn't have too much noise.
+So, so far we've been talking about uh... bending as an artifact of colors and really doesn't have anything to do with colors it's all about the quantization to 8 bits so in our base pass when writing out normals we are writing those out to uh... to 8-bit render targets as well 24-bit render targets So of course we can deal with the normals as well and exchange the banding for noise.
+We do this only in the few cases where it's actually needed, which is the very few cases in the game where we have these really intense spectacular highlights with normals sort of varying across really large surfaces.
+Okay, so now we know to do the everything and how to do so.
+Is there anything else we should keep in mind?
+Well, it's a really good idea to animate the noise.
+If you don't, then when the camera moves, you sort of have this dusty lens effect where the noise moves with the camera.
+Also, because we're using the temporal anti-aliasing, that means that if you animate it, the temporal anti-aliasing will sort of integrate the noise over time and will kind of soak up the noise, so it sort of disappears, which is nice.
+Also, of course...
+Yeah, you should do the UI, because that tends to be a lot of transparencies and a lot of different, like, fades and animation and that sort of thing, which is really important.
+And finally, when you are outputting to a monitor or television, then...
+if that television for example has, is set to use limited range RGB, there may be a small chip that will do a conversion for you, to make sure that you match that TV.
+So if you can, then make sure to output the correct format so you can properly dither your signal and output, rather than having the hardware do it for you, because that's quite unlikely to do proper dithering of that.
+And with that I'll leave you to the very capable hands of the other maker.
+Hello.
+So from a lot of post effects, a lot of debugging we're going to drive into some lighting now.
+As Guido said, we're using pre-pass lighting for our rendering pipeline.
+So that means that during the second pass with our normals and our depth buffer, we're writing several objects into our lighting buffer, like spots or point lights or directional lights.
+But if we want, we can actually just render whatever we'd like in there.
+So we've got a few types of custom lights and whatnot.
+So let's take a look at the first one I'm going to talk about, which is the bounce light.
+The bounce light is probably the simplest of all of these.
+It's very basically a thing that we use to simulate pseudo-global illumination in a very handheld way.
+and uh...
+if uh... we take a look at this screenshot here it's got a little point light down there by the box but uh... that's it's not a sharp point light that we want so uh...
+this is the uh... the lighting product that we get around the sphere and what makes a bounce light different is that we just you know wrap the lighting on the other side and this is something that that Valve has been doing for character lighting for a while.
+It's called Lambert Wrap or Double Lambert, stuff like that.
+And we've just got a parameter for that called Hardness that we can use to just fade off that, you know, front to back side product around our objects.
+And it just makes it less obvious where the light is coming from.
+It kind of makes it look like it's coming from an area rather than a singular point.
+So in this case we're wrapping it from front to back but we can actually fade it off completely if we want so that we just get a straight up ambient, nothing but fall off light.
+So we use this mostly for doors opening or just spreading light around the room when we have a very sharp fixed light hitting something.
+But we can also just attach it to spotlights and hit the ground as the spotlight moves around.
+But yeah, mostly for windows opening and the likes of that.
+Now, a small property that's kind of a no-brainer, but also just gives a lot of freedom is we don't restrain it to just being like a point on the radius, because that would mean that to fill up this room with lights, we would need to just place and place four lights with all sorts of overlap and overdraw.
+So we let artists scale the lights in any which way they want, just non-uniformly.
+Replace these points with a pill instead.
+And it's just a little more effective and actually makes it look a little more smooth because you don't have overlapping things.
+So yeah, that's our GI figury.
+And next up, because we have a pass just for lighting, we can not just add lights to, but also subtract or multiply things onto this buffer.
+So we don't just need to...
+to do an additive blending.
+We can do whatever blend mode we want here.
+So we've got a few ways of doing ambient occlusion, or shadows, in a very custom-handheld way, as opposed to using screen space, ambient occlusion, or any effect like that that's baked, or screen space.
+So we've got three types of ambient occlusion casters.
+And let's look at the first one, and actually the most used one, which is the point.
+So the point is mostly used for characters.
+The point is just to try to ground them to the ground and to themselves and to each other and make this large boy band kind of look like they're huddling together a little closer.
+So in there we've got about one per limb and we've got about sixteen dudes.
+got over a hundred of those little bastards there uh... so how that thing works is very simple if you have a bounce light, you know a light that wraps from front to back of the geometry and that's got an additive blend mode, well the AO decal is very simply just flipping that around to a multiplication blend mode and that's basically it, it's non-uniformly scalable and all that says One thing though, because we place a lot of them, we don't want that many settings on it.
+So we just have an intensity setting, and we can place and scale it however.
+So we don't have a wrap parameter for this one.
+It just wraps from front to back.
+Very simple.
+and that's the AO-Decal number one.
+So, second one we have is, this one we use a little more sparsely, just because, well, it's more for bigger occluders, like this Submarino.
+So the difference between the point and the sphere occlusion is that for the point, you can just see it, like, intensifying as it gets closer, but this, the sphere, the point is that you want it to get sharper as it gets closer to the occludi.
+or the ground.
+And so comparing the two, the point of the sphere, a sphere is just the angle to the ground.
+No, the point is just the angle to the ground.
+But we really want to know what the sum of occluded angles are for this ground.
+So the way to implement the difference between these implementations is if you have this normalizer, which is just normalizing the direction of the.
+of the occluder.
+We just need to change that product from this inverse square root to this thing here.
+And then actually that gives us the perfect product we needed.
+And we get a nice, sharp occlusion for basically cheaps.
+Third up on the AO scale is the box occlusion, because we've got a rather small times a crate.
+In our game, I think a third screen or so, there's a crate.
+So for all these draggable crates and boxes, we need something specific to them.
+And what we really want is like, have sharp corners around the sides and, you know, just make it look crate-sy, if you will.
+and the way we do that is we start with what you could call an unsigned distance function to the box so we have the position minus the size and we got like the distance to the first edge of the box and then what we do is we take the angle around that so we know on which point around that around the faces we are and that will give us that very sharp result up there on the top which is not nice, you know, we got these sharp V shapes so instead of taking just the unsigned distance we take the, let's call it square distance which also happens to be unsigned because...
+Yeah, it's squared.
+And that just smooths out the first gradient, as squaring things does.
+And that's a totally empirical, non-physically-based way to do this.
+It just happened to look kind of neat.
+you know, one side of this angle around is going to look like that side up there and if you compose all four together, you get those sharp edges around the sides of the box and yeah, it's just going to kind of look like the occlusion of a box and that's nice so Those are for ambient occlusion, cast in every direction.
+We've also got one for specifically directional shadows.
+And we use these for places where we have a lot of ambient lighting, very non-directional kind of wide lighting.
+and we just need to cast some very soft, very placed down shadows that might not even be from the right direction.
+So this is the scene without these, and if we add them, it kind of looks like this instead, these scenes.
+And so there are a lot of these placed around.
+In fact, this is like the places they've been put, and all they are are a, what's it called, a...
+a projected decal with a texture and just multiply onto the lighting buffer.
+That's all there is to it.
+And we use these both for these static scenes where we need soft shadows, but also for like, of course, dragging objects around and that shield there.
+And we do these.
+kind of Ocarina of Time period shadows around the boy's feet when he's got a torch and it's a nice way of faking some really really smooth shadows So, like I said, we do a lot of these, so we also need the projection maths to go fast because projections could be expensive if they are not fast and the way that you would neatly implement a projected piece of geometry is in your vertex shader you would get a view rate and in your fragment shader you would multiply that by the depth to get a view position and then just transform it with a full matrix into your object space or your decal space.
+Now that's not that nice because we got a full matrix multiplication in there.
+It's got a large row of mad instructions in there.
+So we would like to minimize that.
+Luckily there's a way to do that if you know how to do well spaced reconstruction from depth buffer.
+In which case you would get a view ray in your vertex shader and you would rotate the ray to world space rotation And then in your fragment shader you just need to multiply this world ray instead of view ray by the depth and add a world space offset and you're done so you can probably guess where that's going we still need to use a transformation matrix in order to get this world position to decal space so that's obviously not what we want but, you know, same technique works on object space arrays so you take a view array multiply it by the object space matrix and you get an object array and uh...
+that also both includes rotation and scale in your fragment shader, multiply by depth, and add an offset.
+So now you've gone from a matrix multiplication 4 by 4 down to a math operation on a vector 3, which is neat.
+So.
+Another place that we use these decals are for reflections.
+So we've got screen space reflections in the game, and rather than it being a full post effect on screen, the whole thing we just needed in certain places where we kind of needed the puddle shader, the puddle entity that we needed to puddle down in places.
+And we like these screen space reflections because they have a very simple, very flexible setup rather than going through.
+uh... doing a planar reflection where you need to tag objects that need to be rendered or make a cube map or anything heavy like that. This just reflects what's on screen without any sort of heavy duty work.
+And setup wise, it's very simple.
+You just get the color that you want the reflection to be, at least for us, and the background color, which is, well, if the ray doesn't hit anything, we need to displace something.
+Texture for projection, Fresnel power, and how long do you need the trace distance to be.
+So very minimal setup on the material.
+But as the advantages is pretty good, what you see is what we reflect.
+That's a very nice thing, but that also means what you don't see is not reflected.
+So in this case, you know, at the edges of the screen, what you usually do with screen-space-perfection is you would either fade out to the edge or kind of stretch it, but, you know, in this case, fade out.
+And you get these very light, bright edges where we, you know, reflect the sky color or whatever, very close to the edges of the screen, and it just doesn't look nice.
+And this is of course happening because we can't anticipate which way we're reflecting so we're assuming the normal scope point in which way and we could be reflecting out of the screen and we need to fade out before that happens to not have like clamp-in textures or whatever.
+And luckily we have, this is not a universal solution, but for us most of the time we place down a puddle on the ground pointing upward and we're a 2D game mostly looking in toward the world.
+So we can be left with just forcing all normals to point straight up and in and never have any deviation on the x-axis which takes care of this problem and now we don't need to fade at all because there's no way we're going to go off screen anymore it's just not going to happen.
+Now, that's the first way that we can not see what we want to reflect and have a fix for that.
+But the other thing is a little bit more bitchy to handle which is...
+if you have something behind something.
+So, like, say our boy is jumping in front of a haystack and we've got a camera and we need to reflect that somehow.
+So we have a camera and we have a reflection ray.
+Anything that's behind the boy is technically invisible.
+It looks like this. We don't know what it is.
+But of course we're not going to reflect him as if he's infinitely deep.
+In fact, we're going to pretend he's quite shallow.
+uh... we need to have a little bit of a cut it off right here, we're going to say that there's an edge and in this case we're just missing everything, we're just going to reflect off the sky and it's going to look awful uh...
+with checking that depth parameter But of course we're not just reflecting a full resolution thing.
+We're taking very quantized steps.
+We're only stepping about 16, 24 times through this reflection algorithm.
+So actually what we're reflecting through looks something like this.
+Instead for each step...
+And what we want to find in order to fix this problem is we want to find these two edges because they're going to be useful. What we want to do is take a mix of what's just above and below these things and assume that we can kind of like stitch it together behind them like that.
+So we need to find these. How do we do that? Well let's try to step through.
+For it, we're gonna need a few parameters to keep in our pocket.
+When we are tracing, we need the depth from the last time, from the last step, we need the difference between the depth and the ray from the last step, and we just need the old position from the last step.
+So, if we are not behind something, we save these things, like last time we were successfully aware of our surroundings, we save these guys, and then we always save the last depth.
+So we step through and...
+Oh! That was a hard wall there.
+So we're no longer going to be saving the old...
+Old diff and old position.
+So we save those for later because we want to sample the old position.
+And we keep stepping and...
+Oh! Shit! That was the other one.
+So we checked...
+the last depth and the current depth you see, well if they're very far apart, there was probably like a split there somewhere.
+And then using that information, we just take the old position from last time that we were down at the red line, and the position now, and just kind of like sample somewhere on that line with like two samples and just there between them.
+And that actually covers 90% of our scenes that we would have otherwise with the boy or any occluder in the game.
+And finally, for projection maps on this guy, we have a view ray, and we wanna put it into frustum.
+We wanna make a frustum ray.
+So unlike, what's it called, the projected decals, we don't need to take some view space to object space.
+We need to take it to a projected space, a skewed space here.
+and uh... the naive way to do that would be to uh... you know take your uh... your reflective position and uh... put it through a full matrix and then subtract your your screen space position but uh...
+I don't like that so much. Also it doesn't handle the near clip plane. If anything goes behind that you just start going back into infinite negativity so Our solution to this is to cheat a little bit and create a little variable on the CPU where we need the size of the viewport in projected space.
+Like on X and Y, we get the resolution of the screen and the aspect ratio and field of view.
+And for the set value, we just need the depth range, which looks like that.
+And then in order to transform a view ray into a projected ray, it just looks like this instead.
+and it handles anything behind camera just fine now.
+So, that's raised now.
+Like I said, we only do a few steps, and just like the volume lighting, we need to do something about these step artifacts.
+So obviously, you add some noise to your first step, and you've got some jittering going on.
+And this is just to...
+reiterate that white noise is nice and easy but very noisy.
+Bayonet UCs are still nice and structural but structural in the bad way too.
+And blue noise is our general saviour and you too should use it.
+And with simple anti-aliasing it's really, really nice.
+So finally, about that thickness, the wall thickness.
+With screen-spreader perfection, like I said, we can't assume that the depth buffer is the perfect information of what's on screen.
+You know, it's just the outer shell, the first thing we can see.
+So we need to step through it assuming some sort of wall thickness.
+And we want to get away with the minimum thickness we can basically come up with, to not have any stretched objects, or as artists called it, the boy with MC hammer pants.
+and the simple way that we started simulating this thickness is to say well let's use the uh... you know how much is our screen rate moving in set and just say that's our thickness because that means if between now and the last step we have passed through some depth we're good but that has one problem at that wall there and the wall is pointing 45 degrees to the viewer, which means the view ray is going straight across the screen, which means it's not moving instead at all, and it won't reflect a thing.
+That... that sucks.
+And, um, well, if I take what that view ray set was made of, this is what it was made of, and all you really have to do is take out the reflection direction itself, and just use that, so that's like the total potential movement that it will have.
+And you've got a...
+You've got my favorite wall thickness there at least.
+It will basically catch anything on its way.
+Another way that we use reflections, but different reflections, are of course for water.
+So we've got some water rendering system.
+For those of you who played the game, we have quite a long water section.
+So, yeah, we need a bunch of water.
+And we need a few layers for this water.
+We need some fogginess or murkiness, like see the depth of it.
+We need to render a bunch of transparencies into it, like you mentioned, the volume lighting underneath the water to sort of sell the thickness of it, stuff like that.
+And we need to refract it.
+and make it watery.
+And finally, reflections.
+And these are not screen-space reflections.
+These are planar reflections, because on a big water surface that just spans most of the screen, a lot of the time, we just can't handle the artifacts.
+So for this one, we do use planar camera reflections.
+And so we render out these layers as individual objects because it's actually the abstraction layer that we think about water is actually useful for rendering as well.
+So this is what happened when we were above.
+When we were below, we actually flipped the rendering order.
+So we render reflection first because that's the furthest away thing.
+You know, we render back to front like any transparency you do.
+Then we render the murkiness on top of that because we wanna murkify the reflection too.
+then the refraction, and finally the transparency is down here so they don't get affected by that fog or anything when we're down under.
+And now for each of these layers, in order to get a consistent surface, we actually render each layer three times.
+We render first up a displacement edge close to the camera, which...
+looks something like this with wireframe turned on and that's like from the camera perspective just a bunch of things that only exist in the frustum making waves and just making sure that when you pass through there isn't like this oh the water was a pancake i guess flat polygon effect and just makes it look deeper it only goes about six to eight meters into the screen but that's all you need for parallax in order to sell the the deepness of the water then we render the outside of a box which takes care of the rest of the outside surface so kinda like the outer faces of a box in case this like this water volume here is a box and uh... when we're done with that then we render the inside face of the box but you'll notice it doesn't render on top of what we've already rendered and that's because for each yeah this is how it looks like by the way for each of these uh...
+for each of these layers that we render out, we actually write into a stencil bit.
+Let's call it the I have rendered water stencil bit.
+And if any geometry reads from that bit that it's already been rendered, it'll just discard the fragments.
+So we render the transparencies front to back rather than back to front with rejection instead.
+So we only have one layer.
+So it's kind of like a pseudo set buffer in a way.
+And, yeah, that's it for now. Let's change gears and go into a little bit more of the VFX area with some smoky smoke.
+So, that very simple smoke stack there had a bunch of effects on it. Let's try it again and just stop it.
+and uh... the strategy of all the events so that's it now it looks very plain and in fact it looks like it's blending into the background you can barely see it that's because it's base color is just the ambient color of the room and nothing else so that it will blend in most cases now the first effect we put on is the presence of a uh... we have a fake point light that we attached to the uh...
+to the smoke to make it look like it's been hit by the light from the window kind of grounded in and uh... up next The texture itself, we need to wobble it a little bit around in order to sell some extra...
+Sorry, we need to light this thing a little bit more just to sell some gradient.
+We need to have it lit from top and darken from below to kind of ground it.
+And it's very hard to see, but if you pay close attention, there it is, and there it's not, and there it is.
+And finally...
+we rub all the texture around a little bit, which just gives a little bit of sub-particle motion where it'll be hard to tell where one particle starts and the other...
+one particle ends and the other starts, just because they sort of...
+yeah, the texture itself is not fully...
+comprehensible. And we wobble it around using this, I like to call it swirl noise, which is basically a UV Map in Photoshop with the swirl effect a bunch of times on it and just apply it over and over a few times and we scroll it downwards in this case to kind of like give the effect that the Steam in this case is going downwards, but it could also go upwards in whichever which way it's just it's scrolled one way in world space, basically So next up, some more vapor of the hotter kind.
+So I'm throwing around this box just to sort of illustrate how it handles movement somewhat well and remains fiery throughout said movement.
+So, we've got the smoke effect going up in the background as well here.
+That's just the same smoke as before with the light.
+But the fire, what makes it special, it's using all the same effects, the distortion and all that, and even a bit of gradient lighting, but the most important part about the fire is consistent coloring.
+When we first tried fire, we just had like, you know, fire going from red to orange to yellow and white in the middle, and then blue at the edges.
+But then, if a lot of layers of blue are layered on top of each other, you could end up with a very bright blue that would look really crappy.
+So what we do, we have...
+essentially a fire buffer. That's a lie, but we have a fire buffer, which is just the alpha buffer of what we're rendering into. The alpha buffer is the HDR bloom value that we already use, so that makes perfect sense because, well, the fire is going to bloom, so why not use this?
+So we render out a bunch of black and white sprites of essentially fireiness or hotness buffer into one consistent thing with additive blend mode.
+And then we apply one gradient to this before we read it back into RGB.
+And that makes every individual sprite look like this or composite it like so.
+And it just makes it more consistent to look at color-wise.
+Now, with fire, motion was not enough to just have with distortions.
+We've also got this here map of, what's it called?
+It's called Thipbook.
+So we've got a flipbook to go through and we had a couple of issues with this We're trying to like animate these just very few cartoony frames of fire and we tried first, you know going sequentially but then that would mean that these nine frames would loop every one second and would look very loopy and then we tried doing random but there's an 11 point something chance, percent chance, that you will hit the same frame twice, which will, so the eyes just look like lag, so that was horrible.
+So we used an in-between thing, which is, you know, we choose columns sequentially, and we choose rows randomly, which means that we don't get looping that often, and we definitely don't get two frames at the same time, and that worked out really well for us.
+Now, to animate between these different layers, this is if I just make each flip of piece a solid color, a random solid color, it would look like this, but of course we don't flip between them hard, we fade between them, but we also don't do that, we fade between them using a vertical gradient upward, with noise, because why not?
+And that's fire.
+Next up, the Bay Flares.
+So we've got these events fairs and unlike the bloom they are very like specifically put in like you put in a events fair entity onto a flashlight or onto something bright and it'll flare up and uh...
+we do this just because we like to have our you know our hdr bloom settings different from the flashlight settings and the flashlight might be smaller than one pixel so it wouldn't get picked up uh...
+so The way we do it is with a quadrant, like a 2x2 sprite there.
+And in order to have occlusion from things, we could do what the standard thing is, is to just ray trace toward the screen and get collision a bunch of times, but A, that would be expensive.
+B, we don't want to set up collision on trees that the boy or anyone is never going to collide with.
+That would suck.
+So what we do is...
+For each point in the vertices here, we sample the depth buffer per vertex a bunch of times, stochastically, because that's only four times rather than per pixel.
+But of course we don't sample at the corners, we sample at the middle.
+and you know we pass this on to uh... to the fragment shader and multiply it by the texture of the fair but of course we could sample it not at the middle but slightly between the corners and the middle just to get like this gradient going across making it look like it's got some volume because it's free we're sampling all four vertices anyway we might as well give them a little variation and that's basically that so next up some water more water and we're not just talking about water rendering here we're talking specifically about effects on top of the water and uh... here we've got this uh... stack of uh...
+of foam, that Olympic dye foam going on.
+And it's got a bunch of effects, almost the same effects, no, sorry, exactly the same effects as the smokestack.
+So if I take them all off, they look like...
+If I take the motion off, it looks like this, all still.
+If I take the lighting off, it looks like this, all flat.
+And putting back in the gradient lighting and the motion, it looks like this.
+So it just kind of like, blends a bunch of sprites together really well, makes it look really thick.
+Over here we've got this flashlight.
+And for those who haven't played it, if you go into that flashlight, you suffer.
+So we need to emphasize this flashlight with a bunch of effects.
+And the effects that we use are, first of all, the rain.
+So we have a bunch of rain.
+and uh... we tried both doing like post effect scrolling things but that didn't really have any good parallax in it then we tried some sprites scrolling down with textures of rain but that was a lot of overdraw so what we ended up with was a mesh with individual raindrops in it and uh... that has much less overdraw but uh...
+but animation could be more costly.
+So what we do is we just have a vertex shader that for the raindrops going down, as soon as the vertex hits the bottom of a volume, it just goes back on top and goes down again.
+That's it.
+And the splashes on the ground, all they do is expand with a random rotation, and as soon as they're done with that and fade out, they go to a new position and do that again.
+And we just do that using, like, the animation unfolding is, you know, the fractional part of time.
+So for every half second, it goes up and for every integer part of time it moves to a new position with a new seed and that's basically it for them. Next up we've got the volume lighting above the water to just show where it is and finally we've got this plane on the water just showing where it's hitting the water itself with basic It's called Fong, specular lighting and a bit of diffuse lighting.
+Going underneath, we have a bunch of the same effects and a little new one.
+So the different effect down here is we have these dust moats underneath the water that are lit up by the...
+by the spotlight and they're lit up the same way that the they're moving the same way that the spotlight, that the raindrops are they just move across and when they come to the other edge they loop back in and just keep going. They just scroll across in a volume and come back to the start using what is called modulus, that operator, fmod and uh... we've got the volume light underneath but unlike the one above of course these are different volumes just like you said uh... this one underneath has uh... a texture on it that's animating of like caustics to make it look more underwater and finally the phone reflection which is now a phone refraction just to show exactly where the light is and that's it for under So for above water we've got these waves coming out from the buoy there.
+I could have chosen a better place to show these because they're very subtle here.
+So the way these waves are done is they just resample the reflection and refraction with some wavy distortion around him.
+They're done with particle-based rings, like just these little ring meshes that go outward.
+And the way we get those distortion normals is very simple.
+the direction around the ring, and we have the phase from center to outward, and we just take that direction on the ring as the normal, and multiply it by a sine that's sampled over the phase of it.
+So it's, you know, zero at the start, zero in the middle, and zero on the other edge, and then negative a lot in the first third, and positive a lot on the second third, and that gives a wave normal, essentially.
+And now for a different type of water.
+so this is the uh...
+this is the whirlpool and uh... this one has much different motion on it uh... so it's got some motion going outward rather than just scrolling across and uh... the way we do that is with this uh... this mesh here, this high poly mesh and the reason is it's high poly is rather than calculating these texture coordinates in uh...
+In Fragment, we just made it higher polycount so we could calculate it in vertex instead.
+Now, we could have picked scrolling, expanding textures outward, but that would be somewhat difficult.
+What we chose instead was this scrolling outward, but that makes texturing somewhat more difficult.
+So the texture that we have scrolling outward looks like this.
+And the criteria before was it had to look wavy and it had to tile really well, but in a non-obvious way.
+So luckily there is a good way to tile these things that you might have seen outside.
+Like these cobblestone bricks, they tile perfectly, with a wave shape, like water.
+So if I took a picture of this, started tracing lines of the wave shapes.
+then took some stock images of waves and layered them underneath and then removed the lines.
+Suddenly you've got a texture that looks like, well that doesn't tile, but it totally tiles.
+And yeah, that makes up for a pretty good tiling foam texture.
+You guys.
+Finally, we've got this flood.
+Which is a lot more dramatic with sound.
+it's got a bunch of elements stuff we've already talked about couple of new ones just stuff we've talked about first up we've got this water volume coming outward and it's using our full water rendering uh... thing and uh... that thing however is of course animated so how it looks like it's using three morph targets one for before breaking one for after and one uh... for in between it looks like this if you just look at the mesh itself so we're using morph targets exported from 3ds max with these three water shapes and animate them and that's how we do the animation of that and uh... we scroll textures on it the same way that we did on the whirlpool and uh... then uh... we've got this uh... thing on the ground this uh...
+this big decal of uh... screen space perfections and the same wave texture that we had before scrolling in the same way that we did before uh... and the texture coordinates what was important to the texture coordinates was that they uh... are faster in the beginning and then kind of like ease out as it goes out toward the end of the decal and we do that by just having like applying power to the y component of the of the texture coordinate so that it goes very fast in the beginning and then over time it will slow down and finally we've got this carpet of particles which are lit from behind to just so that these club cars are...
+alighting it and we've got the same thing for an impact down below and finally we've just got like some some swooshes that make it more swooshy in the beginning and feel more powerful in the start of it and That's basically all the components of that So in conclusion, if it isn't apparent already for sampling, we really like blue noise, and you should like it too.
+We really like temporal anti-aliasing because it really lets us do all these stochastic effects that we otherwise would not be allowed to do before bedtime.
+You should dither all your things with a triangular distribution function.
+And you should expose customizable shaders to artists if you're using any sort of deferred pipeline or any pipeline whatsoever, because you get cool decals.
+Screen space reflections are cool and useful.
+And non-screen space ambient occlusion is cool and useful as well.
+Thanks to all these people, our colleagues at Playdead, people at Microsoft, graphics team at Unity, Double11 for making our code fast, and the Twitterverse for helping with this talk.
+And that's it.
+Thank you.

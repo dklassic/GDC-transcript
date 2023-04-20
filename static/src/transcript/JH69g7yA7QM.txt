@@ -1,0 +1,388 @@
+Hello, and welcome to our presentation.
+My name is Ville Rustie.
+I'm a principal animation programmer.
+Here with me presenting is Ilkka Kuusela, principal gameplay animator.
+We both are from a company called Remedy.
+We are quite a small studio in Finland, famous from our story-driven action games, such as Max Payne, Alan Wake, Quantum Break, and our latest, Control.
+In this talk, we will go through how we build our own animation technology, how we took the responsiveness to the next level, how we started using this quite new tech called motion matching, how we created animation-friendly tools, and how, of course, how we survived through all the craziness that was happening around us with the project.
+But before we start, here's a video of Kontroll.
+And quite early in the project, we sat down and started laying out our core game goals.
+We wanted to make a fast action game.
+This means a much stronger focus on the gameplay than the Quantum Break was.
+This also means that the animations can't compromise controls.
+It needs to be twice as responsive what the quantum break was.
+We got a lot of feedback on that.
+For action, we of course need more enemies on the screen.
+This includes supernatural abilities, include flying and throwing objects.
+So how to make game responsive?
+For us, this means code-driven movement.
+It needs to work without any animations.
+And it needs to be easy enough that even the designers can iterate it.
+For animation part, this is quite tricky.
+So I started evaluating different options.
+And I found out motion matching.
+It seems quite good candidate.
+So what is motion matching?
+It's a tech originally presented by Ubisoft in 2015, Nuclear AI.
+and then brought to the bigger audience in 2016 GDC.
+It's a database of animations.
+We break the path based on the player's input and then the AI path.
+We search through this big database to find the frame which best matches the character's current pose and the path we generated.
+This search is then repeated every frame.
+So in action, we have a character and we have a path.
+We have a bunch of points in a path, some in the future, some in the past.
+Then we have points in the character, such as angle positions, velocities, hip direction, and then the head height.
+Then we generate offline the same information for animations.
+We run through this search through this database and compute cost for each frame.
+Then in the end, we pick the one with the closest.
+In this case, it picked really well.
+So I started making prototype.
+At that point, we were using Morphine as a middleware, so I added the custom node to it, and then simple path prediction.
+For animations, we used the Ubisoft Dance Guard as a reference.
+I added the motion shader, which defines how exactly the potion trajectory is compared.
+We chose to use the data-driven approach to allow quick iteration, what features we need.
+So I exposed position, velocity, and direction.
+For trajectory channels, I added support for specifying the time.
+So those channels could be in the future or in the past.
+For bones.
+the information is only relative to current frame.
+In order to control this, I added a bunch of markup.
+I split the locomotion state into idle, start, stop, and move.
+Then we went through all the animations that were in the database and tagged those based on this.
+And this is how it looked.
+So we have our test character walking around.
+we generated the path.
+The path is the one that is in the ground.
+And the character is following quite nicely.
+And all this data is just the raw data.
+We didn't do much of editing with this.
+And it seems to work surprisingly well with this.
+So we were happy with this prototype.
+We were also happy with the runtime characteristics of it.
+The motion matching only needs some small internal state, like animation index and time.
+It's so small that we could easily use that even in the multiplayer game.
+The memory usage is also good.
+It's small and consistent, and it's the same in each frame.
+But then a surprise happened.
+Morphine goes out of market.
+So I had to stop doing this prototype.
+Now we need to evaluate options.
+We checked the Havoc behavior, Granny Animation Studio, and some others.
+But there's not really anything similar available.
+We would also have to build quite a lot of tech on top of those middlewares.
+But those middlewares also share the risk of going out of market.
+Seems that for us, the best option is to build our own tech.
+And for that, we need a plan.
+With past experience.
+We wanted to focus on performance, runtime performance, and the fast iteration.
+We wanted to simplify the graphs.
+So we wanted more powerful nodes doing complex operations such as motion matching, which we chose as to be the core feature.
+The old player graph was close to 10,000 nodes.
+The top picture you can see is just a small fraction of complexity that we had.
+We chose then that we want to use the expressions instead of math nodes.
+All those gray boxes that you can see in the top picture are actually math nodes.
+Then we picked the best features from the old middlewares and no state machines.
+I will cover that in a later slide.
+So we started with code driven movement only.
+Single plane tree, input and internal variables and expressions.
+And this is how it looks.
+So we have a motion matching that will cover the core locomotion.
+Then we have an animation clip to handle mantling.
+The select will be either one depending on the player's action.
+Then we have a more traditional nodes such as Fader Blend and Blend N.
+The Blend N covers the aim matrix and the Fader Blend N applies it only to upper body.
+The two bone IK fixes the aiming hand.
+in the right place.
+For expression, I created own expression language, quite similar to shader languages.
+I hooked that one into graph, which runs before the graph is evaluated.
+This allows us to compute internal variables.
+So the input variables are the one that come from the game.
+The graph variables are the one that are computed.
+The graph itself can use both of these.
+In addition to that, I added expression node.
+It's a node in a graph.
+It can be placed in any point there, and it only runs when the node is active.
+It can modify bones or compute variables for next node.
+It's really good for prototyping features, such as different IK setups.
+But then, second surprise, E3 demo.
+So we just got this deck running, and now we have six months to ship hands-off demo.
+It needs to have a functional mission, multiple player abilities, four enemy archetypes, and everything needs to run on new tech.
+We need survival plan.
+For locomotion, we chose to use motion matching for all.
+We don't have time to do anything else.
+In order to allow multiple animators to work with this, we need to split graphs into layers.
+Luckily, we have the expressions to make up all the missing features that we have.
+And luckily, we also have time to work with the tech.
+So we added Animation Mixer.
+It defines the graph order.
+So you can choose if a graph is running in the pre-physics or post-physics after.
+dialog lines or after time timelines.
+Each of these graphs here are own files.
+They can define their own set of bones, and they can be shared quite easily because they are own files, so you can use it with different characters.
+In order to handle the layering, I added the input pose.
+It allows graph to read bones from the previous layer, mix it, and then...
+If that node is not active in the layer, it can skip the previous ones as optimization.
+So what it means that no state machines? It means no animation specific state machine.
+The main idea was that we combine it with the gameplay and AI.
+This would then reduce the possibility that these state machines would be mismatching.
+It was quite a big issue in Quantum Break.
+For example...
+Quantum break is quite famous with the infinite fallback.
+I spent at least one month trying to fix that one.
+And there's still some cases in a shipped game.
+So how we do this then?
+We have a higher level actions in a blend tree.
+We have a select node which chooses which action is active.
+Each of these actions then have a.
+transition node using the motion matching, which picks the best transition to come into this.
+Then there's the main sequence, which handles the switching then to the main loop.
+This could be a simple case, like the idle loop in here, or more complex, like motion matching running or traditional blend tree.
+But actually, these features are coming soon.
+We are not done.
+So we have to cover this somehow.
+Luckily, we have this expression language.
+We can use it to build a temporary state machine to handle all this transition, and then use timers to time when the transition is ending.
+This is not the nicest way, but at least we managed to continue the work.
+So meanwhile, we started working with this match node.
+It's same kind of database of animations as motion matching.
+In addition, it has target position and rotation coming from the code.
+It picks the best animation, a starting frame, using the same motion matching search.
+To actually reach target, it has built-in motion warping support.
+And it also allows to do the animation-driven movement.
+So to control this, we added some markup.
+The match range defines where the animation can be started.
+This allows to use different distances for where to start the animation.
+The warping is also controllable by this markup.
+So the position and rotation can be chosen that happens at certain frames.
+So in action, we have a character that is running.
+At this point, it decides that it wants to go in the cover.
+So code generates the target.
+The motion matching picks the result.
+At this case, it picked something in further in the animation.
+So the positional warping is 73% at this point.
+We scale this to actually handle the.
+the blending nicely.
+And to see this in full action, here's the clip.
+And as you can see, the result is 100%.
+So it's perfectly matching the target.
+At this point, I will switch to Ilkka.
+He will cover the more animation-specific things.
+Hello!
+I'm Jukka Kuusela, Principal Gameplay Animator at Remedy, and I was working on Control as the animation lead.
+And one of our first challenges for the E3 demo was how to make locomotion work with motion matching.
+Our motion matching was pretty much in a state where we really left it when starting to work on the new technology.
+And we were hitting the infamous 80% quality.
+We had all the normal motion matching issues.
+Start animations didn't always work.
+stops almost never worked. There was some sliding, even more when converted to code driven motion.
+Sometimes the character would just get stuck in a single pose and often it just looked like the character was running weirdly and then when you debug it turns out he's looping some single cycle from a random animation. And since all the coders were working on getting all the technology ready for it.
+E3, there was no time to improve upon motion matching itself.
+So we needed to ship the demo with what we had.
+And the way I started to approach motion matching was that I need to learn how to think like the algorithm.
+Once I understand how it works, then I can start to provide it with animations that work with it.
+And if something isn't working, I can deduce why that's happening.
+And often, it's pretty simple.
+If you provide motion matching with the kind of animations it's looking for, it's going to work well.
+So we needed to create animations that match the kind of paths what the game was requesting.
+So we created these kind of animations that had accurate speed and correct acceleration curves.
+And that, of course, eliminates sliding and also improves the way motion matching works.
+Here's a workflow example.
+So we have a script in MotionBuilder.
+And you could specify the movement parameters.
+So you would put the same values what the game was using here.
+And then we can define what is the direction we are coming from and where do we want to continue after this animation and at what speeds.
+And then when you run the script, it will generate movement for the trajectory.
+For example, here I generated 180 degree turn.
+Then we would bring in motion capture.
+Typically, it's quite far from the movement what we need for the game, because the game tries to be so responsive.
+But then with some editing, we could make it much better with the game movement.
+Now, of course, since we are doing this much editing on every animation, we couldn't pull off a large database of animations like is suggested in the earlier motion matching talks.
+So instead we chose to create a pretty traditional set of animations with start, stops, turns, and so on.
+And turns out that this kind of data set works just fine with motion matching.
+End result is more or less similar to putting the same animations into a state machine.
+And doing this kind of animations got us to a point where start animations were working, stops were working.
+There was less sliding.
+thanks to matching the movement between animation and code.
+We still have the problem that sometimes the character would get stuck in a single pose.
+It looks like this.
+And this started happening when we started adding turn animations to our database.
+And specifically, it happens when the player is trying to walk an arc, like in this video.
+And the reason this happens is that in order to walk a pattern like this, the player has to be continuously.
+changing the input in order to keep turning.
+But the prediction always assumes that we will keep the current input.
+So in practice, it's looking for the kind of data that begins with a turn, but then continues to move straight.
+And it starts finding this kind of animation in the end of the turning animations.
+And if the player keeps turning, it might find the same frame over and over again.
+And this could be a really hard problem to solve.
+But luckily, when you think about it, we don't actually want motion matching to ever jump to these frames directly.
+They only make sense as part of the turn animation.
+So we added a very simple feature where we could tag parts of the animation to be ignored by the search.
+For example, in this turn animation, we would leave maybe 10 frames near the beginning of the turn for motion matching to pick.
+And anything after that would be ignored from the search.
+These frames are still accessible for continuous playback.
+So if this animation starts playing, it can play all the way through.
+And this turned out to be a pretty powerful tool for controlling motion matching.
+One use case was fixing this problem where you get stuck in a pause.
+You could also use it a bit more for stylistic reasons.
+For example, if you want to play your stop animation so that player always plants at least one foot in the stop.
+then you can ignore the part where both feet are already planted to make sure we get enough of the stopping.
+And in a similar way, maybe you want your start animations to always start from the beginning.
+So you can ignore all the other frames to force it to play these animations from the first frame.
+Another good thing to ignore is tails after transitions.
+When building a locomotion set, typically what you get is lots of transitions or changes of directions that all lead into the same loops.
+So in practice, you have these pieces of a loop scattered all the way across your animation database.
+And this is actually why motion matching might start looping a small piece of animation, because instead of your main loop, it can find one of these loops after a transition and start looping a small part there.
+But by ignoring those frames and only letting them play when the transition is playing helped us get rid of the problem of getting stuck in a loop.
+Also, anything near the end of the animation.
+It doesn't really make sense to jump to the end of the animation because the animation is just gonna end and you have to jump somewhere else.
+So we were able to reduce some glitchiness by just ignoring the ends of animations.
+And of course, since what the ignore tag is doing, it's basically limiting the search space.
+It also works as an optimization.
+In control, we were able to cut our search space down to 20% of the original.
+So after adding the ignore tags to the animations, we got to a point where the most outstanding issues were fixed.
+When it comes to combining abilities with locomotion, we went for a pretty old school approach of blending upper body animations on top of locomotion.
+Since locomotion was always facing the direction where you are going, every animation needed to support all the possible directions.
+So we built game matrices out of our animations.
+And in some places where it had most impact, we added full-body animations.
+And with that, we got the Retreat demo done.
+We had a playable mission, and we were able to deliver all the intended gameplay features.
+We had a couple of set piece animations and intense cinematics and our first building shift, which is the transforming building.
+And all of this was running on a new technology.
+Here's a little glimpse into our E3 demo.
+Okay. So when building this demo, we were able to get a lot of important groundwork done.
+First of all, by defining what kind of a game we are making, but also laying foundations for our animation technology.
+And we were on track with the main goals we had.
+The game was responsive. We had good runtime performance.
+And iterating on animation systems was fast Any change you made could be hot loaded to the game almost instantly.
+And as a standard feature, the match node was a great success.
+It proved to be a pretty versatile tool and became our go-to option whenever we needed to do some one-off animations.
+Using motion matching was quite difficult for us.
+We spent a lot of time debugging it and trying to figure out why something wasn't working.
+And overall, didn't really yet have the level of control we needed over it.
+And we also had some visual issues.
+Most notably, we couldn't do straight locomotion without sliding yet.
+To debug motion matching, we already had some information available.
+So we could see what animation was playing, which frame, and what is the cost of this frame.
+And also if the animation was changed, we could see that what would have been the cost of continuing the previous animation.
+But that didn't really answer all of the questions we were having, such as, why was my animation interrupted?
+Or why isn't my animation getting picked?
+And to answer these questions, Ville created a new animation debugger.
+On the left, it shows all the animations in the database.
+And on the right, it shows a real time visualization of the costs.
+of the different frames in that animation.
+So every little bar on the right corresponds to one frame in the animation.
+And the height of the bar tells how much cost that frame is getting.
+It was also possible to hover a mouse on top of the frames to get more information about that frame, such as how is this frame tagged, what is its cost, and how do the different channels contribute to the cost.
+You could also tune the motion shader of the different calls of different channel live and see how the per frame calls react to this.
+So this way you can try to tune your shader so that motion matching starts picking your animation.
+And then you can unpause the game and keep playing and see how the game feels after the modifications you did.
+Finally, it was possible to draw some debug visualization, like the path points and the skeleton of the character.
+And then you could scrub backwards to a recording of the game, find the frame, maybe where a glitch happened, and then you can investigate, for example, that which animation did it choose and why did it not choose the animation I wanted it to choose.
+To get even more control over motion matching, we added a new kind of data-driven category tagging system.
+So it was possible to add custom category events on the animations.
+And then we could request motion matching to play animations from that category.
+And this was a soft category system in the sense that we could assign penalty for picking animations from a wrong category.
+So if you want to ensure that it's always paying animation from a specific category, we can give a really high category penalty, in which case it forces it to pick those animations.
+But it's also possible to give a lower penalty, in which case it will prioritize the animations in the correct category.
+But if there are no good matches there, it can then default to the other categories.
+The reason our straight flop motion was sliding was that.
+When strafing, you have to be able to move to every possible direction.
+But since we can only have a discrete number of directions in the animation database, then we get situations like the top picture here, where the orange line is showing where the code wants the character to go.
+And the yellow line is the best matching animation for that.
+And if you play that animation, but at the same time move along the orange path, the feet will start sliding.
+So to fix this, we made it so that the character gets rotated so that the animated path is aligned with the path the code is requesting.
+And then we apply a correction on the upper body to counter for this correction.
+So in practice, we are rotating the lower body of the character to align with the path.
+On the animation side, work was proceeding well.
+A lot of things that were causing friction early on, like missing features.
+were being fixed, and animators were getting experience on the technology.
+And one nice bonus we get from motion matching was that now that we had best practices how to create the animations, every animator on the gameplay team was able to create their own locomotion sets.
+On the player side, we still needed a lot of improvement.
+And the main problem was that when players were playing the game and running around.
+and combining abilities and shooting at the same time, things started getting messy.
+We get this awkward process of trying to shoot behind your back.
+Switching between the different abilities didn't look smooth.
+And some important animations got lost in the overall business of the animation.
+So what we wanted to do was reduce any kind of issues caused by changing input.
+and make the main actions what the player is performing stand out.
+We started from our worst offender, hip firing.
+We wanted to get rid of the stiff feeling we get when combining upper body and lower body animations, and instead create a full body locomotion set for hip firing.
+And we also wanted, now that we could make nice straight locomotion, we wanted to make a straightening set so that the character wouldn't have to turn around while moving.
+This will perform better on the changing input.
+And also, we didn't have to worry about seam handling.
+So this is what we were able to create.
+And indeed, it worked a lot better than our previous version.
+When transitioning between normal locomotion and heap firing, we did it so that we added the transitions to the motion databases.
+So every transition into some hipfire animation would go into the hipfire database, and transitions back to normal locomotion would go to the normal locomotion database.
+And to make sure every time we go into hipfiring, we play some transition, we use the category tags to force transitions.
+For coming back to normal locomotion, we didn't need to add them.
+Motion matching was speaking the right transitions automatically.
+And every transition was timed so that in two frames you get from your pose to being ready to shoot.
+To give this feeling that as soon as you hit the fire button, the player starts firing the gun.
+And while the hand is pointing to the right direction, we let the rest of the body turn a bit slower.
+Just to make it feel a bit more natural.
+Next up, Fender was launching objects through the air.
+It has similar issues as the hipfire.
+And since straight locomotion worked for hipfire, we also wanted to try that for launching.
+We were also getting feedback that launch needs to feel stronger, and we need to have a better connection between the object and the character.
+And I figured that by using straight locomotion, we can also get a much more controlled composition of the character and the object on the screen.
+So this way, we can plan for a better connection between them as well.
+Only problem was that we didn't really have time to build another locomotion set.
+So what we did instead was we took the hip fire locomotion, and for every animation, we would turn the character 90 degrees, switch the pose, and this gave us the launch locomotion.
+Some animations went through a bit more polish, but the bulk of the work was done like this.
+And as a result, we got launching that feels a lot stronger, works better on the chasing input.
+And we were also able to improve the connection between the object and the character.
+For the animations where you launch the object, we have some full body animations, such as this one where you run forward and launch the object.
+For other directions, we would use the same animation, but blend it with locomotion, like this.
+And we chose to use hip fire locomotion as a base for this drawing, because that way we could get some body rotation into the animation as well.
+And nicely, it also allowed us to make use of the transitions we added for the hip fire.
+We were also able to blend seamlessly from full body animation to upper body animation, like here where the animation starts as full body, but when the player changes direction, it seamlessly blends into upper body animation.
+And what we got with all of these improvements was a character that can seamlessly switch between launching and hip firing while running around without creating animation issues.
+And yeah, in the end, we made it.
+We were able to ship the game in three years, including pre-production time.
+Clocking at 10 to 20 hours of gameplay, this was the biggest Remedy game yet.
+We had 11 different enemies, some fights against big bosses, which was a Remedy first, 25 minutes of cinematics, and two and a half hours of conversations.
+And as you can see from the timeline below, since shipping the E3 demo, we had one year to complete the full game.
+And most importantly, now we have control over our animation technology, and we are in a good place to start building on top of this.
+All right.
+Now, it's been some time already since shipping control.
+So we also wanted to give a quick look at where we are going with our motion matching since then.
+In control, we proved that we can make a game feel responsive.
+And since then, the focus has been more on improving animation quality and making our workflows less tedious.
+And a big part of this has been adding support for animation-driven motion matching.
+This is to give the characters a more grounded, organic feel.
+And we have this available both for the player and NPCs.
+For player, of course, only using when it makes sense.
+We generally still like to use code-driven for the most part.
+But it's better off.
+Ever cases where we want to prioritize animation quality over controls, we can always switch to animation driven.
+For NPCs, we are animation driven by default, but still allowing designers to switch to code driven movement if they want to try different speeds for the enemies, for example.
+The way we do animation driven is that the characters are still moving along the exact path that is given.
+This is to avoid any kind of path finding issues.
+But the speed at which you move along this path comes from animation.
+And adding animation-driven locomotion here has changed our workflow a bit.
+So instead of first generating movement for the trajectory and then animating on top of that, we are now animating first and plotting the trajectory based on the animations.
+When using animation-driven movement, we can choose.
+either to use both rotation and position, or keep positional movement code-driven, but rotation animation-driven.
+And this is good for a playable character where we still get the benefits of code-driven movement, but we can reduce issues that come from code-driven rotation and the animated rotation being off sync.
+we are able to specify with animation tags on which frames do we want to be animation driven.
+So for example, if you want to make a 180 degree turn feel more grounded, we can make part of that turn animation driven to make it grounded and have a bit of control over the timing in the animation, but leave the rest of it still code driven.
+Now being animation driven only goes so far.
+Because even though the animation technically can now control the speed, motion matching still prioritizes animations that are matching the speed what it's requesting.
+And to counter this, we added the option to use distance instead of time to sample the animations.
+So for example, instead of asking, where am I going to be one second from now?
+you can ask where am I going to be after moving along the path for one meter.
+And this makes motion matching completely independent of the movement speed. So now we don't have to use speed as a factor in it. If we want we can do that. So one thing that works for example is that we can check against current speed and the speed after moving two meters.
+but still leave how the acceleration happens between these totally up for animation.
+Or we can completely leave speed out of the matching and use a category instead for picking animations in sets that match the speed we want.
+And this allows motion matching to work on animation sets where the speed is organically varying between animations.
+There was also one more.
+motion channel we had to add to make animation driven movement work.
+The problem was that when characters were strafing, now that the card was no longer rotating the character to face the right director, it was failing to find the correct animations.
+So we added this channel called trajectory direction relative to velocity. It basically tells you what is my rotation relative to movement direction.
+And this helped it pick correct straight directions under animation-driven movement.
+And that is all we have.
+Thank you for listening.
+I hope you enjoyed this.
+If you like how we work, go check out jobs at the Remedy website.
+And don't hesitate to get in touch if you want to discuss more.

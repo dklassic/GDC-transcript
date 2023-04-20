@@ -1,0 +1,318 @@
+Hey, everyone.
+My name's Ben.
+I'm the lead programmer of Havoc AI.
+So I've been talking here on and off for like five years about how game AI needs to be more ambitious.
+And I don't think that's a particularly controversial viewpoint.
+Of course, we should try to make things better.
+So the question is, what holds us back?
+What limits game AI?
+What limits the set of tools we can use?
+And the number one answer is computation time.
+There might be some technique that's absolutely amazing for, say, action selection for companion AI, but if it takes 20 milliseconds to run, then it's off the table.
+We have 60 frames a second to push out, so that's just not practical.
+We have to do the best we can with the time we have.
+And I don't want to imply that AI is alone in that tragedy.
+Everybody wants to do more.
+The physics people want to do real-time fluid dynamics.
+The graphics people want individual beard hairs swaying in the wind.
+The sound people...
+I'm not really 100% on what the sound people want, but I'll bet that if they had more computation time, stuff would sound just extra awesome.
+Well, I don't have any answers for them, but I've got an answer for us.
+Because in AI, we have special powers.
+We have an ability.
+We can do something that none of those guys can do.
+We can wait.
+Let me explain. The other disciplines I mentioned, physics, graphics, sound, are presentational.
+They do their thing sixty times a second, or whatever your target frame rate is, and it has to happen that frame.
+If you're tossing crates around, they can't pause for a few frames and decide which way to bounce.
+Players would notice that.
+These systems have a responsibility to run in real time.
+Some of AI is real time.
+Things like collision avoidance, whatever we need to feed to animation, that stuff.
+But those things are already fast enough.
+What's left is stuff like action selection, navigation, rebuilding occupancy grids.
+What's left is deliberation, basically, and by deliberation, I mean large-scale computation, which takes in a lot of information and produces a complicated result.
+Things like action selection, where you have to think about everyone around you and what your health is and how many arrows you have left, or pathfinding, where you consider thousands of potential routes through the world and produce a path potentially involving many, many steps.
+These things are slow, they have to be slow to be good, but they're infrequent.
+We don't need to peg the CPU at 100% just on pathfinding, because we only need new paths once in a while.
+Say it costs 20 milliseconds to find a path.
+Well, that's way too much to spend on a single frame.
+But it's also crazy fast by human standards.
+If we were to spread that out over 20 frames, that's a third of a second, one millisecond per frame, A third of a second is an entirely reasonable amount of time for a character to spend figuring out which way to go.
+That's normal human reaction time.
+So our special power is we can amortize these expensive but infrequent processes and hide the latency behind normal human reaction time.
+We can harness a huge amount of potential computation time as long as we don't do it too often and as long as we're willing to wait a little while for the results.
+If a particular planning problem takes an unexpectedly long time, that doesn't blow the frame rate.
+It just means the guy spends an extra fraction of a second cogitating.
+Slicing up long computations, I think, is absolutely essential for really next-level AI.
+We will never get there without it.
+So how to slice up a task?
+I see three approaches.
+The most obvious way is split it up manually.
+Like do n iterations of A star on this frame and n iterations on the next frame.
+Or if you're building a nav mesh, maybe you'll do the face clipping on one frame and edge connection on the next frame and so on.
+The second approach is put the computation on a background thread or multiple background threads and let it chug along with your workload.
+And then every frame, you check whether it's finished.
+And the third approach is kind of a combination of the two, and it's what I'm going to spend most of my time talking about.
+But first, I want to concentrate on those first two and why they're good, but not quite good enough.
+The big problem with manual slicing is that it really, really sucks to write.
+When I'm programming an algorithm, I do it with four loops and function calls and all the normal programming stuff.
+One millisecond after an algorithm starts running, maybe it's five function calls deep.
+It's got a ton of local state at each of the five levels.
+It's midway through a loop.
+The state it is in is remarkably complicated.
+And writing the algorithm in such a way that it can save that state and then stop and then come back to that state later is truly painful.
+Here's an easy example. Quicksort.
+Here's regular old Quicksort.
+And here's what I need to do to spread quicksort over multiple frames.
+I need external state, I need to flatten subroutine calls in general, I need way more complicated ways of expressing the same thing.
+Simply put, this is not how these programming languages were meant to be used.
+Manual slicing is painful enough, in fact, if you're doing it, you're tempted to scale back your ambitions just because every layer of detail doubles the difficulty.
+Also, it forces you to guess where you need to split, and usually your guesses are wrong.
+And then changing those splits is even more painful, because you have to completely rework which state you save and how you resume the algorithm.
+For example, that manually sliced quicksort assumes I'll never want to slice in the middle of a left recursion.
+That's why it's so short and simple, relatively speaking.
+Feel like rewriting it when that assumption turns out to be wrong?
+Because it gets a lot longer.
+Manual slicing is a monumentally inefficient solution in terms of implementation burden.
+But at the same time, we should recognize for a moment how promising it is as an ideal.
+If we could really do this, we'd have as much control over timing as we wanted.
+I'll mention in passing that some languages support a coding style known as continuation passing or another related construct known as coroutines, which make this all considerably simpler.
+So if your game is written in C Sharp or Lua, it's worth looking into, though continuation passing and coroutines can work even better with the approach I'll talk about later.
+The next approach is background threads, where you rely on the operating system scheduler to do the time slicing for you.
+You create a background thread, or maybe multiple threads organized into a pool, and you execute your long-running tasks on them instead of on the main thread.
+The idea is to use up spare CPU cycles during the rest of the frame, and during the AI step, just process what's done.
+Since these threads have their own stacks, there's no need for manual slicing.
+The operating system takes care of saving state for you, and you can program in the normal fashion.
+I've used background threads a lot, and I think they can work very well.
+But there's some problems you need to constantly keep in mind if you're using these.
+The immediate problem is your background threads can end up taking resources away from your main thread.
+You've got enough background tasks to fill up your cores, and then you've also got the main thread, of course.
+And all these threads have stuff to do, so if the scheduler decides that it's going to run your background task threads for a while and pause your main thread, then there goes your frame rate.
+But wait, you say, thread priorities.
+I'll just set my background threads to have low priority and my main thread to have a high priority so the background threads only execute when there's nothing else going on.
+Good idea, except...
+Here's a bunch of threads, and here's your CPU cores.
+At any given time, some of the threads are running, some are ready to run, and some are waiting for I O, or waiting for more tasks, or waiting for a mutex.
+And the usual assumption is the cores are filled with the highest priority threads, which are currently ready to run.
+So if a high priority thread becomes ready, it kicks out a lower priority thread.
+and when a thread starts waiting on something it gets replaced with the ready thread which has the highest priority.
+But on some platforms, which shall remain nameless but which were possibly developed by a company I maybe now work for, there's this weird effect where once a thread is assigned to a core it really doesn't want to move.
+Each core has its own set of threads and only looks there when it needs to find a thread to run.
+The only time a thread is moved is when a core has absolutely nothing to do.
+Only then does it steal a thread from another core.
+So if this is your main thread and this is your graphics thread, they can get stuck on the same core.
+And you've got all these other threads on the other cores humming along, since, of course, they've got plenty to do, with the effect that your higher priority threads have to compete with each other for resources, while your low priority threads get all the time they want.
+The solution is thread affinities, where you control which threads can be on which cores.
+Thread affinities are powerful, but they're really difficult to get right.
+If you make them too stringent, you end up wasting cores.
+A decent rule of thumb is give all your high-priority threads different thread affinities, and don't give thread affinities to lower-priority threads.
+But even that isn't enough if you have multi-threaded foreground tasks to the point where you have oversubscribed cores.
+Another problem is priority inversion, which I'll just rush through.
+If this low priority thread holds a lock, and this high priority thread wants that lock, then this medium priority thread ends up getting all the core time.
+Priority inversion is a complicated subject, and I don't want to go too far into it, but the main takeaway is that if your background thread and foreground thread share a lock, which is pretty much inevitable if you want them to communicate, then you can get into situations where a background thread prevents your main thread from running.
+The final problem with background threads is more subtle.
+The whole point of background threads is to use up spare CPU.
+But that means that the latency of your background tasks is at the mercy of everything else in your game.
+So in some area of the game, say, that have a lot of physics bodies, suddenly your AI latency goes way up in that area, because physics tasks are taking up more time, which means less time for the background tasks.
+With background threads, you have a ton of potential CPU, but no guaranteed CPU.
+manual slicing doesn't have that problem because your code runs in the foreground.
+So, well, what do we like about these systems?
+With manual slicing, the primary advantage is the level of control.
+If we were to do enough work on it, we can do AI for exactly as long as we want to do AI.
+But it's a lot of work.
+Background threads are a lot easier.
+You don't usually hear somebody say how easy multi-threading is, but there you go.
+But you have no control over what they're doing.
+Here's a third option, and it's how we've been approaching asynchrony in Havoc AI.
+The basic idea is you have a pool of threads like with the last approach, but instead of running in the background, they run in the foreground.
+And every frame, the main thread waits for them.
+But it doesn't wait forever.
+After a specific period of time, say three milliseconds, those threads get suspended.
+And then the next frame, they get woken up again.
+So this is the best of both worlds in a way.
+For manual slicing, you get precise control over how much CPU goes to AI, and you get a guaranteed amount of execution time, regardless of what else is going on in the game.
+But unlike manual slicing, you don't have to code in an unpleasant style.
+You just implement as usual, and you let the OS take care of saving your state and suspending and resuming things.
+The problem then becomes how do you do this?
+How do you get the threads to run for precisely three milliseconds during the AI step and then stop?
+Well, my first idea was to have the OS schedule things.
+So the main thread has the absolute highest priority, and the asynchronous threads are just below that, but suspended.
+The main thread wakes up the async threads, and then sets a timer for itself for three milliseconds, and then sleeps on that timer while the async threads do their thing.
+When the timer goes off.
+It suspends the async threads, processes any results that they've produced during that frame, and then the AI tick is over.
+There's a couple of problems with this, though.
+First, most of the platforms you're going to be working on are not set up for this level of precision.
+A timer which goes off won't actually resume the thread holding the timer until after the next natural scheduler tick, which on most platforms is around 16 milliseconds.
+On some platforms, you can adjust this.
+But even at the minimum tick, you don't have very fine grained control.
+the more serious problem is the possibility of deadlock.
+Let's say that when an async thread's three milliseconds were up, it had just finished processing, it had grabbed a lock to write its output, and then just then the main thread suspended it.
+And then, of course, the main thread tried to grab that lock itself, just to see if there was output ready.
+And bam, deadlock.
+Your game has crashed.
+the main thread is waiting for a lock but the only thread that can give it that lock is asleep and the only thread that can wake up that thread is waiting for a lock.
+So, do not be tempted to go this route.
+It might work 999 times out of a thousand and then the stars align and you get a deadlock, probably while you're demoing your game at E3.
+That's how fate works.
+Deadlock happens because at some points, it is just not safe to suspend async threads.
+My initial thought was that the async threads should just guard those locations, setting some flag to tell the main thread that it has to wait a little longer before it gets to suspend them.
+But there's a simpler and more elegant solution.
+Let the threads themselves take care of going to sleep.
+Instead of relying on the scheduler, the async threads regularly check a timer.
+And when their time is up, they voluntarily grab a semaphore, which won't be given to them until the next frame, causing them to sleep.
+They also take care of notifying the main thread when the last async thread has grabbed the semaphore and gone to sleep.
+So the main thread wakes up the async threads by releasing the SEMA4 they're waiting on.
+And then it waits for the everyone's gone back to sleep signal.
+When the async threads are woken up, they mark down the current time, add three milliseconds, and then they go to work.
+Every now and then, they check on the time.
+And when their three milliseconds are up, they wait on the SEMA4 again.
+And the last one to go to sleep notifies the main thread that the async step is over.
+And importantly, the async threads never go to sleep if they're holding an externally visible lock.
+They only go to sleep when it's safe to sleep.
+Essentially, we're replacing the OS scheduler with our own scheduler.
+The replacement is more precise, and it also has more information about when it's safe to switch over.
+It does require that we do these periodic timer checks, a procedure we call tend to thread pool.
+instead of using hardware interrupts.
+But that's really not a major burden compared to manual slicing.
+There's a certain number of annoying but important details I'm going to go into, but before I go into those, I want to note in passing that our implementation of an asynchronous thread pool and task queue will be available in the next release of Havoc AI, or actually just Havoc.
+If you're licensed of any Havoc product, you'll have access to the system for your own code, so if you license Havoc anything, you can probably just take a nap right now.
+I also want to give credit where credit is due.
+Havoc's implementation and the majority of details I'll go into later are not my work, but the work of my teammate, Leven van der Heide.
+So if you want to thank someone for this being an actual thing as opposed to a clever idea, he's the one who actually made this stuff work.
+The first detail is how the locks in the CMU4s work, the machinery of resuming the async threads and pausing the main thread, and then resuming the main thread when the async threads are back to being paused.
+Obviously, this is the most important part of the system, but I don't want to spend a ton of time on it, simply because working through correctness proofs is nobody's idea of a good time.
+But in short, each async thread has its own semaphore which it uses to suspend between threads, or between frames.
+And the main thread has a semaphore which the async threads use to wake it back up.
+Suffice it to say that it's not that difficult.
+If you can implement a task queuing system with dependencies and whatnot, you can implement a simple async thread pool.
+And just Google the sleeping barber problem.
+Everything you need to know is there.
+I do, though, want to talk about thread affinities and how they relate to the locking.
+It's very important that you set thread affinities for all your async threads.
+Otherwise, you can run into the problem I mentioned earlier, where threads get distributed to the wrong cores and end up waiting for each other while low-priority threads run.
+Without thread affinities, this is almost guaranteed to happen.
+So make sure to give each async thread its own core.
+And of course, don't oversubscribe your async threads.
+But having one async thread per core sets up a hilarious problem when you wake up all the async threads.
+Halfway through this wake up, maybe the main thread wakes up the async thread that it shares its thread affinity with, that's on the same core as it is.
+And what happens?
+Well, the async thread takes off, particularly if it's benefiting from priority boosting.
+and then the main thread is no longer running and never has a chance to wake up the rest of the async threads.
+You can solve this with careful use of affinities and priorities and waking the threads up in the right order.
+But a much simpler solution is just to chain the wakeups.
+Instead of the main thread waking up all the async threads, it just wakes up the first async thread.
+And when that async thread wakes up, the first thing it does is wake up the second thread, which wakes up the third thread, and so on.
+So as long as you've set correct affinities for all the async threads, that should wake them up basically simultaneously without any worries about scheduling.
+The next detail is timing.
+An x64 processor has a number of timers available to it, but the only one that's really precise enough for our needs is the timestamp counter, which is accessed through the rdtsc instruction.
+RDTSC gives you very high precision, but it's not perfect.
+In particular, it's a remarkably slow instruction.
+On some x64 chips, it's one of the slowest instructions you can execute.
+So if you've got an inner loop like this, don't tend to thread pool every time through.
+Instead, you can do a tend to thread pool on certain counter multiples.
+Or you can separate an inner and an outer loop like this.
+By the way, once upon a time, the timestamp counter was at the mercy of the CPU clock frequency and could be thrown off by power saving.
+That's actually no longer the case on modern x64 chips.
+But if you have a very low min spec, it's worth thinking about.
+Likewise, once upon a time, RDTSC wasn't necessarily synchronized between cores.
+But on the platforms we've tried this on, synchronization hasn't actually been a problem.
+It's important that your tend-to-threadpool function be as efficient as possible, because it's going to be called a lot.
+Make sure you don't grab any locks or semaphores, or atomically change any global values before it's time for you to go to sleep.
+And make sure that any per-thread state is on a different cache line to avoid false sharing between the async threads.
+You should also make it not suck to call tend-to-threadpool.
+In particular, don't force your programmers to pass a thread pool pointer everywhere.
+You could use a singleton, but even better is to use a thread local variable in order to store a pointer to the per-thread state.
+That gives you a useful side benefit.
+You can make tendToThreadPool behave like a NOP if it's called outside any async thread pooling.
+That reduces the need to make two versions of your algorithms and makes it easier to retrofit asynchrony onto existing code that you're already using elsewhere.
+The trickiest part of all this stuff is calling tend to thread pool at the right frequency.
+If you call it too seldom, you'll get time spikes, and if you call it too often, you'll waste a lot of CPU time on RDTSC.
+Now, we've spent a lot of time getting timings just right because we've set a target of 100 microseconds for our maximum variance.
+That is, a thread never stays awake more than 100 microseconds longer than it was supposed to, which means it has to call this at least once every 100 microseconds.
+For that level of variance, you need to retrofit a lot of code for async use.
+For instance, we actually have a special version for asynchrony of memcpy, just because copying a one megabyte array takes about half a millisecond.
+For smaller data sizes, for higher acceptable variance, you don't have to go this far.
+But you should have some way of finding places in your code where you're calling tend to thread pool either too seldom or too often.
+A profiler can really help with this, particularly if you examine where tend to thread pool is most being called from.
+And you can also manually instrument your code.
+If your tend to thread pool function, if you pass in a unique ID from each place, then you can record when that happened and look for unusually high or low intervals between the calls.
+A major pain point with asynchronous computation in games is working with world state.
+Actually in this system, threading notwithstanding, since everything is happening in the foreground during a dedicated AI tick, it's actually a lot easier than with general multithreading.
+But there are still a couple of things you need to keep in mind.
+First of course is don't hold external locks when you're checking the sleep timer.
+Second is, if you read world state and then call tend to thread pool and then read more world state, consider whether the first batch of world state might now have changed.
+For things like influence maps, maybe that doesn't matter.
+For things like planning problems, it probably does.
+You can also have your tend to thread pool function return whether it slept or not, and roll back and recheck things if it did.
+So far I've talked about async threads as either running in the foreground or suspended, but you can also set it up so async threads switch between foreground and background mode by adjusting the thread priorities during the tick.
+That gives you a guaranteed time slice during the AI step, but it still allows you to soak up those idle CPU resources during the rest of the frame.
+One important point about this, the main thread should increase async priorities and async threads should decrease their own priorities.
+Make sure to do it that way, otherwise things will happen at the wrong time and threads will get stuck.
+There's a big drawback to the background mode, though.
+When async threads are in the foreground, they have full access to the external world data as long as they don't try to sleep in the middle of a transaction.
+But if they're in the background, then it's just like any other multi-threaded system.
+You have to worry about concurrent access.
+So if your system needs to read a lot of world state, making it work in the background may be more trouble than it's worth.
+I should also mention that allowing both background threads and suspended frames makes an implementation considerably more complex.
+One bit of future work we've been looking at is internal locks.
+And by internal, I mean locks that are shared by asynchronous threads but are not visible outside the thread pool.
+You see these pretty often when you've got multiple threads working in parallel to produce a set of output.
+Internal locks, of course, aren't a problem as long as you don't hold them across a tend to thread pool call.
+But it would be nice to have a lock.
+which had that flexibility.
+The idea is that that special kind of lock wouldn't interfere with 10-to-thread pool.
+And the way it would do that is, if a thread is waiting for an internal lock, it should be treated as effectively already suspended.
+That means it needs to be implemented on top of the existing per-thread semaphores and there's a lot of machinery for making sure that when a lock is released it goes to the right thread, depending on whether it's suspended for the right or wrong reasons.
+It's not going to be easy to implement, but I think a successful implementation of this would open up a lot of flexibility in what sorts of processing people could do in an async thread pool.
+I know that asynchronous processing isn't the most natural way to write code.
+Instinctively, we want to be able to ask a question and get the answer back immediately.
+But asynchronous AI opens up possibilities which nothing else opens up for us.
+Computers have basically stopped getting faster.
+If you can't afford a technique today, you won't be able to afford it in five years either.
+unless you change the rules.
+And asynchrony changes the rules.
+It uses game AI's natural tolerance for latency to open up more processing power than we've ever had before.
+I swear, asynchrony is important.
+It's probably the most important thing I've ever talked about here.
+This is something you need to do if you want to move forward.
+Thank you.
+Thank you.
+Thank you.
+Thank you. 2 Thank you.
+Thank you.
+Thank you.
+Got a couple minutes for questions.
+Hi.
+Thanks for the talk.
+I wanted to ask if you guys experimented into diving into, like, implementation with fibers.
+Implementation with what?
+Fibers.
+Yeah.
+I would love to use fibers.
+For that matter, I would love to use user mode scheduling and all sorts of things that are just perfect for this.
+We had to worry about cross-platform compatibility.
+I didn't want something that I'd have to reimplement and have different vagaries on each platform.
+So that meant, you know, doing it the vanilla way with locks and such like.
+Okay, great, thank you.
+Thanks for the talk.
+So given how easy it is to call tend to thread pool and how widespread the calls are, it seems like it's very easy to actually call it from a scope that's holding a lock.
+Do you often run into these problems?
+Do you have some like instrumentation or some tools to deal with that?
+I mean, we ran into it a few times when we were first using this, when we were retrofitting existing code, but, like, we're already very careful with locks.
+Because when you're holding a lock, you're doing something unsafe, of course.
+And because you're doing something unsafe, you're restricting what can happen in the world.
+So our use of locks is already pretty tight.
+We did see a few uses of this, but I would say that none of them were very difficult to resolve, with the exception of the stuff happening entirely internally.
+It's a funny thing that it was the external locks which were harder to fix than the internal ones.
+Last question. So since when you do time slicing, you're essentially trading CPU time for memory.
+Do you guys handle anything with memory spikes essentially now that if different asynchronous tasks in the background are getting paused but consuming quite a bit of memory?
+So by trading CPU time for memory, you mean because there's all these threads which with their own working set.
+It hasn't tended to be a big problem.
+I mean, yes, you have a stack per thread.
+But if you've got more threads going, then they generally have smaller heap sizes, just because they're operating on a smaller area of the problem.
+It's definitely possible to limit the amount of memory being used per thread.
+But this just isn't something we've seen a need to do yet.
+Yeah.
+time.
+Thanks.

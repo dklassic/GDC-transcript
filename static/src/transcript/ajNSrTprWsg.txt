@@ -1,0 +1,241 @@
+Hello everyone.
+Welcome to Disintegrating Meshes with Particles for God of War.
+Welcome to my talk.
+My name is Rupert Renard.
+I'm an Australian game developer.
+I've been programming games for over 12 years now.
+I've worked on 12 ship titles and half a dozen canceled titles.
+Some of the games I've worked on you may have heard about, such as God of War, The Legend of Zelda, Deus Ex, Mass Effect 3, Deblob 2, and Scooby-Doo.
+I've worked in a variety of programming positions.
+I'm currently at Sony Santa Monica as a graphics and engine programmer, where we shipped God of War in April 2018, and it did pretty well.
+In previous God of War games, Kratos would plow through lots of enemies, and the new game wasn't going to differ too much in that aspect.
+So back in around mid-2015, we held a meeting to come up with in-theme methods of removing defeated enemies from the screen.
+The method needed to fit into the God of War world.
+We couldn't just simply let the pile of corpses stack up.
+We needed to remove these bodies to ensure that the framerate wouldn't suffer.
+Most games don't really take this into account.
+They usually just do something simple like let the body sink through the floor, or fade the body with alpha blending.
+So I proposed a method to disintegrate the body pixel by pixel.
+I quickly prototyped this, and the results looked promising, and it got implemented into the game.
+I've prepared a short demonstration video from the final game to show you what to expect from the technique.
+Also note that some other standard particle emission techniques are used in combination at times.
+The disintegration technique can occur pretty quickly at times, so please refrain from blinking.
+This technique is applied in two major parts.
+The first part is to make the mesh disappear.
+To do this, we simply apply a simple alpha reference testing.
+Nothing really new there.
+The second part is to emit particles from the mesh.
+We do this by emitting particles the frame immediately before the pixel will be hidden from the alpha reference testing.
+This gives the illusion that the pixels that make up the mesh are disintegrating into small particles.
+The particles are then able to move and animate independently, as well as collide with the screen depth buffer.
+The technique also conveniently has built-in level of detail.
+We start with a simple alpha reference comparison test.
+For each fragment of the mesh being drawn, we sample a single channel texture.
+We compare the sample against a reference value.
+The reference value is shared globally for the mesh, and changes over time.
+The comparison results are used to determine whether or not a fragment is visible.
+If it's visible, we continue on in the shader.
+If it's not visible, we discard the fragment.
+Here is a sample texture from one of the enemies in the game.
+It's obviously a noise texture that's used all over the character in a wrapped sampling mode.
+The texture is used to demonstrate the character decaying away from random parts on the body.
+That is to say, its effect is to not decay in a specific manner, just let it be random, and it works quite well.
+Other cases may be more case specific, tailored textures for certain models or scenarios.
+Here is a demo of an animated alpha reference.
+I'm using the same texture for the alpha reference as I am for diffuse.
+I've done this so you can visually see where the alpha recedes from and to.
+You can see the mesh starts disappearing at the dark sections, and moves to the brighter sections as the alpha reference level rises.
+The particle mission is broken down into generally three phases.
+We need to leverage a depth pre-pass.
+The depth pre-pass is required to guarantee we only run one fragment shader per pixel in the opaque pass.
+This prevents multiple particles from being emitted from the same pixel if triangles were to overlap.
+Once we have populated the depth buffer, we run the opaque pass.
+The opaque pass will potentially add to an append buffer the screen coordinates of the pixels that are emitting particles from this frame.
+Once we have populated the append buffer, later in the frame we are going to read the contents.
+We initiate a dispatch indirect to read the append buffer and convert pixel coordinates into proper emitted particles.
+This is done by using screen coordinates to look up information in the G-buffer such as depth, normal, and lighting or other surface information.
+while also converting screen coordinates plus depth read from the depth buffer to world space coordinates.
+The next frame we're able to draw the newly emitted particles, and animate, move, and collide all the particles as usual.
+The append buffer will obviously need to be emptied at the start of the frame.
+While I say the depth prepass is required, there are obvious ways around it, you just need to be careful with your drawing and utilization of this technique.
+In the Opaque pass, shader variations were needed to emit the particles.
+We didn't want the particle emission shader code to be in shaders or materials that never emitted particles, for obvious performance reasons.
+We do all this at native 1080p resolution for the base PS4, or at the 4K checkerboard for PS4 Pro.
+The append buffer can pack all information needed, screen coordinates, et cetera, into a single 32-bit entry.
+The append buffer has enough storage to emit 128,000 particles per frame, but it's unlikely it will ever use that.
+Here we're going to demonstrate the emission of particles that are coupled with alpha reference test.
+Here you can see three segments of a mesh.
+Over three frames, these three segments will disappear in a cascade from top to bottom.
+At the start of frame N, we draw the three segments of the mesh.
+We start by drawing the segments in the depth pass.
+The top segment doesn't pass the reference test, so it executes a discard in the pixel shader of the depth pass.
+The other two segments pass the reference test, so they don't discard and populate the depth buffer.
+We have determined the middle segment will not pass the reference test in the next frame, so we need to emit particles this frame to represent the invisible segment in the next frame.
+We start by taking the pixel coordinates of each fragment in the middle section and add them to the append buffer.
+Later in the frame, we need to read the append buffer full of pixel coordinates, and create particles from them.
+We run a shader via dispatch indirect, in order to process one particle per thread.
+In each thread, we read the pixel coordinates linearly from the append buffer.
+Note, we don't need to use a consume buffer here.
+Now that we have pixel coordinates, we can index into the gbuffer, and also the depth buffer.
+We read the depth buffer and can now combine the pixel coordinates with the depth value into world space coordinates.
+We use the world space coordinates as the particle's spawning position.
+This is also a great opportunity to read other attributes that may be used by the particle, such as normal from the normal buffer, or material properties, or final lighting values of the pixel.
+But make note, the particles we're spawning in this frame are definitely to be not drawn this frame.
+The reason being, the mesh is still visible.
+There's no point drawing particles on top of the mesh since the mesh fragments are supposed to turn into the particles.
+We have now advanced forward a frame.
+Now is the time to start drawing the particles we spawned from the previous frame.
+The segment that was visible in the previous frame, but not in this frame, has visually been replaced with particles we emitted but didn't draw in the previous frame.
+We also draw all other particles that have spawned previously.
+we're able to draw all the particles together and treat them uniformly.
+We can also animate the particle, and move the particle, and collide the particle with other primitives or the depth buffer.
+I wanted to test that we could convincingly recreate a mesh entirely with particles.
+What you are seeing here in this video demonstrates exactly that.
+Each of the Kratos clones are fully created from little particles.
+Every frame, we emit particles from the mesh of Kratos.
+As Kratos flies around the test level, the particles remain where they were spawned.
+I had a fixed particle ring buffer so the trails of Kratos end where the particle ring buffer size is full.
+You can also see that segments of the clones are missing pieces.
+This is because they were obscured on a mission.
+Particles are easily able to collide with the depth buffer.
+Start by taking the particle's world space coordinates, and project them onto screen space coordinates.
+You can now sample a depth buffer with the screen space coordinates.
+Compare the particle's projected Z value with the depth buffer value.
+If the particle is behind the depth buffer, you can use the same screen space coordinates to read the normal buffer and use that as your collision normal.
+Then nudge the particle in front of the depth buffer and update the particle velocity.
+Now here we have the first video of putting this technique into the hands of our lead character artist, Raf Cressetti.
+Raf is playing with the decay animation on a loop.
+Raf is also moving the model around manually while the loop plays, to inspect the effect from multiple angles.
+The animation changes the alpha reference value over time, causing the particles to emit and the mesh to disappear.
+You can also see that Raph has added some material animations to help sell the effect.
+Raph has made the mesh burn to ash before emitting the particle, causing a pile of ashes to fall to the ground.
+You can also see that the mesh has burned into a pile of ash in the shape of the silhouette of the mesh.
+Very cool.
+Just as a note, the character has its feet and waist missing.
+This model was a work in progress at the time of testing.
+One of the key benefits of this technique is it has built-in level of detail.
+The smaller the mesh appears on screen, the fewer particles it is able to emit.
+However, this relationship is obviously not linear.
+If a mesh is unfortunate enough to be close to the viewing camera, it may occupy large portions of the screen.
+This can create the opportunity to emit a large quantity of particles per frame.
+However, you can counteract this with the authoring parameters, such as ensuring you do not animate your reference value too quickly.
+With a smaller reference value speed, you create smaller segments of particle emission.
+Our particle system programmer Paolo also introduced a method of emission randomization to help reduce particle emission count in certain scenarios.
+By decoupling the reference value between emission and alpha reference testing, you can actually start emitting particles early, before the mesh will disappear.
+That is to say, instead of emitting a single particle the frame immediately before the pixel of the mesh disappears, you emit one particle per frame over multiple frames right before the pixel mesh disappears.
+This gives you the ability to produce a more substantial decay effect.
+for example, denser objects, but at a cost of more particles.
+You can achieve this with a single LU add instruction in the emission shader.
+You add a uniform value to the result of the texture sample right before you do the alpha reference comparison.
+This detaches the emission of the particle from the disappearing mesh by a variable amount supplied.
+Here you can see a video of the particles emitting at pixels right as the mesh is disappearing.
+When the little explosion occurs, it will change over to emitting particles earlier than when the mesh pixel disappears.
+It gives a nice effect of giving the emitting area a visually larger size.
+Emission velocity is a useful feature to have available to designers.
+Particles may want to just fall from the mesh, or perhaps they may want to sample the normal buffer from the emission screen coordinates and explode off the mesh instead.
+Particles have a range of options to choose from when picking their color.
+The emitted color could be the final lit color of the pixel, or it could derive a color from the material rendered in the G-buffer, or the color could be a part of the particle system attributes.
+There's no reason it can't be a combination of these, such as starting off as the same color as the final lit pixel, then blend towards the external colors supplied with the particle system over time.
+This technique also has some drawbacks.
+If the mesh is not on screen, it can't emit particles.
+So Kratos' head and feet are off screen.
+The rest of the body is on screen.
+Pixel shaders are only ever run on pixels that get rasterized.
+It can't be rasterized if it's outside the viewport.
+So this means Kratos' head and feet will not be able to emit particles.
+If we were to have an alpha reference emit particles from Kratos' head to feet, you would expect Kratos' particles to fall from his head and into the viewport, but they won't.
+The head will gradually disappear downwards even though you won't be able to tell.
+Then the top of his shoulders and chest will start disappearing and emitting particles.
+Some of our designers unfortunately fell into this trap a couple of times.
+One in particular was very impressed with the technique.
+He wanted to use it for revealing a hidden passageway from a fake wall.
+He set the fake wall material up with the decay option and was pleased with the visual result.
+It was decaying like sand from top to bottom right in front of your eyes.
+However, he noticed that when triggering the effect from up close and looking around, the wall just kind of cut off near the top of the screen as the particles were falling down.
+This was caused by the mesh not being on screen in order to emit particles.
+There are methods available.
+to you to help counteract this, such as rendering the mesh off screen at the same resolution, or simply just resort to your simple triangle emission techniques, but these are outside the scope of this technique.
+The technique proved to be very valuable to the effects artists. They wanted to use it in several other scenarios as well.
+As described in the limitation section, it was used for revealing hidden fake walls.
+Various magic effects were also applicable to this technique and were used extensively in one particular cutscene in the game.
+The cutscene shows a character being sucked into a portal.
+The character is attempting to resist, and little pieces of the character end up falling away into the portal.
+One set-up of this technique was repeatedly asked for, the reverse.
+where particles were scattered around and are pulled together to form the mesh.
+This is very doable, but not with this technique present here.
+So as I said earlier, this was all initially developed in 2015, so this GDC presentation has been four years in the making, but we're occupied making the game itself.
+Everything I presented to you here was the core, initial version of the technique, and is everything you need to get this technique up and running for yourself.
+At the same time as this was being developed, our GPU particle system was being developed by Simone Kulcicki. Over the next few years, some changes were made to the technique, in order to fit in nicely with our new particle system.
+Our particle system programmer, Paolo Siricchio, also added some new mechanisms on how to animate the alpha reference value.
+Originally, you could just keyframe the alpha reference value through our animation sequences.
+He expanded on this workflow and added mechanisms to animate it through script and also hooked it up to our desk system.
+He also added a feature to ration out the particle spawning between different multiple disintegrating meshes dependent on their screen size.
+One particular feature I was hoping some of our artists would explore was mesh layering.
+The character would have multiple layers of mesh, like a Munchoschka doll, also known as the Russian nesting doll.
+Before the disintegration begins, the inside layers would never be rendered for the sake of performance.
+But once disintegration starts, the inner layers are rendered.
+As the outer mesh layer of the skin disintegrates, it would reveal a flesh mesh layer beneath it.
+When the flesh mesh layer would disintegrate, it would reveal the bone beneath it.
+Then the bone mesh would disintegrate.
+Thanks, everyone, for attending.
+I'd just like to take a few moments to thank others who helped out in various ways.
+Paolo Siricchio and the rest of the rendering team.
+Max Ankar, Kevin Huynh, and the rest of the effects team.
+Jack Mulholland and Christina Coffin.
+We are hiring in various positions.
+Please check out our website and come join us on our next project.
+We also have various other presentations that other members of the team are giving.
+I think we're around here.
+So we've got all of these talks to go.
+Please attend them.
+Thanks.
+Any questions?
+Please step up to the microphone.
+Go ahead.
+Thank you.
+It was an interesting presentation.
+I have a question.
+This kind of technique is kind of resolution dependent, so you should end up with different number of particles for base PS version and PS Pro versions.
+Is this a thing that you somehow mitigated with your artist, maybe?
+No, we did not.
+So the question was, since there are multiple resolutions for multiple consoles, how did we handle that?
+We just let the higher resolution have more particles.
+It had more hardware to handle it, so away it went.
+But I was curious if it provides, like if artists are happy enough with different visuals on different platforms, like slightly different, okay.
+No, they liked it.
+Okay. Yeah.
+Thank you.
+Go ahead.
+So you mentioned that the off-screen parts of the character couldn't get any particles.
+Did you guys attempt any solution to cover that up, or was it just not visible enough to be worth addressing?
+It was used, sorry, the question was how did we handle the meshes being off screen and not emitting particles?
+So we mostly handled this with kind of two mechanisms.
+One is restrict the camera, particularly in cut scenes to have the meshes on screen.
+The other method is just combine it with other particle emission techniques.
+Thanks. No problem.
+Go ahead.
+Great talk. Thank you.
+Thank you.
+I had a question about, I know you said that you divided the meshes into segments, and the segments would start fading away and emit particles.
+Was the segment definition artist defined, or was that mesh dependent?
+Okay. So the question is on segments. What are segments?
+Segments is something I just invented for this presentation.
+So as the alpha references animating, The segment is effectively pixels on the mesh that will appear this frame and not next frame.
+So there are no real segments, it's just a term I've used to describe pixels that are changing from being visible to not being visible in the next frame.
+Thank you.
+No problem.
+Any other questions?
+Yeah, one last quick question.
+This technique looks like it was purely pixel based.
+Did you investigate anything like pervert based for a similar technique?
+No, we wanted the high resolution of the pixel shape.
+Sorry, the question was, did we investigate vertex emission techniques?
+Is that correct?
+Yeah.
+Yes, no, we did not investigate that.
+That would probably be too low resolution for us.
+Some of our character measures were pretty high in the vertex count, but probably not enough to give the effect that we wanted.
+Yep, thanks.
+Thank you.
+Any final questions?
+All right, thank you, everyone.
