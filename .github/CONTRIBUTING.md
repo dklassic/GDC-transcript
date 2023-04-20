@@ -27,4 +27,4 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 ## Financial Contribution
 
-GDC-transcript uses [Whipser](https://github.com/openai/whisper)'s large model to transcript for best accuracy which costs money. Its ongoing development can be supported via [KoFi](https://ko-fi.com/dkliao).
+GDC-transcript uses [Whipser](https://github.com/openai/whisper)'s large model to transcribe for best accuracy which costs money, extra tools take time to development. The ongoing development and transcription of the project can be supported via [KoFi](https://ko-fi.com/dkliao).
