@@ -41,7 +41,7 @@ def transcribe_audio():
         current_bitrate = int(subprocess.check_output(ffprobe_cmd, shell=True))
 
         # Calculate the new bitrate (half of the current bitrate)
-        new_bitrate = current_bitrate // 2
+        new_bitrate = current_bitrate * 24 // file_size
 
         # Create the new file name
         new_filename = f"./reduced_video.mp3"
@@ -52,7 +52,7 @@ def transcribe_audio():
         filename = new_filename
     audio_file = open(filename, "rb")
     transcript = openai.Audio.transcribe("whisper-1", audio_file, response_format="srt")
-    return transcript['srt']
+    return transcript
 
 def main(video_id):
     try:
