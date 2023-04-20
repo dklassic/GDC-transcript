@@ -1,10 +1,11 @@
 import os
 from pytube import YouTube
+from yt_dlp import YoutubeDL
 from concurrent.futures import ThreadPoolExecutor
 
 input_filename = "video_to_download.txt"
 error_output_filename = "video_download_error.txt"
-output_folder = "gdc_audio"
+output_folder = "downloaded_audio"
 
 def read_video_ids(filename):
     with open(filename, "r") as file:
@@ -26,8 +27,25 @@ def download_audio(video_id, output_folder):
         output_file = audio_stream.download(output_path=output_folder, filename=video_id+".mp3")
         print(f"Audio downloaded from {link}")
     except Exception as e:
-        print(f"Error downloading audio from {link}: {e}")
-        add_error_video_ids(link)
+        print(f"Error downloading audio from {link}: {e}. Try yt_dlp...")
+        try:
+            video_url = f'http://youtube.com/watch?v={video_id}'
+            URLS = [video_url]
+            ydl_opts = {
+                "outtmpl": './' + output_folder + f'/{video_id}.%(ext)s',
+                'format': 'm4a/bestaudio/best',
+                # ℹ️ See help(yt_dlp.postprocessor) for a list of available Postprocessors and their arguments
+                'postprocessors': [{  # Extract audio using ffmpeg
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                }]
+            }
+
+            with YoutubeDL(ydl_opts) as ydl:
+                error_code = ydl.download(URLS)
+        except Exception as e:
+            print(f"Download {link} failed: {e}. Log the error video id.")
+            add_error_video_ids(link)
 
 def main():
     video_ids = read_video_ids(input_filename)
