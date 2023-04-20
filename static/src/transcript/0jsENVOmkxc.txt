@@ -1,0 +1,276 @@
+My talk today is going to be about vehicle physics and tire dynamics.
+My name is Hamish Young.
+I was the lead mechanic designer on Just Cause 4.
+And today we're going to talk a little bit about tires in particular and wheels.
+But let's quickly just have a reminder of.
+What Just Cause 4 is.
+So Just Cause 4 is a big open world game, open world action game.
+We have a wide range of vehicles, over 100 different types of vehicle.
+And a lot of them have wheels, not all, but a lot of them do.
+And wheels and tires are really gonna be the focus of this talk.
+Obviously we could talk about many different types of bits of physics, but that's gonna be the focus.
+But some of these principles can be applied to other phenomena.
+A little kind of note, the code is deliberately hard to read because it will take you time to read it.
+If you want to read it through, obviously, get the notes afterwards.
+But I put it up there just as reference.
+Okay.
+So one of the things you want to do is obviously set out what the goals are.
+What are we trying to achieve?
+So we have some limitations.
+We've got a limited CPU budget.
+We're making a big open world game.
+And there's a lot of things going on, tornadoes, all sorts of things going on.
+So we're going to have to keep performance pretty good.
+Alongside that, we're running our sim at 30 hertz.
+And so we need to, unlike a dedicated driving game, we're going to have a limited frame rate.
+We want it to be believable.
+Now this is in quotes, because obviously we don't want it to be actually realistic like a driving sim, but we do want cars to kind of feel like they behave like cars.
+And...
+And related to that is this idea of limited cognitive load.
+So when you're driving at high speed, you want to be able to do other things and think about other things and not just driving.
+And even when you have complex environments.
+So that's one of the big design goals for what we were doing.
+We also have a very wide range of vehicles.
+Small, large, and everything in between.
+And we want one system that can cope with all those different types of vehicle.
+And then obviously it's an open world.
+We have a huge, diverse environment to drive in, and we want for it to work in all those environments.
+So let's talk a little bit about the different kind of choices you can make in range of handling.
+You kind of got the kind of kart racing end, which a lot of indie developers tend to have games kind of heading in this direction.
+There's no tire model.
+It's all just forces built on that kind of core rigid body.
+As you head through arcade races, and to some extent there's a range where you might use a vehicle SDK from one of the physics providers.
+And they have a kind of constraint-based system.
+And then you head into more Simcade and driving simulations.
+At the far end of driving simulations, you end up with this really kind of accurate tire model with large complexity.
+And what I'm gonna talk about today is how to get here.
+So how do you move either up this way or down the other way to hit the sweet spot that I'm gonna be talking about.
+So to give you a sense of the order of operations, I'm gonna talk about what we did for Just Cause 4.
+We're going to have similar input parameters to the simulation models, so we're going to take some elements from the simulation, but we want much higher grip than is real for that kind of use of arcade kind of physics.
+I'm going to talk quite a bit about friction clamps to stay physically stable, and this is kind of similar to how the constraints-based driving models work.
+And then I'm going to talk about how you can draw friction curves, and then scale down the pitch and roll components to compensate for the grip.
+And then we can talk about the driver assist stuff, which is actually very similar to the kart racing kind of physics you might see at that end.
+So what we're really trying to do is bring all those elements together into something that works as a whole.
+So let's talk a little bit about the semi-empirical Forza, Gran Turismo end of things.
+The models actually take real time.
+You take a real tire and you put it in a real machine and you vary the input parameters and you measure the outcome and then you curve fit that outcome to replicate it in your game.
+And the more accurately you can do that and the higher frequency you can run that at, the more accurate you're gonna be.
+The downside is that if you want to modify what those tires do, you don't want real, it gets pretty hard to modify.
+And there are real reasons why you may not want real tires.
+For a start, if you wanna run at 30 hertz, well, you're gonna get terrible feedback, especially when you have weight transfer, you're not gonna feel it, and the car is just gonna be unpredictable in its behavior.
+You also, I mean, anyone who's gone from an arcade game to a driving simulator, is understeer is a big deal.
+If you brake and you understeer, you don't hit the corner.
+It's kind of unacceptable in an open world game.
+I need to come up to a T-junction and get around that corner.
+And oversteer can be an issue, but actually it's not such a big issue.
+But if you do want to kind of correct oversteer in a very physical correct way, you need complex traction control and stability control, and that's difficult to get right.
+So I'm going to talk a little bit about the tire setup.
+There are some basic parameters we're going to need to assume we've generated.
+The wheel has a position and orientation, which includes the steer.
+You've got a linear velocity of the wheel.
+And then you've got its angular velocity in the direction of the spin.
+And then you've got some sort of ground position and normal where the tire is hitting the ground.
+So this is the tire reference frame I'm going to be talking about.
+And we're splitting the velocity into things that go along the line of the wheel with things that go lateral to the wheel.
+And then you've got the angular velocity of the wheel spin.
+So slip ratio, this is one of the input parameters that we're going to be using.
+And I'm going to take you through the kind of different phases of it.
+So wheel spin is defined in the slip ratio as when the wheel is spinning faster than it's moving forwards.
+There's a kind of intuitive thing here where the point on the rim that's going round, if it's perfectly gripping, then you actually end up with zero.
+So you're following the road.
+So wheelspin is when it's going faster than the road.
+And then when you're locked, the wheel is completely locked and you're sliding forwards.
+And that's negative.
+And the reason why we are in this space is because when you're braking, you're in this negative value up to minus 1.
+And that means you get a braking force.
+And if you've got a positive direction, then you're going to have acceleration, and it's going to be a positive force.
+And this slip ratio is now defined between minus 1 when you're fully locked and up to essentially infinity, positive infinity, when the wheel is stationary but spinning fast.
+So if you like mathematics, this is the equation you'll see in books, which is literally what I've just shown you there.
+And there's a little bit of code, which is probably hard to read, which does the same thing.
+But in the game engine, actually, it's a little bit more complicated.
+There's a little bit of a gotcha here.
+If I actually go back, what happens is if the wheel spin is positive, and you're going backwards, so it's negative, you actually get a minus sign on this first piece.
+You actually end up with something that's kind of more negative than minus one.
+That's something you don't want.
+So in reality, you want to make a modification.
+We've got a little bit of a more complicated bit of code here which you can potentially look at later just to cope with those edge cases.
+And those edge cases are things that you might want to try and avoid.
+Okay, let's talk about slip angle.
+So slip angle is literally an angle, and it is the angle where the direction of the wheel is essentially sliding.
+It's basically as simple as that.
+So all you're working out is what that angle is in the two directions of the wheel velocity.
+And, you know, it's a pretty simple piece of code.
+We also have camber.
+So this is how much the wheel is rolling over relative to the ground.
+And once again, it's a relatively simple equation.
+And this is kind of a core piece of understanding how the wheel is relating to the ground patch.
+And finally, you have wheel load.
+Now in a sim case, the suspension is very high frequency.
+You're going to get a lot of detail in how that wheel load works.
+And the time model is going to react to that in a very dynamic way.
+At 30 hertz, that's not really very possible to get great results out of.
+And also, you basically don't want too much weight transfer.
+So to keep everything kind of realistic, what actually happens is the suspension force, at rest, when the thing isn't moving, you can blend that in to the suspension force with the dynamics, and you can end up with something that's scaled right, and can give you a wheel load that's kind of reliable.
+So if you want more grip, we have an issue.
+the grip can cause things to diverge.
+So if I've got a velocity of a wheel, and I put it through my tire model, and I end up with a big force, I'm gonna end up with something that actually ends up going the wrong way, and even faster than the way it started, which means a bigger force, which means it starts going the other way.
+You get, the model can diverge.
+And so the drag from the grip is flipping the sign of velocity is something you should never want It's actually one of the reasons why these things can be unstable So we're going to introduce this idea of a friction clamp The friction clamp is a way of essentially enforcing the fact that the friction is only gonna behave like a friction.
+It's not gonna go wrong.
+And actually, this principle is used all over the place.
+So for aerodynamics, when you have a V squared term and it's unbounded, having a friction clamp to prevent it from firing your thing backwards when you're going too fast is a pretty good thing to have.
+The danger here is that the mass in this equation, so the kind of applicable mass you're trying to use, if you have more than one tire, which is pretty much every vehicle, you can't apply it all to the same mass, and so it's a little bit more complicated.
+But in a solver, so in an iterative solver, like a lot of the physics engines, this is essentially how they're doing their vehicle physics.
+They're taking the clamp and they're scaling down how much force you're gonna get out relative to that clamp, which keeps it always in the middle.
+But it has a downside in terms of, if you wanted any effects based on wheel spin, like losing grip because of wheel spin, it doesn't model that at all.
+So instead of doing that, what we're talking about is actually providing the friction clamping code, but introducing this idea of useful mass.
+So it goes back to this idea of wheel load.
+So if you have all of the wheels with the correct load and everything is stationary, then the relative mass that's gonna be relative to that wheel, The heuristic is that you end up with this wheel load divided by all those wheel loads.
+And that kind of gives you the ratio of the vehicle mass you should be representing by that one tire's friction clamp.
+Now it's not completely perfect, but it's a pretty good heuristic, and it works very, very well up to tiny, tiny velocities, and it's what I'm gonna be using for the rest of the talk.
+Okay, so longitudinal friction clamps.
+So there are different dimensions in which we need these clamps.
+The first one is the wheel sliding forwards, and we just want to prevent it from going back on itself in a completely linear sense.
+So we have this useful mass, and we're trying to prevent the forward force from being bigger than required to stop that wheel.
+The only complication here is the wheel is actually putting power in if it's got torque.
+So you want to take that into account as well, and that's what the second term here is.
+For the angular clamp, you're trying to prevent the wheel spinning the wrong way and changing the sign of the slip.
+And so your reaction force needs to not be too big itself.
+And that's a little bit more complicated.
+You're ending up trying to work out what the new velocity needs to be relative to the slip.
+And so the code is a little bit more complicated, but it ends up generating what the maximum force should be to prevent the wheel actually spinning the wrong way relative to the road speed.
+And the third thing is this lateral clamp.
+And likewise, you might think that was simple, but it's just the mass going sideways.
+But you've gotta worry about the angular considerations.
+And theoretically, longitudinal clamps should do the same thing.
+I'm not gonna get you to read this code, but essentially it's taking into account the inertia and not just the linear force.
+So once your programmer has sorted out the friction clamps, let's take a look at what it does.
+So this is with the friction clamp on.
+The car's gonna accelerate.
+You may see the curves, and you can see that the markers on the curves are smooth, and they're not jumping around, and there's no jitter.
+Whereas if I show you with the clamp off, you should be able to see that the actual markers, as the car drives away, the car is shaking and so is the values.
+They're jittering all over the place because they're not getting clamped and you're getting this divergence.
+Obviously you don't want this in your game.
+So once you've got your clamps in place, now you can turn up the friction as much as you like, because you're never gonna break it.
+Your designers can go absolutely wild, they can do whatever they like.
+But if you really want to set things up in a way that is controllable, without having to record real tire data, you really wanna be able to find the right friction curves for your game.
+So we actually literally draw the friction curves in the spline tool, as you can see.
+And we have like a three phase model.
+So any of the curves you end up with zero relative to a peak and then you saturate out at the far end.
+And the reason why we do this, so the curve can have as many points as you like.
+The difficulty is that for the working out what the curves in each direction need to do, in a more complicated model, you end up with these complicated mathematical relationships between these different parameters and we're trying to simplify that down to something that ends up being only a few graphs.
+So this is possibly the most difficult part of the talk, but essentially, if you're talking about the force of which you're going forwards, so this is about forward force here.
+If you are not slipping sideways at all, then when you accelerate, you're gonna get a certain curve.
+And when you brake, you're gonna get a certain curve.
+But when you're sliding sideways and you want to go forwards, you may get more wheel spin, so you're reducing the shape of the curve.
+And it's something that lets you have things like donutting.
+So if you want to donut, then you want the side slip to actually let you wheel spin.
+And likewise the other way around, so now you're thinking about lateral force, so these curves are the force relative to the slip angle.
+You're gonna have five of them for each of the slips of the wheels.
+So this is how you can get effects like drifting naturally, where if you slam the handbrake on, this bottom graph kicks in because you're getting a negative slip angle.
+That's gonna mean you have low lateral grip.
+So you're gonna slide sideways, and then you're gonna pump the accelerator.
+So now you're in the saturated, you're now in saturated slip angle, and you're getting that wheel spin, which then gives you low lateral force as well.
+So the bottom graph and the top graph skip all the middle ground, and you get that change of behavior.
+So the relationship between the lateral graphs and the longitudinal graphs is something that can be a little counterintuitive, but it's still simpler than trying to modify a complicated mathematical function like you would have for a magic formula tire.
+It takes a little while to get your head around, but actually it's very powerful once you get your head around it.
+And it's really this that is the basis of the model.
+So if you head back between here, you really want to understand that the angle that you have and the steepness of the curve kind of represents the feel in a different way than you might expect.
+So the steepness of the curve is really how much grip you feel.
+It's not the actual height, it's the steepness that matters.
+And as you go up the curve, you're going to feel that it's grippy.
+And as it levels off, you're going to feel like actually it's sliding.
+And if it drops, it actually feels like the slide is getting faster.
+And so as you're going to gain intuition about what these curves feel like, you can really begin to play with when you get wheelspin, how does the car feel when it's turning, when you're drifting, how does it feel, and you can balance this out.
+Now in our engine, all of these curves are normalized.
+So actually in the final game, we only had pretty much two or three sets of tires for all vehicles in the whole game.
+because they basically did the right things and it meant that we only had to set up the actual grip value themselves.
+So I'm gonna move on to that in a second.
+So the actual grip, which was authored for the front and rear wheels, was just essentially a value and we were trying to balance the front and rear grip.
+And that was multiplied by this graph, this set of graphs that I mentioned earlier.
+Obviously multiplied by the wheel load, so it's scaled correctly.
+And then we multiplied the time step to get the impulse.
+Once you've got to basically a grip level multiplied by this graph, multiplied by the wheel load, multiplied by the time step, you really have quite a simple equation of these forces.
+But, and here's a big thing, if you want something to be believable and you turn the grip up, all that's gonna happen is your car is suddenly gonna wallow and roll and do horrible things.
+Now you can add kind of anti-damp, like suspension and stiffen the suspension, all those things.
+But if you want those values to be vaguely realistic, you actually, the best thing to do is to modify how you're gonna apply the force to begin with.
+So if you reduce the pitch and roll components of the forces you were going to apply to the wheel, you can really turn this down in a very controllable way. You don't have to redo your suspension setup. So in this case, we just decompose the impulse at a point back into the linear angular components, and then we just multiply by linear factor into the roll and pitch.
+And that just made it so the suspension setup could be completely kind of realistic, and the extra grip didn't cause too many problems.
+Okay, so just as a high-level summary.
+So we've got some input parameters.
+We've got slip ratio and slip angle.
+We're turning the grip up higher than real, and we're preventing it from getting too big with the friction clamps.
+And so that element of the friction clamps is keeping us physically stable, whatever graph I draw.
+And then we can draw friction curves.
+And actually you have tremendous amount of freedom here.
+So once you've got the clamp in place, you have a lot of freedom.
+And for our planes and non-cars, we actually just had a linear ramp and a saturation.
+And we didn't have this complicated wheel spin effect.
+Because the clamps meant that whatever happened, we would stay physically believable and it would be fine.
+If you then have too much grip, you can scale down the pitch and roll components.
+And then you get to the final step, which is like driver assist drift control.
+And that actually goes back to that kind of kart racer type physics.
+You're really controlling the car from the basis of a rigid body and the forces.
+And there are many, many ways of doing this.
+And it really is a talk in its own right.
+And I'm not going to dive too deep into it, although if people have questions, obviously that's important.
+But the real thing is if you come from that kind of kart racer feel, actually you'll be very familiar with the kinds of forces you might want to do here.
+The way that we triggered drift is either by, obviously, button press and control, but you can also trigger it by, if the slip angle of the rear wheels gets beyond a limit, you can then get into that kind of drift phase.
+You start controlling the vehicle, the whole vehicle stage and not about the tires.
+So, in our model, we've actually ended up using all parts of the spectrum of that kind of kart racer handling for drift, the kind of, physics SDK style friction clamp model for keeping us inbound, and then a slightly semi-realistic tire model modified heading off in the more sim direction.
+And all these things come together, means that we can run at 30 hertz.
+You can go around a corner very fast, unrealistically fast.
+You can control in a drift, and you can really bring these things together.
+And so the kind of final point I'd like to make before I would kind of go off this topic.
+is that the people who are building indie games with the kind of kart racer mechanics, if you want to go a bit more physical and you want to add tires, the next step along that path would be to get your friction clamps right for the wheels and then you can do whatever you like with your tire model.
+It isn't that hard to move from one to the other.
+So, that's my talk.
+Thank you very much.
+Any questions?
+Hello.
+Thank you for the talk.
+My question is, how did you decide where to place the tires on the ground?
+And how did that interact with your calculation of suspension forces?
+Sure.
+So the question was, how did we decide where to put the tires on the ground and how does that interact with suspension forces?
+So we did line tests to place the wheel on the ground.
+And then the suspension force held the vehicle off the ground.
+It's very similar to lots of simplistic behaviors.
+The line tests were linear, so we weren't doing anything sophisticated.
+Like if you wanted to model more sophisticated suspension geometry, you would actually put it on a circle to change how the roll center worked.
+But we kept it very simple, just had line tests.
+So that's how we placed the wheel.
+Quick follow up then.
+If the brie flew under your line test, what would you do?
+If debris fell under the line test?
+Yeah, would that push the car up?
+It depended, so we have a physics model where you have layers, and so the collision with the ray cast depends on whether something was tagged to be in the layer or not.
+So in the case of debris, it depended on which layer that debris was, if it was big enough, then yes, absolutely, it would climb up on it.
+But for very small things, we could not put them in that physics layer, and so they'd be ignored by the line test.
+Okay, thank you.
+Anybody else?
+Hi, I was wondering, I thought that Just Cause went through the Havok engine.
+Once you've done the calculations for the forces due to the tires, how did you integrate that back into Havok or did you have your own solver?
+So we used Havoc to, there's an API on Havoc to apply forces.
+So once we calculated what force we wanted to apply, we applied it.
+The solve happened in the Havoc solver.
+Great, so thanks.
+Okay.
+Hey, yeah, kind of related to the first question.
+Since you did line tests down, you said, I was just curious, because I've hit this problem, Do you have any issues with going over a curb and having it immediately changes the suspension?
+And I pretty much have things where cars fly when I hit curbs.
+Did you do anything to address that or did you even have that issue?
+Yeah, so the question is about line tests and the compression of a wheel based on a time step finding a surface that wasn't there before, right?
+Exactly, yeah, I figured you'd get it and you can rephrase it.
+Yeah, yeah, yeah.
+So there's two issues here.
+So one is being loads kind of insensitive, we didn't get side forces based on that, right?
+So the only issue was the suspension force itself.
+So we didn't suddenly gain grip just because we hit a curb.
+Essentially, the idea is you're going to have to damp those forces.
+And there are multiple ways of doing that.
+We took a pretty basic approach to that.
+And you can tell when you've moved the suspension a long way in one frame that you need to damp.
+Gotcha. Right. Thanks.
+Cool.
+Okay. Thank you very much.

@@ -1,0 +1,308 @@
+Hello all and welcome to this presentation about VFX learnings on Returnal.
+My name is Risto and I'm the lead VFX artist at Housemarque and with me is Sharman, who is one of our senior graphics programmers.
+Just a little bit about the company as well.
+Housemarque was established in 1995 and before Returnal.
+We were best known for arcade tile twin stick shooters such as Dead Nation, Resogun and Ex Machina.
+Returnal was by far our biggest project to date and that was released in April last year.
+And we have been working with Sony for quite some time and since last June we have been part of the PlayStation Studios as well.
+So, this presentation is about how we utilized our own VFX tool set to create some unconventional stuff for Returnal.
+By unconventional, I'm referring to things like vegetation, character effects like tentacles, and volumetric environment effects with fluid simulations.
+Basically things that you wouldn't expect to be done with a particle system.
+In addition to those things, we also produced a huge amount of conventional effects with regular billboards and point particles.
+And since those are probably familiar to most of you in the audience already, we'll focus more on the unusual stuff during this presentation.
+Okay.
+quick overview of what we are going to talk about.
+We will introduce our proprietary VFX engine briefly.
+I feel that the tool set is quite unique, so it is essential to understand how things work before we present what we did with them.
+After that, I will present particle hierarchies and Sharman will present the last segment about external resources and simulations.
+A little bit about the history of our VFX engine.
+We have been developing our own particle system since 2014.
+Back then, we used to have our own game engine as well.
+Already for Resogun, the team had made some particle effects with compute shaders, and based on that work, we started developing a particle system for alienation.
+We moved to Unreal for the production of Matterfall and ported our VFX tool set to Unreal at the same time as well.
+and design wise, we try to focus on flexibility and performance, all the effects run on GPU only and everything is fully programmable in HLSL.
+While we are at it, let's go through some definitions as well.
+So in our system, when I say a particle, that's a single particle, it's just a text file with some HLSL code in it, so in order to create effects for our engine, you actually have to create an empty text file and start typing code.
+An effect on the other hand, it's a system of particles that reference each other.
+For example an emitter that emits other particles.
+The engine itself does not distinguish between particles and emitters.
+Any particle can be an emitter or not.
+And finally we have the VFX engine that runs the whole show.
+It keeps particles alive and discards dead particles and does other useful things for you.
+The VFX engine itself is a plugin for Unreal.
+Previously we just called it a particle engine, but since it does so many other things as well, we decided to start calling it the VFX engine.
+So there's going to be a bit of code. I'll try to keep it as brief as possible, since I'm aware that this is an art summit.
+So let's create a simple particle effect for our engine just to give you an idea how it actually happens.
+As I mentioned, you start by creating a text file and inside that text file we need to define what particle is, but we also need to define what the particle does.
+What the particle is, is defined by implementing a thing called particle struct.
+Those things that you see inside the struct are particle variables.
+Variables are the data that the particle can store and modify.
+You can add as many variables as you want to, and you're free to choose their data types and names.
+Typical variables would be what we have here, like life, lifetime, but also position, velocity, size, color, or whatever you can think of.
+There's no practical limit to those, and also the naming is free, as I mentioned earlier.
+But actually none of these are required, so basically you'd have to, you can survive with just the dummy variable there as well.
+And after we have defined what particle is, we can proceed and define what the particle does.
+This is done by implementing an update function.
+Here you can see that the particle we just created is passed to the update function, and we can modify it there.
+In this simple example, we just accumulate the delta time to our particle's life variable.
+And when it exceeds lifetime variable, we choose to exit the update function and not to keep the particle alive anymore.
+and we're not even rendering the particle here.
+The render component is optional, and we'll have a look at that later.
+The system supports all HLSL features, branchings, and all the intrinsics are there, et cetera, and this allows us a great deal of flexibility.
+For example, it's trivial for the particle to handle multiple different states and execute update logic based on a given state.
+Okay.
+What we have here is actually considered a particle in our VFX engine.
+So if we were editing this, we could press save and the system would create an effect graphical user interface for us.
+This is a place where other team members and artists can do modifications for our effect.
+For example, you can do material assignments, or you can edit animation curves.
+For example, if you want to have a curve for, let's say, color over lifetime, you need to declare it in the shader code.
+And it will be available for others via this asset.
+And also, you can add color pickers, custom tweakables, and everything.
+But everything has to be declared in the code.
+So we don't assume that anything exists unless you actually explicitly announce it in the code.
+Basically, what we have is a small custom graphical user interface per effect.
+In Returnal, we didn't have this.
+So this is part of the learnings from Returnal.
+And not having this was actually a major bottleneck for the production, because all the modifications have to be done by people who understood the JEDA code.
+Okay, so basically, writing that file and editing this graphical user interface is the whole process of doing an effect in HouseMod in its simplicity.
+You start with a blank file, write some code, and the system produces an interface that non-technical people can tweak or modify.
+Okay, now we can move on to particle hierarchies, which is pretty much node particles in our system.
+Let's talk a bit about them.
+When we started developing Returnal, node particles were a new thing for us.
+They were developed for branching vegetation in another project, but they turned out to be very useful for Returnal as well.
+The concept is really simple.
+Node particles are just like any other particle in our engine, but they can all read the parent data that the parent actually has.
+And parent can have multiple children, but child can only have one parent.
+And parent and child need to be the same particle type.
+And we ended up using these node particles a lot.
+We used them for ribbons, vegetations, tentacles, and all kinds of stuff, as we're about to see.
+So, let's have a quick look at the node particle code.
+Let's create some of them.
+and see how we can utilize the parent-child relationship that they have.
+Our goal will be to create one of the tentacles that we had on many of our enemies in Returnal.
+First, we need to tell the system that that particle is a node particle.
+That's done in the header, so that system knows to include relevant code for it.
+We can do the particle definition as usual.
+And then in the update code, the engine will provide us a function for getting the parent particle.
+After that you are free to do whatever logic you want based on the parent particle data.
+In this case we are just checking if you look at the code, we are just checking if the parent is more than 100 units away and then we move the child particle closer to the parent if true.
+Next we are going to have a look at an animated example of how this can be useful for us.
+What we can see here is some node particles moving around and spawning child particles.
+As we can read the parent particle data, we can draw a debug line from child particle to the parent particle.
+This looks a bit messy as all particles are moving independently.
+Let's add some constraints to their movement.
+First we'll limit the distance that the particles can move away from their parent, and that distance is visualized by those green circles around each particle.
+Now let's apply uniform velocity to the left of the screen and start slowly rotating the velocity and damp it towards the end of the chain.
+And finally, we can apply some curl noise to the movement.
+Now we have something that we could use as a base for a tentacle motion in Returnal, but it's still lacking on many areas.
+The rendering being the main offender here.
+So we have the motion, but we need to be able to visualize it somehow.
+We considered multiple options, like quad strips, point particles, and separate tube render, but ended up doing it all from our particle update function.
+So how did we do that?
+On top of the usual render types that one might have in a particle engine, such as sprites or oriented quads, we also added triangles.
+The two key takeaway things here are, we can define the triangle vertex locations freely.
+And secondly, we can render as many triangles as we want per particle.
+In our engine, we define render types in the particle code by implementing a thing called render struct.
+It works similarly to the particle struct we saw earlier, but the user can freely choose what kind of variables they put there.
+I'm not going to go too much into detail here, but it's enough to say with that kind of render struct that you see on the screen, the system already knows that I'm trying to render a triangle.
+And in the update function, we currently have a loop that just creates 10 triangles and places them side by side.
+Okay, and there you go.
+If we would execute that code, what we would get is 10 triangles, as promised.
+It's not too exciting, so we'll have to dig a bit deeper.
+But so far, we have established two important things for us.
+First one being, we can read other particle data, and secondly, we can render as many triangles as we want per particle.
+Now we can proceed and build a renderable mesh for our particles.
+First, we need to think of particles as control points for a curve.
+And if we have a curve, you can also have tangents.
+Those are the red lines.
+If you have a tangent for a curve, you can also have a normal for the curve as well.
+And those would be the green lines.
+The only thing we need to do now is rotate the normal around the tangent.
+We can use the blue dots resulting from this rotation as vertices for our tentacle mesh.
+Then we can just proceed adding triangles to those positions as vertex locations.
+Okay, that's pretty close to what we have in the game.
+We just need to change the thickness a bit and swap the material.
+I know this is a pretty standard way to do tube rendering, so nothing new there.
+But the fact that we can do all of these things per particle and on the GPU makes it perform really well.
+Like here, basically, you can have all the tentacles in the world, and it's not going to cost you an arm and a leg in performance.
+And since each tentacle is basically a bunch of particles, we can control their behavior and implement things like player collisions and fluid velocities really easily.
+I can't recall how many tentacles this particular scene has, but I think the update costs something.
+around a millisecond.
+I think this is a bit of an excess amount of tentacles.
+I don't think we ever had used that in the game.
+Okay, so we ended up using these things in the game quite liberally.
+Since they performed well, and we were able to program their behavior.
+We attached them to enemies, and had the enemy AI drive the tentacle state so that they would.
+for example, grow and become emissive before the attacks.
+And since they performed well, we were able to use them as vegetation in some rooms as well.
+And that was really nice because we were able to use the fluid sim and the player collisions to drive the vegetation behavior.
+And each grass blade can have its state, so we didn't have to jump through hoops trying to implement their behavior via vertex offsets or something.
+In this last example, we had the player head attract the vegetation, so...
+would look like the vegetation is inspecting the player.
+I think another good example of the flexibility of node particles is that we also use them to do simple destructible objects for Returnal.
+Destructibles had to be pre-processed in Houdini.
+In Houdini, we first split the object into two pieces, interior and exterior, and after that, we do a simple Voronoi shatter on both of the resulting meshes.
+Then we export the mesh to Unreal, and in-game we create a single particle per mesh piece.
+Each of those particles can have access to a lookup table that constraints the start vertex and end vertex of that piece.
+That way we can tell each particle to loop through those triangles and render them.
+So in-game we first show the intact static mesh.
+When the object is hit by a bullet, we hide the static mesh and show the mesh constructed of particles.
+For visualization purposes, we're showing particles as green dots here.
+Each of those particles render a segment of the mesh that is assigned to it.
+When the destructible object health reaches zero, it's destroyed.
+And at that point, we can start animating the particles.
+We make the particles that are below the hit point fly away explosively, and particles that are above the hit point get grouped together under a single node particle.
+We can then animate that particle, visualized by the green bounding box, and the child particles will animate with it.
+This gives an illusion that the big piece is actually a single solid object.
+And let's see.
+I'm going to rewind the video a bit.
+I'll let it play.
+So when the big piece is moving, we can query the SDF collisions in each of the child particles and detach them from the group on collision.
+I call this method scripted destruction.
+It's not as generic as real RBD, but it's very fast.
+I also think that there are several interesting opportunities for improving it.
+One could, for example, export the connectivity data from Houdini and simulate node particle collisions with that information.
+Basically we used it for destroying mechanical enemies and lots of statues and in the bottom right-hand corner.
+We even did a whole boss with this destruction system.
+So it's just basically a bunch of pieces that you can move around with particle code.
+OK, that was the end of my part.
+Next, Saruman is up, and he will present us external resources and simulations.
+Thank you.
+Yes, hello, everybody.
+Thanks, Risto, for doing the first part of this presentation.
+And Risto didn't leave me any tentacles, but we'll be looking into some other things, such as fluid simulations and volumetric fog, how we solve those things.
+We use external resources.
+Let me elaborate.
+By resource, we mean a GPU resource.
+It's something that the particle can read.
+Our particles are explicit in nature.
+They don't do anything on their own.
+For example, if you want to emit something from a mesh.
+you will need to bind that resource, like mesh resource, to the particle and then manually look up the information from those buffers.
+So buffers could be, let's look at what they could be.
+We can have 2D textures, 3D volumes, and as I mentioned, bone buffers, vertex buffers, index buffers, tangents, and these kinds of things.
+I think the best way is to approach this using a real example that we used quite liberally in the game.
+We have a real-time fluid simulation running at all times in the game.
+We've used this technique since Alien Nation, which was launched in 2016.
+So there's always, at all times, a grid-based fluid simulation following the player, and the artists are free to sample from that fluid simulation.
+and have the vegetation, for example, react or point particles or what they want to have there.
+We can also have dedicated fluid simulations for set piece effects.
+And throughout the remaining of this presentation, we'll be watching a lot of videos, and I'll be commenting on the tech on those things.
+So we can start with the player following fluid simulation.
+Those red arrows indicate how the velocity field is currently We can rasterize forces into the field.
+We can also sample SDF and rasterize objects into the field to get interesting motions.
+Here is an actual example from the game where the vegetation as well as the volumetric fog is using all of that.
+As you can see when the enemy shoots at you, the vegetation as well as the volumetric fog move accordingly.
+Using resources is very, very simple.
+Our VFX systems are such that you can think of them as modules.
+They are not coupled in code, but they are coupled with data.
+One module can produce some data.
+For example, the fluid simulation gives you a volume which contains the velocities.
+And you can feed that into the next.
+next module, for example, our particle engine.
+So in here, can you see the mouse cursor?
+I don't think you can.
+But the idea is that you set this kind of, we call it fluid bell.
+So fluid bell is to here.
+And we grab it in that second line.
+You can see that that's what we call it.
+And we use, again, our metalanguage to expose these things to the gameplay side.
+And we're free to sample from this velocity field.
+In fact, we can even write to that velocity field from the particles.
+And with this code, well, it's pretty simplistic.
+But it actually doesn't take too much to create this kind of an effect.
+We're just spawning a bunch of point particles in the middle.
+And we have a constant, this kind of a repetitive fluid impulse blowing towards that direction, where you have that wall.
+And because we're automatically rasterizing all of the environment into the obstacles, you'll have very interesting looking motion there.
+Super simple to do.
+As I said, we can...
+Or I don't know if I said, but now I'll say it.
+We can use multiple resources.
+We can have, for example, a fluid velocity field as well as a mesh buffer bound to the same particle.
+And you can do these kinds of things.
+In this video, you will see white point particles attached to this mesh.
+And once shot at, they just get detached from their positions.
+And they follow the fluid velocity field.
+And after some kind of a cool down, they will try to figure out their way back to the original position.
+We do have an example from the game.
+Yeah, there's trigger area.
+You walk past that, and you get these.
+We call these murals.
+There is a better term that I already forgot.
+But I always call these by the names that we come up with them from a technical point of view.
+Well, mural isn't technical.
+Anyway, particles, look at them.
+Let's talk a little bit about volumes, because we use those a lot.
+In Resogun, as well as Nex Machina, the whole world was constructed of volumes.
+Here we take a different approach.
+We use them using our resources.
+And we get volumes from fluid simulation.
+We also have a real-time voxelizer that will be able to voxelize static meshes and skeletal meshes.
+But we need to understand what volumes are.
+They're basically 3D textures, right?
+In a 2D texture, you have pixels.
+Here, we have voxels.
+This video shows you how you can access particles.
+Each point particle represents one voxel, and they have an ID.
+It's a flat number running from 0 to however many voxels you have, and that can be converted into a voxel or a world position.
+I'm not sure.
+Can you read those numbers?
+But there are numbers.
+We can use this, for example, for density fields.
+So the particles, again, here in this case, we are writing to the GPU resource.
+Previous examples showed how we read from them.
+Here we are writing.
+We are free to write to whatever voxels.
+We just have to take care that we don't have multiple threads writing into the same voxel.
+This is an example showcasing how we use volumetric fog in our case.
+On the right, you can see a.
+particle representation of that volume.
+And on the left, you can see a volumetric fog that we make out of that.
+The idea is that you spawn some density based on the SDF.
+And once you shoot at this thing, the fluid simulation will advect the particles.
+And you'll see particles higher up also.
+The artists were able to place these volumetric fog components in the level using this kind of very crude.
+visualization, and once you press play, it looks something like that.
+So the setup was pretty simple.
+And we used a player following fluid simulation, by the way, in this.
+So it's very affordable.
+Just write your particle code that does the advection, and you basically read from the fluid velocity and advect the density.
+Simple, right?
+Another use case, we can, of course, make a mesh out of the density field.
+We use marching cubes to extract the.
+extract the triangle mesh, and we get that kind of a pie.
+But we also have, in Returnal, I think it was within the first five minutes, if we're good, you could reach this room, which we call Cavern.
+There's a pit of fog, and there's a sphere.
+And whenever I watch a video of people playing this game, they just walk past that sphere.
+I hate it, there's so much tech behind this thing.
+Like there's, okay, I'll explain, I'll just use the rest of the time on this slide.
+There's a particle effect that spawns the density, there's a fluid simulation, dedicated one, that drives, I mean, that affects that density field, that gets fed back to the fluid simulation, that gets fed back to the marting cubes, and people walk past it.
+The GPU will perform equally.
+Well, if you shoot at it, or don't.
+Respect the sphere, shoot at it.
+As I mentioned, we have a real-time voxelizer.
+On the right-hand side, we have a skeletal mesh.
+On the left-hand side, we have a particle representation of that thing.
+And then we construct this kind of an isosurface out of it.
+And we just use a translucent material on that.
+It's very flexible.
+Again, data only.
+And the particle code, I won't be showing it here, but it's super simple.
+Sample from this voxelized result, spawn some density, feed it to fluid velocity, make a marching cube surface out of it, done.
+And as Risto already mentioned, in one of the bosses, we used it on that skull that will appear, 3, 2, 1, now.
+And again, shoot at that thing.
+You can shoot at it.
+It has a dedicated fluid simulation there.
+And if you shoot at it, you will be rewarded with this thing.
+It won't do any damage, so you might actually die.
+But it's worth it.
+I'll wrap up now.
+So the initial question was, can we do it with particles?
+I think we can.
+Thank you very much.
+And let me say this one thing.
+We love to talk about this, our own VFX and VFX in general.
+So we invite all people who want to come into, was it, to the wrap up room, it was maybe 2, 0, 4, or 7, 4.
+Either one.
+We'll be in one of those.
+OK, thanks.

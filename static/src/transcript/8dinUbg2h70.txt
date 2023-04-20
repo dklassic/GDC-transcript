@@ -1,0 +1,161 @@
+Okay, we'll start. Whatever. So this talk is implementation of rewind and braid. It is a technical talk in case you're thinking some kind of design implementation or something.
+That's not it. When I submitted this talk, I was like, oh, sure, it's pretty simple. I'll be able to talk about everything in 25 minutes. It doesn't seem to be how it is. There's a lot of little details I won't be able to get into. May go a little bit over time. Whatever. Feel free to ask me by e-mail or something. Anyway, who ---- How many people in the room have not played the game? All right, that's enough. Okay, cool. So I'll show you really quickly what it's like. It's pretty simple in some ways. It's a little 2D platformer. It's shipped on the Xbox 360, PS3 and PC and Mac. You run around, you can jump as you always can. You can go into these little worlds where things happen.
+And you know, a world is sort of a scrolling area with parallax and all that.
+It can be from one screen to eight or 10 screens large.
+There's all these objects that move.
+You can get killed.
+And you can rewind like this.
+And the rewind is unlimited.
+It's not a resource.
+And so that was the first of the design goals that I had, was I wanted to find out what happens.
+When you design a game where rewind is not a resource and there's not a traditional sort of death challenge, you know, gating the game. I knew I wanted to be able to run on consoles because I wanted to maybe sell some copies. I knew that I was going to be the only programmer on the game. That ended up not quite being true. I got a little help at the very end.
+I really wanted to limit the amount of programming work that I would do because I was also the designer and biz guy and all that stuff. So if you spend all your time programming, you won't have a game because those other elements are missing. Now this is a platformer and I knew it was going to involve puzzles.
+So when you start talking about rewind and puzzles, you start thinking, you know, I'm going to do this.
+You know, I don't want my puzzles to be exploitable, right?
+Like, a typical kind of puzzle might be you can't get between point A and point B in less than a certain amount of time unless you do something special, right?
+But, like, maybe if your rewind doesn't put you back exactly where you were, you could, like, rewind.
+You could go forward two frames and rewind one frame and stuff and get little extra centimeters and eventually exploit the puzzle.
+Or you could, like, somehow jump over a hurdle that you wouldn't have been able to jump over normally if you can mess with your momentum.
+So...
+I wanted to ensure that whatever time manipulation is in the game is not exploitable and I wanted the game to run at 60 frames per second, which we usually think of as a CPU kind of issue. But when you start talking about remembering things, as you need to do for rewind or recording videos or something, as you raise your frame rate, the amount of data that you have to deal with goes up. But I felt that this was important for a fluid, solid platforming experience. So now, if you're a programmer who's been around for a while, I hope these don't get cut off too bad. We'll see. Anyway, there are some ways you might think of to implement rewind.
+And they're generally grounded in optimization style thinking.
+Like, what's the best way to implement rewind, right? One thing that we often do in game engines in order to repro and fix bugs.
+that can be used for this kind of system is to record all the user input. You kind of hook the input function in the engine and you record all the button presses that happen and then you can run it again in playback mode and as long as all your functions in your game are deterministic.
+then you'll get exactly the same result as you play back the events. I've done that a few times. I hate it. It's a pain in my ass all the time because things break. They're not robust across revisions, like a recording that you make once is not going to work on a different revision. You get revision is confused. But even worse, it places constraints on other parts of the code that live for the duration of the thing. So I didn't really explore this option until later in development, but it's lucky that I didn't. Because if I had gone this way, I would have ended up designing a very different game, because the gameplay depends on having functionality that this would not have enabled. And I'll go into that later.
+Another wacky idea you might think of is reversible simulation. We usually have an engine with entities that have a tick function and the tick function knows how to bring them forward in time. What if that could also bring them backward in time inside that function? Well, it's a question of exactly how to do that. We're used to just having discontinuous state changes in objects. If you have differentiable functions, that's easy to reverse. People who do physics know that.
+have to start recording weird data and how do you do that?
+And, you know, gameplay code is pretty complicated and it's a big source of bugs already. And if you make it twice as complicated it seems like a bad idea. And then if you can only simulate in reverse, how do you get random access to your time stream, right? If you want to go back to 10,000 frames ago How do you do that without simulating 10,000 frames backwards?
+So it's not necessarily seeming like a good idea to do it that way.
+OK, well, what started seeming like the best option to me was just to record the full state of the world, because you know that's robust.
+You know you can reproduce that.
+And that's going to be a lot of data, so maybe you drop frames.
+So maybe you record every 100th frame and the frames in between that.
+you interpolate between the end points. But that's not really a good idea because it's non-exact. Your interpolated frame has a very low probability of being what the actual frame was that you threw away. So there are quality questions about that. And again, that question of how to avoid exploits comes up. So I had to kind of suppress my impulse.
+So us guys wanting to be star programmers, our impulse is, man, I'm going to do something that's awesome and fast and has a tiny...
+going to be better than anything anyone in history has ever done and it's going to be awesome. But my attitude at the time was different than that. I'm lucky I had this attitude because this is what allowed me to finish and ship the game.
+It's that, you know, I've been doing all this 3D graphics, high tech stuff for years. We kill ourselves to get 10% or 5% performance differences. We make massively complicated systems to get that performance boost. And it breaks all the time. Games crash and they just go slowly when they're supposed to go fast.
+Since I'm going to have to be designing this game, and I actually want to ship this game so that my independent developer career will succeed, I'm going to do the most robust thing possible.
+So my focus was on robust, enabled me to build the game.
+And so what is the most robust thing?
+It's not any of these things I talked about, because those were concocted with the mindset of being tricky.
+And tricky means complicated, usually.
+And so what I came up with is a variant of that third idea, but dead simple.
+Just record all the world state, every frame, always.
+Don't drop any frames.
+Just record everything, and then figure out a way to compress it.
+And most people would not approach this problem this way, but I believe it was by far the best way to approach it.
+So how do you record game state?
+Well, you've got a world which has got some objects in it.
+And each object in the world has a bunch of properties.
+This is pretty universal.
+Games work this way.
+So this is a shot of the editor.
+In the upper right, there's sort of this panel for this entity that I had highlighted.
+And it's got a bunch of member variables.
+And there's types to them.
+So some of them are integers.
+Some of them are vectors.
+Some of them are strings, whatever.
+You have to have this somehow in your game if you're going to save the world file so that you can edit it and load it in and play it.
+You could think of other ways to store things. I could take the entities in my world and clone them and have a little side world off to the side and do that every time I want to record something. But live entities in a game engine tend to be individually allocated. And if you're playing a lot with memory that way, that creates fragmentation. You allocate a bunch of memory, you free something out of the middle, there's a hole that you may or may not be able to use. And that's bad, especially if you're running on a console.
+And the second point off the bottom of the slide is that things that are serialized are easily compressible. If you want to do entropy coding on them or something like that, it's a stream of bytes. You can feed a stream of bytes into any generic compressor. And if you were to think about some kind of live entity scheme, if you were going to compress that, you have to eventually turn it into a stream of bytes. So you just serialize. So here's some list of properties from some very basic object. And there's a bunch of these objects in a level. How many I don't actually remember, but there's a bunch.
+And if you look at the size of the levels on disk, right, they're between 25k bytes and 175k bytes. And that's great.
+That's a pretty good size for levels on disk, but when you're recording 60 of those per second, it adds up to a lot of memory really fast. So you start doing the second part of what I said, which is figure out a way to compress it.
+And that's basically what the rest of the talk from here on is.
+So the most obvious thing...
+And the first thing people will think of when they have programming experience is most of these entities aren't changing at all.
+They're constant.
+We factor them out.
+We only record the things that change.
+Right?
+And of course this is a massive win.
+So in Braid there's a couple sets of things that are constant.
+On the left is collision geometry which you don't ever see in the game but it determines where you can go and where you can't go.
+And on the right is, you know, cosmetic stuff.
+It's layout that usually matches up to the collision geometry and just makes the level look nice.
+Right?
+those don't change, so you just keep them in a separate array after you load the level and any time you want to seek through the timeline to a particular time, then you just copy these, there's one copy of these for all the frames, right, so you just make a copy of those and then you go look into the data that you recorded, you extract the changing entities, right, the only ones that you actually needed to save, and then you mix them in and you have your final state. Now, This third screen is particles in Braid. The look of Braid depends very heavily on particles.
+There's a bunch of particles everywhere. They fade in and out and provide a very sort of shifting feeling to the graphics.
+And if you actually were to record these in a naive way, it's a gigantic amount of data because there's thousands, tens of thousands of particles on a level, you need to record position, color, and probably about 17 other properties for each one. It's gigantic, right? So what you do is you make the particle entities constant, right? And how do you do that?
+Well, you make a function that is a sort of closed form kind of thing where you feed in a seed from a random number generator and you feed in a bunch of properties describing how the particles should look like, what texture is it and what are the UV coordinates and what color does it start at and what color does it end, right? All the usual particle system stuff. But instead of those properties evolving over time, they're fixed and then when it comes time to generate the particles, you kind of run the equations of physics and interpolate all the colors and all that.
+in closed form and spit out a particle from nothing every frame. When you do this, it's slower than the way particles usually happen. Usually we're tracing particles through space and modifying each property a little bit. In this case, you have to regenerate a bunch of random numbers for every particle, every frame. And that's slower. And sort of the caveat to this is that I actually had to optimize the particle inner loop.
+relatively heavily compared to the rest of the game in order to get it to run well on consoles. Yeah, the current consoles. There's no problem on PCs because of out of order processing. Anyway, I wish I could really see more of the slides, but okay. So you've got a lot of stuff going on.
+this scheme where you're taking all the state of the game or all the changing state, right, so it's a massive win to factor out the constant objects, but it's still way too big, right, because we're talking about massive amounts of data. So what do you do next? You diff individual fields of an entity so you don't have to save the whole entity, right? If you have a continuous gameplay experience, then chances are that whatever the objects are in the world at frame N plus 1, they're a lot like where they were at frame N with some minor differences, right? So...
+Wow. What just happened? I don't, okay. Oh, thanks, you're trying to fix it. Okay. Now the sides are gone. If we can keep trying to fix it, that would be good, though. So this diagram down here, right, is the one that's going to be the is sort of a diagram of what happens in this scheme when we try to seek to a certain frame in the timeline. So we want to find where that red dot is, right? And so we've got these larger sort of yellowish blocks. Those are the base frames which behave exactly like I explained before. They contain data for all the entities in the world. So if you wanted to seek exactly to that point in the timeline, you only decode what's in that block and you're done.
+For anything in between, those are smaller blocks that only contain diffs.
+So if I want to seek to where that red spot is, I have to decode the diffs.
+I have to decode what's in the base frame.
+And then I have to apply the diffs to the base frame.
+When I say diffs here, I'm not doing delta encoding as people do in compression a lot. In delta encoding, if the value used to be 100 and now it's 100.5, you store plus .5 and it's usually smaller. I didn't do that because I didn't want to worry about rounding, accumulation of error, any of that. I wanted to be very, very clean so I just store 100.5 or whatever. And this again is another massive win. In braid, I put base frames every two seconds, I believe, in the final builds. So that's every 120 frames. So this gets rid of about probably 95% of the memory usage or something like that.
+But it's not enough. Or at least, wow. Okay. How about if I do this? There we go. Okay. So I'm going to do this. I'm going is it shift F5 to resume from where you, yeah, okay, cool. So what I found after I did this is that even though it was a massive memory savings, now these base frames still took over half the memory of, you know, the memory of the I don't know if this math works out, but whatever.
+They took about half the memory of the system, right?
+And the delta frames took the other half.
+So one frame out of every 120 was taking half the memory.
+It's obviously ripe for optimization, so what do you do?
+And, you know, all sorts of schemes can be thought of, like, hey, we'll diff the base frame from the previous base frame, so we'll have, like, a hierarchical thing.
+and it's like log base 120 or something, so you climb up a tree to decode. But that's kind of, that's too non-local for me.
+So what I did, and it worked great, is I diffed the base frames again off the default constructed state of an entity.
+So if you're programming in C++ or something, you've got a constructor for your object, it fills in, especially if it's a live object in a game engine, it's going to fill in valid values for all the properties of that object, and often you won't change a lot of those properties.
+So in the base frames now, they're not diffed off any frame anymore, but they're diffed off of how is this entity different from if you just constructed it and didn't do anything to it and didn't even add it into the world.
+So after this, you've done a bunch of high-level optimization, you start thinking about low-level optimization, like an entropy coding layer, you know, LZW on this stream of bytes or something.
+There isn't any in Braid, partially because it was not needed, partially because I had speed concerns about that.
+And I needed as much speed as I could.
+I forget if I talk about that later in these slides or not.
+I had to cut some.
+wasn't needed because on the Xbox 360 where you have 512 megs of RAM total, I dedicated 40 megabytes to rewind data which seems like a lot of memory but on a game that's completely based on time manipulation it totally makes sense. So devoting 40 megabytes gave the player between 30 and 60 minutes of recording time on most levels which is vastly more than you need usually. It turns out some levels actually need that which is why it's good to have.
+Now, if you're unpacking all these frames all the time, that's going to be slow, of course. So here's a screen shot showing a trail effect behind these little monsters when you rewind. And the way that works is it just samples the monster's actual position over the last lots of frames, a couple of seconds usually in alpha blends. I wanted to do that instead of some kind of extrapolation because again, accuracy issues. You get weirdness if you start trying to guess where things were. So to do that you have to touch a lot of frames every time you want to render. So it makes sense to have a frame cache, which in braid is probably about 24 frames. And those are totally live instantiated entities. They're just not added to the main universe. They're just off to the side.
+and, yeah, it's what you would think. So some further implementation details. I was talking about how, let's say we're on frame 130, we want to seek to frame 137 and its base frame is frame 120, right, off to the left, not to scale. And you know, the frame before that, you actually constructed a new object. So it's in frame 136, it's in frame 137, it's not in frame 120.
+So if you go to apply this diff, it's not there, right?
+And the simple solution to that is just any time you constructed a new object and it's not on a base frame, you just store the state for that object back in the base frame so everybody can find it.
+Now, you don't want to store it in the same array that the actual live data for the world is, because when you rewind to that time, you don't want to accidentally think that this object that doesn't exist yet exists.
+So you just store it in two parallel arrays.
+So.
+you know, it still only takes two frames to decode regardless of what objects you knew or create or destroy. If you destroy an object, you just don't really worry about it.
+Because the way that it works is we start at the target frame, and so if the object doesn't exist there, we won't try to diff it at all. If it exists in the base frame, we just ignore it. Okay, so if you have limited memory to work with, then you have to forget things or else you'll crash.
+Now, fragmentation, like I said, is a big issue also.
+So we want to somehow figure out how to forget stuff without fragmenting.
+And I experimented with a bunch of things.
+And the thing I was happiest with, actually, I think the only thing that actually worked across all platforms.
+was to group all the frames into a big bucket, like just for memory allocation purposes, and create a heap for that whole bucket. And then destroy the heap when I want to forget all that stuff. And the reason that I do that is because when you destroy a heap, you know that the actual pages get deallocated. They get returned back to the operating system.
+So you're just not going to have fragmentation. There's no way.
+So at the same time though, if you're using, say you're on Windows and you're using heap alec, that's super slow, right?
+You can't call heap alec for every allocation that you want to make, so what you do is you put a faster allocator in front of that, that allocates chunks out of the heap and then hands little pieces back to the application.
+For this it's super simple, it uses a pool, which hopefully most of us know, but it's just basically an array, and you move a pointer along the array, and if they say I want 10 bytes, you give them 10 bytes, and you move the pointer 10 bytes, and you know, everything's totally packed together. There's no way to ever deallocate anything from a pool, but you don't need to, because you're just going to destroy the heap when you want to forget all this data. The heap size in Braid is about 24 seconds of gameplay, so, you know, after I've recorded 30 minutes or 60 minutes and memory's full and I have to start forgetting, I forget 24 second chunks at a time.
+and that's about, you know, 60 frames per second, that's about 1,000, or exactly, 1,440 frames per heap. Now, there's a constraint on this number, right? It can't effectively be smaller than the difference between base frames, right?
+Because if your first frame isn't a base frame, then you've got frames at the beginning of your data that you don't know how to decode because there's nowhere to go back to when you want to do the diff, right?
+So it has to be a multiple of two seconds, because that's how long I put between base frames, and 24 seconds seem pretty good. Now, this is still a lot of heaps. So if I've got 60 minutes of gameplay recorded right now, and let's round it up to 30 seconds for easy math, that's 120 heaps live. But it seems like a lot. I've never done that before, but it seemed fine on all the target platforms. I did it again.
+I'm just going to maybe stay. Okay. So that's kind of the basics of the system. Now I'm going to talk about some special concerns that came up that are more specific to this game but that might have analogs in other games and how they were dealt with. Yeah, I'm going to stay. All right. So sound effects, whenever people ask me about this, I usually assume I did something crazy for sound effects. I try to guess when a sound would have finished and started up going backwards.
+That's not how it works at all. Sound effects are invisible entities just like everything else in the world.
+And then there's an audio layer that's a little more asynchronous even than usual. The audio layer is usually just streaming samples out to the audio hardware at its own rate. This one has a little layer that once per frame goes and looks at the world state, looks at all the entities that are supposed to be in the world state.
+creating sound and actually pulls the data. So it's pretty autonomous. It will create or destroy a stream that, you know, it will create a stream if there's an entity making sound that it hasn't got a stream for and vice versa. And so the app never directly plays a sound.
+And I actually like this a lot more, not even considering rewind. But this sort of sound in the world database approach I found is actually really nice for everything. And I use it in my new game, which doesn't even have rewind.
+you're going to call a sound effect. I don't want to keep the memory for it or keep storing it in rewind all the time. I want to know when the sound is done so I can delete it. You might check to see when all the samples are streamed out or look for an audio notification from your sound hardware. That's not a good idea because you're going to that is, with respect to the software, like your app, that is kind of non-deterministic. You don't exactly know when that's going to happen and if you rewind and do something again and the sound has been deleted, this time the audio clock might go a little longer and it just doesn't match up.
+So in Braid, sounds actually have their own timer that is tied to the game clock and not any kind of audio system clock.
+and if it's supposed to be a second long sound I just destroy it after a second plus a safety margin of about 10% to account for the fact that the clock on the audio hardware is going to be a little bit different from your idea of what the real time clock is. Okay. So the first thing I want to do is So I talked before about how it was really important that you make particles constant because it's a huge amount of data, but there's a whole world in braid where that's not true.
+In this world, you can drop this little ring that makes this bubble and time goes slowly inside the bubble, proceeding faster and faster as you radiate out from it.
+And I felt it was very important for the coherency of the world to to ensure that this affects all moving objects, right?
+And through all the other worlds, there's all this background particles that are noticeably moving.
+And so here, particles that are noticeably moving should be slowed by this as well.
+And what that means is that you can't use that approach I was talking about before, where you just generate the particles from a seed because you don't know where the ring's been for the past while.
+And so you try to apply that to the seed data, and it breaks.
+You get a lot of discontinuities when you pick up and drop the ring and stuff. So what do you do? Well, you can kind of guess.
+I just record it all.
+But I'm trying to be careful again to make it small.
+So I made a different kind of particle system that is only present in this world where you have time dilation.
+And on those base frames I was talking about before, it actually records the positions of all the particles.
+These particles don't have as much animation as the particles in the earlier world.
+So there's not a lot of state to record.
+Just a position and then a number that you can get the other properties from.
+Like the ring doesn't affect the color of the particle, it just affects the time.
+So you can reconstruct the color and rotation and all that, as long as you can reconstruct the time.
+So on non-base frames, though, I don't want to try to store diffs somehow of all these particles because that's still a giant amount of data, like one diff per particle.
+So what I do...
+I just store where the ring is because that's the only thing that can distort time.
+Because the base frames are 120 frames apart, that's up to 120 frames of data about where this time dilating object is.
+And when I implemented that, because I knew I was going to have to do the next thing I'm about to say, but I was like, no, I'm just going to try it.
+And it was a ton of data.
+Because on frame 119, you're storing 119 frames in that one frame.
+And on frame 118, you store 118.
+It's, yeah, it adds up real fast.
+there's an RLE, run length encoding kind of mechanism in there. Like that ring that you're carrying around, it's allowed to, I'm being told to cut off. All right. I'll take another one minute and then I'll cut off. Question? Come on up to the mic if you got one. Nobody? All right. Thank you very much.
+Oh

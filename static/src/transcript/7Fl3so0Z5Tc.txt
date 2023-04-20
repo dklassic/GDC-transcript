@@ -1,0 +1,215 @@
+Hi everyone, my name is Jonathan Lindquist and today we'll be talking about some of the challenges that we ran into on Fortnite and how we came up with elegant solutions using vertex shaders.
+So I'm a technical artist at Epic Games and I tend to author a lot of shaders and generate art, write scripts that are both online and offline, jump around a bit.
+And before that I worked at Raven Software as a technical artist for three years.
+So for anyone that's not familiar with the project, Fortnite is a cooperative action game with a building mechanic as its focus.
+And I put a quick video together to illustrate some of the effects that we'll be talking about today.
+So this is the building shader.
+It's used to build over hundreds and hundreds of pieces, each containing hundreds of sub-objects.
+This is our calling effect in the game.
+And this is a bounce effect that we apply to every interaction that the player makes with the world.
+So going through those, we'll start off with a very simple example and then move our way toward the self-building shader, which is a bit more complicated.
+Early on in the project, when we decided to go down a stylized path, we wanted damage to be equally stylized.
+So we also wanted to make it very rewarding for the player, because it's one of the main, it's a piece of the foundation of the game.
+So having tried out fractured meshes and decals and a few other approaches, we just felt like none of the approaches were really reaching the look that we wanted.
+So this video was sent out to the team as an early test.
+And we decided to go down this path and kind of.
+incorporate vertex shaders into more of our effects in the future.
+So when examining how this works, we have to look at two components.
+First, a portion of the process is handled on the gameplay code side, and then a process is handled in the vertex shader itself.
+So first, gameplay code feeds the shader an impact location, an impact vector, and a jiggle radius.
+So using that information, we're able to find the distance of the world position of every single vertice on the mesh and the world position that gameplay code fed us.
+And then we divide it by the radius and invert it.
+And it produces a result like this.
+And then we multiply it by an impact vector.
+And what that does is it basically masks an additive offset to the world position of every vertice.
+And it produces a result like what you see here.
+It makes the object jiggle back and forth.
+And this can be applied to any asset in the game, fire hydrant, wall, whatever.
+So the missing component from the animation that we see here is the actual animation itself.
+And that's generated using a curve object, which is a feature in UE4.
+Or say you're able to define a spline, and that spline can be sampled over time by either gameplay code or Kismet code.
+So as the value becomes negative in the spline, the impact vector is multiplied by that negative value.
+And the wall moves away from the player.
+And then as it becomes positive, it moves towards the player.
+So you get this undulation back and forth.
+Now we can talk about the stylized calling.
+We wanted the player to be able to explore the world, and we wanted to populate the world with as many assets as we possibly could.
+So we needed a calling operation.
+And I felt like this was another chance, again, to add this stylization to the world.
+So this is our first prototype approach that we didn't end up using because it became a little bit too obnoxious for the player.
+But we ended up learning from that lesson, and we applied it to the approach that we eventually came up with, which is basically a scale operation from the pivot point of the model.
+And we do this inside the vertex shader because updating the model's transform would actually be rather expensive.
+We'd have to update every model on tick.
+Here we can just feed...
+feed a value into the shader called the distance call fade, which is another UE4 feature, that will animate from 0 to 1 when the object is being called.
+So just before the object disappears, this value just animates.
+And you can see that here, this graph represents the 0 to 1 value.
+So it's great, we have this zero to one value, but now what do we do with it?
+Well, we have to create, we can use that zero to one value to modulate the scale operation.
+To scale an asset, you just subtract the world position of the vertices from the actor's pivot point.
+Doing so will create a vector that's the length of the distance between the two points.
+So if you add that to the world position of the vertices, then basically you'll pull all of the points on the mesh into a single point.
+So modulating that by 0 to 1 value will scale the model from 0 to 1.
+We use another node here called three point levels, which basically remaps the black point, the white point.
+and a midpoint to whatever values you want.
+So here you can see the original values retrieved from this node are 0 to 1.
+But after we're done processing it, it becomes 1 to negative 0.25, and then to 0, which will effectively create a bounce.
+So it'll scale up and then scale back to 1.
+So now we'll go on to something a little bit more complicated.
+The self-building walls represents a significant portion of the game as well.
+We want to, we have, we allow the player to build staircases, floors, and other type of structures using this animation technique.
+So, from the beginning we set out a few goals for ourselves.
+We wanted it to be an engaging experience, so we thought the best way to achieve that would be to build the structures in-game in front of the player so they could see every single board or brick or piece of metal flying to place.
+And then we wanted to indicate the health of the structure.
+So when a monster comes by and hits the wall, we want several boards to fly off and we want the number of boards to indicate how much health the wall has.
+And this had to be an efficient system because we...
+we needed to place hundreds and hundreds of these walls everywhere.
+So, first we need to approach the problem from a conceptual standpoint.
+And we understood that building a wall in place is much like destroying it, but in reverse.
+So, if you can see in this video, we have a pre-constructed wall, and then we're tearing all the boards off, one by one.
+And this is the way that we need to approach the problem.
+The issue is how to actually do that.
+So initially, an artist attempted to use skeletal animations, but they were too costly.
+So we went back to vertex shaders.
+The problem was that we had no way of actually accessing a board or a sub-object in a mesh.
+And when you're working.
+with a vertex shader you have access to the uh... location of the vertices uh... the models transforms but you don't have access to uh... sub-objects transforms and you can't store arbitrary data in the objects themselves so we relied on some of the uh...
+work that I did a little bit earlier to pretty much do the exact same thing.
+Basically, store arbitrary information in vertices.
+In this video, you can see that This model is a static mesh, and it's animated with vertex shaders.
+And the grass is actually made up of only a few static meshes themselves, but they act as many separate objects in the vertex shader.
+And that's due to the script providing data that we need, and the vertex shader using that data in animation.
+And the script is publicly available for anyone that's interested.
+So now we know that we need to do some scripting in order to make this effect work in the vertex shader.
+So we'll first step into that.
+Then we'll step into ripping the boards off the wall.
+And then we'll talk about how gameplay actually controls the boards.
+So this is the overall workflow of making animated assets inside of Fortnite.
+We model out the wall as a series of separate objects.
+And we make sure that their pivot point is in the center of the mesh, and that the x-axis is going down the length of the board.
+Because the script will actually be storing the vector along the x-axis, which will be useful for future calculations.
+So, and this is what the pivot painter tool looks like.
+You basically select all the objects, and then you press the paint button, and it'll store the information.
+And then we can import the static mesh that we just processed into Unreal, and then use the, the, pivot painter material function, which will decode the information that was stored inside the model's vertices and return a x-axis vector in world space and the position of the board's pivot points.
+For anyone that's interested, this is all available in the UDK, so it can be freely used.
+That got us most of the way there, but it didn't get us all the way there.
+We started getting assets like this, a bunch of twigs intertwined with each other.
+There's no good way of procedurally animating those boards in order.
+So we really needed someone to come in and specify an animation order.
+So we had to go back to the drawing board a little bit.
+And also using the PivotPainter by itself, we didn't have a way of knowing exactly how many boards were attached to the wall and how many were not.
+So what we did was we added a few new features to the script.
+And this is the animation process.
+So what the user does is they select the boards in order that they should animate in.
+Then they press the Animate button.
+And here you can see there's a visualization, a grayscale visualization, indicating which order the boards will fly into place in.
+And basically what happens is, behind the scenes, as you're selecting objects in 3D Studio Max, there's a selection array that's automatically generated.
+So what the script does is it takes the selection array, and for every item inside that array, it takes the integer that indicates the position of the object in the array, and it stores it inside the models of vertex information in one of the UV channels.
+And that way, we can gain access to it inside of Unreal.
+So there were a few more tools that were added, but they weren't used as much as the literal order that allows the user to just select the objects in the order that they'll be animated in.
+And this other modification to the script that you saw just there.
+is used to indicate whether boards should fly in from the left or from the right.
+We store a one bit value to indicate the flight path of the boards.
+In the case of floors, we can have boards fly in upward or they can fly downward.
+So this information is also referenced in the shader later.
+And it allows us to do some of the crazier structures that I showed.
+So this is awesome.
+We have all the information that we need, including some other data, too, that we can use to randomize the appearance of the walls as they build up.
+Just a few tips before we move on.
+Definitely avoid unnecessary scripting.
+Talk to your artists and make sure that everything that you're working on is exactly what they need and nothing more, so that you can progress faster.
+And make debugging as simple as possible.
+Add view modes to visualize the data or add data to the user-defined variables in 3D Streaming X. UV values are very inaccurate if you want to store an inf value inside of a floating point data type.
+I would recommend putting a 0.5 value offset to the data before you store it in the UV so that that way in the vertex shader when you're actually.
+Referencing the information you can use a seal or a floor.
+That way all the vertices on a single board will return a solid int value as opposed to a bunch of floating point information that's not accurate.
+And then make your data layout as efficient as possible.
+When you can, possibly, I would recommend storing two pieces of information in every channel.
+So for instance, we store a 0 to 1 random value.
+per board, but then we also wanted to store the flight path.
+And the flight path is really just a one or a zero.
+So that could be stored as a negative random number or a positive random number.
+So that way we're able to make our data storage a little bit more efficient.
+So now we've covered scripting, let's get into the fun part and start ripping boards apart.
+So the first transformation is The simplest, we simply add a downward vector and then modulate it by an animation amount.
+So this will move all the boards downward.
+The next one is that we reference our 1 or 0, or 1 or negative 1 value that we stored using the flight path, and then modulate it by a vector that goes along the length of a flight path, local vector.
+And then finally, what we do is we make another offset.
+To randomize it a bit more, what we do is we subtract the pivot point of the board from the center of the object's bounds, and then that creates a vector outward.
+And then we remove the z component, and we normalize that value.
+And then we can multiply that by an arbitrary amount to kind of push the boards outward.
+So what you see when you add all these values together is that they kind of create an offset like this, which indicates that we're going in the right direction.
+And then finally, when we do rotations, it's rather simple now that we have all the data that we needed.
+So we can reference the pivot point of the board that was stored, and then the axis that we stored earlier along the x-axis, and that'll act as our rotation about axis, rotation axis, and then we can pipe a animation value into the rotation angle, and that'll make all the boards spin along their axis.
+So we have all the transformations that we need, but we don't have any way of animating them efficiently, and we don't have all the tools that we need.
+I won't go into exactly all the details as to how these steps work, but the code is located right here.
+So one of the things that we need to do in the game is that we needed the boards to fly in one at a time when the boards are building initially.
+So what we do is we step through the animation order that was stored.
+earlier, and we simply subtract numbers.
+And as we subtract numbers, you get an animated 1 to 0 value per board, and then it jumps to the next board.
+And then, when we want to rip multiple boards off the wall at the same time, what we do is we do an if statement that says, if your board number is higher than a set amount, then pass through an animation value.
+And then we control both the area, the number of boards that are being ripped off, and the animation value that's being passed through.
+And then finally, when you want your wall to just be obliterated by a giant monster that's running through several walls at a time, you just pipe in a solid value across the entire wall.
+So effectively what you do is you add these different white values all together, and then you use that to modulate the translations that we created earlier.
+So it looks a little flat at this point.
+We're not getting the cartoony look.
+So what we want to do is we want to add a little bit of warping to the boards as they fall into place to make it more stylized.
+So what we just did was the animation.
+But now what we can do is add secondary motion or warping as a post process.
+to that animation grayscale value.
+So what we do to do that is we create a distance calculation from the world position of the vertices to the board's pivot point.
+And then we take the animation data that we stored earlier, that we created earlier, which will be represented by this zero to one gradient.
+And we make a few modifications to it.
+Oops.
+So.
+What we do is we multiply that value by 10 and then clamp it.
+And then we invert it and then multiply it by 10 and then clamp it.
+And then we modulate those two by each other.
+And what that creates is a black value at the start of the animation and a black value at the beginning of the animation.
+And then we modulate that by the three dimensional falloff that we created.
+and add it back to the previous animation.
+And effectively what that does is, as boards are falling off toward the middle of their animation, the center of the board is pushed forward in time.
+So we're actually moving the boards, the center of the boards, forward in time in the animation.
+This is something that would only be possible with vertex shaders.
+So finally, we'll go into what happens to the boards when they're pulled off the wall.
+Well, the answer is simple.
+They get masked by the pixel shader, and they also get scaled down to a single point in space.
+So how is that done?
+Well, basically what we do is we compare the location of the board to a point in space that we define.
+And usually, that's the pivot point of the overall static mesh.
+And then we also add in the animation value.
+So if a board is rather low on the wall, and it's fully in place, then we want to make it completely visible, even though it's rather low on the wall.
+And what we do is we use that to drive a masking value.
+So a few points before we conclude.
+Collision does not update when you use a vertex shader.
+So you have to design around that, or use vertex shaders on assets that don't need collision.
+If you move an object outside of the bounding box, If you move an object outside of the bounding box, there's a possibility that the object will be called if you're looking directly at it.
+Because the calling operation operates on the bounding box.
+If the bounding box isn't on the screen, then you will not call the object.
+But if the object visually looks like it's over here, and you look at that static mesh, and the bounding box is off screen, then the static mesh could disappear when the bounding box is off the screen.
+And performance is actually very strong using this method.
+And one of the things I didn't mention earlier is that the normals don't automatically update.
+So if you want to update the normals on your static mesh that's animating, then you would have to do that in an additional step in the pixel shader, which is slightly expensive.
+So I just didn't do it because you don't really notice it for the most part.
+And so.
+Vertex shaders are very cost effective and they provide unique capabilities that aren't possible in any other way.
+And there's a ton of opportunity out there to use vertex shaders in ways that aren't currently being used to generate really exciting effects.
+There are a few gameplay limitations, but you can work around it if you know what they are ahead of time.
+So, I'm not sure if I have any time for questions or not.
+Yeah, that's the talk. Thanks.
+you mentioned the performance is good. Did you do any actual performance testing like script based object manipulation versus the vertex shaders? Oh, so one of the things that We haven't quite evaluated that, but we noticed that it didn't create much of a problem on Fortnite.
+We didn't see any major performance hitches or jumps like that.
+And one of the great things about using materials to create all this animation is that.
+As soon as you're done with the most complex form of animation, you can switch out the materials to a very simple version.
+So basically, instead of looking at maybe 180 instructions in your vertex shader, which is actually pretty cheap, because there's very few vertices on the model, you can switch it out for a vertex shader that has, say, 30 instructions.
+I was going to ask that, too, actually.
+So you do switch the shader out once it's done animating?
+Yeah, that's actually one of the items that we have on the list for optimization in the future, but we're not 100% there yet.
+Oh, OK.
+So, cool.
+Thanks.
+No problem.
+Okey-dokey.
+All right, thank you guys.
+Thanks.
+Thank you.

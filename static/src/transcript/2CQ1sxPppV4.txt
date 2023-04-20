@@ -1,0 +1,712 @@
+I'd like to begin by extending my condolences to all of you who did not, or were not able to make it into the experimental gameplay session that's going on right now.
+Sorry about that.
+But you'll have to, I guess, accept me as the second place.
+My name is Fletcher Dunn, and I hope you're here to learn a little bit about denial of service mitigation and how we've been approaching that problem.
+I've been making video games for about 22 years now, last eight or so of those at Valve.
+And about the last two or three of those at Valve, I've been working on this specific problem.
+We got a lot of stuff to cover, so I'm gonna just jump right in.
+This is what we're gonna be talking about today.
+I'm gonna give a quick overview of what a DOS attack is and review some history of our experience with that problem.
+We're going to talk about how you can try to approach the problem at the network layer.
+We're going to see there's a bunch of shortcomings with that approach.
+We're going to take a brief detour and talk about websites.
+How is it different to protect a website from a game?
+And how are websites protected from DOS attack?
+And hopefully that's going to lead to the thinking that led to our solution that we've come up with.
+Then we will discuss our solution, we're gonna talk about how it works and the network infrastructure that makes it possible.
+And some really interesting unexpected benefits that it has given us.
+Finally, we'll do some practical takeaways.
+And specifically, we're gonna talk about how you can take advantage of the solution we've come up with.
+Okay, so when you think about network security, you probably think of a hacker, right?
+Somebody's cleverly breaking in, they're sneaking in, they're picking the lock and they're exfiltrating with the data without anybody knowing that they were there.
+That's not what we're talking about today, right?
+The problem we face is more like this, okay?
+So we're talking about DDoS attacks.
+So the first D in DDOS is distributed, right?
+There's a whole bunch of these internet hosts out there and they're flooding our system with packets and in an effort to overwhelm, relatively low level on the network stack with packets.
+And DOS, they're not trying to get in.
+They're trying to deny service.
+So they're just trying to block other legitimate traffic from getting in, right?
+So let's talk a little bit about history.
+cast your mind back, if you will, to 2014.
+Okay?
+Obama's in the White House, and famous people are dumping buckets of water on themselves.
+And sometime around in October, we start to see an uptick in the complaints about DOS attacks.
+And this is Dota and CSGO, and we know that other games as well.
+There's really been an uptick in this problem.
+This is what Reddit looks like.
+And then at Christmas 2014, you may recall...
+This dork ruins Christmas for everybody.
+In January 2015, that's when we started working on our solution.
+So in 2015, the problem starts to get worse and we see the...
+highest point during that year.
+Kind of the problem hits its highest point.
+I don't know if you remember, there were like lizards and poodles running around on Twitter talking about their booter services and bragging about it.
+And then in August, the International was disrupted for nearly an hour.
+So after that, towards the end of 2015, really DOS started dropping off for a problem for us.
+By that time, our relay, the solution that we had come up with, had been deployed.
+And we know that we were still getting attacked, but the attacks weren't as successful.
+So I'm thinking, well, you know.
+maybe we deserve some credit for this because I know that other games, it seems like they did have a little bit of a problem.
+Their problems lingered just a little bit longer.
+But honestly, we don't really know why our problems dropped off.
+Maybe the attackers just chose a different target.
+But the biggest factor may have just been law enforcement.
+So in 2016, the lizards and the poodles got rolled up, and the FBI hacked their tools, and it led to the arrest of some Israeli teenagers, this VDOS group, and they ended up being the real masterminds.
+And one of those guys, Applejack, was a big Dota player.
+So since then, denial of service has been in the news, but really not for games that much, at least not for us.
+So I'm reviewing this history, and I'm thinking, I'm going to give a talk about DOS." And this problem is not even relevant anymore.
+Nobody is going to show up.
+Are we all just sitting here wasting our time?
+And then, of course, just a few weeks ago, there was this giant attack.
+So I hope that we can all agree that vandals are still vandals, and there's more poorly-secured devices on the Internet than ever before.
+And all these devices are powered by consumer connections that are more powerful than evermore.
+So I hope we all agree this topic's still relevant.
+Let's look at the targets that DOS attacks.
+So I think I want us all to keep in mind there's three basic constituencies we need to protect.
+First of all, we need to protect our game servers.
+So the reason people attack game servers is of course to vandalize, and they also wanna cheat, right?
+So if I'm on a game server, I start to lose, I nuke the game server, then my loss is not recorded.
+So game servers are gonna be a focus of this talk, one of the focuses of this talk.
+Another constituency is your backend.
+And when I say back-end, I'm referring to any sort of centralized service, right?
+Account logon, econ, matchmaking, anything like that.
+So why do they want to attack that? Vandalize.
+I'll have just a little bit of advice about how to protect your back-end, but it's not going to be the primary focus of this talk.
+And there's one more constituency. This is kind of a new one.
+Don't forget about these guys, and that is your players, right?
+Your players are on consumer connections that are easily overwhelmed.
+They're especially vulnerable.
+And you may think, well, that's okay, because if their IP gets revealed, they'll just renew DHCP, they'll get a new IP, no big deal.
+Well, for a lot of people, that's not true.
+Their IP is gonna be a lot less dynamic than they would want and so once their IP is revealed and they start getting attacked, they may have problems for a long time.
+So the goals, why would I attack a person?
+Obviously to cheat, again, especially in a P2P network architecture.
+If I'm losing, I want to boot the winner off, or just, you know, I can maybe attack the host, same as a game server, and also to vandalize.
+And then you think, well, why do you want to attack some random person on the internet?
+And this is another kind of interesting thing that's new, is that We have people on the internet who are some random stranger who's playing your game, and if they get taken offline, your game loses a lot of value.
+We have very high-value, high-profile targets that are just out there on the internet that you don't have control over.
+Maybe they're playing in some tournament, maybe they're streaming their game from their house on Twitch, right?
+So we need to try to protect these people because when they get taken offline, we lose value, our game loses value.
+OK, so let's just quickly get a sense of scale.
+How big of an attack leads to what sort of damage?
+So here is a typical Valve data center with some racks of some game servers in it.
+Let's just talk about the scale of an attack moving from the smallest logical unit up to the largest.
+So first, these little red boxes there represent an individual process or an instance of, say, Dota or CSGO.
+And Usually the limit there is going to be in terms of packets per second, not bandwidth.
+So the thing that gets overwhelmed there is, you know, operating system buffers or something like that.
+And what happens is the operating system is going to stop, those buffers are going to be filled up, and the operating system will start dropping packets.
+And so if there's a bunch of junk traffic, the junk traffic crowds out the legitimate traffic, and you start dropping legitimate traffic.
+So if you've written some well-written code, reasonably well-written code, on the order of 250,000 packets a second is kind of where you're going to start having problems.
+If you do not have well-written code, if you have naive code, the limit is going to be much, much lower.
+Like, 100 packets a second, 1,000 packets a second.
+So we'll talk a little bit more about what you can do to deal with that.
+Okay, so moving up a little bit bigger attack may be able to take out a box.
+If it's in our data centers, most of our box have 10 gig NICs.
+And that's usually the thing that gets overwhelmed is the NIC.
+A little bit bigger attack may overwhelm enough to take out a whole rack.
+And usually the thing that gets overwhelmed there is not the switches, but it's the links between the top of rack switches and the box, or excuse me, between that top aggregate switch and the top of rack switches.
+Usually those links get overwhelmed somewhere between 2080 and gigabit in our data centers.
+Of course, a bigger attack may overwhelm maybe some links between specific ISPs.
+And if that happens, those customers, that ISP gets knocked out.
+Or maybe the whole data center goes offline.
+This is a truly tremendous attack.
+So depending on the data center, how many leaks are coming in, for us it's about 40 gigabit to 2 terabit.
+So it's important to realize that all these processes in this diagram are all the same color.
+but they're not necessarily running the same game, right?
+So if somebody is targeting a Dota game and their attack is effective, they may not just take out the process.
+They may not just take out their box.
+They may end up disrupting communication for the whole rack, and a bunch of CSGO servers go down.
+Or we're hosting some game servers to third parties.
+The third party's games might go down.
+And the situation applies to you.
+And everybody's not operating at this scale, and everybody doesn't have enough servers to fill up racks in a data center.
+But if you're in your cloud provider.
+just be aware that there's collateral damage going on.
+So just because if your game is targeted, it may affect somebody else.
+If somebody else's game is targeted, or just some product that has nothing to do with games, it can affect your game.
+So the largest attacks we faced were, historically there was a botnet reflection attack that was able to sustain multi-hundred gigabits.
+of bandwidth coming in to a particular IP.
+And then we also had another attack where we were getting 500 million empty UDP packets a second.
+So that was apparently the attack that they chose to do then.
+And the recent ones that was in the headline, the memcache reflection attacks, we were hit by that, but it didn't cause any disruption.
+Okay.
+So we've talked about the problem in general.
+Next, I want to talk about how you can try to solve it at the network layer.
+So when I talk about network layer, I mean we've got some UDP packet flows, and we're not going to change that traffic pattern.
+We're just going to have our switch or our hardware device that's sort of like analyzing that and trying to filter the good from the bad.
+And it's operating relatively low on the stack.
+So the main point here is basically that it's just really hard, okay?
+So for UDP, you've got packets coming in.
+We're probably not gonna have enough time.
+The packet rate's really high relative to the compute available.
+We're not gonna be cracking open the packet, looking inside, doing any sort of advanced stateful packet inspection or anything like that.
+So it's just gonna be really difficult for us to tell good from bad.
+But it gets worse because many of you probably know that IP source addresses are trivially spoofed.
+I'm on the internet, I send a packet, I can claim to be from any IP address I want, and it's trivial to do that.
+So basically, the way to think about addressing the problem with a network filter is kind of like this gate.
+So any UDP traffic that's bound to your server's port is probably just gonna go through the gate, or gonna go around the gate, I should say.
+But despite these limitations, network solutions are going to play an important role.
+So let's just talk about what that is.
+The first thing is that there's obviously junk packets that you can filter out as far out at the network edge as you can.
+For example, if you're not running any web servers in your rack, block port 80.
+If you're not running NTP, block port 123.
+So obviously, junk packets can be blocked by their destination address.
+You may also want to block based on the port.
+the sender's port, right, the source port.
+You think, well, why would I do that?
+Can't the sender just assign any port they want?
+There's one very important case where they cannot, and that is a reflection attack.
+So if you recall, this is what a reflection attack looks like.
+I've got some attacker.
+And he spoofs his source address, and he sends a relatively small request to some good faith actor out on the internet using a ubiquitous protocol.
+that such as NTP or memcache or something like that.
+And the key thing is that this good faith actor out there is going to reply to the source address, which is you, the target of the attack, and the reply is bigger than the initial attacker's request.
+So by doing this, he's able to gain leverage.
+He sends a certain amount of traffic to the good faith actor, and the good faith actor sends more than that amount of traffic to you.
+And the thing is that the good faith actor who's out there is going to use a specific, he's obeying the rules, he's going to use a specific source address that can be blocked.
+A source port that you can block.
+The other thing you can do at the network layer is block various protocol attacks like SYNFLOOD or HTTP SLOW, right?
+There's these ubiquitous protocols that are in use.
+And even though I realize that's not technically at the network layer, most of the devices can look a little bit higher up the stack, and they can block those types of attacks out.
+And that's really important to be able to do.
+The final case is when there's an emergency.
+So let's say you're under attack.
+Stuff is on fire.
+There's one IP that's getting attacked.
+And there's collateral damage.
+They were able to take out that box, but the damage is spilling over to other boxes in the rack or other things that are along the path there.
+So what you can do, just black hole that IP and just block it.
+put out the fire, and maybe sacrifice that IP.
+So there's lots of things like that, where just in the middle of an emergency, you can't craft a rule that always works, but you can craft a rule that will put out the fire.
+So that's a very important role for networking, filtering at the network to play.
+So network filtering, it does play an important role, but just like this left-hand path there, any UDP traffic to your source port is probably getting through.
+So doing it at the network layer is not sufficient.
+Okay, let's take a brief detour and talk about websites.
+I want to talk about what's hard about games, why are websites easier to defend than games, and what can we learn from thinking about how websites are protected.
+And hopefully, at the end of this little discussion, you'll think, oh, of course, that's the correct solution, the thing that we came up with, which obviously I think is the correct solution.
+I hope to convince you of that too.
+Okay.
+So it's 2015 and we're totally getting our butts kicked by DOS.
+And we're thinking, games are just hard.
+I just wish I worked for Amazon, because then it'd be so easy defending a website.
+I mean, on most websites, if I'm shopping on Amazon, I'm just dealing with my own data.
+I'm like siloed.
+Whereas if I'm playing a game, I've got.
+multiple people connecting to the same box.
+And if I'm a vandal, then I can see the people that are gonna be affected by my attack, right?
+And I can taste their tears, you know?
+I can see it, I can witness the impact.
+If I'm on Amazon, who cares if I take down some box and it's just a bunch of random strangers?
+I'll never be able to see that.
+So in games, the incentive and the payoff for vandalizing is just cranked up so much.
+And then games have all this state, right?
+You think about how much state is in a game.
+all of the positions of all the entities and their health and their animation states and everything is changing continuously, right?
+I mean, you're on some website, you know, you're in some chat group or whatever, there's no state that changes unless you press the enter key to put some input, whereas in game, that state is changing continuously even if nobody's doing any input.
+It's just so much harder.
+And then games have stringent latency requirements, right?
+I mean, yeah, you listen to these talks by Google and Mac, we want to make our website snappy.
+Please, right?
+So yeah, that's great.
+You want to make it responsive.
+But can you keep low latency consistent for one hour sustained, right?
+If there's a hitch, you can't buffer it and hide that.
+Games just have these really difficult problems, and websites are so easy.
+But the worst part is that when you're making a game, you have to take very low level control over retransmission.
+So I'm going to send the position of some entity, and it's changing continuously.
+And if that message drops, I don't want to retransmit that.
+I want to retransmit the current value.
+Who cares what it was that you missed?
+Let's just send you what it is now.
+You can't do that if you use TCP.
+So that's why we all have to use UDP, because we're taking very low level control over what gets retransmitted.
+And UDP is hard, right? We just saw.
+UDP is really hard at the network layer.
+TCP is so much easier.
+Games are just hard, and if only we made websites.
+It would just be so much easier.
+And...
+Get off my lawn, you know?
+So...
+This is a whiny exaggeration, but I hope that...
+Maybe you've had similar thoughts like that, right?
+And the problem with this method of thinking is that it's a common engineer pitfall to think, my problems are so hard and my field is so difficult.
+If only I could do it in the other field.
+And the source of this thinking is because you don't know anything about the other field is what's really going on, right?
+They're facing different challenges and they have different things that are hard.
+So, you have to ask, you step back and you think, wait a second.
+Now, about those websites.
+Does network layer filtering work for websites?
+I mean, I know that HTTP is a TCB-based protocol.
+And so it's a little bit easier than UDP.
+It's a little more context.
+But is that really a magic bullet?
+Is that what's making these websites so much easier to defend against DOS?
+What is it exactly that makes websites easier?
+Well, as it turns out at Valve, we got a bunch of people that run some big websites.
+So what I did is I went down and I talked to those guys.
+And I learned that games have some unique challenges.
+All those things that I listed, those are legitimate.
+And not a single one of them has to do with DOS, actually.
+So let's look at a modern website.
+And we'll see what we can learn.
+So this is a modern website.
+It's built for scale.
+And a lot of the things that make it scale are also the things that make it able to defend against DOS.
+OK, so we've got this client.
+He wants to connect to the service.
+The first thing we notice is that he accesses the service via a DNS name, not IP.
+So this adds a layer of indirection, a very valuable layer of indirection that we can use as a tool to spread the load.
+We can use various DNS tricks.
+And you compare this to once a session starts on a game server, you've got the IP, right?
+There's no multiplexing or routing or anything.
+It's like you've got the IP, and that's the only way to talk to it.
+And you might say, well, I need to talk to that game server.
+I can't just randomly choose one geolocation, random assignment route.
+I've got to talk to that game server.
+That's the only one who has my data.
+Just hold that thought.
+So the next thing...
+about a modern website is there's going to be this row of some sort of edge box.
+Some layers of load balancers, proxies or whatever.
+I'm going to want to focus on the HTTP proxies, right?
+They're running Varnish or some similar software.
+And these can be deployed at the edge of the network, right?
+So any sort of junk packet, any reflection attack, anything like that is going to bounce off these guys, right?
+The other thing about using proxies for a modern website is that this is a commodity service.
+So if you call up Amazon and you say, I need a whole bunch more proxies, that's in their wheelhouse.
+They know how to do that.
+The cloud providers can do that for you as total commodity.
+The other thing is that if a DOS attack takes out one of these proxies, big deal, right?
+The client could just choose another one, right?
+There's nothing really special about any one of these proxies.
+And so we can scale and we can add redundancy that increases the surface area of what needs to be taken out if we're going to prevent a client from accessing our service.
+Okay, then on the right-hand side, I want to skip the middle, pardon me.
+We have the data stores, right?
+So this is, I'm talking about like some sort of SQL database or whatever.
+The thing to note here.
+is that a SQL database is stateful.
+It's kind of hard to imagine anything more stateful than a SQL database.
+We talked about game servers having all this state, and we couldn't migrate it that easily.
+We've got to talk to that specific one.
+Ignoring some small multiplier for the purposes of redundancy, if I go to Amazon, I've got to talk to the specific server that has my account history.
+I can't just talk to any random one.
+So in that sense, it's not that different from a game.
+I've got to talk to a specific box.
+In the middle we've got these app servers, right?
+So this is where your business logic is.
+And the main thing here is that this is also very stateful.
+And it's also the case that you really have to talk to a specific box.
+You can't just talk to any random one.
+It's true that if one of the app servers goes down and gets rebooted, no data is lost because there's nothing persisted there.
+It's all in the data stores.
+But it is important that you get rerouted there because of caching and perf, right?
+So It's very important that I talk to the specific one that handles my account, or that's handling this particular chat room, or whatever.
+So it's not fundamentally different than a game.
+We've got requests from a client.
+They've got to go to a specific box.
+So let's just review really quickly the key aspects that make this scale, that makes this design of a modern website facilitate the defense against DOS attack.
+First of all, the only thing that is directly addressable are the proxies.
+And anything that's really highly stateful, anything that would be cause of disruption if it went offline, you cannot even talk to directly.
+It does not need a public address at all.
+Doesn't need to be on the internet.
+The other thing is that the proxies have just the right amount of state.
+So, it's not too little, because if it was too little, they'd basically be just like a network switch, right?
+They're trying to evaluate these packets and they don't have enough context to filter out good from bad.
+But, It's not too much because if one goes down, I can just get another one really quickly.
+Establishing connection does require some bit of work, but I can do it pretty quickly.
+The other thing is that I can add additional proxies to add additional redundancy, and this increases the surface area.
+So if somebody wants to take out our site, they have to take offline a significant proportion of that.
+And I can increase that by throwing money at the problem indefinitely.
+Okay, I hope that after looking at this, you can kind of say, oh, I see what you need to do to make a video game work.
+So let's talk about our solution.
+Our solution is basically proxies for game traffic.
+And it, again, I hope it seems like, oh, yeah, that makes sense.
+But at the time, we weren't thinking about it in terms of proxies, and we're thinking about it like comparing it to a website.
+What we were thinking about was, we, it was more like comparing it to a network switch.
+And we were thinking...
+we are going to route every single packet through a Linux box in software.
+I hope that sounds crazy to you because it did to us at the time.
+Okay, so this is what direct UDP connectivity looks like.
+This is the standard way of doing it.
+You've got a game server, it has a public IP.
+To send a message to this game server, the client just uses a public IP.
+We're on the internet.
+Of course, the problem is that so can the bad guys.
+And if I'm a network switch sitting in between, or a device, as we talked about, it's really difficult to tell the good traffic from the bad.
+So our solution is, we take these commodity servers, and just running Ubuntu, and we have some software called Steam Datagram Relay, or SDRs, and we deploy these at the edge of our network.
+So now, a client wants to connect.
+How does this situation change?
+So first.
+he gets a ticket.
+And the ticket, he signed into Steam, so he's been authenticated, we know who he is.
+And the ticket contains his identity.
+It's restricted, it says, hey, you can only talk to this specific server, and it's gonna have a time limit, so the tickets are shared or whatever, it mitigates damage.
+And it's gonna be signed, right?
+Signed by something that the relays trust.
+And as we'll see in a little bit, that can be your back end, okay?
+You guys can generate these tickets.
+Okay, then the client talks to the relay over a public address.
+And then the relay talks to the game server using the private address, right?
+So game servers cannot be directly addressed.
+Okay, so now what does it look like for an attacker?
+So an attacker, well, you know, it's open internet, right?
+It's free country.
+He can send packets through the relay just fine.
+It's got a public address, but he has no ticket, right?
+So the relay is not gonna let him in.
+Of course.
+You could DDoS it, right? Like it's on the internet, it's vulnerably taken off.
+So he gets his buddies together, he DDoSes it, and that disrupts.
+So the client no longer can talk through that relay, but no big deal, he just uses another one.
+So maybe there's a, there's some software that's running on the client that is making dynamic route choices.
+It's saying, which one of these relays do I want to use to talk to this server?
+and it notices, whoa, I'm stopped receiving communications from the relay, I better switch to a different one.
+So maybe there's a few second delay for the time when that, it takes to detect that that communication has been disrupted with the relay, but he switches and the game keeps going.
+There's no loss of connection or anything like that.
+And the other important thing to remember is that the relays are not just at the same data center with the game server.
+We've got relays deployed all over the world, so he can go not just at that data center, he can go to relay in a different data center, and then that goes on our backbone to the data center where the game server is.
+In fact, that's a really common thing that happens.
+Okay, and of course, same as with websites, if an attacker wants to disrupt gameplay, he's got a huge surface area that he has to overwhelm.
+Of course, you can only do this if you've got quite a bit of network muscle.
+So let's talk about Devalve's network.
+So at our edge, we've got 30 points of presence currently.
+So a point of presence meaning we have a physical connection within ISP where we can receive network traffic and it gives ingress.
+And we have a backbone connection, a dedicated link that only carries our traffic.
+to the rest of our network.
+And in many of these points of presence, we also have racks with game servers or some other service, like a content server or some Steam service like that.
+But in some of them, all we have is just a point of presence where we've deployed some relays.
+The total aggregate bandwidth at our edge is in the multi-terabit range.
+And right now, we have about 115 relay hosts deployed.
+We're in the process of ramping that up.
+We also have connected all of our points of presence in a backbone.
+We have about 120 links right now, most of those are 10 gigabit links, and aggregate bandwidth, total aggregate bandwidth of all those links is also in the multi-terabit range.
+So you think, why, this is not relevant to me, right?
+Well it is, because later we're gonna talk about how Steam partners can have access to this network.
+But I do wanna pause just for a moment.
+And now that you guys know what this hybrid solution is, I want to point out that it's not a coincidence that at Valve we came up with a hybrid solution.
+So if you're going to do this hybrid solution, you've got to change the app code, right?
+There's client software that's running on the client.
+And you also have to be able to deploy quite a bit of network hardware, right?
+You've got to be operating at scale.
+So how many companies have both of those things going on?
+So, you know, we make games and we make Steam.
+My personal background is more games.
+So I'm a software developer, and I don't really, I'm not a network engineer.
+I don't buy...
+bandwidth, I don't understand links and data centers, and I don't know how to, you know, deploy hardware and all that sort of stuff, which is a cop-out for the Q&A session if any of those sorts of questions come up. But we do have people that know that. So what did I do? I moved my desk down there and we started figuring out the solution. We said, man, this seems kind of crazy. We're going to be rounding every single packet through software. Is that crazy? No. We just did it and we shipped it.
+I just think it's remarkable at Valve, first of all, that we have that ability to collaborate like that, and the job titles, these strict job roles didn't get in the way at all.
+And the other thing is that the impact of one software engineer.
+So one software engineer can design this entire protocol, write the relay server, write the client code, integrate it in Dota and CSGO, and ship it.
+That's what one software engineer can do at Valve.
+We had one or two more guys help out with deploying hardware and doing that sort of stuff.
+But anyway, I'm really proud that we shipped this novel tech and we had a huge impact on a whole bunch of customers, which is a way of saying that we really need network engineers right now.
+So if that's you, or it sounds really cool, or you just happen to be a super smart person, come on.
+OK, with that little digression out of the way, A big part of this solution is that client software that we talked about.
+It's running on the client, and it's making these dynamic routing decisions.
+Because we have that client software, we got two unexpected benefits.
+The first benefit, and I hope you read this slide title and you think, what?
+That does not make any sense.
+We were able to improve ping times for a significant minority of players.
+Relaying packets through software improves ping times.
+So that doesn't make any sense.
+Let's see how this happens.
+So this is a real example of a player who is in Crowley, Texas.
+Happens to be near where I grew up.
+He's playing on a server in LA.
+So if he routes direct to LA, he would have gotten an 82 millisecond ping.
+So the first thing, so he's gonna route to the relay there in LA and then the relay is gonna go over the backhaul within our LAN.
+So the first thing to observe is that just inserting that relay did not increase the latency.
+So relaying software, at least I can convince you, doesn't make it any worse because you can pull a packet in and out of a Linux server with less than a millisecond and you can send it over the LAN backhaul within a data center super fast, right?
+So that is less than a millisecond, that is negligible additional latency.
+And here's how you can improve the ping time.
+Because this is not actually what he did.
+What actually happened is that his client measured the ping time to all of our available relays and is it, oh, if I route through Oklahoma City, I'm only 17 milliseconds away from Oklahoma City.
+And then it's another 39 milliseconds on our backbone between Oklahoma City and Los Angeles.
+And if you're keeping track, that's 56 milliseconds.
+So 80.
+2 milliseconds versus 56 milliseconds.
+That is a meaningful improvement, right?
+I hope everybody sees that.
+That is a meaningful improvement.
+It's not just an improvement because we got his latency down, it's an improvement because more of the traffic... so in this situation, it's all going over the internet. We have no control over any of that, any of those links that are involved. In this situation, only a short portion of the path is over a route that we don't control. In the backhaul, we control. We can make sure that the routing is optimal and we can make sure that there's no, you know, downloading of the latest season of Game of Thrones or whatever, spiking up and interfering with our traffic, right?
+So, the ping improvement is not because we're relaying traffic.
+The ping improvement comes because there is a choice of route.
+And you might ask, why is his direct ping to LA so poor?
+The question is, I don't know.
+I don't know why it's so poor, right?
+But we have to remember that there is no such thing as a direct route to LA, right?
+The internet is a packet-switched network.
+So when he's talking to LA, he's bouncing through all kinds of network devices already.
+So adding one of them, and it happens to be software, doesn't really change things in any fundamental way.
+There's no direct route.
+So you say, OK, I didn't mean direct route.
+I meant the default IP route.
+Why is the default IP route so poor?
+Well, it's because it's determined through BGP routing.
+That's the routing protocol that drives the internet.
+And the input to BGP routing are these metrics called weight and preference or whatever.
+Well, they're not identical to latency.
+They're kind of close, but it's not an exact matchup.
+So any time there's a discrepancy there between those metrics and actual latency, it creates an opportunity for us to find a better route.
+So maybe you're thinking.
+OK, you dug through all your stats, and you cherry-picked an example.
+How often does this really happen?
+So here is a chart that shows all of our data centers from the busiest to the least busy.
+And you can see here, our busiest data center is in Stockholm.
+And you can see it's a majority of players.
+So this gray represents people who essentially the default route was optimal.
+This is the majority of players.
+So most people got an improvement.
+And it's true, this purple bar is anywhere from zero to 10 milliseconds.
+So it's a modest improvement, right?
+But look down here, oh, and you can also see that the amount of improvement depends on the opportunities for route selection, right?
+So in Europe, we have a lot of different interconnects, we have a lot of different ways for there to be different routes and we can make improvement.
+For example, in, this is Australia down here, we really don't, we only have one data center, only one way for the traffic to get in.
+Most people don't see an improvement.
+But look down here, like, this is Dubai, right?
+This is, that eight.
+that red section is a 75 millisecond improvement.
+That's a huge improvement, right?
+So for a lot of, for a small percentage of customers, we're able to make a big difference.
+And for a, I would say it's a minority of customers, we're able to make a modest improvement.
+Okay.
+The other thing, unexpected benefit that we got from this, from having this client software that was making these routing decisions, is that in certain parts of the world, the competition between ISPs is less than you would desire.
+And this has happened in many different parts of the world at various points in time.
+And basically, the ISPs are peering with each other, and the routing is set up in such a way that if you were an engineer and you were trying to design things so that the internet worked as efficiently it's not how you would design it, right?
+So the peering arrangements and everything are set up in a way that has, makes, is based on some sort of business competition, not based on what's good for people trying to get a good connection to arbitrary internet hosts.
+So, let's say that you have a data center, and you do have physical connectivity to two different ISPs.
+So in this diagram, we've got two players and they are using two different ISPs, the red ISP and the blue ISP.
+And contrary to other diagrams, the blue guy is not a bad guy here, he's just two different ISPs and everybody's a good player.
+Even having the connectivity come in from two different ISPs is not sufficient because you have to pick an IP address for your game server.
+This is back when game servers have a public IP.
+So let's say you choose an IP address that's assigned from your red ISP.
+Well, then great.
+Your player on the red ISP, he's got a great route.
+And your blue guy gets bounced around some crazy scenic route, and he has a bad time.
+you could try to switch it, but then all you've done is you've traded off one person having a bad time for the other.
+So our solution...
+We just have some relays with red ISP addresses, some relays that are assigned blue addresses.
+And the clients measure their ping.
+They say, if they're blue, it turns out, oh, looks like the blue route is fastest.
+And they connect through there.
+The red guys say, oh, looks like the red route is fastest.
+And they connect through there.
+So of course, there are other ways you could solve this problem, right?
+There's traditional networking engineering approaches that you could do.
+In Dota, what we've had to do is we, in some cases, we had to segregate people by ISP.
+And that's really a substandard solution.
+On CSGO, we were able to implement this solution.
+You could also give the game server two IP addresses, right?
+You could multi-home, and then when you told clients to connect, you could say, OK, I'm going to figure out if you're a red client, and if so, I'm going to tell you to connect through the red IP, and if you're blue, I'm going to...
+That's just a lot of work, and you have to be able to figure out who's red and who's blue, right?
+It's a...
+You're signing yourself up for a lot of bookkeeping and a lot of ongoing maintenance, right?
+So the SDR solution, it just automatically works.
+You just let the ping measurement sort it out.
+OK, let's get to some practical advice.
+We've talked about the problem.
+Hopefully everybody understands how our approach works.
+And now I'm going to give some practical advice about what you can do.
+So there's one guaranteed way to make sure that your game is not impacted by denial of service.
+And that is you can make an unpopular game.
+So this slide actually does have a point.
+It's not just to use that emoji, although that's a pretty good benefit.
+The point is that there's no other guaranteed solution.
+So everything else we're about to talk about is just going to raise the bar that attackers have to jump over.
+And it's up to you to figure out how much dev cost, how much money.
+You're going to have to do those cost-benefit analysis.
+But there's really no guaranteed solution aside from making it an unpopular game.
+Okay, one bit of practical advice.
+I don't want to draw on this, but back end.
+Make your backend, your backend is just a website with a rich client, right?
+That's all it is.
+All those things that we talk about that's hard about video games, don't apply to your backend, right?
+So do not open a raw socket.
+Take it, make your backend traffic be HTTP.
+Take advantage of all the existing tools that are out there, commodity services, you'll get super high bang from your buck.
+There should be no reason whatsoever why you have a hard time protecting your backend.
+Just make it a website, essentially.
+The other thing you're going to do is to use the network layer to do what it can do.
+So we talked about the fact that, you know, there's going to be this hole any UDP traffic bound for your server is going to get through.
+the network layer can block reflection attacks.
+And that is the most important function of the network layer.
+So you may end up spending a little bit money, maybe from your cloud provider, to do some advanced protection or whatever.
+Or if you're in a colo situation, maybe you buy some of those military grade switches, dedicated DOS hardware, whatever.
+But you may throw some money at the problem, but the network layer is going to play a role.
+Every time you share an IP, it adds risk.
+So don't share IPs unless you have to.
+Only do it on a need-to-know basis.
+So for example, don't do it just because one side wants to connect.
+Need to make sure that both sides have expressed some sort of affirmative intent to participate in this connection.
+For example, you may remember that there was an exploit with Skype.
+You could just initiate, by the process of initiating a Skype call to somebody, I could get their IP. The other guy didn't even have to answer the call.
+So that bug has since been fixed, but that's an example of where make sure your protocol does not reveal any IPs until it's absolutely necessary.
+There's other sorts of ways where you might leak this sort of information.
+For us, we had some dev tools which are super useful for sorting out problems with customers.
+You can say, hey, check this, try this, or whatever.
+But unfortunately those dev tools leaked information about where the game server was or what other people's IPs on the game server.
+We had to lock all that down.
+Also rich presence, spectators kind of ended up being a gray area.
+So those are some examples of places where you might find yourself leaking this information.
+And it'll be used to DDOS your players.
+Basically, in today's internet, anytime, if you ever reveal an IP, it's just bad.
+That is a conclusion that we've come to.
+You may not know that if you're using the current Steam P2P APIs because they try to peer-snap and establish a direct connection, and that is bad.
+And we are not going to do that in the future.
+We are working on fixing that.
+But the ideal situation...
+is to relay the traffic and have your relay anonymize it.
+And so nobody knows anybody else's IP.
+And they're identified by your Steam ID or some other identity like that.
+Of course, you probably are not operating in a scale where you can deploy all this hardware.
+But I'm going to talk about, if you're a Steam partner, you can relay your traffic through our network.
+And you can make sure that your players don't get DDoSed.
+Of course we want to prevent a DDoS attack, but in the event that it happens, and it will happen, you need to be able to detect it and get those guys, ban those guys from your game and lock down the incentive for them to keep doing it and mitigate the damage of it happening.
+So that means obviously you're collecting data on like how often games are failing, right?
+Like you have to have sufficient analytics to identify the people who are doing this.
+And then if you have a free to play game, you've got a problem because the band may not sting, right?
+So if they can just, if their account gets banned or whatever, they can fire up a new account and get right back into the matchmaking pool, your bands are totally neutered.
+So you really need to have some barrier to getting them into whatever matchmaking pool that you're trying to protect.
+So for example, in Dota and CSGO, you have to have a certain number of games played.
+Some sort of time investment.
+Make them jump over a certain hurdle before they can get back in and start doing bad stuff again.
+Two more things you can do.
+You can harden your network code. So previous iteration of this talk, I went into detail about how you really need to be pumping, pulling the socket on a thread and you need to be making sure that you don't have, and I realized, man, just writing socket code is just really hard.
+And so I recommend that you just don't do it.
+And so we are releasing a open source library to do a lot of this stuff.
+It's a very permissive license.
+It's open source.
+You can use it on any platform you want.
+Doesn't matter if you're a Steam developer.
+Doesn't matter if you're on Steam.
+Doesn't matter if you make games at all.
+And it is a real-time oriented protocol, so it does a mix of reliable and unreliable messages.
+and it will do the fragmentation and reassembly.
+You know, your messages can be bigger than the MTU and then retransmit for reliable data when there's packet loss.
+It also has bandwidth estimation based on an RFC that describes TCP-friendly rate limiting.
+And so you can just put a giant message, you know, into the API, and then it'll meter out the packets at a rate depending on how big the pipe is between the two peers.
+It also does encryption.
+It does not do anything above transport, though.
+And I think that's really important, because we're not trying to take your entity data and then you figure out how to, we'll serialize it for you, and we'll figure out which of those state fields changed, and then make a delta encoded thing.
+We're not gonna do any of that.
+Because that's what's really hard to get into a game.
+That's what's so incredibly game-specific.
+But transport layer.
+we found it's just pretty much easy to drop in any code base.
+There's no real reason not to use it.
+And the other thing is that this code, all of those things I talked about, about spoofing, UDP source spoofing, and the risk that entails, and making sure that your socket doesn't get overwhelmed in legitimate traffic, being drowned out by spam packets, and all that sort of stuff.
+We've got that.
+We've solved all that.
+Opening a UDP socket on the internet is fraught with peril.
+This code has been battle tested for several years now.
+The other thing, I want you to please use our network.
+OK, how are you going to do that?
+There's an SDK.
+So what do you get?
+You get access to our relays and our backbone.
+So what does that mean?
+That means P2P traffic is anonymized.
+No IPs are being revealed.
+You're going to get any sort of ping improvement that we're able to do because we're finding optimal routes.
+You are going to get your data transferred.
+More of the path is going to occur over our backbone, where we're able to control it and make sure that you're getting the right traffic.
+So that's the end of the video.
+I hope you enjoyed it.
+And if you did, please subscribe to our channel.
+And if you want to see more videos like this, please subscribe to our channel.
+And we'll see you next time.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+Bye.
+uh... that the uh...
+began with runs downloads or you know you know whatever not interfering We can do, we have P2P APIs, so just two random hosts on the internet, right, they're just players.
+And we also have, are hosting some dedicated servers for a few partners.
+The Stunlock guys, the Battlerite guys are hosting some servers with us.
+And we have some more partners that are, we're in the process of working on that.
+And we can do, that's a slightly different API.
+and we can do that too.
+Also, because we have these relays deployed out there, we can, we have some tools for estimating ping.
+Okay, so let me just describe how this works.
+So I measure all of my ping to all of the relays, and I know all of my ping to those relays.
+And if you measure all your ping to all of your relays, and then we compare notes, It's a small bit of information, right?
+Just a small bit of data that lists those pings.
+But once I have that, I can estimate my ping to you, right?
+Or between any two internet hosts, once I have that data, I can estimate the ping between them without sending any packets.
+This is extremely useful for figuring out what peers ought to be put together, or figuring out who's going to be the host if you've got some P2P situation, or figuring out if you've got servers deployed, which region they should connect to.
+I know that our existing P2P APIs, if you try to do that right now, you're going to be actually pinging, and it's going to try to pierce NAT, and there's this five-second handshaking time where it tries to do that, and it has lots of problems.
+I'm really, really looking forward to some partner who has a good need for some of these ping estimation tools.
+I think they're really going to be powerful.
+Another thing you get with this library is certs.
+So I mentioned that Game Networking Sockets has encryption.
+Encryption only works with certs.
+I don't want to get into a big discussion, but basically you can just man in the middle, right?
+And unless you can prove that the guy you talk to is the guy you really want, encryption is a little bit neutered.
+Of course, it doesn't prevent anybody else from filling that role of certificate authority.
+But Steam can be the certificate authority.
+Here's the key point there, is that, well, there are two points.
+One is, if somebody connects, You know from the very first moment that they are who they say they are.
+You don't have to say, okay, I've got a connection from this particular Steam ID, and then go ask Steam, hey, is this who they say they are?
+Meanwhile, they're in this kind of state of limbo?
+Nope, from the very moment they connect, you know that we've checked their identity and they're presenting the certificate that proves that they are who they say they are.
+The other thing is, on the encryption bit, we have moved the threat so that it's not possible to man in the middle, to observe or tamper with the traffic.
+unless you are inside the process.
+So you can't just observe it or tamper with it by being outside of the process, installing some box that's gonna like, you know, relay the traffic or anything like that.
+You have to be inside the process.
+And that makes it in a position where VAT can detect it, right?
+So the certs maybe seem a little esoteric, but they really empower some good security features.
+Of course, you also get everything else that comes with everything on the previous slide.
+So our goal here is that we really want, if you're on Steam, you use this SDK.
+And if you're not on Steam, You can use the same API, you just use the open source version.
+So you don't have to have if-def-steam go this janky way, otherwise I'll use my socket code or whatever, and then you're resolving all those same problems that we talked about, hardening your network code and all that.
+Just talk straight to the API.
+So if you are a Steam partner, please email me and I can get you early access to this SDK.
+It's currently.
+kind of in early access as a separate lib.
+It will be coming in the CMOS SDK soon.
+That is it.
+Thank you for your time.
+Are there any questions?
+How do you, first of all, great talk.
+Love all this stuff.
+How do you mitigate against replay attacks?
+Replay attacks.
+So can you describe what that means?
+So in a replay attack, someone who's in the game and wants to, like they're losing, they want to take the server down so that they don't have the MMR hit, they'll record a little bit of their traffic that they're sending, and then they'll just give that to a bot farm and say, hey bot farm, send this traffic.
+Well, so the protocol is a connection-oriented protocol.
+So...
+You could, I'm probably gonna have to think, all these security questions can get really complicated, okay, so I have to think about exactly how we're gonna defend to that.
+I may have to answer that offline.
+I don't mean to cop out, because I'm certain that we have an answer for that.
+I'm just gotta think through, I don't wanna give any wrong answers, especially on security stuff, where it depends so much on the details.
+Does anybody else have any questions?
+If you want to, we can talk about it after.
+I just don't want to answer off the cuff here.
+Yes, sir?
+So it seems like there's fair amount of value that I as a developer would get if I was using this.
+So is there an associated cost?
+No.
+Okay.
+No, no, we just, you know, we consider it a Steam platform feature.
+Okay.
+No other questions?
+Okay, well I'll be, I guess, hanging out out here answering this guy's security question.
+And if anybody else has any more questions, thank you for your time again.

@@ -1,0 +1,448 @@
+Hello.
+Just gonna start off with the basics.
+Please put your cell phones on quiet, otherwise I'm gonna get very distracted and it'll be really funny.
+And also don't forget to fill in your evaluations at the end of the session so that hopefully I can get invited back.
+So my name is Chris Savoie and I was the lead UI programmer on Tom Clancy's The Division.
+In my role, I created the UI solution that we use in the game.
+And I had the fortunate opportunity to help develop a lot of the core technologies used in the Snowdrop engine.
+Today I'd like to share some of the hard lessons that we learned while building the UI system for Snowdrop and The Division.
+For those who haven't played it, Tom Clancy's The Division is a third-person, cover-based shooter online RPG.
+It's a Tom Clancy game where you play as a high-tech government agent during the fall of New York due to a virus outbreak.
+One of the key pieces of technology is an AR system that links your character to the central AI system, Isaac, which will feed your character with information about your current situation and the world around you.
+So it was very early on that we decided that we wanted to make a fully diegetic UI for the game.
+Every UI element that went into the game was framed in the idea that this wasn't just for the player, but also for the character that you play.
+So here's the plan for today.
+I'll start by covering a bit how our node graph and UI technology work.
+Then I want to talk about the importance of rapid iteration and the various things that we did to improve it.
+After that, I'll get into some of the gritty details of how we work and some of the performance issues that we faced.
+And in the final part I just have some general lessons about what went well and what we would like to improve upon in the future.
+So what makes Snowdrop so special?
+The Division was the first game to ship on the Snowdrop engine that we developed at Massive.
+At the heart of our engine lies a powerful node graph visual scripting system.
+This single system is used to create content for many parts of the engine, from familiar shaders and mission scripting, but also for particle systems, graphical objects, animations, AI behaviors, and many more, including of course UI.
+As a quick example of how it all works, I recorded myself doing a quick health bar prototype.
+First, I output the health as text by concatenating the current and maximum health, though you should try to avoid concatenating strings because it doesn't really work well with localization.
+But in this example, it's okay.
+So I just do a quick test here to make sure that the values are responding.
+I'm then just going to add a bit of a background to the element that's going to change color based on your total health.
+I also add a blurred background to it, mostly out of habit, but this really is what adds a lot of readability to the UI elements in our game.
+I use a gradient to transition the colors as you get damaged.
+So green for good and red for bad.
+give it a test. It's all working as designed. Now I'm just going to move it into 3D space.
+And then I attach it to the player. Unfortunately, when we move it into 3D, it gets really, really huge so I need to scale it down a bit. And then I just move it above the player's head since the player position is generally at the foot. And then I basically just enable it in game, hit save, and then we have a new piece of UI running in the game.
+So you might have noticed that at no point was there any direct manipulation of the UI.
+This is one of the main differences in the Snowdrop UI system is that we have no canvas.
+To be honest, this just started with a problem of time.
+We focused on developing the node system first before the UI tools, but every time the topic came up to add direct canvas manipulation, it didn't really feel worth the time investment.
+Another big difference is that we run an immediate mode instead of retained mode.
+Put simply, this just means that we redraw the UI every frame instead of trying to pre-generate everything on screen.
+While this does come with a performance cost, it also means that being dynamic and flexible are at the root of the system.
+We'll get more into the performance cost of that later, though.
+The system is also vector graphic driven.
+We tend to prefer to build shapes with triangles instead of using texture masking.
+This comes with a few key benefits.
+First is that we can reduce the GPU load by only rendering the pixels that we use.
+And the second is that our tech artists can really flex their creativity.
+So this effect was made by one of our technical artists while just experimenting with various data processing and point rendering techniques.
+By using primarily vector graphics, it allows us to render all the UI at 4K on PS4 Pro without really having to change any of the data whatsoever.
+Finally, our UI system is tightly integrated with our overall render pipeline, and it uses the same shader backend.
+This means that we can share shader techniques and have access to the same render resources as any other system in the game.
+like the depth in the normal buffers.
+Any artist that has made a shader for a 3D object or particle system can easily jump in and make shaders for the UI.
+Since UI can just render over top of everything, it makes it very easy to add new post effects into the pipeline as well.
+Many of our skill post effects were done in the UI system.
+Here, I built a small UI to test a few of them out.
+I just enable it in game and hit save, and then I can just test that all these effects are working well in the game.
+To get information from the game, a coder just writes a new node to provide that information, like the position or health of the entity that I used earlier.
+To get more information, we just add more nodes.
+We had nearly 5,500 nodes when we shipped the recent survival DLC last Christmas.
+These nodes may have been made for the UI, but they can also be used in any other system, like graphical objects, to make them react to the player's presence.
+Here I have a turret object that I made out of a few different meshes.
+I identify the head parts of it, and I can use the player's position so that the turret will always face the player.
+And then I just hit save, and then it's updated in game and tracking the player's position.
+Nodes in Snowdrop can do much more than just getting set data.
+In the UI system, they act as a visual scripting language.
+So we have many nodes that affect the flow of execution with branching and looping.
+Most of our systems share a high level of interconnectivity.
+So from the UI, we can add objects to the world, run skills, or spawn separate UI objects.
+On the other side, world objects and skills can also spawn UI.
+The freedom of our nodes does come at a bit of a cost.
+It can sometimes be difficult to understand who's doing what and where certain things are coming from.
+For that, we do have a very thorough dependency tracking system, so you can always figure out who's owning what and who's the responsibility of things.
+The Snowdrop graph system is also very extensible.
+It's very easy to add new data types to the system.
+It's actually almost too easy.
+When I made this slide, we were up to 278 data types.
+They range from basic types like interfloat to very complex types that have custom behaviors and editors associated, like the gradient that I showed earlier.
+The numbers of types in the system doesn't really affect anything, however, since at runtime, it all gets optimized away.
+To make life easier, we have a system to enable automatic conversion between types, which you can see by the yellow lines here.
+It's also easy to make nodes that support multiple data types to either avoid conversion costs or to optimize for specific cases.
+And if code doesn't provide enough data, users can just make their own variables using almost any available data type.
+And we also have global variables, mainly so our content creators can just shoot themselves in the foot all the time.
+While it's a bit hacky to glue systems together using global variables, they can easily solve problems that would take much more time to code a system for.
+We did ship with around 1,600 globals.
+Actually, our entire menu system was done using purely global variables, which more or less worked.
+The best thing to come out of having a single graph system is that, in a lot of cases, work done in one system would benefit all systems.
+During the development of our UI system, we added better variable support, timeline-based animations, and expanded on supporting arrays of data.
+All of these features have benefited and been used in many other graph systems in the engine.
+We also have assets in Snowdrop that we call compounds.
+They're basically node graph snippets.
+They're used in the UI to create reusable behaviors like buttons or common styles like how many shadow layers to use.
+However, since they can be used in any system, we also have a wealth of generic compounds that can be used just about anywhere.
+We have about 3,000 of them.
+Having everyone work with the same language just generally helps out around the office as well.
+It means that level scripters, artists, coders, and designers all speak the same base language.
+So while each graph system might work in slightly different ways, we at least have a common ground for communication.
+So that's a little taste of the Snowdrop engine, but its biggest secret lies in its iteration times.
+Iteration is one of our core pillars in the Snowdrop engine.
+In every system, tool, and piece of code, we constantly think of ways to see our changes faster and faster.
+This starts with our code base.
+We're constantly keeping an eye on compile times.
+In general, compile times for coders is only around a minute, especially now that we've upgraded to the Visual Studio 2015 compiler with its improved link times.
+And it's really worth upgrading to that if you haven't already, it helps a lot.
+We advocate both refactoring code to make it more efficient and removing code that isn't used anymore to keep our code base as small and clean as possible.
+We also make sure startup times are very fast as well.
+Getting to the character select screen or to the start page of our editor is actually just a few seconds.
+Loading into Manhattan can take a minute or two, since it is such a huge level, but opening it in our editor is actually quite quick, since we're able to stream load everything much more aggressively in that case.
+And our users can also hide large parts of the level so that they can work much more efficiently.
+For the UI specifically, it starts with being a what you see is what you get editor, being connected to the game and seeing results immediately.
+And it ends with only having to hit save to see your changes running in game.
+This has been absolutely key to developing things like our menu system and our mega map.
+So not only do we build UI and see the results right away, but we're always connected to live data, so in our editor viewport, we get a lot more flexibility to play around with ideas or even make some debug features.
+Like these debug UI graphs that show our input actions reacting in real time.
+It's not just the UI that updates live, but nearly all data in our game.
+We can save an object in the editor and it updates immediately in world, or change our input scripting, or just about any piece of data.
+Our goal is that the only time a developer needs to restart the editor is when getting a new version.
+And even then, they should be able to get back to where they were in very little time.
+The less time they spend getting up and running, the more time they have to make content.
+As one last element to iteration times is that we implement continuous integration with live deployment.
+What this means is that as soon as a programmer submits their code, our build machines will pick it up, compile the various targets, do some basic testing, and once all of that passes, the build is immediately made available to the development floor.
+We found that overall, the benefits of a coder being able to fix a bug or add a feature and have that change on the floor in under 30 minutes far outweigh any risk of a bad change causing problems in production.
+Our UI team all sit together, so our artists and coders are only a few feet away from each other.
+We're constantly working back and forth, implementing nodes and features, being able to react to them quickly enough so that they're never really blocked from working on a feature.
+This connection to the artists is what really shaped our UI system to what it is today.
+We use compounds, which are those reusable groups of nodes, for sharing functionality.
+These are an important part of our workflow.
+We can take any other graph or set of nodes and create a reusable component out of them.
+These can then be used in any other graph that supports the nodes that it contains.
+A great feature of them is that we can quickly replace them with code.
+This allows artists to create complex systems that they need, and we can easily replace them with an optimized code system if the need arises.
+Writing code for a finish system is way faster than having a coder trying to guess what an artist might need.
+Iteration, however, does come with a bit of a cost that's best summed up by Uncle Ben.
+With great power comes great responsibility.
+When it becomes so easy to make tiny changes, and then another, and then another, it also becomes easy to get lost in your work.
+Usually this just results in having to kick people out of the office because they're having way too much fun working.
+Unfortunately, in other cases, it might cause features to take a bit longer by losing track of time while trying to perfect them.
+So it's good to make sure that you have clear goals and deadlines in place, or people will just keep iterating forever.
+Towards the end of a project, quicker iteration can be really great for being able to squash those last minute bugs, but it also really helps to have someone in place that can also shut down the process.
+Those simple little changes at the end of a project can also easily lead to introducing new bugs.
+So now it's time to get into some of the details of how the system works.
+The actual UI system of Snowdrop is deceptively simple.
+The basic setup is that everything is split between widgets and graphics.
+Widgets take up space and are our primary source of mouse input.
+Graphics are used to add flavor and are generally sized relative to the widget they're on.
+The funny thing is that we only really have five widgets.
+Instead of giving our designers buttons and combo boxes and very complex widgets, we just gave them the very basics and let them build the functionality they need.
+It turns out you don't need to have a very complex widget library to ship games, especially on consoles.
+So it all starts with a window.
+This basically just tells the system where to start a new UI element.
+When combined with a coordinate frame, that can be in either 2D or 3D.
+It will automatically vertically stack all widgets given to it and it also is there to control how UI elements layer over top of each other.
+Text is our primary mode of communication.
+All our fonts are generated on the fly to keep memory down to what we use.
+The system has a rich formatting library to help customize text in additional ways by adding icons, line breaks, coloring, and much more.
+Images are the second mode of communication, though most of the time we're just using flat colors or gradients instead of actual textures.
+And it supports a bit more than just your basic imported DDS files.
+We have sprites, sheet systems, and for improved performance, or we can just support any loose image that you care to use.
+The stack container is pretty much the only thing we have for sorting elements.
+It just literally puts things one on top of each other.
+Or there's an option on it, you can put things beside each other as well.
+So you can stack vertically or horizontally.
+The scroll box is probably the only complicated widget that we have, and it basically just moves its internal contents around and defines a clip area that's used to...
+so that it won't render outside of defined space.
+So it's pretty much used for just scrolling content around and clipping it off.
+For graphics, we get a whole seven types of graphics, starting with more text, because sometimes you want more text in the background, not just in the foreground.
+We found that there were a lot of cases where we wanted to define space with a widget, but then use the text in the background to have a lot more flexibility with how it's rendered and displayed.
+In the graphics, you get more than just your basic square images.
+So we're able to cut some corners here or curve them.
+Lines can be used for a lot of things, like pointing things out in the world or framing other elements.
+Points are great for effects.
+You can make a random mess or a more controlled effect with just a little bit of math.
+And then we have arbitrary shapes, because sometimes even artists don't know what they want.
+Sectors are a really cool graphic that we have.
+They're basically just circles or parts of circles.
+Anything that you see that's a circle in the division was made with one of the sector nodes that we have.
+And it really helped to sort of define that graphic style of the division.
+And then finally we have custom graphics, which is basically everything else.
+Because something like drawing all of the streets of Manhattan through the regular line node was a little bit too much for that node to handle.
+So making a quick custom node for that was much better equipped to handle the amount of data in a much more efficient way.
+We also have a node that allows us to draw almost any regular graphical object directly in the UI so it can be layered properly with the UI.
+But that's pretty much it.
+We have a few other minor bells and whistles, but these 12 elements comprise the bulk of the work that's done every day in the UI system.
+By keeping the basic usage of the system as simple as possible, it allows to build up complex behaviors in layers where the designers and artists have full control at each step.
+So this might come as a surprise to some of you, but the Snowdrop engine does not currently have any form of reflection.
+That is, there's no way to automatically expose the inner workings of the data to editors.
+Today, almost all nodes are written by coders, but a bulk of the nodes, however, are quite trivial.
+So for easy nodes, we just declare the number of inputs and output pins, the types, and use this handy calculate method to do the processing.
+This allows programmers to add simple functionality very quickly.
+In other cases, it gets a little more complex.
+This is most of the code for this little node which goes through a lot of pain to output a matrix.
+But it's a really, really good matrix, like high quality, perfect matrix.
+It might seem like a lot of work to manually declare each node, but it also means that we have nodes that do exactly what they need and no more.
+We can craft each node to be as simple or as complex as we need to be, and with short iteration times, it's not nearly as bad as it sounds.
+By coding each node in this way, we have full control over how they execute.
+Do they need to run every frame?
+Can they be evaluated on startup?
+Or even having debug nodes that remove themselves from the final game.
+And in the editor, we can customize nearly every aspect, so complex nodes are easy to work with.
+For example, when selecting any UI node, you see the element in the editor that's selected, and our positional nodes provide elements in the viewport so you can interact with them directly.
+Unfortunately, our UI is not a cheap system.
+I'll break down a typical game frame so you can see what's going on.
+I'm going to use this scene, which is in the middle of the fight that takes place while trying to establish your base of operations.
+That happens fairly early on in the game.
+Here's a snapshot of our in-game profiler running on console.
+There's a lot of unused CPU time in this frame, but that's actually to be expected since the fight isn't really that heavy of a fight.
+To the left, we have the update of our game systems, input, agents, and the player, and a few other things.
+To the right, we have a big block that is the calling and the update of all our graphical objects and particle systems.
+This generally will fill up as much CPU time as it can to try to offload the GPU.
+And then in the middle, we have the UI, which is all the orange bits.
+It takes up a decent chunk, but it is also very multi-threaded.
+Early in the frame, we do a small bit of management to prepare for the updates to come.
+Next, we do a few high priority graphs that need to finish before the rest of the UI system can run.
+This is mostly preparing a bunch of matrices that will be used by other UI systems so we don't have to constantly recalculate them.
+Then we get to the bulk of the work, executing the node graphs, with a little tail for preparing the render commands for the frame.
+And this last area is the time we take on the CPU side of the render thread, submitting data to the GPU.
+I'd show the GPU cost, but it's almost non-existent most of the time.
+Staying in budget while developing a rich, complicated UI has been a major challenge since we're so CPU heavy.
+The areas here represent about 12 milliseconds of total work updating nearly 100 root graphs per frame.
+In total, we run over 300 graphs per frame across all our various systems comprising of nearly 30,000 nodes.
+Multithreading should now be basic knowledge for coders.
+This is just the world we live in today.
+My four year old phone had four cores, current consoles have eight, and these numbers are just gonna keep increasing.
+We no longer have a simple 33 millisecond frame for 30 FPS.
+On either console, it's around 200 milliseconds across all available cores.
+And all those cores need to be shared among so many complex and interconnected systems that it's no longer an option to just let one or two of the tech guys fix everything.
+All coders need to be on board now.
+Even our freshest interns will run into and need to solve complex threading issues very quickly when starting at Massive.
+And to make things worse, multi-threading is extremely complex for games.
+At our high level, we have a tasking system to sort dependencies between systems and allow major systems to run in parallel.
+At the mid-level, we have a few different ways of processing work in multiple threads.
+So our systems, like the UI, can go wide.
+And then at the low level, you just have to work diligently with different access patterns to ensure safe access to data.
+So first off, you need to make sure that every coder understands all the threading primitives at hand and when to use them, like only using spin locks for very tiny operations and always avoiding mutexes as much as possible.
+Second is to make sure that every coder understands the various types of access patterns that are commonly used.
+Every game system has different requirements that need to be optimized for.
+Some systems can use deferred processing, but others that need to stay frame synced might need to operate in designated safe areas during the frame for best performance.
+While some other non-critical systems are totally okay with just having mutexes to protect their data.
+And multi-threading isn't just a challenge for coders anymore either.
+I'm sure most games end up with loads of global variables to tie systems together, and when artists can interact with those in multiple threads, they can run into the same issues that coders.
+We had a lot of issues before shipping with our menu states because those were managed with global variables.
+It took us a while to figure out that it was actually a threading problem that was causing some of our last minute bugs.
+And when your script system is multi-threaded, who controls what's threaded and what isn't?
+Trying to figure out how to run things efficiently can be a challenge, and it's usually where coders still need to step in.
+The UI uses a simple high-low priority system to split dependencies, but our graph objects and particles have a much more rigorous set of options and constraints since there's just so many of them in the world.
+On the other side, our scripts don't do much threading at all, but that's mainly because they're running on our servers, which use a completely different threading model to our main game.
+Unfortunately, I don't have a lot of answers here.
+It's an area that we're still focusing a lot of effort on solving, and it's a work in progress.
+What does help is having more technical artists.
+That is, artists or designers that have a lot more technical expertise than you would normally expect, often having experience with scripting languages or other node-based tools.
+So life isn't always a rosy 30 FPS.
+Sometimes you just end up in a bad situation and need to figure out what's going on.
+In this example, we see a huge outlier in our thread times, and we already see the graph name that's causing the issue, so we can already start to take a look into what's going on here.
+So we clearly see that it's a megamap that's acting up, but what's going on?
+In Snowdrop, we have the tools to be able to see where the cost is going in a graph.
+Following the cost of the megamap, we find out that, unfortunately, in this case, it's just trying to do too much at once.
+so there's no easy fix.
+Unfortunately, just executing over 8,000 nodes in a single thread is still too much for the system to handle.
+So the two choices we have are, can we multi-thread this, or can we just do things more efficiently?
+In this case, the answer is to try to move work into multiple threads.
+In general, almost all of our performance improvements fell into one of these two categories.
+The easy one is just simply identifying what work can be put in other threads.
+So instead of rendering each enemy's health bar and name in a single loop, we can split it up to run across threads.
+The second category, and the area where we saw the biggest gains by far, was converting loops into data arrays.
+So even better than looping over each enemy or even processing them in multiple threads, is just do them all at the same time.
+This was the most powerful part of our node graph system.
+Since any interpreted system has overhead and processing, you need to be able to do more with less.
+In our case, it's about 300 to 500 instructions of setup to execute a single node plus a virtual function call.
+We can either write complex nodes that try to do all the work for us, or use arrays of data to do all the work in a single pass.
+To support this, we have a lot of fun ways to work with data, like filtering based on complex conditions.
+In this example, I can quickly filter a list of entities based on how close they are to the player.
+An interesting side effect of this is that as programmers start to become more familiar with the system, they start to learn new and interesting ways to work with data.
+I think that data-driven development is an area that all programmers can benefit from knowing a lot more intimately.
+In addition to making low-level systems data-driven, we should also think of how to make our content more data-driven.
+There's no point in having a super-optimized render pipeline when very basic scripts are taking up all your CPU.
+This is an example graph I made when developing for loops in the UI system.
+It does a brute force collision between 100 squares as they try to get out of each other's way.
+While at work, the approach was very slow, taking 20 milliseconds to run the graph.
+Compare this with the same approach using arrays.
+I still need to loop over each bug, but I don't need a second recursive loop.
+This approach does the exact same work in only .6 milliseconds.
+And not only is it faster, it actually took about 100 or 30% fewer nodes to do the same work.
+Sometimes though, it's the small features that make a big difference.
+One of the best little things we added was the ability to hold the control button and mouse over any UI element and show what file it's being drawn from.
+When you have data from all over the place, it's hard to keep track of, so this became essential to being able to quickly track down bugs in the end, especially when it's in graphs that may not be done by your team.
+To ease the localization burden, we added a few small features that drastically reduced the implementation overhead.
+like automatically trying to figure out what to show for a given game action on console or on PC or on PC with a console controller.
+Since we shipped the division in Arabic, we also added support for right to left languages through various means.
+In any list of UI elements, you can quickly reverse the order.
+So for text, we have an auto-justification mode that will be left to right depending on the current language.
+We already had a system in place to input data into our strings, so we simply extended it so that we can interpret numbers into language-specific replacement rules.
+It turns out there are very concrete rules for every language about what types of replacements exist for different numbers.
+I suggest you check out that link for more information.
+Another one was an in-game test for color blindness.
+Since the UI had a lot of render control and also has the final render pass, it was really easy to just transform all the colors in a way that can be used to see where you might be having difficulty with certain colors.
+We use this to figure out what colors we needed to change for our various colorblind options.
+We simply enable it in our in-game debug menu, which was also made with our UI system.
+And then we used it to see what item colors worked and didn't work with the various different colorblind.
+So I hope you were able to take away a few things from our experience on the division, like the importance of iteration, threading, and data.
+I do have a few other things that we learned, and, or that we would like to do better in the future that I would like to share.
+It's very easy for me to say that our UI system is just as equally developed by our artists as it was by our coders.
+Every feature was reviewed and approved by the team members.
+We're always delivering code for someone else, so the user should have a say in how it works in the end.
+Throughout the whole project, we had a constant feedback loop with our tools and systems.
+Any request or complaint was considered and addressed if possible.
+It's most important to do this during crunch, when everyone is really, really stressed, that we take time to listen and see if we can do even some small things to improve development.
+Sometimes it's just simple little things like trying to reduce the number of clicks required to do common operations, or finally fixing that editor crash that's causing just one person to constantly restart.
+By the end of the project, I had a huge list of features and improvements that we didn't get a chance to implement.
+We've been slowly tackling them so that we can just continue to improve the tools for our users.
+To get the most out of your code, I think threading and data need to be in the back of your minds at all time.
+Multi-threading was considered a lot for the internals of the UI system, but not as much for the users.
+We had a lot of hard to track issues towards the end that could have been prevented with some tools for users to manage their data better.
+Getting data models correct can be a challenge, but it's well worth the effort.
+It took us a while to fully appreciate the power of a data-driven approach, but it made the single biggest difference in performance in the division.
+While our UI system is very powerful, the main complaint that we get over and over is that it's too complicated to use.
+It does take a while for someone to really get into, and most of our work is done by technical artists that usually have some scripting background.
+The big reason for the difficulty is the lack of direct canvas manipulation.
+I firmly believe now though that had we added it, it would have actually limited the creativity even if it did make some things easier to do.
+By removing the canvas, the designer has to really work hard to understand the system.
+And it was through this special connection that a lot of magic really started to happen with Division.
+We're constantly trying to improve our workflow, but in ways that doesn't dumb down the entire system.
+I've been against adding direct canvas manipulation because I believe it would just make our artists lazy and take a lot of creativity out of our design.
+As is the usual case, it's hard to find time to prepare documentation and good examples during development.
+We tried to make it a priority, and we do have a bunch of wiki pages and video tutorials and things like that, but there's always room for more.
+I think the biggest problem that we had wasn't necessarily the lack of documentation, but the organization of it.
+You can have all the help pages in the world, but if you can't find them, it's not gonna help.
+And I find this is one of the most important, but often overlooked lessons that I can offer, is just keep it simple.
+It's very easy for programmers to fall in the trap of overthinking things.
+More often than not, the solution is much easier than it seems.
+I find borrowing from test-driven development can help a lot here.
+You start by writing what you need the code to do, and then you fill in the code to do that, and then you stop.
+If you added any more code than you needed, then you added too much code.
+The same goes for tools.
+It can often be a bit of a balancing act between what someone thinks they need and what they actually need.
+But simple tools that work consistently and quickly without crashing are going to be far more useful than barely functioning complex tools.
+That actually went a lot quicker than I thought.
+So I hope you were able to get some ideas out of our experience on the division to improve your own games and engines.
+At this point, I'd just like to give a shout out to Anders Johansson, our lead UI designer, and Lars Vincent, our lead UI artist on the division, because I firmly believe that they were as much a part of making this UI system as any of our coders.
+If anyone has any questions about anything related to Snowdrop or the division, I'm more than happy to answer as best I can.
+Thank you for listening.
+Hi, enjoyed that, thank you.
+Thanks.
+You talked about how users still ask for the ability to directly manipulate the canvas, but you reasoned that forcing them to understand the system resulted in a lot of magic.
+Can you describe that more?
+I was really surprised to hear that.
+So, yeah, all of our Node Graph systems are basically like scripting languages.
+So you're basically, you're building the logic to build your UI system.
+And like every time we sit down and we evaluate and we're like, what's it going to cost to bring this sort of direct canvas manipulation?
+And then we plug in the numbers and we're like, okay, it's going to take like three months or four months or whatever.
+And then at the end it's like, what are we really going to improve the situation for, for people? Um, and it's like, okay, we might get some things to be able to just like stretch and move things, but you can already do that with the nodes once you get a chance to learn them.
+So it's just, it's, it's that level. It's like when we, when we think about the coder investment to just add all of the work, um, It just never feels worth it.
+Hi.
+Oh, sorry.
+Here you go.
+I worked on a similar system on a much smaller scale, and I was wondering how did you handle merge conflicts putting all your code into data?
+Not well.
+It became a bit of an issue.
+post-launch when we had a lot of different branches and stuff like that.
+We actually ended up implementing instead of, well, as sort of like a quick fix, we basically set it up so that you can't modify data in two branches.
+And then we just have some processes in place so that, like if you, obviously you have to, but once you know that you're causing a conflict between the branches, then you can sort of take the steps necessary to resolve that ahead of time, instead of having, ending up in a situation where you have lots of data modified in multiple branches and then you end up in the merge hell.
+So by just adding a quick feature that basically said, I'm about to cause a conflict, it allowed us to sort of get ahead of the problems.
+It's awesome, thank you.
+Hi.
+I was wondering how your team handled ownership of cross-disciplinary issues.
+Like for the main menu, you had to frame the character and also put the UI up.
+So how were you able to communicate and make sure the framing worked and showed the UI at the same time?
+I'm not sure I kind of get the question. I mean for the case of the main menu, that's all controlled sort of in our UI system. So the UI takes control of the camera and frames it.
+I think we even add a couple lights in the world to make sure that the player is lit at all times, even at night.
+But that was the UI team that handled that.
+It was the UI team.
+I mean, we also communicate very closely with all the other teams and stuff like that, just to make sure that, like I said, we added a bunch of lights in the world so that we're not busting our light budget and things like that.
+So most of the people on the division, we all work fairly close together.
+So there's actually a lot of cross-disciplinary, like, crossover and stuff like that.
+Thank you.
+Hey, could you talk a little bit about how you build the Node graphs and execute them, or how you optimize them?
+Well, for that, I guess one of the things I was going to suggest is, hands up, would anyone be interested in sort of a live demo of the UI system?
+OK, wow.
+All right, in that case, at 1 o'clock at the Ubisoft booth.
+I'll have the editor up and running, and I can give a live demo and then go over that general process if you want.
+Thank you.
+Hi.
+I'm just interested in a little bit more information about the loops versus data arrays.
+Is that distinction as in you're then passing the full array to the node and handling that code side rather than node execution in loops?
+Exactly. So the way our node system is built is that each piece of data, it doesn't matter if it's one or more.
+And so then we move that looping basically directly into code and then we remove all the overhead of the actual...
+script processing and it made huge like as the example I showed it made one graph go from 20 milliseconds to 0.6 and so we got we got those gains pretty much anytime we did that it was gains like that. And have you looked at being able to write the nodes back down into code and compile them into code to remove that overhead?
+One of the problems is is just since we have our node system that works in a whole bunch of different ways.
+Like, we have the same system that works in a whole bunch of different contexts.
+It's just a huge amount of work to both write the code that does the work and then also make sure that it compiles down to proper code that's going to work in all situations.
+However, we do have some types of graphs, like our shader graphs, which effectively do that.
+They're basically generating the shader code.
+So, it's definitely something that we've sort of talked about, but it's...
+I think it's a hard, in our case, it's a hard thing to do on such like a global scale just because all our graphs actually function in very different ways.
+Thank you.
+Hey, you alluded to giving developers control over certain rendering aspects like the depth buffer, things like that.
+Could you explain a little bit about how much flexibility there is in terms of where widgets and graphics can be rendered and how they interact with post effects and things like that?
+Sure, so the UI system is like, it's directly integrated into the render, so we pretty much on a feature by feature basis, we can sort of add and remove.
+you know, whatever we want.
+We just need to put the time in to do it.
+So when we ship the division, our UI actually had seven render passes and would make use of some of the data that's generated from the game.
+So the game's depth buffer and things like that at various different points.
+And then we can sort of use the different data during the different passes to achieve a whole bunch of different effects.
+So we use them for things like highlighting enemies behind walls after we pulse and things like that.
+That.
+Yeah.
+helps. Hi, I was a little late so tell me if I'm asking about something that you're talking about. I have a rather simple question. How you handle stuff like layouting, what is the centered topping left or something like this? Is this?
+Like anchoring? Yeah.
+So when I explain, so we have a window and we have coordinate frames and our 2D coordinate frame basically supports all the anchoring for that.
+And so you can anchor to the left, you can position things based on pixel or percentage positions.
+And then we also have built-in support for like safe areas on consoles and multi-screen support on PC for different things like that.
+Local scaling, yes, something like that.
+For what?
+Local scaling.
+Scaling, yeah, we have a...
+I think we can do like automatic scaling.
+A lot of the scaling we do on our own just because we found that especially with things in 3D versus 2D, there isn't sort of an automatic scaling that's applied to everything.
+There's a few options for different types of automatic scaling, but we just found like different UI in different situations would have slightly different requirements.
+So we sort of just kept those all as options that can be manipulated in each situation.
+and any errors in context of scaling. If you have any problems when move from one for example you know one scaling for example and another yeah from uh.
+50% more and things like you have gap between some elements and they look differently.
+Oh.
+This.
+Yeah.
+Something like that.
+I mean, I guess it's hard to, I guess, explain without an example.
+Maybe that's something at the live demo I can try to sort of sort out how we do that.
+But generally, like if you within an individual element, if you scale it, it's going to scale uniformly.
+So you're not going to introduce gaps or anything like that.
+If you have multiple different elements and you're trying to manage the scaling between them in a synchronous way, then if you mess up the math, then you can end up in a bad situation.
+I had a question about clipping.
+So when you can bring up the main menu, you can do it at any point in the game and you could be right close to a wall or you could be clipping next to an object.
+How did you deal with clipping?
+And I had to follow up another question about the mega map.
+Originally you had the the Megamap kind of start off as part of the game world So I think it was in the first reveal that you guys showed the megamap was kind of like in the sea Are you fading out the complete city to gray when you're doing the megamap now in the game?
+Was that just because of clipping issues and that kind of thing?
+Right, so for the main menu clipping, in general we just detect as soon as the camera hits something.
+We found that it was, there were too many edge cases when trying to keep the camera in a safe space.
+So we found in the end it was just better to, as soon as the camera just hits something and we're going to clip, we sort of go into this mode where we kind of blank out the world using the...
+I'm trying to remember the term, but we basically just use sort of like the general color of the world.
+So, so it's not like a fixed color that we sort of like, we don't gray out the world to a fixed color.
+We do it to a color that sort of makes sense to the current state of the world.
+For the mega map, we do a similar technique.
+Most cases when you bring up the mega map, you're going to still see the world a little bit.
+And then we just, we sort of fade it out for, for like for clipping like, you know, because there's going to be things that.
+and for readability because we have found that towards the end, like when you had the world and the megamap at the same time, it just became too noisy and it was hard to read and make use of it.
+So you get it for a moment when you first open the megamap, but then we fade out the world so that you're focused on using the megamap.
+All right, I guess that's about it.
+So yeah, one o'clock today at the Ubisoft booth.
+I'll have a live demo of the Snowdrop engine up and running and if anyone wants to see how the UI system works, feel free to stop by.
+Thank you.

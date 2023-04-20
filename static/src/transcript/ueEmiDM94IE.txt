@@ -1,0 +1,422 @@
+Welcome to this presentation of It is Rocket Science, the physics and networking of Rocket League.
+You all know the rules by now.
+Please silence your cell phones.
+Partway through the talk, you will get an evaluation in your email.
+If it's not in your email, then check your spam.
+If it's not in your spam, maybe GDC doesn't care about your opinion.
+My name is Jared Cohn.
+I am the lead gameplay engineer at Psyonix, Psyonix being best known as the creators of Rocket League.
+I've had the pleasure of working for Sonics for 11 years now.
+I was involved with the development and release of Rocket League's predecessor, the concisely named Supersonic Acrobatic Rocket-Powered Battle Cars.
+Every time I say that name, I make sure to hold my head high and say the whole thing, all the way to the bitter end.
+I'm very proud of it.
+I've also was part of the initial startup for the Rocket League prototype and have been involved.
+with the development of it all the way through its release, the fires of release and continue to support it as a live game today. So I've pretty much made a career out of cars playing soccer.
+Today we're going to talk about the tech of Rocket League. If you're interested in the history or design of Rocket League, then Corey Davis gave a great talk at GDC 2016. That's available on YouTube and at the vault. I highly suggest you check out.
+Specifically, three topics we're going to be covering today.
+We're going to take a look at the physics engine.
+Even though we're an Unreal Engine 3 game, we decided to put in an alternative physics engine and take a look at kind of global physics settings that we chose for the game.
+This is a very quick section, but it actually contains what I think is one of the most important takeaways for the whole talk.
+So keep an eye out for that.
+Then we're going to look into vehicle systems, specifically vehicle tuning and what you can do to make your lives easier when working with physics based vehicles. And then we're going to kind of switch context and talk about networking. So once we got this game made that we really wanted to play online, how the hell do we get to play over the internet?
+I'm actually really excited about talking about the networking because for me it was like my own personal moon landing achieving this type of game to be playable online. So looking forward to talking about that.
+First an overview of Rocket League for the uninitiated.
+Elevator pitch is it's cars playing soccer.
+We needed our cars to be a little more exciting than real life cars so they drive fast, they steer fast, they can jump, they can double jump, they can dodge.
+We strapped on some rocket boosters to make them even faster.
+Combine that with jumping and air control and they can fly through the air too.
+So high-level goals that we had for Rocket League on the tech side of things is we needed fast, responsive vehicles.
+We weren't going for a realistic physics simulation.
+Conversely to that, we also wanted consistent, controllable physics.
+We wanted to make sure that players felt like they had control over the car and kind of a say-so in how the car was interacting with the ball and the rest of the physics simulation.
+and we wanted the game to not be just playable over the internet but needed to be competitive. So competitively playable over the internet. Let's dive right into the first part of the talk. Look at our physics engine. We decided to go with the bullet physics engine for a number of reasons. First off, it is open source. So you can debug it, you can modify it, you can make it do what you want it to do.
+And I want to say that this bullet point, if I had to pick one thing that was most responsible for Rocket League's technical success, it was the fact that we went with an open source physics engine that we could go in and fix edge case problems, literal edge problems, and make the vehicle system work exactly how we wanted it to do. I highly suggest you do it if you want to make a physics driven game yourself.
+We also needed a really fast single-threaded physics simulator.
+Many physics engines kind of focus on multi-threaded physics and handling lots of objects over the course of a frame.
+We needed something that could run on a single thread and be able to handle many frames all at once, as we'll get into when we get in the networking section.
+It was pretty quick to integrate because we did not actually replace the physics engine that came with Unreal Engine 3.
+We simply added bullet as an additional physics engine and it handles all of the gameplay physics.
+It only took a couple of days to get boxes rolling around in the level and then maybe another week to get the vehicle prototype in. So if you think the idea of switching physics engines sounds too daunting, it's not so bad if you're only piecemeal integrating the things that you need from another physics engine.
+We use discrete collision detection like most physics engines do.
+The key difference is with discrete collision detection, the actor will move and then it tries to find things it's colliding with.
+With continuous collision detection, first we look for things we could collide with and then we move.
+We'll get into why that's an important distinction later on, but of course that was chosen because it's more performant.
+And we run at a fixed tick rate, which is not usual for an Unreal Engine game, but I'm actually quite surprised it isn't usual.
+With a fixed tick rate, you can have deterministic physics.
+So your physics frames are always working with the same delta time, no matter how fast the game is rendering.
+For Rocket League, we chose to go with 120 hertz tick rate.
+So each frame is approximately 8 milliseconds.
+And I want to get into why we made that decision, rather than going with something more standard like 60 hertz.
+So I want to look at a scenario where a car is actually driving towards the ball, comes from a stop, hits max speed and hits this ball towards the goal.
+Notice how high the ball gets in the frame and where it lands on the back of the goal.
+Now, we're gonna repeat this experiment with a ball going up to speed and hitting the, or a car getting up to speed and hitting the ball at max speed.
+But we're just gonna move the ball back a couple of units.
+Notice the difference in the trajectory.
+Notice where the ball lands.
+So as far as we know, we have a deterministic physics simulation, but we have these inconsistencies.
+So what happens if we up the physics rate to 120 hertz?
+Ball lands there.
+Repeat the experiment.
+We get much more consistent results.
+What's going on?
+So if we look at it frame by frame, here we see a physics frame run where the car moves and then we look for intersections and no intersections yet. Car continues moving, nothing's happening. Finally the car moves and we just are barely intersecting the ball. So at this point the physics engine needs to calculate the impact normal so it gets a vector from the impact point on the car to the center of the ball and this is roughly the direction the ball is going to travel in.
+I should clarify that Rocket League doesn't exactly do this. We do augment this vector a little bit with our custom forces and Cory talks about that in his talk. But it's the same principle. So with our experiments, instead of starting the car here, we're going to move him back just a little bit. So step through the physics simulation again. At this point, in the previous simulation, we were actually intersecting the ball, but because we moved the car back, it hasn't quite made it there yet. Now when it steps, it's actually got a pretty deep penetration.
+This impact normal is calculated again and now it looks like that instead of that. So that's the differences we're seeing in these hits and that's why we went with 120 hertz just for better consistency with the physics simulation. So when you run at a slower physics rate you have to take larger steps for each physics frame. That results in a larger variance in penetrations and you get inconsistent physics simulation.
+We upped the rate to have more consistency, but of course, this made everything more expensive.
+It was the easy thing to do.
+In retrospect, I wish we had found another way to handle these penetrations.
+But the game's released, and so we're kind of stuck with it.
+So coming to the end of the physics engine part of this talk, I strongly suggest if you're making a physics-driven game, get a physics engine that you can change.
+Use a fixed tick rate for deterministic physics.
+That's good not just for replayability, but also for networking, as we'll see when we get to the networking section.
+And you can play around with your tick rate for a better physics simulation, but it will come at a cost and you might have to optimize that later on.
+So switching gears over to vehicle tuning section.
+We have some high level goals with Rocket League.
+specific to our vehicles. We needed the fast acceleration and braking for a fast game play. We needed sharp steering. And despite all those things, we also need the cars to be stable. We don't want them to leave the ground too much by accident. In the event they do leave the ground, we want to make sure they're able to have a fast recovery so they can get back into the action. So you would think that making a vehicle drive faster would be something pretty simple to do.
+we just simply say depending on the implementation of your physics system or your vehicle implementation, you just simply add more torque to the wheel.
+So if the player presses throttle, we're just gonna up that torque value.
+This should cause the wheel to spin, move the car forward.
+Problem is that depends on friction, specifically the tire friction as it's touching the ground.
+This could be a complicated friction model.
+So if you have too little friction, the tire is just going to spin.
+If you have too much friction, you might have sticky tires whenever you come in for a landing.
+Friction depends on the spin speed of the wheel.
+So if the wheel is spinning faster, you have less friction.
+So you have unpredictable driving.
+Spin speed of the wheel depends on the wheel radius.
+So you might want to grow the rear wheel as we have here, just because you think it looks cool, but then you'll have to retweak everything there is about your vehicle.
+Suspension is important for keeping wheels on the ground.
+If you have soft suspension, they will maintain their contact with the ground better.
+If you have hard suspension, then they might ride off the ground a little bit and affect the driving.
+Gravity and mass pretty much affect everything about your vehicle's driving. If anything about those changes, then you end up retweaking all of these values anyways. And if you are really mad at your game designer and just want to ruin his day, give him a transmission to work with. This means he has to sort out gear ratios in order to figure out an acceleration curve.
+So these are all things that we have dealt with over the years. You're constantly having to tweak all these values and it's always a balancing act and you're only, you have to settle on a compromise for how you want your vehicle to behave in any given scenario. We know this is a pretty prevalent problem in the industry because Sionics over the years, our primary income was through contract work and on many of our contracts we're just simply helping other studios implement vehicles.
+because they couldn't sort out all these problems on their own. So we know it's a problem and we know we need to do something better for Rocket League. So the idea was just simplify the vehicle system as much as we can while still making it feel like you're driving a vehicle. So in order to reduce complexity, talking about the transmission, maybe don't start immediately having transmission just because a car has it in real life doesn't mean you actually need to simulate one in the physics engine.
+If you ever play our game, you'll notice the cars sound like they're changing gears, but it's all fake.
+It's just in the sound system.
+Instead, provide your designers an acceleration curve that they can tweak directly.
+So if the vehicle's at a stop and the player presses throttle, apply this amount of force to the vehicle.
+If the vehicle's going top speed and the player's pressing throttle, maybe don't apply any force at all.
+So much easier to work with, much better to get the desired acceleration curve that you want right off the bat.
+Mass is a super important property.
+It affects pretty much everything about how your vehicle handles.
+So it's very important to make sure it doesn't change out from underneath you.
+Many physics engines offer a feature where you just simply provide them the density of an actor and the size of the actor, or its collision size, and it will calculate the mass for you.
+And this is a pain in the butt because if you play around with the collision shape for your vehicle, your mass will suddenly change.
+And now your driving has changed, and now you've got to tweak all those variables all over again.
+So I highly suggest you just turn that off and override the mass manually.
+Also, ignore mass when you're applying all these driving forces.
+So driving, braking, in case of the rocket league, you have jumping and the dodging.
+You want to take mass out of the equation.
+So if you apply a force of five to a car...
+you want to make sure it has the same amount even if that mass changes.
+Many physics engines offer the ability to do this by simply passing a flag to the add force function to say ignore mass.
+Tire friction is another complicated thing. Longitudinal tire friction is where the wheel spins and it's what causes the car to move forward. It catches on the ground.
+All those variables we saw on the blueprint slide are all directly affecting longitudinal tire friction.
+So we can actually just get rid of longitudinal tire friction.
+We don't simulate it at all in Rocket League.
+Just simply if the player presses forward and the wheels have contact with the ground, we apply a force to the vehicle.
+We also simplify the lateral friction instead of depending on lat slip angles or ratios and whatnot.
+We were trying to figure out how can we simulate it so that you have actual friction, such as if the vehicle comes in from sliding or necessary for steering, while being simple to work with.
+And we tried a few different scenarios, and I wanna share with you what we ended up with and what we're using today.
+So for our lateral tire friction, what we end up doing is we look at the wheel, and we look at how fast it's moving through world space.
+And in this case, we look at how fast it's moving forward, and we also look at how fast it's moving to the side.
+So we look at these speeds.
+We use this to calculate the ratio.
+We just do side speed divided by side speed plus forward speed.
+This gives us a value between zero and one, where zero means the wheel is going perfectly forward, and one means the wheel is going perfectly to the side.
+We feed this into a curve.
+It's a pretty simple curve.
+I think ours only has two points.
+But basically, if you feed in a value of one, where the wheel is going perfectly to the side, then you're gonna get a value of 0.2 out of it.
+So it's nice and slippery when the car comes in from a sideways landing.
+But if you feed in a value of zero, so that the wheel is going forward, it's gonna give you a value of one for friction.
+So you have very sticky friction.
+And this is how we're able to make it so the cars have very tight steering, very sticky steering, but they stay slippery when they come in for a sideways landing.
+And that's pretty hard to do when you have a more realistic tire friction model.
+You also have to throw in ground friction because you don't want the vehicle just sticking on a slope perfectly.
+So we just throw the ground normal into another curve that scales friction.
+Finally, we use the physics engine to give us what impulse would be necessary to make this wheel come to a stop right now, given the location of the wheel and the mass that the wheel supports.
+Once the physics engine gives us that, we just scale that number by this friction value that we calculated and apply it to the wheel.
+And that's pretty much all we do. These few lines of code is basically our lateral tire friction model.
+It's pretty simple, but it works really well.
+and again it allows us to do the tight steering while also having the vehicles be sliding.
+While we're talking about friction, another important aspect is where you actually apply the forces on the vehicle.
+So in this scenario we have the vehicle on the ground but he's sliding to the right, so we're applying friction force right here.
+Normally when you're doing friction forces you want to apply them somewhere around the bottom of the wheel or maybe around the wheel axle.
+The point is it's usually offset from the car's center of mass, which is indicated there.
+When you apply a force that is offset from the center of mass, you get a torque, in this case, a rolling torque, which causes the car to roll.
+And that's not good, because we want our players to be able to drive around without fear of having their cars roll.
+Seeing this in action, the player is able to steer a little bit, and it's fine.
+But once they get up to speed and steer too much, they just flip over on their side, and they're done for.
+This is great if you're making Reliant Robin Simulator.
+Not so good for a competitive game.
+There are a few workarounds you can do for this.
+One, you can just lower tire friction.
+Obviously, this is not great if you want to have good steering.
+You can limit your steering angle.
+So it just simply prevent the player from turning that sharply.
+Now you're limiting your turn radiuses, and it's a big pain in the butt to maintain that steering angle curve.
+You could apply a physics constraint, usually called a state upright constraint, which is a constraint that you actually flip on when all the wheels are on the ground.
+that will try to align the vehicle's up axis with the surface normal that it's touching.
+It comes tricky trying to figure out when you should turn this constraint on or off, depending on very specific gameplay scenarios.
+What we did for Rocket League, and what I would continue doing going forward for any vehicle game, is we apply the friction forces at the height of the center of mass, so we don't get that rolling torque.
+So instead of applying them down here, apply them up there.
+So now there's no rolling torque and we don't have to worry about flipping the car from steering. Once we see that in action, the vehicle is able to turn as tight as we want it to and we don't have to worry about rolling. But you'll notice it has really uninteresting turning right now. There's no suspension wobble. That got lost because we don't have any of that torque anymore.
+but you can just add it back in visuals. So our cars look like they have suspension, but it's all fake. It's all just done in the animation system. And so this way you can have suspension look as wobbly as you want without it actually affecting how you want the vehicle to drive.
+Wheel positions. This is an important aspect of how well your vehicle can steer. Looking at two properties, I call them axle separation.
+which is how far the rear wheels are from the front wheels, and axle width, which is how far the left wheel is from the right wheel.
+These two numbers make a ratio, and that ratio is a very important number for how well your vehicle can steer.
+Here we have a tool that we use to measure a vehicle's handling.
+So what we'll do is we'll have the vehicle drive forward and steer various maneuvers at various speeds and record its position along the track just to see how well it's handling and to compare it to other vehicles.
+So what happens if we move the front axle forward just 2 centimeters?
+Already the vehicle is not turning as well. It's getting a little sluggish, and it's sometimes very subtle. You won't notice it playing, but your hardcore players will, and they'll call you out on it.
+So what can we do about this?
+What I was going to say was a big problem that we had with Rocketly is we allowed the physics wheels to be defined by the artist. We just simply put the physics wheel wherever the visual wheel was on the car. As you can guess, this had a dramatic effect on handling.
+We would get a new vehicle in and we'd have a long iteration times of trying to figure out how to get it drivable, either adjusting the visual mesh or more likely adding offsets to the physics wheels until it became drivable.
+So as of summer of last year, after release, we switched to a vehicle preset system.
+The idea of a vehicle preset system is we simply completely separate the physics settings from the visuals.
+We don't look at the visuals at all when setting up the physics for the vehicle.
+For us, that includes the collision size and translation for the vehicle collision, and also the wheel positions and the radius of each wheel.
+With this we have many vehicles, I don't even know how many vehicles we have in the game now, but we only have a handful of actual physics presets. So as soon as we get a new vehicle in, we just give it an existing preset and it's good to go. Of course this gave us faster iteration, I wish we had done it a really long time ago.
+line up with your visuals anymore, obviously. So I thought there would be a problem where if the wheel is going up a slope, it might intersect the geometry because the visual is offset from the physics. Nobody seems to really care. It's not that important in a very fast paced game. Stability, talking about how we can get vehicles back in the action once they become unstable. Let's look at a scenario where a vehicle actually leaves the ground and lands awkwardly on its side.
+Notice it takes a while to recover.
+It does recover because it's got a low center of mass, but when it does, it's facing the wrong direction.
+So for Rocket League, we work around this by adding auxiliary forces to help out.
+Looking at two scenarios here, we have a vehicle on the left who has wheels touching the ground, but not all of them, and a vehicle on the right who has a body touching the ground, but no wheels.
+For both of these situations, we're gonna look at the surface normal that it's touching, and we're gonna apply a rolling torque.
+to try to align the vehicle's up axis with that surface normal.
+We played around with also doing pitch torques to try to get maybe the front end down faster or yaw torques if it was maybe yawed up and rolled.
+We found that made really unpredictable corrections on the vehicle and decided that roll alone was perfectly fine.
+One difference between these two scenarios is once the vehicle's got a wheel on the ground, we're also going to give a downward linear force to really clamp it down into that ground much faster. Obviously, we don't want to do that for this scenario on the right because that would be counteracting that roll force. But once he's rolled far enough, we will flip it on and that plants our vehicles to the ground and we'll flip off these extra forces once we've got three or more wheels touching the ground. Looking at what we had before, just to refresh your memory.
+We have the vehicle leave the ground, takes a while to recover, it's facing the wrong direction.
+After we apply stability forces, the vehicle is able to right itself much quicker and it's now facing the correct direction still.
+So coming to an end, talking about everything that we did for our vehicles and some key takeaways from it.
+Strongly encourage you to start with the simplest vehicle system you possibly can and just simply add complexity whenever the need arises.
+Yo, yo.
+find that the need doesn't arise that often.
+Or if you already have a vehicle system you want to use or you have to use, find ways to trim out the complexity by keeping things constant or removing things from the equation.
+Anything that you lose with that, you can always just make up in the visuals.
+We have a surprising amount of our things that look like physics that are actually all happening sort of under the hood, so to speak, in the animation layer.
+And another thing is when iterating on your vehicles, don't depend on the visuals.
+Those are gonna change all the time.
+So just keep your physics settings separate and you will be able to iterate much faster.
+So concluding our vehicle tuning section, we get to move on to what I would think would be the meat of the talk, and my favorite part is talking about networking.
+So we had some interesting challenges with Rocket League's networking.
+first off input delay is not an option. So what I mean by this is many physics driven games that involve vehicles, they can get away with having the client send their input up to the server, and have the server simulate the physics simulation, and send the results back down to the client before the client even sees the car move at all.
+They can do this because the vehicles are more realistic.
+They have a slow acceleration, slow braking, they don't turn too sharply, and they can totally get away with having this added network latency.
+Obviously, we can't do that for Rocket League because it's so fast-paced, it would be very noticeable and makes the game pretty unplayable.
+So since we can't have input delay, we're gonna have to implement some kind of client prediction.
+This has been kind of a solved problem since the mid 90s.
+We've had client prediction for shooters for so long.
+The tricky part is how are we gonna apply client prediction to a physics simulation that involves rigid body vehicles?
+Another issue is when the player is sending their inputs up to the server, it suffers from packet loss, packet jitter, it arrives unpredictably on the server. This isn't a problem for most games because the server can just simply not run physics for that particular player until his input comes in. Once it comes in, we run physics immediately and everything is good. We don't want to do that for Rocket League and we'll get into more detailed reasons why in the next slides.
+Another challenge is collision with moving objects. Normally when you're using client prediction, if you've played a game, a shooter, where you've been, had high latency and have either run into other players and been rubber banding around or maybe even something as simple as going up an elevator and characters jittering on the way up.
+that is because client prediction is fighting this server authoritative moving object. So we need to overcome that in rocket league because the core game involves hitting a moving object. Last but not least, we wanted to be a PC game so we needed 100% server authority. We didn't want to trust the clients for anything because cheaters like to cheat. So why can't we have the server just simply wait for client input?
+As players send their inputs to the server, they suffer from loss, they suffer from jitter.
+So the server can just simply wait for inputs to come in before running physics for that player.
+This isn't very good for rigid body simulation because a core tenant of rigid body simulations is everyone moves at the same time a little bit at a time. We can't have one actor sitting there while all the rest are running their own simulations.
+It's also particularly bad for rocket lead because you could get a pretty bad desync when you're hitting a moving object.
+And I want to take a look at that real quick. Here we have a scenario where a client's car on the left is moving towards the moving ball.
+We're going to step through it frame by frame and see what the client sees as he's approaching the ball. Finally, he thinks that he has hit the ball here and is able to predict the hit and maybe sees the ball go into the goal. For a server, he's sitting here waiting for the client inputs to come in before running physics. One comes in, so he's good to go, runs a physics frame. But then the next input gets delayed a little bit. This isn't a problem. The server could just not run physics for that car, but he's got to run everyone else because the show must go on.
+So it continues running physics for the ball. Finally the player input comes in, but at this point the ball has already moved past him and he has missed the ball. Finally the server sends this new information back down to the client. Client who thought the ball was in the goal sees the ball just warp back here. He says, what the hell?
+So the reason we don't want servers to pause individual players to wait for their inputs is because it results in non-deterministic behavior between the client simulation and the server simulation. What about hitting a moving object? What kind of challenges are we seeing with that? The idea is the client is predicting his vehicle, so his vehicle is ahead of the servers, but the server is authoritative over the ball. So the client under these in this situation normally for most games is just simply drawing the ball where the server tells him the ball is at. But this is old information. The tricky part with this is we have two things interacting on the client that are kind of existing in two different timelines with the car being ahead of the server, the ball being behind the server. Looking at this in action to see what actually happens. Here we have a car moving down towards a moving ball.
+We're going to overlay the client's view so we can see what he sees and what the server sees at the same time. The client thinks he's driving towards the ball and is able to get a hit off here. This is what the client sees in his view. This is what the server sees. The client is nowhere near the ball and he doesn't get a hit. So this timeline discrepancy is something that we have to overcome for Rocket League. Now, some people ask, what's the difference for that particular scenario, why don't we just do some form of lag compensation? This is something we can take from a page from the book of first person shooters is.
+the idea that in a shooter you can predict your weapon shooting and then predict that it hit something and send a packet to the server saying, hey, I shot this guy. When the server eventually gets that packet, he can look back in time, see that that guy was where you thought he was, confirm the hit, maybe give you a kill, and this way you're able to fire your weapon as if we have zero latency and everything is great. How would this apply to Rocket League?
+maybe clients could predict hitting the ball and send a packet up to the server saying, hey, I hit the ball. Server can do the same thing, look back in time, confirm that it's a good hit, update the ball's position, update the trajectory and continue on like everything's going great. What does this actually look like in practice? Here we're going to overlay the server view on top of a laggy client. In this example we'll say the client has a 200 millisecond ping, which is pretty high. Client's driving towards the ball.
+thinks that he hits the ball here, so he's going to send a packet up to the server saying, hey, I hit the ball. Server keeps running the physics simulation until he finally gets the packet from the client saying when the ball was back here, I think I hit it. Server is going to look back in time and agree, yep, you're not a cheater, I agree, so I'm going to move the ball back here and update its position, run a few frames of physics to get back ahead of the client, and now we're all in sync again, everything's good.
+and the client just felt like he hit the ball with zero latency. So everything seems great until we add another player into the mix. Now we're going to see things from the point of view of a low ping player. This guy's ping is so low, basically what he sees is what the server sees. Walking through frame by frame, he's going to try to hit the ball as well.
+At this point, he thinks he's about to hit the ball, or maybe that he did hit the ball, but remember, this packet is now arriving on the server from the high ping client, indicating that he hit the ball. So the server is going to move that ball back, rerun physics, send that update down to the low ping client, and he sees the ball warp past him, maybe rolling into the goal. He says, what the hell, man? So we can't do lag compensation because laggy clients would ruin the game for everyone else.
+Now, I should specify that this is actually a viable option, lag compensation, if you're running out of time or resources, because this is exactly what we did for supersonic acrobatic rocket-powered battle cars.
+People had fun playing the game online.
+It developed an online kind of cult following.
+But we can do better.
+What do we end up doing for Rocket League to get it playable over the internet?
+really came down to two key concepts as far as I'm concerned. First one is to handle the problem of jittery player inputs coming into the server. We're going to buffer those inputs just like a video player would buffer a video stream. The second thing that ended up being kind of wacky is we have the clients predict everything about the simulation. So instead of running prediction and corrections on their own vehicle, they're actually going to run it on their own vehicle.
+every other vehicle and the ball. So with that said, I'm going to split networking up into two distinct sections and talk about input buffer. I have to apologize, you're about to get a wall of text. I don't have pretty slides for this one, so just bear with me. So the idea with the input buffer is the client, for every physics frame he runs, he's recording input and just sending that off to the server.
+This is arriving on the server at some random rate. Who knows when an input is going to get in there. So instead of processing input as soon as it comes into the server, the server is going to put it into a buffer and let that buffer fill up for a little bit. So when it comes time for the server to run physics, it can just take one item from this buffer and he's good to go. He doesn't have to ever pause for the player.
+because ideally there's always something in this input buffer that he can pull from. The nice thing about this is it eliminates certain classes of cheats. You don't get speed cheaters because if a player increases the rate at which their game is running as a cheater, all they're going to do is fill up that input buffer faster.
+Likewise, if they intentionally try to make their network jittery or laggy to try to appear jittery to other players, it can't happen because the server is just simply pulling inputs out of a buffer whenever it needs it. Downside is it increases average latency because the server instead of processing input from a player as soon as it arrives, it's going to sit on it for a few frames and then process it sometime later.
+There are a few key requirements if you're going to implement an input buffer on the server.
+First off, you don't want it to run empty because if an input buffer runs empty, that means the next time the server goes to run physics, he won't have any input to work with. So he's just going to have to reuse whatever the previous input was. Not terrible, but you might miss something important. You also don't want the buffer to get too big because now inputs are just sitting in the buffer for longer and it's adding latency to the player. So the question what techniques can we use to grow or shrink this input buffer? One technique is upstream throttle, or at least I'm calling it upstream throttle. The idea is the server can tell the client to run faster or slower depending on how empty or full the input buffer on the server is. So if the input buffer is low, he tells the client to speed up, maybe run an extra physics frame more than he would have normally.
+If the buffer's getting full, tells the client, maybe don't run one more physics frame.
+And now, inputs are coming in to the buffer slower than they're being pulled out, so the buffer can shrink down.
+This is the technique used by Overwatch, as explained in last year's GDC talk given by Tim Ford, Overwatch Gameplay Architecture and Netcode.
+If you haven't seen this, you have to watch it.
+If you have seen it, go watch it again.
+It's totally worth it.
+what Rocket League uses is what I'm calling downstream throttle. The idea here is the server handles the input buffer himself without talking to the client. It just simply consumes 0, 1 or 2 client inputs for every physics frame depending on what he needs. So the idea is if the buffer is running low, the server is going to repeat an input for two physics frames so that he's consuming inputs slower.
+and it gives a chance for the buffer to fill up.
+If the buffer's running full, he's gonna consume two inputs for one physics frame.
+Not throw out an input, it'll still process it so he can catch jumps and dodges and other important things, but he's just simply gonna consume it and then consume the next input too for one physics frame.
+This is effective, it works, we're still running with this today, but if you think about it, it can result in minor desyncs because the server is doing exactly what we didn't want to do, which is repeating player input or reading input without running a physics frame for it. So the one-to-one ratio of input to physics frame that the client is running may not be the exact same thing the server is running and you could get desyncs. I should mention...
+If you're going to go with input buffers, I strongly suggest starting off with the upstream throttle method where you tell the client to run faster or slower. It seems much smarter to me and we're investigating converting Rocket League to that system pretty much right now.
+Sorry, not today. We're investigating it today. The other aspect for Rocket League's networking is predicting everything.
+So the best way I can explain this and to see how exactly it works and how we're able to hit moving objects is just walking through it with you one frame at a time.
+And we're going to see this whole process from beginning to the end.
+So the idea, what we have here is the client on the left has a vehicle and he's pressed throttle, but that input hasn't made it to the server yet, so the server doesn't know.
+the ball isn't moving on the client because maybe it doesn't know it's moving yet, but the server knows it does. Maybe somebody just hit it. So they're out of sync and we need to get them back in sync. For every physics frame that the client runs, he's going to record the current input and an incremental frame number. This is just a number to identify this particular physics frame. He then runs physics and records the results to history. So for frame number one, the car is there, the ball is there.
+He then sends this frame number and his inputs up to the server.
+It's going to take some time to get there.
+While it's in route, the client and server are just going to keep on running physics.
+Finally, this information makes it to the server.
+The server is able to read that player's input, see that the player is actually pressing throttle now, and then it's going to run physics just like it always would.
+Car moves forward on server.
+Ball moves forward on server.
+Now that the server has run physics, he's able to pack the current physics state up into a packet and send that information plus the frame number back down to the client. It's going to take some time for this information to get down there, so again, the server and the client just keep on running physics. Finally, it makes it to the client and the client is able to see I should say compare the server state to what he had recorded in history. So this is what we got from the server. This is what we have recorded for frame number one on the client. The car is good because we were predicting our car and we knew we were holding throttle. So that's fine. But we didn't know the ball was moving. So that is way off. It's far enough off that we're going to have to do a correction.
+So first thing we do for a correction is we update that point in history to the new data that we just got from the server. Then we're going to take where all of our physics actors are now, so our car, all cars, and the ball, and we're going to move them back in time to that point in history. Then we're going to rerun physics frames a whole bunch of times to catch back up to the frame we had just left from.
+Now the car is back where it was before, because we have deterministic physics simulation.
+The ball is where it should be, because we now know that the ball was moving on frame one, and we can accurately predict that it should be further ahead now.
+If you compare what the server sees versus what the client sees at this moment in time, the client's car is ahead of the server's car, which we kind of expect with client prediction, but an interesting point is now the client's ball is ahead of the server's ball instead of behind.
+So now the car and the ball are on the same timeline, so he's able to hit the ball. Exactly how does that work out? Here we have the client moving towards a moving ball.
+Here we can see we're going to overlay the server's view with his car being behind the client and the ball being behind the client as well. Here is the data that the server is sending down to the client. Here, the client thinks he hits the ball. Eventually the input from that frame number makes its way up to the server. The server runs physics and because we have deterministic physics between client and server, they calculate the exact same outcome. There's no coordination, they're just running the same inputs and the same physics.
+That frame makes its way back down to the client where you can look up in history, confirm that everything is good and we don't need to do a correction and continue on just playing the game as we were. So now the client can hit the ball, predict hitting it as if it's zero latency but we don't have to do any lag compensation. What are the results of all this?
+If you think about it, if you've ever played a first person shooter back before lag compensation was invented, you know, back in the day, you remember that you would actually have to lead your target and shoot ahead of them.
+So if they're over here, you're shooting ahead of them and you kind of just hope that they run into your bullet.
+That's basically what we're doing in Rocket League, but we're able to project the ball where the player needs to be going in order to hit it.
+We're just kind of doing it behind the scenes for them.
+This works really well with the ball because the ball moves predictably. It's predictable physics. It's not a whole lot of dynamic input is happening with the ball. As you might guess, it doesn't work so well with other cars because they can change their inputs at any time and all of a sudden you've got 150 milliseconds of steering this way changes to 150 milliseconds of steering that way. It's still better than not running prediction on the cars at all.
+Trust me, I've tried turning it off on the other cars. It looks really bad.
+Huge upside is we don't have server-side lag compensation, so high-paying clients aren't ruining the game for everyone else.
+Downside is we have crazy expensive corrections on the client, because instead of running correction on just the client's character, like most games do, we're running corrections on the entire physics scene.
+this is where the 120 hertz physics simulation really bites us in the ass. You get a 200 millisecond ping client running 120 hertz physics. That's 24 physics frames we got to run all at once while continuing to run everything else about the game. It's tough, but it's doable. After all this work, what we get is you can play the game, you can drive around in your own car with a high latency, hit the ball around, it feels like you have no latency at all.
+aren't ruining the game for everyone else. We can hit moving objects which is not something you're supposed to be allowed to do when running client prediction. And we have what I consider the holy grail of client server networking, a completely authoritative server. All it does is read inputs, execute physics. So summary for the whole talk for today.
+Key takeaways.
+Reducing complexity can help you achieve your goals.
+This is not just for physics systems and for vehicles, but really just everything about your game.
+If you don't like how it's going, you can just gut it and start from simple.
+We probably redid how the car interacts with the ball like three times.
+You do have a choice of physics engine.
+We didn't think we did until we tried it and found it surprisingly easy to add an additional physics engine.
+So maybe consider that for your game.
+Networking is still hard. We've had client prediction since the mid-90s, but we still find interesting new ways to apply it to new types of games. And I highly recommend any games you go forward, use a fixed tick rate. It's so much easier to debug, to reproduce problems. It's great for client server networking because they're running the same deterministic simulation. And I also recommend client input buffers instead of having the server wait for clients. Even if I was to make a shooter, I would go this route. It's just...
+more reliable, but extra work. Some resources, if you want to learn a little bit more about what we talked about today. Gaffron games, it's a fantastic website, you should just read everything on it, but particularly if you want to know more about fixed time steps, there's this article. I already mentioned the Overwatch game play architecture and net code that's available on the vault.
+these two articles I found that seem to do a really good job explaining client prediction and reconciliation in general if you want to know about how that works in other games. And there's also a YouTube channel called rocket science where they actually really dive very deep into how ‑‑ physics and other things work in Rocket League and I've actually watched all the episodes and I've actually learned a few things about our game that I didn't know. So I highly recommend it.
+It's really great. That's it for this presentation. We've got some pretty good time for Q&A.
+Cool. So I kind of understand the system you showed where on the client-side prediction, it looks like you almost kind of extrapolated the ball forward based on what the server is seeing when you rewind back and simulate forward.
+And I can see how that system would work really well in the beginning of a match case, for example, where the two center forwards are charging the ball in the center.
+And if they don't do any kind of crazy turning, that should work out perfectly because the extrapolated other car will collide.
+with the ball where he would normally collide on his side of the simulation, but do you know if that causes issues if one of the guys at the last second changes his vector to decide not to hit the ball because it takes a while for the input to arrive?
+Yes, it absolutely does.
+I should clarify real quick.
+We don't use extrapolation.
+What we're doing is rerunning physics frames.
+But I get what you're saying, and it absolutely does cause problems.
+That's why kickoffs are basically the worst thing for our game.
+The player can change their input at the last moment, and you predicted that they hit the ball.
+but instead they actually miss the ball.
+So you see the ball moving on your screen, but it's actually not moving.
+What we did for that was make sure that we send the ball information down to the client at a regular interval, even if nothing has changed.
+So you'll see the ball slide away for a second and then slide back.
+Cool, okay, got it.
+you said you used 120 hertz fixed physics step to improve consistency. But you said also multiple times or a few times throughout the presentation that there are some minor regrets regarding that. I'm curious if you were to go back and say remake everything from scratch, if you would go with a different method. Yes. I would at least investigate something where possibly taking the penetration depths into account when calculating those vectors.
+I would try that out first before turning on 120 hertz.
+We did 120 hertz because we were strapped for time.
+Well, you're always strapped for time, aren't you, when you're working on a game?
+But it was the easy thing to do.
+But yeah, I would definitely investigate a different solution to the problem.
+Awesome, thanks.
+I have two hopefully short questions. One being how do you deal with things like audio or effects that you can't necessarily roll back? So like the collision of the ball makes an audio cue happen but then if that collision didn't turn out to happen when you get the information back from the server, do you actually like stop the audio or do you just say screw it? You heard that and it's erroneous. Luckily our audio is pretty short so we just leave it. One thing we make sure not to do is repeat audio. So if the player thinks they hit the ball and then a correction comes in and they rerun physics and they just hit the ball again, we make sure we're not going to repeat that audio and it won't stack up. But otherwise if the player thinks they hit the ball and a correction comes in and turns out they actually missed it, it's a short-lived audio so we just let it keep playing.
+second one is on the input buffers on the server, sometimes things can come in out of order. Do you respect that and reorder them on the way into the buffer or does order actually end up mattering because you buffered anyway? We respect, well they can come in out of order but we'll enter them into the buffer in order. Because they have that sequential frame number we know what order they belong in.
+And like any other sort of out of order things that end up affecting that system, like maybe that we've made a decision when we have frame five, but frame six is still on the way?
+We, so we don't send player inputs one at a time.
+We'll always send like the last 10 inputs.
+Cool.
+Which is, you know, it's a standard thing to do.
+So that way, if you lose a packet and when the next one comes in, it's got a whole lot of inputs ready for you.
+Great, thanks.
+So obviously if you can predict the inputs of other players more accurately it'll end up in a better consistent view of the world Can talk a little bit about the model you use for that prediction?
+Obviously discrete button presses might be tough to predict for other players, but what about something like the analog stick?
+we it's a good point. So with the analog stick what we actually do we don't try to predict player inputs. I mean maybe you can do some like machine learning or something that might be kind of cool. But beyond that you can't predict what they're going to do. So your client doesn't predict the other cars? Correct. It'll take so here's what we actually do is it'll take whatever their input is that the last input that we know of that we got from the server.
+and it will, for the first frame of the correction, it's going to use that input for that frame. And then the next frame, specifically in regards to your comment about analog inputs, it's going to decay that input a little bit. And then the next frame, decay it some more. So it's kind of like we're losing certainty over an amount of time. So if the car is like full steering right on the first correction frame, by like 150 milliseconds in, we're just, it's got like, it's straight steering and no brakes. And that was actually something we did.
+In response, people were saying the game looked more laggy.
+And even though we hadn't changed the networking, we had made the game faster.
+And so they were seeing cars.
+If you throttled back and forth between steering, they would see cars doing this.
+And so by decaying the inputs, now the cars just do that.
+And it looks less laggy.
+So I do have a real question, but first, so you were saying lag, high lag players don't ruin the experience.
+I'd like to counter that by saying they suck as teammates.
+Well, they actually do.
+It's a real question.
+So if on my screen, and it's interesting what he was saying about my client doesn't predict other players.
+If on my screen I see someone else hit the ball.
+and they swear they hit the ball, but then it's a goal, and the replay shows that that was missed.
+How is that being handled that I saw it, and a teammate saw it, and it didn't happen?
+Yeah, so you saw a hit.
+The teammates saw the hit.
+You both could have been working with the compressed inputs that were sent down from the server.
+And so that's the problem is up until this patch that we're going to be coming out with.
+April 3rd? April 3rd. The server would actually send compressed physics state down to the clients for the networking reasons, so the server is running with full bits of floating point precision, compresses it, and then the clients have to work with this compressed state, so there's a slight desync there. So what we added was, again on that Gaffron Games website, it talks about quantizing physics state.
+And the idea is you're going to run the same compression on the server, then run physics, then run that compressed result back down to the client. And we implemented that for this upcoming patch, so we're hoping there will be less instances of exactly what you just described.
+Hello, sir. I got a question about cheaters. Do you guys cheaters, physics based cheaters or visual, visual only or nobody cheats?
+So far, we've only seen visual cheaters. The question is what kind of cheaters are we running with our game?
+Well, we were blessed with a game that doesn't quite fit the normal cheating model, since it's not a shooter.
+It's actually really quite nice. We haven't had to worry about cheaters too much.
+Mostly we've just seen visual, where they'll kind of draw the trajectory of the ball a little bit, and then we actually try it out, and we're like, oh, that really doesn't help all that much, so we actually just don't care about that yet.
+Really the biggest concern we would have is people start adding things to help them with like aim assist or flying or something.
+So that would be a physical cheat.
+But as far as people actually like warping around on the server or futzing with their inputs or something going to the server, we just don't have that problem.
+Thank you.
+Hi, thanks for your talk, it was fascinating.
+I'm wondering, you hinted a little bit at how you deploy physics changes post-launch.
+And I'm wondering if you could talk a little bit about the process of how you test and evaluate those physics changes and net code changes, and how you decide what's too risky and might affect the competitive landscape.
+Yeah, so specifically the vehicle presets, we consider it a win because we have data on what cars people are using, and of course everyone's using Octane.
+So it was actually a big win because we were able to apply these physics presets to these cars that nobody was using, and now they're more playable.
+So.
+some people complained that okay my car drives a little differently but then once they try it out like oh wait it's actually better. So in that particular regard we weren't too concerned and we just kind of did it. Otherwise pretty much any time we make a physics change and this includes any kind of bug fix we do in physics, any kind of networking change with all the networking change we have coming out with this April 3rd patch, we always add an ability to dynamically turn it off from the back end. So every single feature that goes out, if something goes wrong after we deploy it.
+I mean, of course, we test it before we send it out.
+But if something goes wrong, which sometimes it does, we can just flip it off and then fix it and then deploy a patch.
+Cool.
+Thanks.
+I actually prefer the hybrid hitbox, but thanks.
+Sorry.
+Great talk, very clear slides, it's very easy to understand.
+At the risk of sounding lazy, since you guys started the development of this, have you run into any third party solutions that solve all of this for you?
+Solve all that for us? I have not seen anything. I haven't seen anybody else doing anything like this before. The only thing we've seen is third party solutions that claim to help your latency in general, which is definitely worth looking into, but that's pretty much it.
+Um, so you talked about how you can predict ball easily and that allows you to, uh, calculate the physics for player to ball collisions and that's, that sounded awesome. What do you do with like player to player collisions when they're not near a ball? Um, so for example if like I'm swerving really fast and on my client I see that I have avoided hitting player A.
+but because of flag or whatever it is on his client, it might seem that he's still at the first position and is hitting him.
+Do you run into issues surrounding that?
+How do you solve those?
+Were you asking about other players hitting the ball, or just simply other players?
+Other players interacting with other players.
+With other players?
+Yeah.
+We still run prediction on them, because if you don't, it's extremely hard to actually run into another player.
+There are desyncs issues.
+You'll think you hit a player, but then he'll just suck right back to where he was before.
+Luckily, it's not a core issue for our game, so it hasn't been a huge problem.
+But pretty much, we just run prediction, just like we do for the ball.
+And we decay the player inputs, as I mentioned with the previous question.
+That's pretty much it.
+me again. I was curious on the slide where you had, you know, we find that the client, because the client's in control of his own car, you know, that matches up with the server's understanding of the future or the past. And like, do you do any kind of diff when you're rerunning and re-simulating to know that like, okay, these objects are in sync and they continue to be in sync so we don't need to simulate that? Or is it just like a regular old simulation when you're playing it back?
+Do we do a diff between the server information coming in on the client or what the client had recorded?
+Well in other words when that matches up, right, like when the server and the client agree that they're both in the same position in a historical frame, does that mean you don't need to re-simulate that object or potentially you could interact with other things?
+Yes. So before we added quantization, we basically if a correction came in from the server and it was kind of close to what we had, we're not going to bother doing a correction. So if it's like just a few units off, that's close enough.
+After quantization, I haven't turned it on yet, but I might make it so that it has to be exact because we are now working with more exact units.
+But like per object, does that matter? In other words, if no correction is needed, then I understand.
+But if there is a correction being done, do you do it on all of the objects in the simulation or only the objects that disagree?
+We do it for all objects. So if the ball is miscorrected, we're going to rerun physics.
+We're going to warp everyone back and rerun physics for all the cards and the ball.
+Cool. Okay, thanks.
+Hi, thank you for the talk. So what kind of extra work you had to do on the physics system to achieve a deterministic simulation? Uh, was it to achieve the, I'm sorry to achieve what about the simulation? Deterministic simulation. Deterministic. Um, It was mostly deterministic.
+There were a few weird things that you wouldn't expect.
+There was an issue where if the ball hit two physics objects kind of at the same time, versus if it hit one on it first and then hit the other one.
+Let me clarify that.
+If the ball hits two different meshes, such as like a triangle mesh and then a plane, there is an issue where it gets added to the collision hash and then that the size of the collision hash is used later on to determine what order collisions are processed in.
+So depending on what order those things get added to the hash and the size of the hash, you could have things processed in different orders so you end up with non-deterministic results, sometimes surprisingly non-deterministic.
+The quick fix would have been to make the hash a fixed size, but I didn't want to do that, so we actually dived in and fixed the code to say, if the ball is hitting these two things at the same time, make sure that the order in which they're processed produces the same results.
+Other than that, you want to make sure you turn off any randomization, some physics users use randomization so turn that off. Yeah. Some optimization for the compiler right? For what? For the compiler, some optimizations. I remember Glenn writing about it. No, I mean you're not going to get, especially with being multi platform, they're all playable with each other. We're not going to get perfect floating point simulation so that's why all the corrections and stuff, they're just going to fix that up for us. Great, thank you.
+I'm surprised you guys didn't run into bullet physics floating point errors because it's full of them.
+But my question is, I guess, so whenever you're running these kind of simulations where your requirement is that whatever a player is driving has to be super responsive.
+and there's latency involved and they can crash into each other you usually have some form of desync like it's an unsolved problem essentially so do you guys do any kind of tracking on seeing like hey how often are corrections happening in clients like do you know like approximately what number percentage of interactions end up being some form of a desync even if it's not something that human eye is going to catch as like a bad behavior.
+Right, it's a metric that we actually, behind the scenes, we report metrics of various things from the game to the server.
+We actually just flip it on with this latest patch to actually track that sort of thing so that we can, if a game is running poorly or a server's running poorly, we can actually see like, oh, this server's actually having larger corrections happening on the client.
+So it's something we just recently turned on, probably should've turned on a long time ago.
+Are you willing to share any numbers or?
+Well, we don't have them flooding in yet.
+It's not until the patch goes out.
+Thank you.
+OK.
+Well, we'll be out in the overlook if anyone else has any more questions.
+Otherwise, thanks for coming out.

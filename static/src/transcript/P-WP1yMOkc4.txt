@@ -1,0 +1,344 @@
+Roblox is a platform for user generated 3D worlds, mostly games, and the physics engine is a core component of the platform's runtime.
+This presentation will be an overview of the mathematics and implementation of the physics solver inside of the Roblox engine.
+This is the system that computes the motion of constrained rigid bodies under the influence of forces.
+Since the creativity of Roblox developers knows no bounds, a physics engine is required to support complex, sometimes very complex, mechanisms.
+For example, we wouldn't be able to simulate this scissor lift using an existing physics library.
+This requires a more robust type of a constraint solver, and this will be the topic of this talk.
+There is another requirement for a physics library, the support for distributed physics, which we will not discuss here.
+A physics engine solves an LCP, a linear complementarity problem.
+And typically, it uses an interactive solver, such as the projected Gauss-Seidel.
+Within a reasonable number of iterations, the projected Gauss-Seidel is not able to simulate the scissor lift, leading to instabilities and explosions.
+Our main contribution is the LDL-PGS solver.
+It uses a direct method to invert the submatrix corresponding to the equality constraints and helping the PGS.
+This leads to much better behavior in the example of the scissor lift.
+Also, it behaves much better when bodies with very different masses are interacting, the high mass ratio problem.
+The LDL-PGS solver has two phases, the symbolic phase and numeric phase.
+In the symbolic phase, which runs only once per mechanism, its structure is analyzed and an optimized LDL decomposition program is generated.
+And in the numeric phase, which executes every physics frame, the mechanism state is updated using both the PGS and the LDL decomposition program.
+In the next section, we will quickly cover the basics of a constraint solver.
+A constraint solver deals with mechanical constraints, such as a ball in a socket or a hinge.
+It also supports other constraints including rods, prismatic, cylindrical, angular limits, positional limits and ropes, and few other constraints that don't need to have mechanical equivalents.
+Let's define a constraint mathematically.
+We have two or more rigid bodies, represented here by green and blue ovals, and their state is described by their coordinates, positions, and orientations.
+The orientations can be specified using either rotation matrices or quaternions.
+Then a constraint between these bodies is a differentiable function of the coordinates into a vector space of an arbitrary dimension d.
+This vector space is called the constraint space, and its dimension is called the degree of the constraint.
+We say that the bodies respect the constraint if the constraint function vanishes at their coordinates.
+The function must have an additional property, it must be regular on the zero locus, that is the Jacobian has full rank, or equivalently, d is the number of degrees of freedom removed by the constraint.
+How do we model a ball in a socket or a ball joint between two rigid bodies?
+We specify pivot locations in the local space of the two bodies.
+The constraint function is then the difference between these two pivot positions transformed into world space.
+The constraint function vanishes when the two are in the same location.
+It seems that there is another way to specify this constraint by using the distance function between the two pivot positions, but only the first model is regular, that is the Jacobian has full rank.
+This is how you model a hinge.
+It's a ball in a socket, together with an orthogonality relationship between a vector on one body and a plane on the other body.
+The degree of this constraint is 5.
+Now that we have a way of modeling constraints, we are interested in the dynamics of the rigid bodies, their motion.
+Therefore, we need to derive the velocity relationships that the constraint imposes.
+This is obtained by taking the derivative of the constraint function.
+This derivative can always be formulated as a product of some matrix J times the vector of velocities.
+The matrix is called the Jacobian of C.
+As a result, the Jacobian is an operator that takes the body space velocities and produces the constraint space velocities.
+Since the time derivative of a function, that's zero, is zero, constraint bodies produce no motion in the constraint space.
+For example, here is the ball in the socket constraint and its derivative, which is the relative velocity of the two pivots.
+Some care has to be taken in taking the derivative of orientation matrices or quaternions.
+These are expressed in terms of cross products with angular velocities.
+But a cross product is a linear operation and can be expressed as a matrix multiplication.
+As a result, we can gather the velocities into a vector and the rest into the Jacobian matrix.
+The Jacobian matrix has two parts corresponding to the two rigid bodies.
+So far, we have been looking at single constraints.
+But in practice, we want to model entire mechanisms consisting of many constraints and bodies.
+We can stack all the constraints in the mechanism into a single function called the global constraint.
+Taking the derivative of the global constraint, we get the global Jacobian matrix, which maps the velocities of rigid bodies in the constraint space.
+In practice, each constraint will only affect two or three rigid bodies.
+which means that each row of the global Jacobian has only 12 or 18 non-zero entries.
+Here is an example of a mechanism with four bodies and four constraints.
+And this is how the Jacobian would look like. Each block of rows corresponds to a constraint, and each block of columns corresponds to a body. The most important thing to notice is that each row of the Jacobian contains 12 non-zero elements. This is a sparse matrix.
+We are now ready to describe the integration step.
+We have the velocities at time zero, and using the Euler integration step, the velocities at time dt are given by this equation.
+It involves the inverse mass matrix, which is a block diagonal matrix with inverse masses and inverse inertia matrices on the diagonal.
+And the Lagrangian multipliers, also called the constraint impulses.
+This last term comes from the D'Alembert's principle.
+It adds the internal forces of the constraints, and these internal forces must be such that the resulting velocities produce no motion in the constraint space.
+Moving the terms around, we get the following equation.
+It's called the linearized constraint equation.
+It involves the constraint matrix K, which is the product of the Jacobian, the inverse mass matrix, and the Jacobian transpose.
+This matrix is symmetric and positive semi-definite, which means its eigenvalues are non-negative.
+It is either invertible or it can be made invertible by adding any positive value to its diagonal.
+This equation is valid only for equality constraints.
+Other constraints like collisions or limits lead to an LCP, which we will not cover here, but the structure of the problem is very similar.
+In the next section, we will discuss methods to solve this equation.
+Traditionally, the constraint equation, or the LCP, is solved using the projected Gauss-Seidel.
+This algorithm makes small corrections to constraints consecutively.
+The impulses for collisions and friction, and for inequality constraints, are processed using the projected Gauss-Seidel iterations, where the equality constraints use the Gauss-Seidel iteration.
+These iterations are repeated multiple times until the system converges.
+Usually, games use a fixed number of iterations.
+Our approach changes the way the equality constraints are processed inside the PGS.
+Instead of processing these one at a time, we use a direct method to invert the entire submetrics corresponding to the equality constraints.
+This fits within the formalism of the block Gauss-Seidel, and the method we use to invert the matrix is called the sparse LDL decomposition.
+But because of performance, we are not able to correct the solution using the entire holonomic block constraint matrix every iteration.
+Instead, we do it only in one iteration, the last one or one before last.
+A lot of iterations use normal Gauss-Seidel on the equality constraints.
+It turns out that this is enough to have very good quality simulation.
+And as a bonus, it allows us to compute the LDL decomposition in parallel with most of the PGS iterations.
+Let's review the PGS in details.
+It starts with an estimate of the solution, which can be cached as a result of the previous frame or simply the zero vector.
+and it now starts the iterations over the rows of the constraint matrix.
+First calculates the residual, which is the measure of the error for the current row, and then corrects the solution by adding the residual divided by the diagonal element of the constraint matrix on the current row.
+Optionally, it then projects the newly calculated solution into the admissible domain.
+It repeats this process for all rows multiple times.
+The bottleneck of this algorithm is this dot product between the rho of k and lambda.
+It has an arbitrary number of non-zero terms.
+There is a better way to calculate the product k i times lambda.
+Let's go back to the constraint equation and write it in terms of the Jacobian and the inverse mass matrix.
+We can use the associativity of the matrix multiplication to isolate the Jacobian on the left side.
+and the product of the inverse mass matrix, Jacobian transpose and lambda on the right side.
+We call the right side the vector of velocity changes, delta v. It's literally the velocity changes of the rigid bodies.
+Then in the Gauss ideal, we can replace Ki times lambda by Ji times delta v.
+This product has only 12 or 18 non-zero terms for practical constraints.
+We have now an improved version of the Gauss-Seidel for mechanical constraints.
+In the physics simulation community, it's called the impulse solver, but in mathematics, it's the catch-match method.
+The solution is initialized to an estimate, and the vector of velocity changes is precomputed.
+As before, we're going to iterate over all rows of the matrix.
+The correction to the solution is calculated with the residual computed using the new method.
+Optionally, the corrected solution is projected, and the velocity changes are updated.
+This new algorithm uses about 50 floating point operations per row, and the constant number of operations is good for an algorithm.
+We already talked about the block Gauss-Seidel.
+This is formalized using partitions of rows.
+A partition is a grouping into subsets where each element is included in exactly one subset.
+A partition of rows induces a block structure on the Jacobian.
+It's the original Jacobian, but where the rows have been permuted and grouped together according to the partition.
+The block structure on the Jacobian naturally induces a block structure on the constrained matrix.
+Note that the square blocks on the diagonal are symmetric matrices, and the opposite of diagonal blocks are transposed of each other.
+We will call this using N and E.
+N stands for node matrix and E for edge matrix.
+We will see later this comes from graph theory.
+The Gauss-Seidel or the impulse solver can be made to work with blocks instead of individual rows.
+Two things to note.
+In the block impulse solver, we need to compute the inverse of a square matrix, ni, which might be expensive depending on the size of the block.
+Also, the block solver doesn't support projection, so this can only be used with equality constraints.
+In the block version of the impulse solver, we need to evaluate the inverse of the node matrix times a vector.
+For small dimensions, this is as easy as inverting a matrix using naive method like Cramer's rule.
+For example, using the natural partition coming from grouping the rows by constraints, the node matrices will have dimensions up to 6 by 6.
+and these are invertible because we assume the constraints are regular.
+Consider this idea.
+What if we grouped all the equality constraints together in the partition?
+So the subset pi zero contains all the rows of the equality constraints and other subsets contain individual rows.
+N zero is then a large square matrix, constraint matrix of equality constraints.
+We denote this matrix using H.
+H stands for holonomic.
+We need now to evaluate the inverse of H times a vector, but there are some obstacles to do that.
+H may not be invertible.
+This is solved by using regularization, which adds compliance to the mechanical constraints and makes the system invertible.
+It may have large dimensions.
+We deal with this by using sparse methods.
+Still, it may have large dents of matrices, where sparse methods won't help us.
+We can increase sparsity by splitting bodies.
+So how does regularization work?
+H is symmetric, positive, semi-definite, which means the eigenvalues are non-negative.
+This means that adding anything positive to the diagonal makes the matrix invertible.
+Of course, adding absolute values is scale dependent, and it's much better to add epsilon times the diagonal.
+Adding such a regularization term changes the mechanical system.
+It makes the constraints compliant.
+Traditionally, other PGS engines also use compliance to stabilize the solution.
+Using PGS on the regularized system is equivalent to using PGS on the original system, but damping the solutions after each raw update.
+In bullet or ODE libraries, this term is called CFM or Constraint Force Mixing.
+Let's now look at the sparsity of constraint matrices.
+For a mechanism like this one, which has a scissor lift on top of a platform with wheels, the constraint matrix consists mostly of zeros.
+This model has 50 constraints, mostly hinges.
+The dimension of the matrix is 246, and its density is 12%.
+Sparse Cholesky LDL processes this matrix in about 90,000 floating-point operations.
+which on my machine takes about 70 microseconds.
+So what is Cholesky decomposition?
+It says that any symmetric positive definite matrix A can be decomposed into a product L times D times L transpose, where L is a lower triangular matrix with ones on the diagonal, and D is a diagonal matrix.
+This is useful because both L-inverse and D-inverse can be efficiently evaluated as operators on a vector.
+So for any vector V, A-inverse times V can now be evaluated by applying the inverse of the decomposition factors.
+Computing the L inverse and its transpose times a vector can be done using a method called back substitution, which is very efficient.
+And inverting D is trivial as it involves only inverting scalars.
+Now suppose that A has a block structure coming from a partition of the rows.
+And it has an LDL decomposition where D is a block diagonal and L is a lower triangular matrix with identity blocks on the diagonal.
+And both these matrices inherit the block structure from A.
+But why are we using a block LDL instead of simple scalar version?
+Its performance.
+Block decomposition is much faster than scalar decomposition.
+A sparse block matrix requires less indexation than a scalar one.
+Next, we will look into details of an algorithm that produces such decomposition.
+There are at least two algorithms that produce LDL decompositions, the Gaussian elimination and the Doolittle algorithm.
+We'll use only Gaussian elimination in this presentation.
+At the core of the block Gaussian elimination, there is an operation called the Schur complement.
+There we have a symmetric block matrix where the blocks are denoted by N, E, E transpose, and S.
+We apply the following operation to this matrix.
+We multiply the top row by e times n inverse and subtract from the bottom row.
+As a result, we get a matrix where the bottom left block has become zero, has been eliminated.
+Then we multiply the first column by n inverse times e transpose and subtract from the second column, resulting in the top right block being eliminated.
+So what we have done is to decompose the block matrix as a product of a lower triangular matrix, a block diagonal matrix, and an upper triangular matrix, which is the transpose of the lower triangular one.
+And so we have obtained a block LDL decomposition.
+The algorithm that produces this block LDL decomposition is the block Gaussian elimination, which is just a recursive computation of the Shur complement.
+For our constraint matrix, which is a symmetric matrix with a block structure, we'll group blocks even further to simplify the notation.
+We'll call this lower left column E star comma zero, and the bottom right block, we'll call it S zero.
+So we have this two-by-two block representation of the matrix.
+And computing the Schur complement produces this decomposition.
+We now apply recursively the Schur complement.
+Here we have a matrix that has already been partially eliminated.
+So we already have some blocks on the top left of the diagonal, and underneath and to the right, the elements have already been eliminated.
+And this is the sub-matrix we will be working on.
+It is the SI minus 1 matrix from the previous iteration.
+Applying the Schur complement, we get this decomposition, where the matrices on the left and right are called elementary matrices.
+The algorithm underlying the Shur complement is divided in three steps.
+Number one, invert the node matrix N.
+Number two, compute the elementary matrix L.
+And number three, reduce the S matrix.
+After the last iteration, we will be left with a block diagonal matrix and the lower triangular matrix L.
+That's the product of elementary matrices in the order they were produced.
+And these are the factors of the LDL decomposition of our matrix.
+We can now apply the inverse of H to a vector V.
+And this is equivalent to applying the inverse of the factors of the LDL decomposition in the opposite order.
+The inverse of the matrix L can be computed using its decomposition into the elementary matrices that we obtained during the Gaussian elimination.
+The inverse of each elementary matrix is simple to compute.
+Just negate the elements below the diagonal.
+And don't evaluate the product of these matrices.
+Use this decomposition while applying to a vector.
+And finally, the inverse of D is the block diagonal matrix consisting of the inverses of the node matrices and I's.
+But these have already been computed during the Gaussian elimination.
+Let's turn our attention to the constraint matrix of equality constraints, H.
+The block structure comes from partitioning the rows by constraints.
+So the diagonal blocks and i's correspond to individual constraints.
+And off-diagonal blocks, eij's, correspond to the interaction between two constraints, if they have a rigid body in common.
+Usually a lot of those EIJs are zero, because not all constraints have rigid bodies in common.
+Can we use these zeros to help us reduce the number of operations during the Gaussian elimination?
+Yes, absolutely this is possible, and here is how.
+We need to establish a relationship between sparse matrices and graphs.
+translate the Gaussian elimination to a process on graphs, and pack the sparse matrix data in memory in such a way that it optimizes the block Gaussian elimination.
+Let's dive into some graph theory.
+First, we have the body graph.
+It's the graph where the nodes are rigid bodies and edges are constraints between them.
+The dual of the body graph is the constraint graph.
+It's also called the edge graph of the body graph, because its nodes are constraints, and edges are common bodies between constraints.
+As you can imagine, the constraint graph is related to the constraint matrix.
+What this means is that nodes correspond to diagonal blocks, the node matrices, and edges correspond to the off-diagonal blocks, the edge matrices.
+And Gaussian elimination has an equivalent operational graph called graph elimination.
+We'll dive into this later.
+Here's a simple example of a dune buggy with its body graph.
+The nodes correspond to the following rigid bodies, the main body, the wheels, the knuckles that join the front wheels to the body in the steering mechanism, and the steering rack.
+Taking the edge graph of the body graph, we get the constraint graph.
+This graph represents the structure of the constraint matrix of the equality constraints in this buggy.
+Let's turn our attention to the way the Gaussian elimination translates onto the constraint graph.
+Let's call the node ni corresponding to the node matrix the pivot.
+The basic operation of taking the sure complement at ni does the following to the graph.
+One, it adds edges between the neighbors of the pivot.
+And two, it eliminates all edges with the pivot.
+On this example graph, let's select node 0 as the pivot and eliminate it.
+This produces the graph where all neighbors of node 0 are joined by edges, and edges with node 0 are removed.
+Note that this process creates four new edges, meaning this fills in four 0 blocks in the sparse matrix with non-zero values.
+There is a better way.
+If we permit our matrix in such a way that the rows corresponding to node 1 are at the top, we can eliminate node 1 instead.
+Doing this produces this graph, where no new edges have been created, and therefore no zero elements of this sparse matrix have been filled in.
+This is much better than eliminating node zero.
+So now on the resulting graph, let's find another node to eliminate.
+Let's try node zero.
+This creates a new edge, but if we eliminate node three, There will be no new edges created, and the sparsity of the matrix will not increase.
+Continuing with this algorithm, we produce an elimination order.
+If it doesn't produce new edges, it's called a perfect elimination order.
+In this example, we have a perfect elimination order, and it's 13024.
+But not all graphs have a perfect elimination order.
+The objective of the elimination game is to find an order that minimizes the number of new edges created.
+This is an NP-complete problem, but there are some very good heuristics.
+Here are two heuristics. The first one, called minimum degree algorithm, is a very popular method as it is very fast.
+But it generates mediocre ordering. It's mostly used for very large problems with millions of nodes.
+The second one, minimum edge creation algorithm, is more expensive but in general produces much better ordering.
+This is our invention and is more appropriate for medium-sized problems where the graph does not exceed hundreds of nodes.
+Also, we can afford running a more expensive algorithm because we only need to compute this once, per mechanism, and cache the results to reuse every frame.
+The minimum edge creation algorithm is very simple.
+At each step, it eliminates the pivot that will create the minimum number of new edges.
+That is the pivot whose neighbors have the smallest number of missing connections between themselves.
+It does require an expensive search step, but it is affordable on graphs of few hundreds of nodes.
+By the end, the graph elimination creates two lists.
+an ordered sequence of nodes, the pivot sequence, and for each pivot, a sequence of eliminated edges, the edge sequences.
+The elements of the edge sequences should be in the pivot order.
+Before proceeding, let's enjoy this animation of the elimination of the scissor lift constraint graph.
+With a graph elimination in hands, let's go back to our sparse matrix.
+Since it is symmetric, we only store the blocks on and below the diagonal.
+The node matrices on the diagonal are in the pivot sequence order, and the edge matrices appear below the diagonal, also in the edge sequence order.
+The light blue blocks are those that were not present in the original matrix, but were filled in by the elimination.
+These are initially zero, but will acquire non-zero values during the process of decomposition.
+The colored blocks represent all blocks that we'll need for Gaussian elimination, and we can pack these contiguously in memory.
+We store the blocks in column major order in memory, but we store the elements of each block in row major order.
+This memory layout is very important for efficient processing.
+Now let's look in details at the step of Gaussian elimination on the sparse matrix.
+We have the pivot matrix that we LDL decompose in place using dense LDL, which is always faster than using the Cramer's rule.
+We compute the L matrices by multiplying the edge matrices below the pivot matrix by N zero inverse.
+We store the L matrices in a temporary buffer.
+This process can be done very efficiently.
+The way the edge matrices are packed in memory, they can be interpreted as one block matrix.
+And multiplying by the inverse of the pivot, we don't need to keep track of the block structure.
+Next, we reduce.
+This is the most expensive part of the process, as it costs proportionally to the square of the height of the edge column.
+Again, we don't need to keep track of the block structure of both E and L matrices, but we do need to have an indexation of the target location in S0.
+Then finally, we copy the L matrices from the temporary buffer over the age matrices that we will no longer use. And we repeat this process with N1. LDL decompose N1, compute L matrices, reduce, and replace E with L matrices.
+After repeating this process on all the pivots, we are left with the block LDL decomposition, with the L matrices replacing the edge matrices, and the D matrices replacing the node matrices.
+And these node matrices are already LDL decomposed, so it's easy to compute their inverse operator.
+We have one key ingredient still missing, the indexation of the reduction step.
+The results of the reduction step, which consists of multiplying the edge matrices with the L matrices, are being scattered over the rest of the sparse matrix.
+The scattering needs to be indexed.
+This indexation is pre-computed for pairs of indices into rows of E and L, and it is called the reduction scattering indexation, RSI.
+It can use either pointers or indices if both node and edge matrices live in the same workspace.
+This array can become quite large and using indices rather than pointers is better, because it requires less memory, 4 or 2 bytes versus 8 bytes for pointers on 64-bit CPUs.
+So why is the performance of the block LDL better than the regular LDL?
+Let D be the width of an edge column, which is the degree of the corresponding constraint or the pivot, and H be its height.
+We assume that H is bigger than D, which is true most of the time for complex mechanisms.
+Then we estimate the number of operations for the three phases of the Shur complement.
+And we estimate the memory access.
+These are the dominant terms.
+Now, modern processors are good at floating point operations but are bad at memory access.
+And if we compute the operation count over the memory access, we get d.
+As a consequence, the best, most efficient results are obtained with larger d as long as it stays smaller than h.
+Let's look at the implementation of the reduction step, which represents about 70% of the processing time.
+It's fairly simple.
+We loop over the row indices of both matrices and compute the dot products.
+The result is subtracted from the locations indexed by the RSI.
+Note that the degree parameter, which is the degree of the pivot constraint, is passed as a template argument.
+This allows unrolling the dot product underlying the matrix multiplication, which has very large impact on performance.
+Now here is the implementation of a single pivot elimination.
+We have the three steps.
+The LDD decomposition of the node matrix, which takes about 5% of the time.
+The computation of L, which takes about 25% of time and should also be on roll over the degree.
+And the reduction step.
+And here is how you invoke this function, by using a sweet statement on the degree or dimension of the pivot.
+The switch should handle all degrees, although those up to 6 are the most common, and should be allowed to enroll their internal computations for performance.
+The last topic we need to cover is about large dense submatrices where sparse methods can't help.
+Let's look at this example of a tracked vehicle. This model has three components, the main body and the two tracks.
+The track consists of 40 plates connected with hinge constraints.
+The constraint matrix has dimension 200 with 7.5% density.
+Its non-zero elements are mostly very close to the diagonal.
+Such a system is easily decomposed using LDL.
+Sparse LDL processes this matrix in 43,000 operations.
+In fact, it has linear complexity in the number of constraints in the track.
+On the other hand, the body of the vehicle has a totally different constraint matrix.
+It has only 20 constraints, which are mostly hinges, and its dimension is 88.
+But the density of the constraint matrix is 100%.
+It takes 250,000 operations to decompose.
+The complexity here is n³ in the number of wheels.
+This is a problem to which we have a solution called body shattering.
+Body shattering will transform the system into a system of higher dimension, 142, but with much lower density of 17%.
+The LDL can decompose this in only 35,000 operations.
+It turns out that this number of operations is linear in number of wheels.
+We went from n-cube complexity to linear complexity.
+And this is how the constraint matrix looks like after shattering.
+So dense submatrices appear where we have a rigid body with many constraints, like the body of the tank.
+Here we introduce a method called body shattering.
+It finds bodies with many constraints where the sum of the degrees should be more than 20, splits the rigid body into smaller shards, joins these shards using rigid joints and equally distributes the constraints over these shards.
+Suppose this is the body graph of a mechanism with a central body overloaded with constraints, and this is the corresponding constraint graph.
+We can see that it is a complete graph. The associated sparse matrix is dense.
+We get this rigid body graph by shattering the central body into three pieces and joining them using rigid joints.
+The corresponding constraint graph has more nodes, but less edges, and constraint metrics is sparser and more efficient to LDL decompose.
+Since we're now near the conclusion of this talk, let's put all the ingredients of the LDL-PGS solver together.
+For every mechanism, we have two phases, the symbolic phase that needs to be executed only once, and the numeric phase that runs every physics frame update.
+The symbolic phase takes as an input the structure of the mechanism, which is the connectivity data between bodies and constraints, and produces the elimination sequence, or DLDL program.
+The numeric phase takes the current state of the mechanism and executes the PGS solver in parallel with the LDL decomposition of the constraint matrix.
+Then after joining the two threads, executes one step of the block Gauss-Seidel using the LDL decomposed matrix to correct the constraint impulses.
+Here's a profile capture of a solver update.
+We can see the PGS solver running here, and in parallel, DL-DL decomposition of the holonomic constraint matrix.
+Finally, the decomposed matrix is applied to the impulses here.
+This is it.
+I hope this talk will help you build a great physics engine.
+Thanks for watching.

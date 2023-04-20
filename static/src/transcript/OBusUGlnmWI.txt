@@ -1,0 +1,394 @@
+Let's get the shame out of the way early.
+Everybody think of an example of bad AI.
+You got it?
+OK.
+I think a lot of you are thinking of something like this.
+And the first thing I'd like to convince you of during this talk is that this is not bad AI.
+I mean, it's not good.
+But what we're really looking at here is a failure of production, of management, resourcing.
+Because here's the thing, if your AI isn't very good, you know what you can do?
+You can hide it.
+Put these guys on rails because of that bug, put disabled grenades in that room, stuff like that.
+Actual bad AI in a competently developed game doesn't usually directly impact the player experience.
+What it impacts is the overall game quality by sapping the efficiency of everyone else.
+You end up with more pressure on the iterative QA process.
+Your level designers spend more time working around quirks in the Pathfinder and less time working on tweaking for balance and fun.
+You spend less time, well, you spend more time and then you eventually end up dialing down your ambitions for like, say, tactical AI.
+You might cut down some emergent tactics and just move towards something more like on-rails shootouts.
+The most sinister thing about bad AI, real bad AI, is that it doesn't look like bad AI.
+It just looks disappointing.
+It looks like something less than it could have been.
+It looks like the team didn't try hard enough.
+So what I'd like to do with this talk is help you think about AI development in a way that leads to solid and dependable systems.
+This is not going to be an exciting talk, because it's not about being creative.
+It's about supporting and enabling creativity.
+It's about building something you can build on.
+The first topic I'll touch on is layering and the closely related topic of interface design.
+Now, Rodney Brooks described this idea of a subsumption architecture, a bottom-up approach to AI, where high-level competencies depend on lower-level skills.
+And we do this in AI without really thinking about it.
+In your guard's search behavior, you'll have something like, run to the last place you saw the player.
+But that behavior depends on a lower level locomotion system, which might defend on an even lower level pathfinder.
+And what you'll notice when you look at these layers, of course, is that the creative aspect of AI, the content, what makes this guard different from that villager, is all up in the top layer.
+And as you go down, the layers become generic.
+They're services, not content.
+And what you want is for the lower levels to be rock solid and boring, so you can ignore them and concentrate on the content, which is where your game really is.
+Well, that's the ideal anyway.
+And I think it's useful to look at what happens when layering starts to rot.
+And there's two ways this can happen.
+And the really bad one is this first one, when your creativity and your content starts to leak down into your services.
+The prime symptom of downwards leakage is when your service interface suddenly gets more semantically specific, more use case specific, when it starts thinking about things that it shouldn't need to think about.
+Here's an example.
+You're making a game whose levels include some farms.
+And there's some feral chickens wandering around, just randomly picking goal points around them.
+And the problem is, the chickens keep wandering away from the farm over time because they're just picking random points.
+But you want to keep the chickens tightly clustered there for set dressing.
+So you take your pathfinding system, and you add an option to the find path query called isChicken.
+And then your pathfinder, if isChicken is set, doesn't allow paths that go, say, more than 20 meters from the nearest farm.
+So now your Pathfinder has this concept of a chicken.
+If you want to do similar things for other characters, you'll have to edit the Pathfinder again and add more options.
+That 20 meter limit I mentioned is not with the rest of the chicken's behavior.
+It's somewhere deep down in the pathfinding code.
+What it means to be a chicken is no longer local.
+And what it means to find a path has now become more complicated and confusing, since previously you were worried about nodes and edges.
+And now you're still worried about nodes and edges and also farms and chickens.
+Now, that example is trivial to the point of being manifestly unfair.
+I think most of us would have done it a different way, by having the pathfinder, say, take a callback, which filters which faces are loud or not.
+Then the filter for chickens would apply those same limits I talked about, but the code for that would be part of the chicken system, it would be part of the chicken code base.
+The pathfinding system sticks to what it's good at, finding paths, and the extension to its interface, just adding this generic filter interface, makes a lot of sense.
+But now we have the opposite problem, because a piece of code that was previously concerned with pecking and clucking is now also calculating the distance between points and navmesh faces.
+It's scanning through the game level to try to find all the farms.
+All this knowledge of the underlying structure is going into the chicken's mind.
+So now, say, if you want to change how navmesh faces are stored, now you need to edit how chickens work.
+So this is the opposite problem with upwards layer leakage, because the service refused to give the content what it needed, and now service-like code is going into the content.
+This happens when you have a layered system.
+Both layers start saying, not my job.
+It's not the Pathfinder's job to care about chickens, and it's certainly not the chicken's job to care about navmesh geometry.
+What you generally end up, if you're doing your job correctly, is a set of utilities built around the lower level, which offer slightly higher-level services to the upper level.
+So if you see this sort of pattern where you've got two layers, and you can't decide where to put a piece of functionality, consider whether you need a third layer.
+Mapping gameplay concepts to mechanical queries is a type of functionality.
+It's a kind of code itself.
+It deserves to go somewhere.
+It deserves to be recognized as a separate system.
+The other thing to notice about these examples is that the risks differ depending on who's programming what.
+If it's the same programmer in charge of both layers, doing both, say, pathfinding and behaviors, you're at particular risk for things leaking through the layers, because why not?
+He's an expert in both.
+Whereas if it's different people in different layers, there's more likely to be separation, but it's also more likely that that separation will be in the wrong place, because it's more difficult for the two programmers to work together to refactor the layer design.
+So let's change gears a bit.
+You get a bug report where during a cut scene, in the middle of the scene, a goblin runs in and starts hitting one of the characters with a stick, which rather detracts from the drama of the moment.
+Now, the background characters, the goblins, need to keep doing goblin stuff.
+So you can't just turn off their AI during the scene.
+So you try various things, various approaches.
+And eventually, you find a solution.
+You happen to already have a utility which checks whether a character is playing a scripted animation sequence, which is a thing in your animation system.
+So in the target selection system, you exclude characters who are currently playing these pre-canned animation systems.
+There's sequences.
+And this is a practical solution.
+It's simple, and it's straightforward, and it happens to actually work.
+And it feels right.
+You guys know what I mean by feels right?
+Because if a target can't respond to combat, if a character is off doing their own thing, then they shouldn't be participating in combat, including as a target.
+Fast forward, the game is released, and players start noticing that if they keep sheathing and drawing their broadsword constantly, the player is invisible to enemies.
+Because late in the dev cycle, the act of drawing or putting away a broadsword got implemented as a scripted animation sequence to work around, say, some camera issues.
+So if you keep doing the broadsword thing, enemies keep ignoring you.
+What happened in this example?
+Well, what happened is you mistook functionality for intent.
+The attribute you were looking at was called isPlayingSequence.
+It was not called in a cut scene.
+And it certainly wasn't called in a scripted cut scene where people are talking to each other and everyone else should go do their own thing.
+It worked at that moment in time, because at that moment in time, nobody was using these canned animation sequences for anything else.
+But it wasn't testing what it wanted to test.
+It was testing a proxy of that.
+In the moment of implementation, this felt like a small, unimportant fix to a minor bug.
+And what I want to convey is that little decisions like this can have huge, far-reaching future impacts.
+You took the concept of scripted animation and you added to its definition.
+Before it was a detail of the animation system.
+Now it's a rule of gameplay, but it still has to be a detail of the animation system.
+So let's imagine the same scenario a different way, because I've known some really good QA testers, and constantly drawing their broadsword is exactly the sort of crap they'd try.
+So this never got released.
+It got reported a day after they made the broadsword thing a scripted sequence.
+And the combat programmer says, oh, I guess we can't use scripted sequences for that, because it breaks the AI.
+You, the AI programmer, just made the animation system worse.
+because you got there first, and you imposed definition on something, and you did not do a good job of it.
+Now, this is a particularly egregious example because it involves multiple systems.
+But this sort of thing happens on a smaller scale all the time.
+And it usually happens in AI, because AI has exactly the sort of semantically rich concepts with corner cases that nobody thinks about until the bugs are reported.
+The other thing to take away from these examples is that you should be wary of when something feels right.
+I'm not saying ignore your instincts, but what felt right in this example was not just your solution, but the whole context in which you imagined this solution existing.
+When there's ambiguity, there's a tendency to come to an understanding which is based on your own current needs, a sort of wishful thinking.
+Repurposing an existing tool to solve a new problem feels really rewarding because it's clever and being clever is rewarding.
+But when you feel happiness at your own cleverness, make sure to feel some worry as well.
+All right, so moving on.
+Who here has experienced bugs caused by floating point imprecision?
+Yeah.
+Yeah, OK, everybody.
+It's sort of a rite of passage, right?
+Looking at this number and wondering why it isn't one.
+OK, so here's an example of a bug.
+So you have an enemy AI for a melee character where the character tries to navigate to be exactly one meter away from the player because that's what the animations are built for.
+and the character measures distance from their own frame of reference, which involves a number of calculations, various additions and multiplications, and due to floating point imprecision, you find that the character actually ends up navigating to a point 0.99997 meters away.
+That's not a really compelling example.
+It's barely a bug.
+Nobody reported this because nobody cared.
+And if you think about it, why should floating point imprecision matter in AI?
+Because AI is all about uncertainty and fuzziness.
+Exact numbers aren't generally important.
+When we tweak our AI, we do it through sliders, not text boxes.
+But playing with curves and fuzziness is only the first half of AI.
+And the second half of AI is about taking these uncertainties and fuzzinesses and probabilities and such and making distinct behavioral decisions based on them.
+There's this related concept in math, in computational math, of a predicate.
+A predicate is a procedure that takes some data, say like the vertices of a polygon, and makes a discrete judgment based on that, like is that polygon convex, based on the real valued vertex positions.
+Or, like when you take data, like how far away is somebody, and you make a discrete decision based on that, like should I start fighting them.
+Both predicates.
+So let's try that bug again.
+You've got a character that wants to be one meter away.
+It does its calculation.
+And it says, oh no, I'm slightly more than one meter away.
+I'd better get closer.
+So it asks the navigation system, please take me to this place.
+I've calculated that it's exactly one meter away from the player.
+And let me know when I've arrived.
+And the navigation system does its own calculations in a different part of the code base and says, good news.
+You've arrived.
+You're one meter away at that goal point you gave me.
+And then the combat system, the following frame, redoes its calculation system and says, oh, no, I'm 1.002 meters away.
+I'd better get closer.
+I'll get there.
+I'm at my goal, et cetera.
+And from the player's point of view, of course, what's happening is that the kid's just sitting there and twitching a little.
+Now that feels like a bug, right?
+But it's not like a scary bug.
+So OK, for the audience, how should I fix this bug?
+Anybody?
+Add an epsilon, add a tolerance, yes.
+This was still not a great example.
+This was way too easy to fix.
+Let's talk about that tolerance value.
+I heard the word epsilon.
+What should the tolerance be?
+Well, there's float epsilon, which is not something you should be using for anything unless you fully understand how to do forward error analysis.
+I see this being misused so often.
+This is not a magic value that means two numbers are close enough.
+Yeah, all right.
+We'll call this 1 centimeter.
+And 1 centimeter off is going to be fine visually.
+And so you test with 1 centimeter, and it works.
+Ship it.
+Here's the problem, though.
+You tested this in your test level, which is maybe 50 meters on the side, and your characters are nearly at the origin.
+Now, the basic nature of floating-point error is that it is relative to the magnitude of the numbers involved.
+When you do math with large numbers, particularly when you are subtracting large numbers from each other, you end up with an error which is much higher than when all your numbers are small.
+Now, an example of small numbers is the coordinates of all the objects in your test level.
+This sets up this tragically common pattern where everything works fine when you test it, and then much later, you have to fix it again because you tested it so close to the origin, and then the game happens far, far away.
+It's very tricky to experimentally determine the proper value for tolerance, but a good first step is to do your tests as far from the origin as you're going to get.
+So tolerance solved that last problem, which is fine.
+That is a good enough solution.
+But I still want to drill into it a little bit more.
+Now I was talking about predicates.
+And in this last example, we have two predicates now.
+We've got the navigation systems predicate, am I one meter away?
+And we've, I'm sorry, the combat systems predicate and navigation systems predicate is, am I at my goal point?
+And the assumption is, if navigation says, yes, I'm at the goal, then combat is expected to agree, yes, I'm ready to start meleeing.
+That's mathematically reasonable, but throw in floating point error, and you lose that consistency.
+What we did with the tolerance, the reason this was an acceptable solution, was that we made this logical consequence more robust, so that when navigation says, yes, you've arrived, combat will definitely say, yes, I'm approximately one meter away.
+All right, so another example, squad combat.
+You've got a squad of two enemies.
+Let's just say this is a squad, and you want to avoid overwhelming the player with two enemies at once.
+So only the closest one engages the player, and the other one, say, waits his turn, like if you've watched a kung fu action film, that sort of thing.
+So each enemy, in their behavior, measures their own distance to the player, and then it measures the other enemy's distance to the player.
+And if it's the one that's closer, then it attacks.
+And if it isn't, then it waits around.
+and tries to look action-packed.
+But now let's say that both enemies are about the same distance to the player, and each one does the calculation in a different frame of reference, and each one thinks my squad mate is a little closer and waits its turn.
+And the result is much the same as with the last example, two enemies standing around checking their watches.
+So let's try adding some tolerance to that.
+So let's say if an enemy calculates that he's 10% closer than the squad mate, he says, yes, I'm definitely closer.
+If he's 10% farther away, he says, yes, I'm definitely farther.
+In those two cases, if he's definitely closer, he attacks.
+Definitely farther, he waits.
+And what about if it's in between?
+What then?
+We're seeing a different kind of tolerance here.
+In the goal reached case, it was simply identifying the region in which it was good enough.
+Here we're using a tolerance to express that in this zone, the predicate might not be giving the correct answer.
+But we still need an answer, right?
+Because the enemy still has to attack or not attack.
+We still have to make this binary decision.
+What if we added a tiebreaker that applied just in that error zone?
+If he's definitely closer, he attacks.
+If he's definitely farther, he waits.
+In the middle, he'll fall back on a tiebreaker.
+Select, look at your object ID and your squadmate's object ID.
+If yours is lower, you are closer.
+You get to attack.
+And this is obviously consistent.
+So does this work?
+No.
+you have just moved the bug over, you've just made it more complex to reproduce.
+Now there's a situation where one enemy thinks, I'm definitely farther, so I'll wait, just outside that tolerance.
+And the other one calculates, I'm in the error zone, and my ID is higher, so I'll wait.
+So they both wait.
+You cannot use tolerance and a tiebreaker.
+You cannot use this sort of escalation of complexity to fix floating point problems that are caused by inconsistent predicates.
+It doesn't work.
+This is a real life problem, by the way.
+This is not just game.
+So here's another example.
+Two cars come to a four-way stop.
+Now the law says, at least in California, that the driver on the right goes first.
+But if...
+I'm sorry.
+The driver who gets there first goes first.
+But if two drivers get there at the same time, the driver on the right goes first.
+Which, I'm sure they had the best of intentions when they made this law, but it doesn't help anything.
+Because now, instead of wondering whether you were there first or second, you're wondering whether you were there at the same enough time.
+So you get exactly the same problems.
+This is another bug caused by inconsistent predicates.
+So let's revert all that, enough with tolerances, to enemies, the closer one attacks.
+And there's a much cleaner solution, right?
+So they can just both measure from the same frame of reference, right?
+Because then they're both asking consistent questions.
+So of course they'll get consistent answers.
+They might get the wrong answer.
+They might say that A is slightly closer when really, truly B was slightly closer.
+But that's the sort of bug we don't care about.
+That's a 0.99997 meters away sort of bug.
+Once we have this consistency, in fact, if we detect a tie, then we can fall back on the tiebreaker because it'll only apply in the actual case of exact ties.
+Of course, we can make the solution even cleaner.
+Don't make the enemies make the decision separately.
+Have a squad behavior which handles this.
+And again, we're restoring consistency in this example, not by having two consistent predicates, but by chopping the number of predicates down to one.
+Now I want to disabuse you of the idea that floating point math is the only source of inconsistent predicates.
+It happens at stop signs, for instance.
+It's a common one with floating point math simply because we have all these intuitions about how math is supposed to work, which actually can kind of go out the window.
+But there's a danger of inconsistent predicates whenever you are making decisions based on multiple concepts whose relationship might be a little more complicated than it first seemed.
+All right, so changing gears a bit, let's talk about documentation, which is a huge topic, and it's not necessarily AI specific.
+But I think there is an AI specific bit of this, because I want to go back to something I touched on earlier.
+I mentioned in an earlier slide about, this is the one with the cut scene thing with the goblin.
+I said that the source of the bug was that the programmer confused functionality with intent.
+There's various kinds of documentation.
+There's different reasons that you might need to document something.
+But one crucial reason for AI is to document intent.
+All right, take a look at this function.
+I won't keep you in suspense.
+Anybody know what this is?
+This is Bubble Sort.
+If ever there was self-documenting code, it's this.
+All right, so keep that one in mind.
+Here's another function.
+Yes, that is identical code.
+No, these are not the same function.
+They have the same functionality, but they have different intent.
+This first function is intended to sort any array of characters by the character's age.
+It has a bug.
+If the array has length zero, it reads out of bounds and probably crashes.
+This second function is intended to sort any non-empty array of characters by their age.
+It's only used when the array is non-empty.
+It does not have a bug.
+And the only difference is the intent.
+This is why the most crucial documentation is documenting intent, because nothing else indicates intent.
+This code is self-documenting for most things, everything except the intent.
+Imagine that you saw that function crash, read out of bounds of memory.
+Well, where is the problem?
+Is the bug here in this function?
+Or is the bug in whatever code produced an empty array of characters, which is never supposed to happen?
+And if the bug is here, if empty arrays are reasonable, where did it come from?
+Why did this code use not equals instead of less than?
+Was the programmer not paying attention?
+Is there some subtlety?
+Maybe there's a range issue with signed integers.
+Maybe it's designed for a platform where that's faster.
+Is this code stupid or smart?
+For that matter, speaking of stupid or smart, why bubble sort?
+N squared time, why not use quicksort?
+But maybe the programmer doesn't know about quicksort, or maybe they do, but they wanted a stable sort, which quicksort is not.
+But then maybe they should have used merge sort.
+Maybe not.
+Maybe they're worried about branch prediction.
+Maybe they tuned this very specifically for the use case.
+Who knows?
+You know what this code is?
+It is uncooperative.
+It refuses to tell you what you need to know.
+And through that refusal, it refuses to change.
+This is code that you leave alone if you are not absolutely forced to not leave it alone.
+Because if you touch it, something might break.
+The other reason to document intent is to standardize it.
+Let's say your character has an isAlive method.
+What does alive mean here?
+Suppose you add a death animation.
+While the death animation is playing, should isAlive return true or false?
+The documentation of isAlive helps you answer that question by telling you what it's meant to be used for.
+Because the process of documenting a concept involves exploring that concept, defining that shape.
+Maybe, assuming we thought of that when we were making the documentation.
+But suppose we didn't think about it, because we didn't even think of the aspect of somebody being neither alive nor dead.
+That's still an example of a reason to document your intent, even if we have to go back and fix the documentation.
+Because when you fix a documentation, when you change the intent or clarify it, which is a kind of change, you're potentially cutting off certain usages.
+Update to the documentation forces you to think about that action you're taking.
+It forces you to think about all the use cases you might be ruining, all the future use cases even, ones not currently using this function that you might be cutting off.
+Now, documenting your intent isn't just about writing essays.
+Think about an architectural drawing.
+This is not a single picture.
+It's multiple pictures.
+You get redundant, overlapping information to resolve ambiguities in a single diagram.
+Similarly, if long comments are one view, another view is tests and assertions.
+Now I'm not going to talk very much about tests and assertions because I don't think I'm the right person to do it.
+Other people have thought about it a lot more than I have.
+But I will say that one of the most useful aspects of tests for me is as a form of documentation.
+They document what you were thinking about, what you were worried about.
+They highlight the difficult or under-specified cases.
+They help someone understand why you had to make the decisions you made.
+Though, while we're at it, if we're making an automated test, maybe we should document the intent of that test.
+Is this something that you never think will happen, but you just put it in just in case?
+Is it the common case?
+Is it an edge case?
+Is it why you didn't use QuickSort?
+Now a corollary of tests and assertions being a kind of documentation is that they don't have to break in order to be useful.
+I will often use assertions that I know will never, ever, ever fail for two reasons.
+First of all, sometimes they fail.
+Secondly, an assertion is inherently reliable.
+Look at this comment.
+X will never be zero.
+Well, says you, but the reason I'm even looking at this code is because there's a bug.
+So someone's wrong about something.
+But if it's an assertion, well, OK, you're right.
+It's not zero.
+The princess is in another castle.
+Otherwise, this assertion would have fired.
+And because it's an assertion and not a comment, I don't have to spend any time, any brain power, second guessing it.
+It's documentation you can believe in.
+I don't think document your code is a very controversial opinion, but it's one of those ideals we sometimes opt out from.
+Like we try to eat healthy, get plenty of vegetables, and then we see a burger and some steamed carrots, and we don't really feel like the steamed carrots, and what feels like in the moment...
+good to do is not documenting your code maybe.
+Maybe what you feel like doing is writing the code.
+Because AI programming, what feels good is getting stuff done.
+Not to mention, in a situation where you're experimenting and iterating and redesigning, if you document something while you're doing all that, it feels like you're trying to paint an oil painting of a football game while the football game is still going on.
+So documentation is often done as a post-pass.
+The good thing about documentation as a post-pass is you don't need to redo it.
+The bad thing about it is that it feels like such a chore, because you already did what you wanted to do.
+You fixed the bug.
+You got everything done.
+And now you have to go back and write a book report?
+Sorts the characters by age.
+There, documented.
+I want to advise you how to write good documentation.
+And I think to do that, I need to advise you how to want to write good documentation.
+Because there's no objective metric of documentation quality.
+If you just want to get it out of the way, you can do that.
+You can convince yourself that you documented everything you needed to.
+So here's my advice.
+In the moment, want to share that moment.
+If you did something clever, want to tell other people about it.
+Not to brag, but to share your joy.
+If something was a huge pain to write, tell them about it.
+Tell them about the journey that it took you through.
+Tell them why you were forced into this weird solution.
+Explain to them the dilemmas you faced.
+Document to share.
+Sometimes that'll happen while you're writing the code.
+Sometimes it'll happen afterwards.
+But always with the same intent, which is to help your team.
+Because the goal of your process is to help your team.
+I want to have some big inspiring conclusion for this talk, but I think that would be a little dishonest.
+You're still going to write some bugs.
+I hope I've helped you write fewer.
+Thank you.

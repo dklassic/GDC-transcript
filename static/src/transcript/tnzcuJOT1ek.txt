@@ -1,0 +1,257 @@
+Good morning, everyone.
+I'm Wang Xi from the graphics studio, from Bungie Studio.
+I'm a graphics engineer.
+Today, I'm going to talk about the automated LOD generation system for the Halo Reach.
+So back to the history of our studio, we have worked for many game titles like Halo 1, 2, 3.
+But surprisingly, we haven't had any real LOD system.
+We do have the option which allows artists to create a low-res model.
+for a far away case, but unfortunately, it turns out to be the most rare used feature in our system.
+So, but fortunately, our engine optimized enough, we can still ship the game.
+But in the Halo Reach, we increased the quality bar for our game, we have a lot of new more stuff need to be displayed in the runtime.
+So we realized we have to have a LOD system which can save us the.
+the cost for rendering the same.
+And considering the number of assets in our game, and also the endless iteration during the production, we decided this system has to be automated, which means any update the artist made, we need to generate the low-res model for them by default.
+So that's our motivation to design this system.
+And this system was designed by three very simple, principles. The first thing is like, we need an automated mesh simplification system which can robustly simplify the raw mesh provided by the artist. And also, we can fit in the animation information automatically for them, which means, you know, if you have animated character, when we do the simplification, the low-res version still can be animated properly, you know, as the animator wants.
+The second thing is like...
+We have really sophisticated material system, which, you know, composed by the Koutoris model, Tulip Foam model, and when we switch that thing to the low-res model, we don't want to keep this kind of complexity anymore.
+So we decided, you know, whether we can unify the material model, just using one material model to approximate anything in our game.
+And the third idea is, you know, Because this low-res model will only be rendered in the faraway case, it sounds like not important to make sure every pixel correctly.
+So we decided using the per-vertex shading model.
+Another benefit of that, we don't need to deal with the texture calling the parameterization and the texture page-in, page-out when we're switching different low-res model.
+So here's the case of three character in our game.
+And when you're in the far away case, actually we were rendered using this low res, you know, vertex lighting model.
+We call this thing Imposter in our project.
+So here is a live video we captured in our engine.
+Oh, sorry, I think the sound is too loud.
+in the halo, so that's what you see in the shifter title.
+But actually in our debugging mode, when we freeze the camera, and this yellow line indicated the view frustum.
+And when you're flying closer and closer to what really happened in the far away, you see all this weapon on the Marine's hand already switched to the imposter.
+And even it's imposter, it's still firing and killing the enemy.
+And for the further case, you are finding some jackal on the ground already switched to the.
+imposter.
+Another interesting case of the imposter is the Elite.
+You can see, you know, this Elite switched to the pretty low-res model, but the filling of the, you know, alien material, you know, metal filling, still keep the color and everything still looks approximately correct.
+When we get in further, you will find a lot of environment stuff switched to this really low-res, diffuse looking, you know, stuff.
+This is our special system to handling the environment in Pulsar.
+I will talk about those later.
+Now let's turn back the time.
+Let the Pulsar animate.
+See?
+So this is like, you know, in Pulsar, really.
+involving the combat with you.
+So which means, you know, when you play the Halo, you know, you might be killed millions of times by this little ugly low-res model, but you know, you don't really realize their existence.
+So, let's go to the technical detail of our system.
+The first system, first step for the low-res imposter generation is a mesh simplification.
+So here, we show the, you know, a case of the hunter in our game.
+The hunter might be the easiest case.
+you know, in our game, because the whole body just composed by one single mesh.
+But even as simple as the hunter case, you know, you will notice the artist has been, has tessellated the mesh really unevenly.
+If you're sending this mesh to the, you know, DX progress mesh simplifier, when you send the budget to be really aggressive, you will get a, you know, most likely you will get a very unacceptable result.
+So to work around this.
+Problem, the first thing we do, we're trying to do capturing the voxelized image of this model.
+So we, using orthogonal projection, generate the depth image of this character from different angle.
+So along the sixth axis, we get a sixth depth image here.
+The brightness of the gradients indicate how close.
+that part of pixel toward you.
+So using a really standard visual hall technique, you know, we can generate a work slice representation of the character, and then we apply a low pass filtering, and on this work slice mesh we get something like this.
+You will notice, you know, the shape of this hunter has been pushed out a little bit, but roughly kept the shape, but the tessellation of the mesh looks way better than what we have just now.
+So when you're sending this thing into mesh, direct mesh, progress mesh simplifier, you will get a result like this.
+So this one is around like 10% of the vertex count of the original mesh.
+The original hunter mesh is around 10,000 vertex.
+This one is around 1,000 vertex.
+So this is our mesh simplification idea.
+So a lot of people asking us like, why you do the voxelization?
+So I give you three reason for that.
+First, you know, the voxelization can help us to...
+remove a lot of unnecessary small feature over the character.
+Secondly, you know, when artists creating the model, they using, they build each piece by a component and just, you know, putting them together, you know, they buffered in the 3D Studio Max.
+So this voxelization can help us remove a lot of unnecessary inside, you know, interior triangles.
+And the third benefit is like, because we're using the orthogonal projection to generate the mesh and the localization for everything, in the later part, when we do the material fitting, we can easily align this mesh with our material parameters.
+But that's something we can talk about later.
+And but the drawback for this algorithm is, we do notice some case, some small feature, which if you're hiding inside some features, because we only do the six-way projection, you might have the chance to be ignored by voxelization.
+But what we found is it's not really a big deal because normally artists are building the character by many, many piece.
+Each piece is not relatively big.
+So as far as we can get the general profile of that piece, the whole thing assembled together looks pretty representative for the original model.
+So, the next step we need to do, as we promised, we want to try to simplify all our complicated material model.
+So the way we do that is like, we assume we have no idea how we, in writing the shader code, but we just try to apply the different lighting over the model.
+So when we just turn on the diffuse lighting, you know, we get something like, like the case of the very right, or very left.
+And if we turn off all the lighting, you know, we get the picture in the very right.
+Just show the self-illumination of the character.
+And then we can try manipulate the view and light direction.
+We can capturing the maximum reflection.
+I'm sorry, I forgot I have the text on top.
+In this case, it shows when n dot h, n is normal, h is half vector.
+When those two vector dot together equal to one, which means that's maximum specular reflection.
+And also we can manipulate n dot h to something less than one.
+We can try to figure out how quickly the specular will fall off.
+So this sounds pretty easy, but the challenge is, you know, for each pixel of the character, you know, they have different normal.
+If you set a one lighting direction, the end dot end value will be quite different, you know, across, you know, the whole character.
+So we try some method like the BRDF capturing, we set a bunch of view and light direction, and trying to say, hey, you know, we totally, you know.
+to be agnostic to the shader code and like be able to have a computation like 20 lighting directions, 30 view direction.
+But unfortunately, we find, you know, it works perfect for the diffuse and self-illumination, but it works horrible for the spectra because that's really high frequency stuff.
+So eventually we have to insert a little, you know, special code in our shader system, you know, just to manipulate the view and light direction for each surface pixel.
+This one sounds really scary and complicated, but due to our really smart, sophisticated shader system, we can totally compile out those special caption section shader code in our release build, so which means they have zero impact for our final game performance, but make our material simplification way more reliable.
+So after you get those four images represent four different properties of the material, so we can roughly.
+approximate the material's properties.
+Like this first image show the diffuse component we captured.
+The second shows the self-enumeration component we captured.
+And this one is the specular.
+So we summed all the three components together.
+We get something like this.
+Actually this guy is composed by maybe five different shaders, but after we do the material simplification.
+you know, we just got one material, and each pixel has three properties.
+And for each work zone, you know, we attach this material properties, and we apply the mesh simplification with the material property, which means, you know, if you're sending a textured cube, because the texture has a different pattern, has different material distribution, you end up with more than eight vertex, but, you know.
+when you switch to the pro-vertex lighting, you still keep the pattern, keep the feeling of the material.
+So that's the trade-off.
+So you sacrifice a little bit more vertex budget, but you get a better representation of the original model and its texture.
+So the next thing we need to do is like, do the animation information fitting.
+So we call that skinny information fitting.
+The idea is pretty simple.
+So let's look back to the raw mesh, and for each vertex of the character, we have four different animation bone attached with that vertex, and has a different weighting function.
+The way we generate the weighting function for each imposter vertex is, we first looking back to the original model, find all the neighbor vertex, and so we get a list of the bones need to be, could be involved for the animation.
+Because you reference to more than one original vertex, you might easily end up with more than four animation bones.
+We just sorting them by their original weighting and also the distance, the weighting by the distance to this low rise vertex.
+And so we figured out which animation bone is the most dominant one.
+And so for the imposter model, we just animated the character with a single bone rather than the full bone interpolation.
+This one sounds like we sacrificed some quality, but it's turned out to be a really big, you know, improvement for the imposter performance.
+Because, you know, you only need to animate one bone in your vertex shader.
+So, this is the, like, fitted result.
+So, that's everything about our, you know, object imposter system.
+You know, it's pretty simple, based on three simple ideas.
+But we do find some challenges with this system.
+First, you know, when we do the workflow filtering, we find that the filtering kernel is really sensitive value because you're setting the kernel to be larger, you will get a smoother result, which means the mesh simplification result.
+well, looks better, you can use more aggressive budgeting.
+But if you make that thing too aggressive, you will get some better result like this.
+Because the neutral pose of the jackal, the two legs sitting pretty close to each other.
+So when you're applying the filtering, those two legs will be linked together.
+And another challenging case for us is the transparency.
+We do try some technique to detect all this transparency stuff, run on different methods, but it turned out to be not very reliable.
+And another thing is very thin geometry, because when you do the voxelization, you can easily make the single-faced geometry to be double-faced voxelized.
+That's okay when you generate the source voxelized mesh for the simplifier, but when you run the simplification, you can easily get the front and back face intersect each other, which looks pretty ugly under the lighting.
+So for those two challenging case, our solution is quite simple.
+We just say, hey, do nothing.
+So we just give the option to the artist, say if you notice anything wrong.
+just turn off the imposter for that particular part of the object.
+And we try a lot of different character and asset in our game.
+We found set up a reasonable budgeting is very important.
+So our experimental result is for the object, we normally set 12% vertex count of the original mesh.
+And we found the transition distance.
+Transition distance means, you know.
+the distance when you switch from the object to the imposter, we set it up to be the 30 times of the bounding radius of the object.
+That's a, both of the data are purely experimental result, so which means if you're trying to apply this technique in your own game, you need to set up your own data.
+So this two data just for your reference.
+For the environment object, which is a little bit different story, because environment objects mostly like tree, like rocks, those things are pretty static, placed in our level, they don't remove, but they have a lot.
+So we find maybe we need a better solution for them.
+So the idea is very simple.
+Is, what about we just directly base the lighting result in our progressive color rather than run the shading?
+The reason for that is because those environment objects, they just stay in one location, they already know what exactly their lighting condition will be.
+So, yeah, we don't need to do all the complicated, multiple steps, like set up your lighting, set up your material, do the shading in the picture.
+We just say, hey, start everything, render the object.
+The second optimization we did is, we're trying to grouping all the neighbored environment objects with a similar size into one group.
+So which means, when we do the rendering, we just do one single draw primitive call, and we can render a bunch of them.
+which save us a big overhead of the CPU time because the directs and set up the render call is not that cheap.
+And if you do that a thousand times for each frame, the overhead is significant.
+So here is a video show our, you know, imposed on the environment object.
+Look at all those rock.
+When you're flying camera further.
+you will find that those rocks have actually been fading to the only diffuse looking poster, but you will notice their lighting matched pretty good and it's pretty hard to notice.
+And so we're fading the back.
+And now I will turn on the debugging mode, which means, you know, when you're flying the camera away, if you are already in poster, we are using the blue wireframe to indicate the switching.
+And you will notice that when you're flying really far, a group of environment objects we are sending, as it renders one draw call, we indicate that with a light bounding box.
+So that's how our imposter system works with environment objects.
+So that's pretty much everything about our ultimate LOD system for HaloReach.
+It's turned out to be a pretty big win for our performance.
+For the dynamic objects characters, the impulse rendering is about 10 to 20 times faster than the original model rendering.
+And for environment object, it's about 50 to 100 times faster than the original one.
+The reason for that we already explained because we just using per vertex, pre-baked color rendering.
+So it's supposed to be that cheap.
+And on storage UIC for the dynamic object, which is.
+around eight times less.
+So it's kind of like a little additional data sitting beside the original model.
+And for the environment, we pay a little bit more because we need to bake the lighting, which means for the same environment instance definition, because for its different placement, we need to generate a different imposter.
+This thing sounds scary, but because the per vertex overhead is so low.
+it turns out we're still five times smaller than the real memory cost of the full environment object.
+And so we find it's a really valuable investment for our system, considering the three years production time of the Halo Rage, and we have 100 people's team, we rarely have the case, artists need to deal with the system to figure out something's wrong, and they just go ahead, create their high-res model, they will get this low-res model for free.
+And we also realized it's really important to provide the manual switch, which means for any broken case, we mentioned it before, and some unsatisfied case, the artist and the QA team always has the option to turn it off.
+So, there's still something we want to improve in our future game developing.
+One is, we decided using the Direct Smash Simplifier and Progress Smash.
+But in the later, we realize it will be way better if we can write our own mesh simplifier.
+The reason for that is because when we do the capturing of the model, we capture a lot of information.
+And also, artists has a lot of idea and some hint information we want to provide to guiding our mesh simplification.
+But using the third party mesh simplifier, we don't have the luxury to customize that.
+And if we write it on our own, we can easily incorporate those information to guide us to work.
+to get a better result.
+Another thing we want seriously adding, allow the artist to customize a low-res model.
+Because we find that the artist is still the guy who knows how this thing is supposed to look like best.
+So we can give them good looking for 90% of case, but they stay up with 10%, I mean, 5% of case, they find it will be way better.
+I can create my own.
+So we think this option is very important for our content team.
+So that's all of my talk.
+And thank you very much.
+And so if you are interested in Bungie Studio, and we have a bunch of openings, just feel free to contact our HR.
+And so if you have any questions, please step to the microphone.
+Thank you.
+Yes, I was curious if in this work, if you ever run into the case where due to the reduced amount of vertices, if you ever were running actually slower doing things per vertex instead of per pixel, seeing that fewer pixels were going to be for the object.
+Hm?
+Can I repeat the question again?
+OK.
+I haven't heard it.
+And when you were using this system, did you ever run into cases?
+where an object still had enough verts in the object, where it would actually run slower per vertex rather than per pixel?
+Or was it always a win to do everything per pixel at a distance?
+We tried the per vertex simplification before, like just sending the original mesh.
+But the result is not good.
+But unfortunately, I haven't have that same shows up, because that's pretty, pretty early try.
+We run a bunch of the objects there.
+And we realized, you know, we need, because when the artist created the model, you know, their tessellation is really, you know, arbitrary, so we realized we're using the per pixel solution to make the source mesh tessellation as even as possible.
+We have benefited the follow the mesh simplifier a lot.
+So.
+We only have time for one more question.
+Yeah.
+Hi. What simple changes did you make from Halo 2 to Halo Reach as far as using imposters?
+Because in Halo 2, you could see the imposter sometimes when it was loading.
+Did you do some sort of line of sight changes or timing changes?
+Like, what would be the simple changes?
+In the Halo 2 and Halo 3, we don't have an imposter system, but we have a low-res model available, which means for any object, artists can create a separate low-res model and attach with that object and set up the transition distance.
+The problem for that setting is, for most cases, artists just forget to create a low-res model.
+Another challenge is, because in a full-res model, you have a lot of fancy material and texture and it looks awesome.
+But when you create a low-res model, you want to use a cheaper texture, cheaper lighting, cheaper material model.
+To make sure the two versions look similar to each other is pretty challenging.
+Imagine you have really fancy material which composed with 20 different material, and if you're trying to mimic that with just a simple foam shader, trying to find the right parameter for that is not a trivial thing for the content team.
+Thank you.
+So I think it's about the time.
+OK, thank you very much.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Oh, I forgot to one thing.
+Please fill the evaluation form.
+Thank you.
+OK.
+Good luck, dude.
+Thank you.
+I think all I need is the sound.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+Oh.
+shift to the middle so we can get more people seated or coming in, I guess.

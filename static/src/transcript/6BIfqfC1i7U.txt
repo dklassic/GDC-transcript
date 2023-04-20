@@ -1,0 +1,589 @@
+Alrighty, are we ready to get going?
+Okay, so I'm Earl.
+I'm a lead programmer at Respawn Entertainment and I like programming stuff.
+Here's some of the stuff I've done.
+And before we get started too much, I'd like to remind you to please turn off your noisemakers and to fill out those emailed surveys you get and invite me back next year.
+So that's who I am.
+If this is who you are, then you're in the right talk.
+If you like math, bit operations, vectors, then you're in the right spot.
+And just to warn you, we may set a record for most slides in a 50-minute presentation.
+So this is not a relaxing talk, but hopefully it's informative.
+So first, why did we do this?
+and then we'll get into how we built our access align bounding box trees, how we optimized our traversal of the trees, and how we did SIMD parallelization of the final collision tests.
+So collision detection is basically broken down into two broad categories.
+There's discrete collision detection.
+Are these two things intersecting right here, right now, and you don't care about what's before or after?
+And then there's continuous collision detection.
+Where when does this thing that's moving first hit that other thing?
+And the discrete detection, since it doesn't have to do with motion, is often faster.
+But it has some downsides, too.
+It teleports, essentially, each step.
+So it just detects that you're stuck right now, and it's up to someone else to fix it.
+And even worse, fast objects, if they step too far, they can completely skip something.
+So you could have something like a bullet going through a wall is the classic example.
+But rotation is no different than translation.
+So in Titanfall, in Titanfall 2, we used continuous collision detection and it was continuous for translation only.
+The rotation, we just did fixed steps.
+But we also did discrete collision detection at the initial position, so we did both tests at the same time.
+But there were some limitations that led us to revisit it.
+The collider shape, for one, depended on the situation.
+Usually it was kind of a capsule-cylinder hybrid, where we start with a cylinder and then we chop planes off of it, tangent to the capsule, so that it is smoother over rough terrain.
+And it was efficient, but it had some oddities.
+And even some things would fall back all the way to an axis-aligned bounding box.
+Some of our optimizations in the collision code assumed that Z was up, so if we rotated the capsule so that you were leaning forward or lying down, we had to basically fit that in a larger capsule and transform all of the world then to the smaller capsule and the larger capsule, so it worked, but it was expensive.
+And the real reason we revisited it is there is a hard limit of about a million triangles because we index triangles by a 20-bit index.
+There are no bits left to do more.
+And strangely enough, our content creators keep adding stuff and want more, more, more.
+So our goals were no hard triangle limit, arbitrarily oriented colliders, consistent collision shape, fast constant iteration times.
+We don't want people waiting on this.
+And ideally, the game doesn't get any worse in memory or time.
+And we met all our goals.
+And memory usage was maybe a few percent less, but not anything to write home about.
+But performance more than doubled on console, which was an unexpected benefit.
+So our target platforms are all x64, but we can't rely on SSE4 or AVX because of our low-end PC.
+So some relevant traits about x64 in Jaguar's implementation.
+We've got 64-byte cache lines.
+and that's pretty standard in practice, even if they can do different things if they want to.
+L2 cache misses are usually around 100 cycles, and mispredicted branches are about 20 cycles, which is about the same cost as a square root.
+It also has parallel execution pipelines for both integer and floating point, so you can do both of those at the same time.
+And there's four-way SIMD with SSA2 required.
+We actually use supplemental streaming SIMD extensions, three, SSE3, and we'll get to why near the end of the talk.
+And it's 98% of hardware according to Steam.
+So here's our design overview for our collision detection.
+We use a four-way access-aligned bounding box tree, which is ideal for four-way SIMD.
+We pack each node into 64 bytes, which is ideal for cache coherency.
+and we swept oriented capsules versus triangles as our basic collision technique. Um, it's, the techniques in this talk are applicable mostly to any type of collision shape you want, but this is what our code used in the past, so we kept it.
+I noticed that this is already optimizing.
+This is all based on what the hardware is good at.
+The four boxes is based on four-way SSE.
+The tree structure is good because we call about three quarters of the stuff each step.
+64 bytes of voice waiting on memory.
+We're going to find branchless AABB tests.
+And all of these early high-level optimizations are important.
+So what's an AABB? It's a box that contains stuff and it's axis aligned. Not necessarily cats. It's defined by a min and max coordinate. In 3D that's three floats each, so 24 bytes.
+You can also define it by center and extents, but when I looked into that it uses one or two more instructions to do all of your testing.
+and the dependency chain is one or two instructions deeper.
+So, men's maxes tends to be better.
+What's an AABB tree?
+It's just boxes in boxes.
+Here's a four-way AABB tree.
+You see a blue box containing four orange boxes.
+Excuse me.
+So, four bounding boxes is 96 bytes, which...
+Some quick math tells us doesn't fit in 64 bytes.
+So we have to pack it.
+We did the obvious thing of packing in 16-bit integers.
+That leaves 16 bytes for the rest of our tree structure.
+And we're using our hardware architecture here so that we know that decoding the integer part is gonna be free because it's going to run in parallel on the CPU to the floating point axis-aligned binding box test.
+So here's our structure kind of shown.
+You can see we've got the men's maxes or the four boxes taking three quarters of the structure. This is to scale. Indexes are 24 bits. That's either a child bounding volume node or a collision primitive index. We have the 0, 1, 2, 3. Those are the child types. Each one of those is 8 bits. So we have 4 bits per child type.
+And then there's a collision mask.
+We use a 32-bit collision mask to decide whether or not we want to collide with this, like Titan only, player only, and so on, mass, water only, you can, the idea.
+And there's 32 bits, but we don't use all combinations, so eight-bit index is enough.
+Well, so why an access-aligned bounding box for a bound of volume hierarchy?
+Well, it's a good trade-off.
+To be a net win, a slower collision bounding volume needs to be better at culling stuff.
+So if you use spheres, it'd be faster.
+But you wouldn't cull as much stuff.
+And if you used oriented bounding boxes, or KDOPs, which is a discrete oriented polytope, means you pick a certain number of directions, like three is an AABB.
+You get more storage, you get more culling, but it's slower to test.
+So access aligned binding boxes are a good trade off.
+Might be interesting to use different shapes in different parts of the tree.
+Up high near the top of the tree, you expect most of your leaves, or most of your nodes are gonna miss.
+So it might be worth a faster test that's less accurate.
+And then near the leaves, it's more likely that you're close to the stuff, so a more accurate test that might be worth a little extra time.
+So that might be worth future research.
+So how do we build our trees?
+Well, BVH, Bounding Volume Hierarchy, again, we basically do it in two passes.
+One pass, you make a binary tree, because that's easier.
+And the second pass, you throw away 2 3rds in the nodes to get a four-way tree instead of a two-way tree.
+So, how do you build a two-way tree?
+Basically, you just try a bunch of ways to split all of your boxes into two sets of boxes.
+Then, you evaluate them based on some heuristic we use, the surface area heuristic, like everybody in the world.
+and then you recurse on the two halves.
+And then stop once the cost of a split exceeds the cost of not splitting.
+So the surface area heuristic assumes the probability of a ray hitting a box proportional to the box's surface area.
+And this is true for random rays that start outside of a box.
+And it works really well in practice and it's better than using the box's volume because flat boxes still have area even if they have no volume.
+Um...
+Now we tweak it slightly because we expect to test volumes, not just rays, because we expect players to collide with the world in Titans.
+So we increase the node box sizes by half the player's radius to increase the surface area cost of every box.
+This leads to a shallower tree with fewer nodes, which saves some memory.
+And it also saves some CPU time for testing boxes because you don't spend a lot of time seeing that this player's capsule intersects.
+a lot of leaves that are near each other, a lot of small leaves.
+It really helps solve the problem of lots of small leaves for small triangles.
+So we use three split strategies.
+The first one is the most important and is pretty easy.
+You just sort all of the boxes by their centers and you do this once per axis.
+And then you just walk that list, trying all ways of splitting it from the first half and the last half.
+And you get the surface area heuristic for each sides, evaluate the cost.
+And that's the most important one.
+Strategy number two is a unique one to us, I think.
+We just take all of the big ones and put them in one list.
+I think it's if it's over half the size of the parent box.
+And we put the little ones in another list.
+This really helps when you have playable geometry in the middle of giant background geometry, such as a skybox.
+It separates all of that big geometry you almost never collide against from all of the detailed geometry you collide against a lot, and keeps from making weird hierarchies.
+So this helped us a lot.
+And then you can also split your, on a regular grid, and when you do this, you, Consider if a primitive is big, then you can put part of it on one side of the tree and part of it on the other side of the tree.
+You basically chop it in half, see what bounding box fits on the two halves, and then use just that bounding box on each side, but put the whole object.
+So it sticks out the bounding box on one side, it sticks out the bounding box on the other side, but you put them together and it's inside all of the bounding boxes.
+This causes the same primitive to possibly be tested more than once, but it actually didn't really help us.
+It pretty much never gets chosen, probably because of our big little strategy worked better.
+So, we have a two-way tree. How do we get a four-way tree out of it?
+Well, we just do a greedy top-down merge.
+And there are five different ways that you can merge subtrees.
+There's one symmetric way, which you see over here.
+And then there are four asymmetric ways.
+And I only drew one of them because you can easily see what all of the others are.
+And we don't necessarily have four leaves because artists are making this stuff.
+And they don't always make it perfectly nice for code.
+So we can end up one symmetric way or two asymmetric ways of having less than four leaves.
+So it's wasteful in memory to not use all four children because we always store four children.
+And because we do a greedy construction from the top down, this can only happen at the leaves.
+So can we tweak the greedy algorithm near the root to make the partial leaves better lower in the tree?
+Yes.
+So first an observation.
+Adding a node turns one child leaf into four grandchildren leaves, which is a difference of three leaves.
+And at the root, and one node has four leaves, so you have three k plus one leaves for k nodes.
+So you can solve and find out that if you have n nodes, you're in a subtree, you're going to waste n plus one modulus three leaves, and I'm not going to waste your time reading algebra to you.
+So that tells us how much leaves we're going to waste if we put this many nodes on this branch.
+So when merging, we just slightly increase the subtree cost if it's going to have unused leaves.
+And this does a pretty good job in practice of reducing the number of wasted leaves.
+And also, it helps a lot high up in the tree.
+As you get lower in the tree, closer to the leaves, it doesn't really help much, and it starts to hurt.
+So we fade out the cost as we go down the tree.
+Fade out the penalty.
+But we still end up with a lot of two-way leaves.
+And these are leaves that are only half full, which are the most wasteful.
+So the idea we had was if the leaves are half full and we have two of them, why don't we just smash them together and make one completely full leaf?
+And that works great, but now you have two parents, but we don't care.
+We don't keep parent pointers, so we can have two parents.
+And this saves a lot of memory.
+And there's actually no added cost at runtime since we're gonna test all four boxes anyway, as long as we end up culling these shared leaves.
+And culling is more likely if we pair with leaves far away spatially in the world.
+So how do we maximize the distance between things we pair? Well, first we just collect all of the two-way leaves in tree order, which should roughly match spatial ordering, but not perfect.
+And then in that list we pair nodes that are halfway apart, which again, it's a rough heuristic that they might be far apart.
+And then we make it better.
+How do we make it better?
+Well, we sort all the pairs by increasing distance so that the closest pair is first.
+And then we just order the first 1 8th of the list.
+For each of those pairs, we pick one other pair anywhere in the list.
+Try all ways of swapping pairs around, and we pick the best one.
+And if that changed, great.
+We've improved things.
+If not, we pick another one up to 10 times.
+And then we repeat the whole thing 32 times.
+And that is really fast.
+And in the end, our pairs are usually about half a map apart, so it works really well.
+It can increase the time complexity using a smarter partition, but we didn't bother because when it's two seconds, you don't get much by making it better.
+So now we have beautiful trees.
+And now we get to do math to collide.
+So we call, how do we test these AABBs?
+We call if the line segment misses the AABB.
+So we test this infinite line, and then we only care about from the start time to the end time, and see if that infinite line intersects this box at all.
+And for volume traces, this is how we do rays.
+For volumes, we just increase the box size by however big the swept volume projects onto the coordinate axes.
+So how do we do this?
+That's pretty standard.
+You find the enter and leave times of the infinite line for all of the planes through all of the box faces.
+This works for convex polyhedra, not just axis aligned bounding boxes.
+So this is the last enter time.
+Here's another enter time.
+Here's the first exit time.
+Here's another.
+And it's easier to see in 2D, but it works in each dimension.
+And a cool thing is that there's no intersection if we exit before we enter. So that's a pretty cheap test.
+And how do we deal with line segments?
+It's also really simple.
+The start of the line and the end of the line are just extra enter and exit events.
+And they get to be either first or last enter.
+In this case, the last exit is the end of the ray, so it misses the box.
+And here's the other two exits.
+So here's the math, you just do vector algebra and you end up with this guy for when you hit.
+And it's pretty cheap, you do a vector subtraction and a dot product and divide by a dot product.
+And this is where we get some optimizations.
+First, the point on the plane is always gonna be one of the two corners of your axis-aligned bounding box.
+Three of them use the mins and three of them use the maxes.
+The plane normal is always going to be a coordinate axis.
+So the numerator just picks x, y, or z from this vector subtract, so we don't have to do a dot product at all.
+We just pick a coordinate.
+And then 1 over d dot n is going to be a constant, because we only have three values for n.
+So we can just precalculate those once for all a, a, b, b's.
+And that's just one divide at the start of your ray trace, because we do it in SIMD, so we get x, y, and z at once.
+So our plane distance check is just a subtract and a multiply to find when we hit each plane.
+And we do six of those.
+So we found that when you hit the mins and maxes for each axis, so it's going to be true that on an axis, you always hit the Enter before you leave.
+It's only when you combine axes that you can leave before you enter.
+So we use that to trivially find the enter and leave times.
+We just take the min of the two times we found and the max of the two times we found to find the enter and leave times.
+And modern hardware has instructions for min and max that are as fast as add.
+So that's really cheap.
+So it's good to get fast code and edge cases.
+Special cases slow down code.
+Even if you don't take the special case branch, you spend something to detect that you don't need to take it.
+You spend some code cache space, you spend some cycles just doing the if.
+You don't necessarily pay the branch miss prediction penalty, but there is still some cost.
+So it's always, always, always better to tweak code so that all of your special cases can be handled in normal code.
+And that's where we're going now, by dividing by zero.
+Dividing by zero, we're all afraid of because it's undefined behavior in C++, but IEEE floats to find it in a way that makes a lot of sense.
+And almost all hardware you'll see is IEEE 754 floats.
+The exceptions are probably irrelevant to us.
+It's like IBM mainframes, Unisys, Cray, I think, and maybe some microcontrollers somewhere.
+So I doubt any of us will ever see those.
+So undefined behavior.
+C used to have undefined behavior just to let different architectures, CPUs handle the edge cases different ways, like is it ones or twos complement?
+Can we innovate different ways?
+Modern compilers use it to mean I get to do any bizarre thing I want if it speeds up an artificial benchmark, even if you don't want me to.
+So I really think that the standards committees should define undefined behavior to be what the hardware does, in cases like divide by zero.
+So I like floats, IEEE floats, because they are very smart about their decisions.
+So in IEEE floats, you can represent all numbers from minus infinity to plus infinity, and you do that in only 32 bits, which is only possible because intervals map to a single float.
+And for the edge cases of plus or minus zero, and plus or minus infinity, it's useful to think of those values as limits as you approach them instead of as discrete values.
+So plus or minus zero are just, you can think of them as equivalent to one-sided limits as you approach zero.
+So this is approaching zero from the positive numbers, this is approaching zero from the negative numbers.
+And if you do that, it makes divide by zero well-defined, and it makes plus and minus zero really useful.
+I mean, it might have seemed odd to have negative zero, but because of this, and the fact that there are plus and minus infinity when you divide by them, it's actually very useful to us to have positive and negative zero be different.
+And multiplication by infinity is also well-defined, because you can use these limits, and you see you basically just combine the sign bits and keep infinity.
+Unless F is zero, then zero times infinity is the same as zero divided by zero, which is not well defined.
+It's this limit, which in calculus we can solve using L'Hospital's rule.
+I hope I pronounced that right.
+But CPUs don't have enough info for that because you have to take the derivative of the numerator and the denominator.
+CPUs just have the values, they don't have the derivatives.
+So, IEEE floats return NAN.
+which means not a number.
+For 00, you can think of it as not a number because it could be any after you apply Lajoux-Pattal's rule.
+For other NANDs like the square root of minus one or the arc sine of two, you can think of it as not a number because there's no such number, that's where it, and you often see these in debuggers as one pound I and D for indefinite.
+So an interesting thing about NANDs is any comparison with them returns false.
+So A equals A can be false.
+if and only if A is a NAND.
+And if you turn on fast math in your compilers, they usually ignore NANDs, but NANDs can be important, so I don't turn on fast math.
+And math with NANDs also returns NAND, for the most part.
+But what about our min-max instructions?
+IEEE originally didn't have those.
+In 2008, they suggested you should return the non-NAND number, and that's exactly what HLSL does.
+And that's exactly opposite what ARM does.
+ARM makes it like plus.
+And SSE does something different still.
+They return just the second argument.
+The only other option would be to return the first argument, and I haven't seen that.
+The reason SSE does this, it's a natural consequence, is they said min is equal to this code sequence.
+Well, if A or B is NAND, this is going to be false, and it's going to return the second argument.
+So, dividing by zero.
+We have this thing, and here's our divide by zero, which is undefined behavior in C++.
+Fortunately, we're using intrinsics, and we're not using C++, so it's defined for SSE, and it's well-defined for us.
+And it becomes plus or minus infinity, which when we multiply it by this guy is going to give us minus infinity, nan, or plus infinity.
+And it will turn out that this is almost exactly what we want.
+So when we're doing our test, we're going to keep just the last enter time, when we find all of our enter times and leave times, and we're going to just keep the first leave.
+So if we ever calculate a negative infinity enter time, that's always going to be not the last one.
+Some other one is going to be more laster.
+And similarly with the leave time, plus infinity can never be the first time we leave.
+So in these whites, you can see we basically ignore it.
+And right here in the middle, we're ignoring both the enter and leave time.
+So the other coordinates decide whether we hit the box or not.
+And then for these red and green cases, well, if the enter time is plus infinity, that's always going to be the last enter, and that's always going to be greater than our first exit.
+So we're always going to cull a box over here.
+And the red leaf time does the same thing over here.
+So our plus and minus infinities from dividing by zero are automatically culling and handling all of our edge cases so far, except one.
+We get a NAN on this case when the ray goes right through the edge of a box.
+And what should we do and how can we get that?
+Well, our desired behavior is that there's no gaps between two AABBs that touch.
+If there were a gap, you could basically have two walls that touch, and you could shoot right between them.
+Or you could drop something right through the floor.
+We don't want that.
+So the easiest way is to make the edges of the box considered part of the box.
+We'll do this for SSE.
+Other platforms are an exercise for the reader.
+So.
+it turns out we're going to need to turn negative zero to positive zero. This will make it so that negative, uh, we only have positive infinity to deal with. And we'll also use a specific ordering of our arguments to min and max. And I'm not going to put you through the derivation. I basically tried all ways of doing it and picked the one that worked, which is not exciting to do and even less exciting to watch.
+So enough math for now.
+Let's code.
+Here's the entire code to test four bounding boxes.
+It all fits on one slide.
+And it's not even a lot of, like this, oops.
+This is two instructions.
+This is one instruction.
+This is a lot.
+This is like four instructions.
+This is like two instructions.
+So that's not a lot.
+That's it.
+OK, so we'll do a quick explanation.
+Here, we're just finding all of the plane distances.
+This is mostly for reference later.
+Here, we combined them to find the enter and leave times for each axis.
+And again, this is for four boxes at once, because it's SSE. And I've highlighted that we're swapping the order of the min and maxes for these min and max instructions.
+And that turns out to be crucial for getting correct.
+edge case behavior on SSE when you go through the edges of a box. And then this just finds the global minimum, uh, the last enter time, this finds the first exit time and this decides if you should keep each of the four boxes or not and puts it in a four bit register, well, four bits of a 32 bit register. So, robust code. This code is robust. This code looks almost exactly the same and is broken.
+This code looks almost exactly the same and looks like it's better because it has a lower dependency chain. And it's less broken, but it's also broken. So when you have code like this where you've carefully designed it, leave warnings in the comments so that future programs don't come in and make things better and break edge cases that happen to one person every month or so and you talk up to gremlins.
+So here I've given for future reference detailed analysis of why it's broken, but that's kind of boring right now, so let's move on.
+And then here's some more boilerplate code of just how we decode the axis and line bounding boxes.
+We get a constant, we unpack our 16-bit integers, and we decode them using fixed point and relative origin.
+OK, now we need to find our traversal order.
+This is going to end up being cool.
+We'll get some branchless code using bit manipulation and magic numbers to visit a specified subset using a mask of the boxes in the ideal order.
+So keep flags, which we've just found, has a bit set for each box we want to keep because it hits the ray.
+And we want front to back order for doing earlier rejection tests.
+So our min and max enter times for each box have this information, and we'll keep the maximum.
+So this is the time that they first leave each box, not the time they first enter.
+And almost always they'll give you the same order.
+There's only one case where they're different.
+um, the only case is when you have a big box holding littler boxes. This is the case you have the sky box holding your playable geo. In that case, if you use the exit time, it will visit the interior box first, then the outer box, so it will visit your playable space and then the background geometry, which is what we want in that edge case. So that's why we use Tmax, but Tmin is almost as good.
+You also go fast by doing too much work. We write all the boxes even though we don't use all the boxes. But we only increase the count of boxes we have by however many we're going to keep.
+This gets rid of all of loops and branching and we need room for all of those boxes anyway and the off chance we hit them all and it's okay to have garbage data if you never read it.
+So how do we figure out where each box goes in our sorted list?
+we don't want them just in the order they're in the tree, we want them in front to back order.
+So we observed that the index it should go to is the number of boxes that should go before it.
+So I'll call the boxes A, B, C, D. Box A's index is B is less than A plus C is less than A plus D is less than A. That's pretty easy. So we could do this and it would not work. We could just do it for each box, but it doesn't work. So why is it broken? It's because of ties.
+If all the distances happen to be exactly equal, every box says I belong in index zero and they're going to fight for it.
+So we fix it by if we're testing A versus B to go into index A and to go into index B, we make sure they give exact opposite results.
+And so it's not A is less than B. And this works even if we happen to have an AND.
+So another receptility is that if we use A is less than B, and B is less than C, we have to use A is less than C.
+We're not free to choose C is less than A for one of our tests.
+And it's because if we chose C is less than A, we could end up with our all equal test saying that C is greater than C, which makes no sense.
+So because of that, one of the four boxes always has to be on the left-hand side of each test.
+And one of them always has to be on the back.
+That kind of narrows the combinations we can check.
+And so here's my solution to do six tests.
+There are 24 possible solutions that correspond to different permutations of the all equal case.
+This gives three, two, one, zero.
+So we're now going to translate this into SIMD.
+We are going to do this using SWZLs.
+So this notation means we test box A versus box B, A versus C, A versus D, and B versus C.
+So that's doing four tests at once.
+And we have a lot of flexibility in how we group these.
+This is kind of one arbitrary grouping.
+When we do this, we want to do the fewest possible swizzles.
+This is like solving a little puzzle, and my solution is not unique.
+Now, we also get eight results but only need six, which gives some flexibility in how we pack things.
+So these two extra ones we can choose so that they always go zero, like A is less than A. We can use a result we need already, like A is less than B. Or we can use a result we don't care about, like B is greater than A. I ended up just doing things like A is less than A.
+Here's a table of how I played around and came up with.
+which tests I used and this box used these tests. And this is four tests in one register, four in another. And these are the two swizzles. And notice that this swizzle is repeated twice.
+And one other subtlety is this is bit 3210, which is like Intel's preferred order. This order, I often do A, B, C, D.
+But DCBA in this case is not permuted. It's natural order.
+turns out to be nice when I'm keeping track of which box is in which bit. So here's all that code. It's not much. We do a shuffle, we do a couple comparisons and we combine them. The combining is interesting. Normally you'd expect to take four bits and tack them on to four bits. But that leaves two zeros in the middle. You can see the two zeros right here. So instead, we just move it over two to get rid of those zeros.
+But instead of doing bit ops, we do a multiply and add, because we know that our bits don't overlap, so we're not ever going to have carries.
+And using a multiply and add lets the compiler use a single LEA, load effective address instruction, to do this calculation.
+So we save, like, bytes of code space in one cycle of execution time, which is a huge win.
+And then we just use pop count to do the test.
+Now, we use bit operations to do the not. So we sometimes use A is less than B, sometimes not A is less than B. And so we use XOR. In this case we want to flip all of the tests so we use tilde. And then this just picks the three bits we care about. And then this counts the three bits. So pretty simple code. And then we only want to keep the boxes that passed our test, but we've been sorting all the boxes together. So how do we limit it to the ones we care about?
+We just force the time to infinity for the ones we don't care about, and the ones we like are in the front.
+We don't care what happens at the end.
+So that's pretty easy.
+That's just a couple of minor tweaks here, which you can look later.
+It's just a couple extra instructions.
+One more gotcha.
+We need to limit it to just node boxes or just leaf boxes.
+Here's a leaf box.
+So we have isNode and isLeafMasks in integer registers, which we, I haven't shown you that, but we decoded that in parallel to our AABB test.
+Now we need either a LUT or a long code sequence to force plus infinity based on a register inside our SSE register.
+And if we did that, we'd have to do all of our compare logic and mask works twice anyway.
+So instead, we stay in the integer unit, and we change the output bits of all of that floating point math as if we had done it.
+So we don't actually force to infinity, we just do bit twiddling to make it as if we had done that.
+So if we're comparing A and B, if A should be infinity, we force a zero.
+If B should be infinity, otherwise we force one.
+And this also says exactly how to handle the edge case.
+We put it into a fun lookup table, which is just using the stuff we've had before and saying, what bits do we change in these cases?
+It's pretty straightforward.
+These bits correspond to, oh my mouse stopped working.
+These bits, why did my mouse stop working?
+Oh, there it works again.
+Yeah, these bits correspond to these hex constants.
+And one thing to note that'll be useful to us is each bit appears exactly once.
+The implication of this is if you flip all of your input bits, you'll also flip all of your output bits.
+this will be useful to us.
+We are already finding a mask for is it a node and is it a leaf?
+So the regular inputs to this table use not a node, not a leaf, but inverted inputs use is a node, is a leaf, which is what we have.
+So that's why inverted inputs are better.
+And if you use inverted inputs, you get inverted outputs, so you invert your bit math.
+So how do we get those masks?
+Well, we have that four-bit child type we saw back at the beginning.
+We encode it this specific way.
+Zero is a node, one is empty, and the rest are different primitive types.
+And we decode that into a 32-bit integer per child using this.
+The child type minus one underflows if and only if it was zero.
+And that makes the upper 28 bits all set.
+and no underflow means the upper 28 bits are all clear. And this is defined behavior as long as you use unsigned types. So don't use signed integers for this. So we end this with those magic constants I've shown you. We also have a bit saying this box is a node. We order the constants together for each of the four boxes to get all of the bits we need to set and clear.
+And then we separate into the set bits, into the clear bits, into the what type of boxes it bits in the end.
+And that fits on a single slide.
+And I've color coded, these are sets, these are clears, I mean, these are clears, these are sets.
+This is what type is it.
+And then you can see it's just a little bit of bit math.
+That's pretty cool.
+So, we still need to actually write that stuff.
+So leaves are processed in front to back order, so we can simply write them into a FIFO queue.
+Nodes are processed depth first.
+If you did a FIFO queue, you would do breadth first.
+So a stack is depth first, so we need to write in reverse order.
+FIFO order would be 0, 1, 2, 3.
+Stack order is 3, 2, 1, 0.
+So if you look at it, you end up with this is what you need to do.
+And here's a table you just make.
+If it's this, if I want to keep all four, I want this order, if I want to keep three, I want this order.
+And you just notice this works and it's solving a puzzle again.
+And you get this code.
+This we've seen before.
+This is the new code.
+This is just that thing I just showed on the previous slide that remaps indexes.
+And that's how we do front to back depth first traversal.
+That's pretty cool, not much code, no branches.
+And lots of instruction level parallelism, so parallel CPU pipes can be effective, but we can still make it better one way by not doing it.
+It turns out that most of the time, 80%, we only have zero or one children, and you don't need to sort if you've got that few.
+So it's worth a branch.
+If we know we have zero or one, we have a 4-bit mask that we know has at most one bit set.
+So it's going to be one of these five values.
+And we want to turn it into an index, so we want these values.
+And another little puzzle.
+I noticed that dividing by two almost worked, except for this guy.
+So I added a fudge factor to make him work.
+And that ends up this cheap code, which you can put into C++ and it looks like this.
+The leaf code is exactly the same.
+Ta-da.
+Now I tried pre-caching and it didn't help on console even though I know better than the hardware.
+So that was sad.
+I thought, I only need one cache line.
+Surely pre-fetching is ideal for this, but no matter where I put it, it didn't help.
+So how do we batch leaves?
+We just, like I said, we append to a FIFO queue and we amped it when it's full enough.
+It turned out it was faster if we always traced rays right away against triangles.
+and it's also useful to always test them right away if you're debugging it. So you see where things came from. Otherwise we drain a queue when it gets too full. This helps prediction in code cache. So now we need to do triangle collision. Some more math. Here's an efficient test by these guys whose names are cool. And there's one problem with it. It can have cracks.
+If you look at this, vertex A is treated differently than vertexes B and C. And that means that the order of vertices can affect the results of any edge test, whether or not it exactly passes an edge test or not.
+So if you get really unlucky, you can have a shared edge between two triangles with no cracks.
+But because of the order, the floating point math ends up putting a tiny hole in between those two edges, and something can go through it.
+And it's going to be an extremely rare bug that you'll chalk up to mysteries.
+So it's better to notice it when you read code, because you'll never find it any other way.
+So I did something else that doesn't have cracks.
+I create a plane that goes through the ray origin and each edge, three points defines a plane, and the ray hits the triangle if and only if it's on the same side of all three planes.
+And we still have to see if it hits in the right distance range.
+So I tried to do a perspective sketch, pretend it's 3D, but I don't know if this ray hits or not based on the sketch.
+It's easier to see if you move the camera to the origin so that the planes now go through the camera and they become lines.
+So here's a ray that misses.
+Here's one that hits.
+You can see this one's on the same side of all of these.
+We don't know if it's plus or minus, but we don't care.
+This is on a different side of this edge than these two, so it misses.
+And then this has no cracks, even with floating point math, independent of vertex order.
+And when done in SIMD, it's roughly the same cost.
+How you treat plus and minus depends whether you hit both front and back faces, just front faces, or just back faces.
+And whether plus or minus is front or back depends on your winding order.
+Okay. So here's that math.
+It's just you make the plane.
+and you dot product with it.
+Pretty boring.
+This doesn't do the test for the distance, but we saw that earlier.
+It's time for capsules.
+The capsule is split into three features, two spheres and a cylinder.
+The triangle has eight features, three vertices, three edges, two faces.
+So we have 24 feature pairs to test, and they're broken down this way.
+We don't test the cylinder versus a face because that's a very rare case that can only happen if you start intersecting and only if your spheres on the top and bottom don't overlap at all so that there has to be a gap between your two spheres for this case to ever matter.
+Which means that the height of your cylinder has to be bigger than the diameter.
+Anyway, we don't want to test all pairs.
+If we did this in the naive SIMD way, since if you rounded these up to multiples of four, you would end up with seven SIMD tests with 28 results.
+And 20% of them would be useless to you.
+And it's often easy to see that you don't need to do all the tests.
+So we'd like to do that.
+So what we'll do is we'll quickly call some collision pairs and put the ones we keep into type-specific queues for like sphere versus vertex, cylinder versus edge, and so on.
+and will train queues when they get full.
+And this does automatic vectorization for SIMD at runtime.
+And it is perfectly good for eight-way SIMD in the future, and is as good as you can get.
+So, how do we do the quick calling?
+We'll do an orthographic projection in the direction that the ray is moving.
+So you're looking along the ray direction.
+And so that means the swept carry, from your perspective, appears perfectly stationary.
+And so instead of doing a 3D swept test, you can do a 2D intersection test.
+So here's a picture.
+That's a capsule.
+That's a triangle.
+Here's the capsule broken into parts.
+And then what we're going to do is we're going to take the center of the two spheres and compare it with the infinite extensions of each edge.
+And we're going to take the radius of the sphere and move it to.
+a band around each edge and that gives you this diagram.
+Then we're going to test the sphere's origins, how far it is from each edge.
+That tells us is it on which side of this edge and we can do a radius check to see is it in this band.
+So a sphere versus edge test is needed as if you're inside this box.
+We see if you're inside this infinite band.
+If you're inside these two edges.
+you need to do it, or if you're inside these bands, you need to do it.
+And so that's just a few tests.
+Vertices are similar.
+If you're inside this band and this band, you need to test this vertex.
+We don't need to test any of our six vertices.
+The face is if you're all on the same side of lines.
+We don't need to test the face with either.
+Cylinder is exactly the same, except instead of using the radius, you project the sphere perpendicular to the edge, which.
+is pretty cheap. So you get a different radius for each band for the cylinder. So our quick call eliminated 20 out of 22 tests. That's pretty good. We only kept two tests. So how do we do that in code? Well, first we need to find the distance to the edge. So we described it working in 2D, finding the projection of 3D space. If you extend those 2D edges into 3D planes that go through the view direction.
+The 2D distance to the edge is the 3D plane distance.
+So we can skip the projection and just stay in 3D.
+To get the normal, you just do this cross product.
+And to find the distance, you just do this dot product.
+So it's pretty cheap to find how far you are from an edge.
+And then you can do three to four edges at once in SIMD.
+So you can do triangles and quads, which is what we do.
+it all ends up being roughly equivalent to four dot products.
+And you usually need that triple product anyway, so you can save the results when you batch up the features and use them later.
+So we still need to test the distance to the radius.
+It turns out we don't need to know if positive or negative distance is inside or outside.
+For edges we just test, is the magnitude of distance less than radius?
+For vertices we test if both edges are flagged.
+And for face we just see if all have the same sign.
+One gotcha is the normal is not normalized, and you don't want to normalize if you don't have to.
+So you basically need to square both sides to avoid a square root.
+Move the magnitude of the normal to the right to avoid a divide, and it's all faster, gives you the same results.
+Almost there.
+So here's some quick notation.
+B means you're in an edges band.
+RB means you're in the band of the edge rotated right, LB.
+means and left edge is band. So this is for a triangle a 3 bit value. This is that 3 bit value rotated right, rotated left. And then S is just the edge assigned bit. But again, we don't know if plus or minus is in or out. And so here's kind of a sketch showing here's the band we're interested in. Here's left, here's right. Signed bit says which side of this edge. And I've just shown bit 0, but we have it rotated for bits one and two also. And we calculate all at once. So for an edge to hit, you need to be in its band and either between its neighbor bands, neighbor edges, which is this test, or inside the neighbor's band, which is that test. So it's just this bit math. And this is cool. This only depends on three or four S bits, and this only depends on three or four B bits. So they can be put into a micro LUT, which is a single integer literal. It's a LUT so small you can hold it in a constant integer. So for three, we have three bits.
+We want to get a three bit mask for each of them, so we only need 24 bits for a LUT.
+So here's a case where octal is actually useful.
+You could show each entry in octal using only three bits.
+And if you work out the truth table for rotating and oring and all this, you get these magic numbers, and I'm sure you can do that.
+And for quads, you get these magic numbers, and it's so fun to do.
+So for face to hit, all edges must have the same sign. We can do that with the microlet too. We just use it with the most significant bit set and the least significant bit set. To get the left rotated band, we need to rotate three bits by one bit. There's no instruction for that, but we can use this to do it. We can multiply by nine and shift right two. Multiplying by nine makes two copies of the bits. And then shifting right two keeps just these three, so this is actually rotated.
+This also keeps this bit, but we don't care. We won't use it. It becomes this code you can look at later. It turns out we can cull even more tests with precalculation. A shared edge, you only need to test it one way. You don't have to test it for both triangles. And you also don't need to test an edge that's in a valley.
+But you do need to test both edges when it's co-planar because, or at least you need to test one edge when they're co-planar because otherwise each triangle may think the other will catch the collision and you'll fall through the floor mysteriously once ever.
+So we just store a mask with each poly and do a bitwise and, and we call 60% of our edge tests, which is great.
+Now can we do the same thing for vertices?
+Well we need to, do a vertex if either edge is ever tested. So we have to keep a vertex if either of its neighbors edges is kept. It culls about 15 to 35 percent. Not as good, but it's something.
+We tend to hit way fewer vertices than edges anyway, so it's okay that it's not as accurate. And to get more accurate, we need more bits stored per triangle, and we'd rather use those bits for other stuff. So, last thing to do is queue the collision tests.
+We want to compact the fields and SIMD registers to tightly pack the channels whose bits are set in the mask we just found.
+So we found we want this one and this one.
+So we want x1 and x3 to pack here.
+Don't really care what's here.
+And we grow the count by the number of set bits, in this case, two.
+We still store the whole thing.
+There is no good option in SSE.
+But supplemental SIMD extensions three finally added something usable.
+This shuffle that takes a 16 byte shuffle pattern that says where each byte goes.
+It's something, but yeah.
+So we'll end up with this code for each field that we're putting in our struct of a ways to compile, to collide against.
+So this is how we add Q.
+We still need to find the pattern.
+So we need to get it out of a bit mask.
+it's too big for a microlet so we need to solve a puzzle.
+Basically we need this pattern 1010 stored in an integer register to get into this byte pattern stored in an SSE register. And note that this one corresponds to 4567 because we have to say where each of the four bytes in our four byte value goes. So, uh, so, uh, so, so, so, so, so, so, so, so, so, we want four destination indexes expanded from our bit mask in the range zero to three. So we basically end up doing a micro let for each index. So we have four micro let's instead of one. And this code does that. And according to Agner Fogg's timings, it should be about 23 cycles on Jaguar, which is about a quarter of the cost of a cache miss.
+But to be honest, we just pay for the cache miss and do it the simple lookup table way.
+OK.
+Conclusion.
+We got there.
+Takeaways.
+When you're doing your AABB trees, consider big versus little splits.
+If you have a four-way tree, you can merge two half empty leaves to save space.
+It's OK to write garbage data if you don't ever read it.
+Microlets are really awesome.
+They fit in the code cache, so you don't get any cache misses.
+They're really pretty much perfectly prefetched.
+They're super fast.
+Mask and bit tricks are great for branchless code, which are good for performance.
+Divide by zero can be your friend.
+It's not always bad.
+Know your edge case behavior and try to make your typical case work for edge cases.
+And Quick Call plus automatic SOA batching is great for SSE and AVX.
+And like I said at the beginning, it made our collision code twice as fast, even though it was doing more work.
+So a special thanks to Chris Butcher for his help and for the Titanfall artists for all the pretty pictures they've used in the background.
+And here's some references.
+That's it.
+Any questions?
+If you've got questions, please use the microphones that are set up there and there.
+Just a quick question, you used pop count in a number of your slides. Is that a concern on the low end PCs? When I looked, I couldn't find any CPUs that had SSSE3 and pop count, or not pop count. So, yeah. Good question. So he asked if any CPUs had SSSE or any CPUs we cared about didn't have the pop count instruction. If you didn't hear it. Anything else?
+All right, thank you all for coming.
+And remember to fill out your views.

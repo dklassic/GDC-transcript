@@ -1,0 +1,253 @@
+My name is Nolan Carnahan.
+I'm an Engine and Graphics Programmer at Ember Lab, the studio that made Kane and Bridge of Spirits.
+And in this talk, I'm going to cover some of the VFX and tech art that went into realizing the dead zone restoration sequences and the round abilities in game.
+So for some context, Ember Lab is a small animation studio turned game studio.
+and Kena Bridge of Spirits was our first big game.
+The studio had previously worked on the effects for commercials and short films, but I imagine more of you would probably recognize the team's work on Terrible Fate, a Majora's Mask fan film that went viral apparently five years ago because time has no meaning at this point.
+That said, I personally joined the team to work on Kena, and while I certainly did a lot of work on the content I'll be presenting, I do want to stress that it was definitely a team effort across.
+art, programming, and design to arrive at where we did.
+So for anyone not familiar with the game, Cana Bridge of Spirits is a third-person action-adventure game featuring the spirit guide Cana and her fluffy round spirit companions called the Rot.
+Throughout the game, you come across this corruption covering the land that we called Dead Zone, which usually manifests in locations tied to lingering spirits struggling with some sort of tragedy from their past.
+In-universe, the Rot Spirits are a key component of the cycle of death and rebirth and can eat away the dead zone to restore balance.
+By using the Rot, Kena is able to destroy the dead zone hearts, the source of the corruption.
+And upon doing so, the player is rewarded with the restoration of the environment.
+We call these sequences dead zone clears.
+And in this talk, we'll discuss the goals that we had established for these dead zone clears, showcase some of our earlier prototypes, and break down the different layers of VFX and tech art that went into.
+achieving our visual and storytelling goals, and then finally share some concluding thoughts and some lessons learned.
+So starting from the goals, we first wanted the dead zones to feel threatening to the player, in harsh contrast to the inviting nature of the rest of the world.
+The spaces should not only be filled with spiky roots and boldest growths and thick fog, but the transition back to the healed version of the forest should be obvious and noticeable.
+We also wanted these dead zone clear transitions to take place in real time as much as possible.
+The transitions in some of our prototypes hit a lot of environmental changes behind cut scenes, which felt somewhat disconnected from the player's actions.
+Bringing it closer to the gameplay makes it more fun to do and it makes the player want to do it over and over again.
+And finally, since the Rot Spirit companions are such a key component to fighting back the dead zone, we wanted to make sure that the VFX feedback reinforced their place in the story.
+As Kena has access to a variety of rot-powered special abilities, we wanted those abilities to have a smaller scale version of the cleaning feedback scene in the dead zone clear sequences as well.
+So these prototypes showcase an early version of Dead Zone, one with larger spaces packed full of corruption, tall enough to physically block the player.
+However, this vision wound up changing over time because of both art and design considerations.
+In this early version, the player could throw bait to attract the rot or move them around directly, like the rot cloud in the shipped version of the game.
+This version is obviously quite crude, lacking any sort of feedback when the larger dead zone clumps are getting destroyed.
+This later prototype used a render target to mask out areas that were cleaned by the rot, which is then sampled by other materials.
+The cleaning of the landscape material was somewhat successful and closely resembles what we shipped.
+However, these larger dead zone clumps push their vertices down into the terrain, which causes a lot of weird visual artifacts when the player is slicing through the middle of a mesh.
+In addition to the visuals, we had a couple other problems with this version.
+The meshes need to be very high poly in order to support this deformation, and LOD popping would be exacerbated when you're cutting into a mesh.
+Handling collision was also very challenging as we did not want to dynamically adjust the collision based on which parts of the model were cleaned.
+And instead we just wound up disabling collision and we made the player take damage when they walked through it, which didn't look very good either.
+As these collision issues also caused problems for navmesh generation and other things of the like, we wound up going away from this approach to ensure that the combat worked well in these spaces.
+In this last bit of prototype footage, you can see how a prototype dead zone clear was not yet accomplished in real time.
+You might notice that these blue and purple flowers only appear after the camera cuts to black.
+This flower growing in during the cut scene is meant to incept the idea in the player's mind that the plants grew back in, but it's not quite the same as seeing it actually happen during gameplay.
+So next I'm going to talk about how we built the final version of the dead zones in engine.
+There are roughly four layers or ingredients involved, and each of them uses different solutions to solve their unique problems.
+The first is the landscape, the base layer of the terrain.
+And then after that, I'll cover the foliage and how it builds on how the landscape is cleaned.
+And next, I'll cover the improvements that we made to how we handled larger dead zone meshes.
+And finally, I'll cover the systems that we built to drive lighting and ambience when the player is in the dead zones and how we turn them off during the clear sequences.
+So I'll now go over each of these layers in detail and show how they all work together.
+Our landscape material supports two additive layers that can be painted on top of the underlying material.
+In Unreal, this requires checking the no weight blend checkbox on the landscape layer info.
+The first is a dead mask that just makes the underlying material appear dead.
+And the second is a harmful variant of the dead zone that slows the player down and will kill them if they stand in it for too long.
+The dead mask.
+tints and desaturates the base color and makes the material appear a little bit glossier by modifying the roughness.
+And on the other hand, that harmful dead zone one layers a different tiling material on top of the underlying material, which makes the border between the two a little bit more clear.
+This layer also modifies the physics material so that we can detect when the player is standing on top of it.
+So to implement the cleaning effect, we have gameplay objects right to a top-down.
+render target that is centered on the player's location.
+The red channel of this texture encodes the clean state.
+So for example, when the player destroys a dead zone heart, a circular shape extends outward and marks different areas as being cleaned.
+The material uses pixels world space position to compute the correct location at which to sample from this texture.
+And the value that is sampled is used to fade off both of the additive dead zone layers on the landscape material.
+Since the landscape can be visible from afar, we actually have two render targets set up in a similar manner to cascading shadow maps.
+One render target of higher resolution covers the area immediately surrounding the player, and a second lower resolution render target covers a much larger area, which allows us to have dead zone appear being cleaned, even from very far away.
+Just like in cascaded shadow maps, we also ensure that the render target is snapped to the nearest texel.
+so we don't have any weird sampling artifacts from it smoothly interpolating between when you're moving small distances.
+There are a couple of limitations with this approach.
+One of the obvious ones is that the render target is top down, so we can't have dead zones layered on top of each other, but this didn't really wind up being a problem in practice.
+This also only supports cleaning dead zone.
+So while we thought that dynamically authoring dead zone might be interesting from a gameplay perspective, we didn't wind up actually pursuing that.
+So yeah, just above the landscape, we have ground cover meshes like our grass, clovers, and flowers, which add depth to the terrain as well as other larger plants, like ferns and some other stuff.
+We use Unreal's built-in instance foliage system to place and render these assets.
+For assets that need to be used in the dead zones, we set up two foliage types for each plant, both a clean version and a dead zone version.
+And we use the appropriate version when doing level dressing.
+So if the artist is placing Assets on top of somewhere where they painted Dead Zone on the landscape, they would make sure that they place the Dead Zone versions of the Assets instead.
+And so obviously, we also need two sets of Materials as well, and the Dead Zone Foliage Types have different Materials assigned that support being cleaned.
+Having two sets of Foliage Types and Materials did lead to some minor issues, like keeping both of these in sync when we were making changes to things like Material parameters.
+But ultimately, I think this wound up being the right call.
+We had tried out using a single foliage type that could detect when it was in dead zone, but that added additional complexity around detecting what landscape layers were below the mesh, which is not super easy to do out of the box.
+It also increased the shader complexity for every mesh, even though most meshes were not going to be transitioning from cleaned to dead zone.
+Given the asset density that we were targeting, it did not really seem to be a trade-off that was worth making.
+So these foliage types are generally cleaned the same way as the terrain, by sampling from the red channel in that cleaning render target that I mentioned earlier.
+And they use that value to lerp colors and other Material parameters.
+You might also notice that some dead zone plants scale down and disappear when cleaned.
+This is handled by scaling the mesh in the vertex shader based on that same value sampled by the Texture, or sampled from the Texture, I should say.
+This does leave us with a problem, though, in that if we remove a lot of dead zone versions of plants, we are left with bare patches of the landscape exposed.
+So we solved this problem by having other plants grow back in and fill in those bare spots.
+Certain Materials actually start with a scale of zero, and they scale up instead, based on the value sampled from this time, the blue channel, instead of the red channel.
+One big reason that we separated these into two separate channels, is we want the flowers and other plants to grow in a little bit delayed relative to when the dead zone gets cleaned.
+So having them separated into two channels allows the viewer to take them in as two separate events, and it makes everything feel a little bit less in sync.
+Adding this wound up being a big win from an art direction perspective as well, as it enabled the artist to dress spaces with vibrant plants and large flowers that would not look correct in a dead zone space, even if we did desaturate the colors.
+So whenever the dead zone clear occurs, all of these plants rush back in, and they fill the space with life.
+This also allowed us to stop loading in levels to bring in Assets and have it all occur in real time.
+One obvious drawback of scaling foliage like this in the vertex shader is that there are locations where we have two versions of plants in the same area.
+We have dead zone plants that scale down, and we have the plants that grow back in, and they scale back on top of those ones.
+To optimize this, we could have theoretically written some code to modify the instance foliage system and have some code that tries to call out zero scale instances or something like that, but we did not actually have the time to make any big changes.
+So instead, we just made sure that we did not go overboard with this effect.
+At least any of the zero scale instances, all of the triangles that are generated from them have zero area, and so they at least get called during rasterization.
+And then one final bit of visual polish on the ground cover assets is what we call overgrowth.
+The green channel in the cleaning render target encodes an additional value that we use to temporarily saturate colors and scale up plants beyond their normal size.
+You can see this effect take place when destroying a dead zone heart or removing the rot in the rot cloud form through the grass.
+This effect provides some additional bounce during dead zone clears.
+It makes everything just feel a little bit more animated.
+And finally, you can see all of this work on the foliage shaders come together in the context of a dead zone clear.
+It is easier, I think, to see it in the viewport rather than the debug render target view, but the blue channel is slightly delayed to the red channel.
+So you might notice that the flowers grow in a little bit after all of the grass turns green.
+Also note that the green overgrowth channel is the only one that does not stick around after the clear.
+That effect is temporary.
+The next ingredient is the larger dead zone meshes in the space.
+This includes the bulbous, gnarled dead zone pods, but also trees with some larger dead zone growth sprouting out of them.
+These larger meshes are great at blocking progression through a space, and they help sell the idea that the dead zone is taking over.
+Whenever a dead zone clear occurs, these meshes dissolve out, allowing the player to get past them.
+These meshes are actually Blueprints rather than instance foliage.
+A big reason for that is we did not want to use the cleaning render target, since we would run into the same issue that we had with the prototypes, where things would be, we would just be cutting through the middle of a mesh whenever those effects were going off.
+And another problem is that during the dead zone clear, the cleaning effect moves out so quickly that it would wipe over the larger assets in a fraction of a second, which wouldn't look good either.
+So instead, what we do is we dissolve out all of these assets on their own timeline.
+By giving them more time, the player actually has a chance to take all of this in.
+Compared to the prototype version where the meshes could be either, could be partially cleaned, these meshes are binary.
+They're either cleaned or not.
+So that makes it easy to disable collision on these when they're cleaned.
+To make the dissolve still feel connected to the dead zone hearth's destruction, We built a tool to adjust the time that it takes for each one to start dissolving out.
+So what happens is when the dead zone cleaning effect goes out, these meshes are not dissolved by the time the cleaning effect reaches them, but rather they start dissolving out when the dead zone clear hits them.
+And that gives them enough time to sort of be spaced out, and they just dissolve out on their own timeline, and they can take however long they need in order for it to look good.
+The dissolve in the shader is a pretty typical noise-based dissolve that brightens the edges to cover up the transition.
+A lot of the assets also spawn particle effects, like little splashes and snapping roots and a little bit of distortion to help cover stuff up.
+Some assets like trees also lurp between two separate diffuse textures, which just gives us a little bit more texture variation.
+You might notice that there's a little bit of moss growing back here on the tree.
+And note that for the handful of assets like trees that stick around after the clear, we don't actually disable collision on those as well.
+So as with most things that are Blueprint adjacent, we did run into some performance problems with our initial setup for these assets.
+We had originally set up these Blueprints using dynamic material instances to allow tweening the dissolve parameters per instance, but we moved away from that since it breaks instancing.
+Since version 4.22, Unreal automatically instances draw caps.
+draw calls that share the same mesh and materials, which can significantly reduce the amount of draw calls that get submitted to the GPU.
+But since dynamic material instances can have different values for their different shader parameters, they need to be rendered as separate draw calls.
+The other problem is that it's expensive on the CPU side to update a lot of material parameters.
+The default interface for updating material parameters involves looking up the parameters by name, which involves a lot of string comparisons.
+This was especially bad during level streaming, because we would wind up updating a few parameters on hundreds of dead zone Blueprints.
+And on some of our levels, we were paying something like 30 milliseconds just to create the dynamic material instances and update all of the parameters on these assets just so they could get into the correct state on the level load.
+So to solve these problems, we switched to using an Unreal feature called Custom Primitive Data.
+Custom primitive data gives you access to 32 floating point numbers on a per primitive level that can be modified just like material parameters.
+But it does not require you to make dynamic material instances just to set these values on a per primitive basis, or a per instance basis.
+So as you can see in these images that I stole from the Unreal documentation page, in the shader, instead of reading the parameter value by name, you instead index into that float array.
+So you just specify the number of the index that you want to use instead.
+Since a lot of our shader parameters are actually exposed from material functions and not the material itself, we set aside, we set up like a convention to set aside specific indices to be used for certain effects.
+So that would allow us to avoid any conflicts if you just drop in random material functions into different materials.
+So for example, Index 0 might be always set aside to store the dissolve amount, or index 1 might be set aside to always store a desaturation value or something like that.
+So since we don't need dynamic material instances anymore, the renderer is able to instance all of these dead zone meshes.
+And another thing that is also a benefit is that since the parameters are referenced by index instead of by name, updating these values on the CPU side is a lot easier because we avoid all of those string comparisons.
+Custom primitive data does have some drawbacks though.
+One big one is that it is a per primitive setting.
+And that means that if you have multiple materials on the same mesh and you want them to have different, different values for their shader parameters, you won't be able to do that.
+So in our cases, whenever we ran into that, we wound up just falling back to using dynamic material instances for those meshes.
+So the final key component to the dead zone is the lighting and ambience.
+All of the lighting in Kena is real time, which gave us the ability to finely tune the look of each area in the game, including the dead zones.
+Lighting artists control the lighting in different regions by using custom post-process volumes.
+Similar to the built-in Unreal post-process volumes, our volumes drive the lighting and fog parameters based on the camera location, fading in the values as the camera gets closer.
+Artists can modify a variety of properties like sun or skylight intensity or fog density, and plenty of the other in-depth parameters that get exposed on the light and fog components so that they can finely tune the look of the space.
+Similar to post-process volumes, all of the parameter overrides are optional, so a volume only needs to specify a value for things that it actually wants to override.
+For dead zones in particular, we generally just decrease the sun intensity, increase the fog density, and bring in a little bit of chromatic aberration.
+And all of these parameters are not actually stored on the volumes themselves, but we store them in data asset configuration files.
+Swapping out the configs in the editor is a very easy thing to do, and it can be a great way to find a config that is close to what you're looking for when you're setting up the lighting in a space.
+Another benefit of having the lighting configs as separate files is that it avoids a lot of the source control conflicts where people would run into issues having to check out the same levels.
+So for each dead zone, we wind up setting up a post-process volume that controls the look of that particular space when it is a dead zone.
+And during the dead zone clear, we gradually fade out the contribution of that dead zone post-process volume to avoid a lighting pop.
+Artists can also preview the contribution of a volume by toggling it in editor.
+So this makes it very easy when you're setting up the length for a space to see both the before and after version of the dead zone clear.
+So finally, in this breakdown video, you can see how all of the different layers come together for the final product, starting from just the landscape, having the foliage, having the rest of the scene come in, having these dead zone meshes, which you'll see dissolve out slowly once they get hit by the clear.
+and then the lighting and the fog changes that dissolve out at the beginning.
+So now I'm going to talk about how we achieved the rot-powered special abilities in the game.
+There were two big goals that we wanted to accomplish with these abilities.
+First, we wanted to make sure that we captured the collective nature of the rot and their role in cleaning Dead Zone.
+While the rot are typically animated characters represented by skeletal meshes.
+They transition through different representations during these abilities, including Alembic geometry caches for fast morphing transitions, and Niagara particles for when the rot are swarming together.
+So first, the geometry caches are used in cases where it would be hard to synchronously animate multiple rot.
+So to create the geometry caches, we animated low-poly rot meshes to follow animation curves.
+There are generally only a few base curves that are then tweaked slightly to create different path variations for other rot to follow.
+This ensures that there's some level of visual cohesion as all of the rot are swarming in.
+The meshes are also stretched as their velocity increases, with care taken to preserve their overall volume.
+You can see these used at the beginning of the rot bow and bomb abilities, as well as the rot hammer.
+For swarming behaviors, we use a Niagara sim where each rot is represented by a particle.
+The normal skeletal mesh versions of the rot can be quite expensive, and so we wind up scaling down the number of rot that are visible on screen depending on what platform you're playing on.
+However, we wanted to ensure that the user could see all of their collected rot when they're in the rot cloud form.
+So we chose to represent them with static meshes in the Niagara particle system to reduce their animation and rendering cost.
+This Niagara simulation runs on the CPU so that we can easily keep the particle locations in sync with the rot characters.
+This allows us to switch from the particle system version to the skeletal mesh version relatively seamlessly.
+The Niagara simulation distributes rot along a spline.
+When binding enemies, the spline is generated dynamically by adding points that follow an animated path.
+As you can see here, this is the version that just has the spline.
+On the other hand.
+When in the rot cloud form, the splines actually follow the bones in the skeletal mesh.
+This ensures that the spline has a consistent length and the distribution, and it has a good distribution even when the cloud is standing still.
+The rot particles are attracted to points that rotate around this spline.
+The radius and angle of rotation of the attraction points is somewhat randomized per particle.
+These settings are also controlled both by curves that allow you to define how the values change over.
+the length of the spline.
+So you might want more thickness at the head and less at the tail.
+And they're also controlled by scalar values that can be adjusted.
+So for example, you can globally scale up the radius if, for example, the player collects more rot.
+These Niagara parameters can also be driven over time by animation curves.
+This allows animators to adjust the simulation's behavior to better match the animation.
+So for example, if the rot cloud is moving fast, the attraction strength might need to be higher to prevent the particles from lagging behind.
+To accomplish this, we just have some blueprint code that samples specific animation curves by name, and it routes those values into the Niagara system.
+We animate these values as scalars rather than absolute values to avoid stopping any other global changes that are being passed in.
+Like for example, if we're adjusting the radius based on how many rot you have.
+So in this breakdown of the Rot Hammer, you can actually see all three stages, starting with these rots swirling in as a geometry cache, and then turning into a Niagara particle system as they come bouncing out.
+And then finally, they change back into their skeletal mesh form when they hit the ground and come tumbling out.
+As previously mentioned, these abilities also are tied into the Dead Zone cleaning system.
+all of the abilities right to the cleaning render target so that they affect the landscape and the foliage, but they don't affect the larger dead zone meshes, which is good in our case.
+Not everything cleans in a circular shape, however.
+So we needed to add support for drawing trails to this render target.
+While this was originally built to provide the feedback when moving around the rot cloud, we wound up using it in a variety of places like the bind feedback, or the bounce during the rot hammer, or the cleaning trail left behind from the rot arrow.
+One problem we ran into was that the cleaning mask render target is top down.
+So there isn't really an easy way to encode that cleaning is happening at a particular height value.
+So one of the early problems that we ran into was, for example, if you take the raw arrow and you fire it into the air, ideally, the cleaning effect should decrease as the arrow gets higher off of the ground.
+But in our naive approach, it didn't do that.
+So we fixed this by just simply performing traces down to find how high off the ground it was whenever we were adding a point to the trail.
+And then depending on the distance to the ground, we adjusted the strength for that point.
+And the shader takes that into account, and it fades out the effect.
+So put all together, we think the dynamic feedback for these abilities gives the impression that the player is fighting back the dead zone every time they use the Rot in combat.
+So hopefully that gives you a brief overview of how we achieved the dead zone transitions and rot abilities in Cana Bridge of Spirits.
+I think that there were two big takeaways for us that we've already somewhat alluded to.
+First, ideally the VFX is used to reinforce the world building rather than just using it to make stuff look cool.
+Especially in our case, we struggled a lot to establish how the rot actually cleaned dead zone, but we found that good VFX feedback did a lot of heavy lifting when it came to getting players to understand and accept how the stuff worked.
+And second, we derived a lot of value by building stuff in layers.
+So while none of the individual parts of the dead zone equation are particularly complicated, each layer provides different feedback from the last, and they all work to produce something greater than the sum of its parts.
+And by staggering the effects of these layers across time, we were able to make each part read separately from the others, instead of getting lost in the noise.
+So I guess we're a little short on time for questions.
+So I will say, if anybody has questions, I'll probably be hanging out in the room 204 down the hallway if anybody wants to ask questions afterward.
+And you can also shoot me an email if you want to.
+My email is on the slide, my work email, and I'll try to get back to you.
+And if you have any other things that you want to contact the studio about, you can always hit up our contact email, contact.emeralab.com.
+But I guess I just want to thank you all for your attention.
+And yeah, I want to thank everybody else who worked on this content and helped me prepare this presentation, because it was certainly a good bit of work.
+So thanks.
+Thank you.
+Good night.
+Good evening.
+How are you?
+Good evening.
+Good evening.
+Good evening.
+Good evening.
+How are you?
+Good evening.
+Good evening.
+Good evening.
+Good evening.
+Good evening.
+Good evening.
+How have you all been?
+Good.
+Good evening.
+Good evening.
+Good evening.
+Good evening.
+Good evening.
+Good evening.

@@ -1,0 +1,639 @@
+All right.
+Yeah, my name is Mika Vehkela, and I work for Remedy Entertainment as a lead AI programmer.
+And in this session, together with Bobby and Ben, I talk about our experiences working with behavior trees.
+And in my part, I'm going to be talking a little bit about a quick touch up on this blackboard and database, which is used together with behavior trees almost in all the implementations.
+Then the most of the talk that I'm going to give is about decorators.
+And then little bit about splitting the trees and then also about coordination using the ever trees.
+So some of the challenge areas that I've faced using multiple different implementations in different games have been always the same thing it sounds like a simple stuff, but it still comes up time after time it's the generalization and granularity of tasks so the so in in like pre production production.
+And then of course between game projects as well so you would like to of course build eventually this library of reusable building blocks of decorators and notes that you could use then you know in in future games as well.
+And then also there seems to be this question especially from designers working with this this implementation is that how do you deal with interruptions and transitions in the behavior trees.
+But before I go to all these notes and decorators, a quick glance at these databases.
+So most often what people have in conjunction with the behavior trees is some kind of a blackboard implementation and also this kind of sensory systems that the sensors will basically reflect the data from the game world from all over the memory and then store it inside a database, a compressed format.
+And the behavior tree is only reading through this database.
+It can read and write there.
+So it's still a good idea to keep in mind that the simpler this implementation of the database is, and the data format, and the more compact it is, the easier it's going to be to implement all of your nodes and decorators, especially for conditions.
+It also makes the debugging easier, which is pretty obvious.
+But if you have a very condensed and a nice implementation, you can just basically list out of all the properties that this NPC knows of.
+And then finally, of course, it performs better, because if you have a very compressed set of data that you're accessing, it's going to be much better than accessing the memory all over the place.
+So one example, and I'm using this kind of method in this presentation, how you could implement the database would be to have one single dictionary per tracked entity or a known entity for each of the NPCs.
+And this dictionary is just a.
+list of properties, key value pairs that this NPC knows of each of these tracked entities.
+So in this example, for example, we have an entry for self, the agent itself, and in this example it would have only one property, primary target, set to enemy01, which happens to be the other entry, another dictionary in your database that has one property which is visible is true.
+And you can reference these entries in the database in your decorators and nodes just by using a string path.
+So for example, self.primaryTarget means that you take a look at the self entity and you read the primaryTarget property.
+This happens to point out to enemy01, so now you read from enemy01 the value of the visible property.
+Okay, let's move on and go finally to the actual behavior tree stuff, the nodes and decorators.
+So a very quick recap.
+You obviously, behavior trees consist of root node, control flow nodes, which are the selectors, sequence nodes, parallel nodes, and then your execution nodes or tasks.
+What you also have in many implementations is some kind of decorator nodes.
+So you may implement your conditions as decorator nodes, and in this example, you would have, for example, two conditions for this sequence.
+So the above one, the abort condition, would have to be met before it can select the child behavior sequence.
+Also, the first child node of the sequence must be able to succeed, because if it would fail, the sequence would, of course, also be aborted.
+So both of these conditions have to be met before the sequence can be activated.
+So if this happens now, the sequence is activated.
+It would proceed to the first task, the middle one there.
+And if the abort condition now would turn to be false, of course it would abort the sequence and exit this whole branch.
+But if the other one, the condition, the first child of the sequence, would turn later to be false, it would have no effect whatsoever.
+So these would be the control activation and deactivation decorators.
+Then you have modify termination status decorators, which would be something like always succeed.
+So this always just succeeds when its child is completed.
+Even if the child fails, it will report itself as success to the parent.
+So in this example, it would make the first task as optional in the sequence.
+Regardless of the task failing or succeeding, the sequence will proceed to the final task.
+And then you can have something like this add-on functionalities, for example, if the last task would now fail, it would set a property.
+So these decorators are very nice for doing cool-down or retry mechanisms without having to implement it inside the task itself.
+So all these are kind of nice and very useful.
+I'm sure that you guys are using them with your behavior trees.
+But there's also another way to think about them which would be instead of decorative nodes, node decorators.
+And there's a nice example, so Miesko Zielinski did this for the Unreal 4's behavior trees.
+So it basically means that the decorators are part of the nodes themselves. They are not actually nodes at all.
+So this will create, in my mind, more compact visual representation of your behavior trees and it also allows more options to simplify your nodes in an easier way.
+So the common types again would be that you have the activation and deactivation controlling decorators inside the node, but now in this case you can easily see that this sequence, they are within the sequence, both of the abort and the regular condition.
+You can have the termination status modifiers.
+Again, it's much easier to see that now this task always succeeds.
+You can have parallel execution by having updatable decorators.
+Unreal, I believe, calls them services.
+And then finally, you can have the same add-on functionality that if this task, the right one, would fail, it sets a cool-down property to 10 seconds in this example.
+So comparing these two approaches, at least myself, I prefer the left one because it makes it much more condensed.
+And especially when dealing with big behavior trees, when they tend to actually grow up, you would like to, of course, be able to read those trees, especially if they're altered by multiple people in an easier way.
+So that's one of the kind of the major things that I personally like with this kind of an approach.
+So a few more examples of what you can, like how you can try to build your library of this reusable building blocks with decorators and more general purpose nodes is an example of a retry mechanism.
+So you can have this selector that will first try to, of course, activate the press button behavior.
+It would be a general purpose behavior where the NPC is trying to press a button.
+Maybe it even has the animation control inside this behavior.
+Let's assume that it would now fail.
+So for some reason, pressing this button didn't succeed.
+So we have this general purpose decorator that says, well, if I fail, set last try property to be the timestamp of now.
+Also, we have a condition that checks that if time since this property is more than 10 seconds, then you're allowed to select the node.
+So if you now fail, it would take at least 10 seconds before you can reselect the node.
+So the selector will happily select the next behavior, which is play animation.
+And we can now also add this general purpose loop decorator, also very common in many implementations, where instead of having the play animation to contain a selection of I want to loop this animation, or maybe an option inside the animation resource itself, you can bring it forth in the behavior tree itself and say whenever this task succeeds, it will start over again and won't report to its parent that it has completed.
+So in this example, it would make this play animation to simply play forever.
+But of course, since the selector is monitoring the higher priority branch, the press button, eventually it can be reselected because the time stamp will be more than 10 seconds old and it will retry the press button.
+So again, you don't have to implement this retry mechanism into any of these behaviors, but use a general purpose set of decorators and behaviors.
+An example of look at, so you can have two types of parallel execution things.
+Now with these updatable decorators, so a parallel node will execute a move to, which will move to a next waypoint. At the same time there's a look at behavior, which would try to look at a location of primary point of interest, if it is set. And then you can have an updatable decorator that is separated from the look at, so the look at doesn't figure out what it should look.
+It simply just looks at a point that has been set in the database.
+So the scan point of interest will be scanning around the agent and setting this primary point of interest if it finds something interesting.
+And now the look at would of course pick it up and start looking at that point.
+In this example, the updatable decorator could also be of course put into this look at node itself.
+Then we have debugging.
+So we can also use these decorators very easily.
+to help you debugging the behavioral trees so you can have tag decorators.
+So it's a simple decorator where you can give any string, in this case, in combat or in patrol.
+And you don't have to care, as a designer or a programmer, how did these nodes get selected.
+The behavior tree can be complex, like above these behaviors, you don't have to care where this is, or if somebody refactors the tree somehow, you don't have to care.
+Also, you don't have to care what happens inside these nodes.
+whenever to notice active this time would be active and there can be a simple way to be basic query which tags are active at this moment and you can display them for example on top of the characters head showing the guys now in combat or in patrol this could of course also be used outside of debugging and maybe control the the game playing in some way.
+Same thing you could do with message decorators instead of tagging something you can basically have a message decorator that sends a message on activation of the node, on deactivation of the node and possibly even sends every update some kind of message either to your debugging systems or possibly to the gameplay systems as well.
+Finally of course break point decorators which act in the same way so if the node gets activated and perhaps there's a condition if the condition is met then the game will for example pause and zoom to this actor so it can be very helpful if you have multiple actors running around to have this condition that you can flag I want to monitor these particular NPCs and if any of them happen to select this one node you would pause the game and zoom to that place and see okay now the guy is about to perform this action.
+So with all these examples, what I wanted to sort of bring forth is that building a library of reusable tasks actually is more like balancing out how to extract options from your tasks into decorators and kind of balancing the library of decorators and nodes together.
+And of course it wouldn't matter in which way you implement them, but I personally prefer these decorators to be the property of nodes themselves.
+A little bit about interruptions.
+So we could have a case like this.
+There's a selector that has a higher priority behavior, jump to safety, if there's a grenade within five meters of the NPC.
+Let's assume that there is no grenade yet.
+So the selector would pick a sequence.
+And its sequence, the first thing that it tries to do is a heroic, super slow vault to cover.
+Let's say that takes 15 seconds.
+It looks really awesome.
+And it's going to take the character outside of the nav mesh and do all kinds of funny things.
+And it's going to be very difficult to interrupt it in a meaningful and good looking way.
+While he's now in halfway through this vault animation, let's say that the grenade lands next to it.
+So what the behavior tree will do, it doesn't really care.
+It simply selects the jump to safety and deactivates this other one.
+What to do?
+So, of course, I don't think it's a problem of the behavior tree.
+Personally, I think that that's exactly what should happen.
+So the task that gets interrupted may, of course, do some cleanup.
+Perhaps it wants to tell the animation system to stop playing this animation.
+Maybe it doesn't.
+So the second thing that it can do is also the jump to safety that gets selected.
+It doesn't have to fail if it cannot perform immediately this jump to safety.
+So perhaps you want to just wait out that the body is able to perform the action that you want here.
+What I'm trying to say is that it's really not oftentimes a problem of the behavior trees to deal with these interruptions, even though there's a lot of these questions of what should be done.
+But sometimes you might still have the case that...
+you want to commit to an action and you do not want to interrupt this in the behavior tree itself. So you could also of course add an uninterruptible decorator into your node. And this would be quite simple to implement so the only thing it means is that if there's an uninterruptible node it will freeze all the the condition monitoring on top of the tree like throughout the parent hierarchy of this tree.
+You can chain also those uninterruptibles.
+So if there's a child node to this uninterruptible, of course that would then set the parenting hierarchy to be uninterruptible as well.
+But personally, I wouldn't really use this.
+I would try to avoid them at all costs, because eventually you could get the tree getting stuck and weird issues that the guy is performing very long sequences and not reacting to anything.
+So splitting the trees.
+That's the next thing. This is like a workflow thing and I also think it's something that people do very often.
+So you can have two types of ways to split your trees.
+As a property of behavior trees, of course, any sub-tree can be always considered as its own tree.
+So what you can do is have reference nodes. So this would be design time nodes, where you can just extract a part of the behavior tree and save it to a separate resource.
+And then you set in the parenting tree that contains this tree a reference node and you refer this behavior. It's a pretty standard node to have in your behavior tree implementations. So this is designed and it merges during export or load. So it reduces the perceived complexity of the tree, not really the actual complexity of the tree. And the main benefit is of course that it allows you to edit these behavior trees by multiple people at the same time without having to worry about the merge conflicts.
+and you shouldn't go like crazy about these and start immediately doing them.
+You should basically build this one tree and whenever it seems like logical, you should then take a piece of the tree and save it to another resource.
+Effectively refactoring your trees as you go.
+There's also these other types of nodes which allows the dynamic attachment of behavior trees. So it's just a placeholder node that's saying, well, if there's nothing attached at this node at runtime, the node always fails.
+It cannot be activated. And you can, from somewhere in code, you can attach a behavior tree here and then it would just do the same thing as the statically attached trees. Then it would appear as part of the tree.
+So what you can do with these dynamic trees is smart objects, for example.
+So instead of having fixed pipeline smart objects where you have, for example, a list of actions or animations to perform when you try to use these things, you could simply have them as containers for behavior trees and maybe a small piece of a database that's embedded with this smart object.
+So it's essentially instructions of how to use this smart object.
+You could also have items and weapons.
+So instead of having everything put into the character themselves, you could have the combat part of the tree actually be embedded into the weapon itself.
+This would allow you, especially in the prototyping phase, to build a single NPC, and depending on the weapon, you can change how it actually behaves.
+Maybe later on you still want to put all the behavior trees inside the character, but this way you can dynamically say, if I give this guy a pistol, maybe he wants to use cover, and he wants to fight quite close by.
+And if you give him a shotgun, maybe he's not using cover in the same way.
+Maybe he wants to perform a different set of actions instead.
+And then you can do more than just the smart objects in your level scripting.
+So, for example, for spawning, again, instead of having fixed pipeline spawning animations that the guy rushes through the door in some kind of awesome way, you just put a behavior tree that overrides your master tree at a very high level.
+When the guy is spawning, maybe it has some kind of sequence, similar sequence to rush through this door or has some, is using like move to behaviors, but it can also do things like if the enemy happens to be very close by, maybe I don't want to commit into this long animation and expose myself, but instead just take a shortcut and start shooting back immediately.
+So this would be such a simple example. So this smart object could be as simple as just a list of animations as you would have in your fixed pipeline smart objects.
+And then you could attach it into this child tree node.
+And the node itself can be also very simple.
+So you can have the cool-down mechanism implemented again with these generators, general purpose decorators.
+And for weapons, of course, you don't want to detach the tree if this child tree is not active.
+But for smart objects, when you have finished using the smart object, you can add this decorator that says, when this node terminates, it detaches the smart object.
+And then finally, there's this thing that bihertories are oftentimes used and mostly used only to control your characters, but they could also be used to do coordination between NPCs.
+So...
+Thanks for watching!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+Bye!
+What you could have is a volume for a room, like a box, whatever shape of a volume, and you can add a behavior tree to this volume as well, and a database to go with it.
+And this behavior tree, of course, wouldn't have moved behaviors because the volume is not moving much or controlling the body in any way, but you would basically have a custom set of nodes and decorators that you could build up, which would be updating goals and objectives, influence maps with updatable decorators, assigning roles.
+and communicating with the NPCs either by writing that are in the visual memory or just writing to its own memory and opportunistically these NPCs could be reading from this database and altering their own actions.
+So as a wrap up, I personally think that the way that Unreal has for example implemented the decorators, it's a great way, it simplifies the complexity, at least the perceived complexity, and it allows an easier way in my mind to implement this kind of reusable building blocks.
+for your behavior trees and for your games.
+You shouldn't be limited to a single static tree.
+Use a lot of these dynamic and static reference nodes.
+And finally, behavior trees are not character specific.
+Also, they are not the only mechanism to control your characters.
+And I think Bobby will touch upon this subject a little bit more now.
+Oh, and there's of course read more.
+So AI game dev has a lot of articles about this and the Unreal 4 is very well documented as well as Angry Ants behave.
+So Bobby, your turn.
+All right, so for my part, it's going to be a little bit more of a best practices talk.
+We're going to talk about some problems with behavior trees.
+We're also going to discuss some of the solutions.
+Nothing I'm going to really discuss today here is going to be revolutionary in terms of reinventing the wheel or anything like that.
+We're not going to do anything crazy.
+What I'm going to do is I'm going to provide some observations and suggestions.
+People have touched on this in the past, but I want to go a bit more deep.
+And I want to kind of hope that I can prevent some pain for people in the room and also kind of kick off some discussions.
+As kind of an intro to this, I just want to discuss my perspective on engineering.
+I don't believe in silver bullets.
+I believe that every technique, every approach we have has pros and cons.
+And in games especially, we tend to lose our perspective a lot and we tend to brute force our solutions.
+It's our job to sort of look at the tools we have and understand them deeply and understand where they work, where they don't, the pros and the cons.
+Also in games we have this mentality of sort of milestone driven, goal driven, feature driven approaches where sometimes we lose sight of the bigger picture chasing a small goal.
+In my experience the better the tooling we have the better the workflows, the more iterations we can do the better the end result is and so to have good tools you need to understand what the flaws are.
+So before I dive into the behavior tree stuff, I'm gonna discuss a little bit of visualization.
+I tend to kind of think of trees in a different way to most.
+Kind of the traditional approaches you saw in Mika's display and Angry Ant in Unreal 4 is sort of this kind of vertical approach where we both have the priority as well as the sequence order of nodes running horizontally.
+So you'll see that both priority, high to low, is left to right, as well as actions left to right.
+I prefer to visualize trees in more of a kind of reading approach, in my kind of preferred way of visualization, I kind of have the priority going from top to bottom.
+So when we branch, we kind of branch vertically.
+And then the actions are running left to right, sort of like a sequence or a timeline.
+That helps me reason about behavior just a little bit better, because I'm like, okay, well, I made this choice, and now I'm going to make this choice, then I'll make the third choice.
+Okay, I've made the choice, now I kind of go left to right.
+So, I'm going to start off discussing some of the problems.
+Behavior trees are inherently bad at two things.
+Those interruptions and transitions and behavior prioritization.
+Now, I know a lot of you are going to pull out pitchforks and torches, and yes, you've shipped games with behavior trees and everything worked out fine, and you know, you got everything done, and you can, but just hear me out.
+So, Currently the most sort of common approach to behavior trees that I've seen in the industry is event driven.
+That basically means that as we kind of traverse the tree, at every single point we register these monitor nodes until we hit a behavior that we run.
+These monitor nodes get updated every frame.
+And the deeper we are in the tree, the kind of more monitors we need to kind of check the higher priority behaviors.
+And when one of these monitors ends up triggering, it will end up causing the tree to sort of abort.
+reset and kind of go into that behavior they triggered.
+And this is happening through the conditions that are being set for these monitors and the entries.
+This leads us to our first big problem and that is static prioritization of the trees.
+So imagine I'm currently in fighting.
+How do I go to investigating?
+Well, the only way to transition from high-low priorities is to either abort or complete that behavior.
+To abort, we usually need to then start sprinkling these special case conditions in these behaviors.
+So if I was fighting and I lose sight of my target, I need to now write a bunch of conditions and they're saying, well, if I lose sight of target, fail this behavior, then the behavior tree will reset and then I can jump into a lower priority behavior.
+This kind of ends up polluting the tree, especially the high-level behaviors with low priority ones.
+It's kind of implicitly because you're trying to cater for the transition lower down by canceling a high-level thing, which greatly ends up increasing the complexity of the tree.
+And then there's another even worse problem, which is that we often need to change the priorities of our kind of high-level states based on the context of the situation.
+To highlight this, I'm actually going to have some audience participation.
+I'm going to show you an AI design.
+I'm going to give you a few seconds to kind of look at it and tell me if you understand this.
+You guys get this? Do you see what it's doing?
+Does everybody kind of...
+No? Yes? People get this?
+Okay, so I'm gonna ask some questions, see if somebody can answer.
+You should just shout out in the room.
+When can a super attack occur?
+There we go.
+What happens after I do a super attack?
+Cool, and from attack pattern two, what can I do?
+Okay, simple, right?
+What about this?
+The same diagram, the same AI system.
+It's a little bit harder to read.
+And this is inherent to behavior trees because behavior trees are directed acyclic graphs.
+It means they have no loops.
+They don't have cycles.
+That AI design and AI designs in general are cyclic.
+Even the most basic combat behavior cycles between things like fight from cover, fight from position, or wait, no, go back to cover.
+We're constantly cycling these behaviors.
+And what we're trying to do is we're trying to model cyclic behavior with a cyclic data structure.
+And yes, it can be done.
+It doesn't mean we should.
+So, how do we do this modeling of the cyclic behavior?
+A lot of you in the room are probably doing this without realizing it.
+We end up doing preconditions to get the required results.
+So for example, we'll have stuff in our knowledge saying, hey, did I just do a charge attack?
+Yes, okay, cool.
+Then I can do this through another set of conditions somewhere else.
+Unfortunately, this requires us to sort of track this kind of stuff in an agent knowledge, and it kind of pollutes it with execution and control flow data for the tree inside of the agent knowledge, which is supposed to be kind of the agent's personal state about himself.
+It also greatly increases complexity, which ends up hurting robustness, understandability, and obviously performance, since we have these monster trees we have to evaluate.
+Worst of all is that we're creating these implicit transition dependencies between the subtrees and the agent data.
+Now, anybody doing computer science should be beaten into at some point that implicit dependencies and dependencies in general are not good things.
+And a personal metric of mine for code quality is more like how easy is it to delete that code.
+I'll look at a piece of code and say, if I want to delete this thing, how many areas do I have to touch?
+If it's simply just copy, paste, delete and everything works, then that is good code quality.
+If I have to delete that, touch this, change this, undo this hook, remove this pointer here, we've got problems.
+So I'm going to ask you, like, how easy would it be, for example, for me to delete one of these behaviors?
+Well, I'm going to have to delete all the preconditions.
+in potentially super attack inside of charge attack.
+I'm gonna have to find every place that I've hooked into this to kind of fake the cyclic flow in an acyclic structure.
+And so over time this works, but all the solutions, especially later you get into a production, end up looking like this, where you've beaten this square peg into a round hole with a lot of force to the point where now you can't even get it out if you tried.
+And now that we've discussed kind of the transitions and the interruptions and this kind of priority, we also have another thing is that often when we do these transitions, additionally we have to signal to the player that, hey, I actually switched state.
+So normally, kind of simplest case, we play an animation and sound.
+But sometimes it gets more complex and we have to do things like, oh, I have to turn to target, I got to pull out my gun, I got to do a bark, maybe wait a second.
+Or if we're doing like a boss fight in a brawler, we need to do something like taunt the player, wait for a bit, that kind of thing.
+That is purely kind of like a visual state.
+It's not decision making, it's nothing.
+It's just saying, okay, you know, let the plane know what's happening and he can react to it.
+And these reactions and behaviors unfortunately end up, again, being shoved into the tree and we end up with situations like this.
+So this is a subset of the previous example where you'll see now we have little trees inside of the other trees saying, oh, if I'm transitioning from this state, do this thing.
+If I'm transitioning from this state, do this thing.
+And even worse now, we have...
+a lower priority behavior handling higher priority behavior.
+So now we've got spaghetti everywhere.
+We just don't know it.
+Everything's linked to everything, everything's handling everything, every flag in the tree, you change one setting here and you don't know what triggers where.
+Now I guess a lot of you in the audits are basically saying like, okay, well, behavior trees are awful, right?
+You know, like, that, you were supposed to tell me how to use them, not how bad they are.
+So behavior trees are actually kind of good, but They're good in a different sort of way.
+Like if you look at the Wikipedia definition for behavior, it says it's a mathematical model of plan execution.
+I think that's super important, something we've kind of forgotten.
+It's a plan execution model.
+And that sort of implies that there's a plan.
+You know, not that the behavior tree is the plan, that it's just executing somebody else's plan.
+Behavior trees are really, really good at describing a complex sequence of actions to perform.
+So I'm gonna show you a simple behavior now, and I'm gonna ask you again a question, and hopefully you guys will shout out at me.
+What does this behavior do?
+As soon as somebody knows, just shout out.
+Stuff.
+And Dave is wrong.
+Pardon?
+Okay, and when do we look for a new position, for example?
+Kind of if we don't have a good position.
+You see that there's a little branch in there, but yes, for the most part, this is a very simple approach for doing a fight from position.
+Not a cover, just in the open.
+I'm shooting as soon as I maybe don't have a good position based on line of sight or whatever.
+I find a new position.
+And when I'm stuck in a good position, I'm shooting the player and he aims at me, I'm like, okay, well, let's move.
+Let's give him a bit of a challenge, a pattern gameplay or something.
+So a lot of people kind of think of behavior trees as decision making.
+If we look at like a standard Russell Norvig, the behavior trees kind of fit into decision making.
+That's where people have lumped them into.
+Personally, I think of behavior trees as more of a control layer in between actuation and decision making.
+You know, we can still make some decisions in the trees, but those decisions shouldn't change our overall AI goal or AI state.
+They're simply decisions to execute our decision.
+If we've said, okay, you're fighting from cover, the behavior tree can make some decisions saying, hey, I should pop up now, or I should dodge to the left, or I should do a reload.
+But they should never say, you know what, I actually think it's better for me to go outside of cover right now, even though this is the cover behavior.
+For example, in the previous example, we made the decision of, if I don't have a line of sight, I find a position with line of sight.
+So if we work under this conception of these simpler execution trees, we need a high granularity of actions.
+We need actions that are more like move, look at, reload, fire.
+I've seen implementation of behavior trees with the actions that are a little bit more coarse.
+They're like fight from position, fight from cover, that degree of things, where you're using a behavior tree like a decision tree for the most part.
+So simpler and smaller trees, obviously, each one executing just a single goal.
+And we also need to make some decisions in the tree, as I mentioned.
+So for example, we'll decide whether we have a good position or not.
+Now if we move to the simple execution-oriented approach, we have several benefits.
+Obviously they're easy to build because you're solving a very small problem in isolation.
+They're easy to understand and debug.
+In like less than 15 seconds, you guys could sort of understand what was going on.
+And that's what you want to do if you have a new hire coming into your code base.
+You don't want him scratching his head for three days trying to do something wrong.
+It's also easy to identify the working data set.
+If you want to parallelize your agent updates or something, it's good to know exactly what data you're using so you can kind of isolate that out so you don't have any kind of race conditions or anything like that or overriding of data.
+They're also easy to test independently.
+Again, if you know your data, you can build a test harness and just have that behavior being tested, saying, does my fight from position behavior work?
+Well, let's just test that.
+Don't run the whole AI, don't run anything, just run that behavior and test it out.
+And they perform better.
+Cutting out, I think.
+Now, obviously you're going to say, well, how do you author these things?
+What are the rules?
+Well, my general rule of thumb is I basically say to myself, OK, I've made this decision, I want to go to cover and I want to fight from cover.
+What are the steps I need to do to execute that?
+That's generally how I kind of think.
+I like simplistic approaches.
+Maybe I'm a bit slow in my old age.
+But I kind of like things that are simpler to understand, simpler to build, simpler to reason about.
+Especially like three months later when I come back to something, I don't want to be like, what did I do here?
+What idiot wrote this?
+Oh, it was me.
+You know, so again, I guess a lot of people are saying, well, first you said they're bad, then they're not.
+Now you're saying, don't use it for decision making, but I can make some decisions.
+It's like, what should I actually do?
+Well, we're spoiled for choice.
+We have a lot of techniques available to us.
+We have state machines, we have planners, we have utility systems.
+These days there's a revival of neural networks, machine learning, that kind of stuff.
+We have a lot of these options out.
+You don't have to pick one.
+You can pick multiple, you know?
+choose. What I've kind of found to be an elegant approach to solving this problem, for me at least, is something I like to call a hierarchical finite state machine behavior tree hybrid, or hoversome but-a-her, for short. Rolls off the tongue.
+Hoversome but-a-her.
+So, I guess a lot of you are asking me, like, state machines, you know, didn't we go through this already?
+You know, there's problems, you know, that kind of thing. And there's a whole bunch of you probably going like, I've seen this movie, I know how this ends. But, hear me out.
+So state machines are excellent for describing states and transitions.
+They're easy to visualize, they're easy to author, they're easy to understand.
+They're horrible for defining sequence of actions.
+Absolutely horrible.
+Behavior trees are excellent for describing sequence of actions, and they can do parallel execution of actions.
+But they're awful for describing transitions and these cyclic behaviors.
+Both of these techniques are relatively well proven, they're well understood, they're super low risk.
+You know, there's a very high reward.
+But alone, both of them have their problems.
+And what we're trying to do is kind of combine them together to kind of build something that's greater than the sum of the parts.
+We want to kind of accentuate the pros of one and the pros of the other and try to minimize the cons by just avoiding them at all.
+So I'll give you an example of this based on the simple combat investigation AI system.
+If we look at this diagram, it's kind of the same as before, except it's a little bit more clear.
+We can say, okay, our combat behaviors can alternate between these three.
+We know that from each one, we can go to the next and alternate back depending on what's necessary.
+We can say, okay, we can go from idle to combat, but if we want to go back to idle, we have to go through an investigation because maybe our game loop is set up to say, fight, when I lose a target, I investigate, if I can't find him, oh well, go back to idle.
+If I was alerted in my idle, like I heard a noise, then it's okay to go back to a relaxed idle.
+It's sort of very clear that you can look at this and say, yeah, I get what this is doing, you know?
+Cool.
+Also, if you click one of these transitions, you can then set up a set of conditions there saying, hey, if these conditions are met, I do this transition, but I just play a simple reaction behavior.
+Or, hey, if there's a different set of conditions, then I need to do something more complex.
+It gives you the flexibility there to kind of do specific transitions.
+And again, it's very simple to understand.
+And now again, if we go back to my code quality metric, if I want to delete investigate, what do I do?
+I select investigate and I hit delete.
+All the transitions go with it.
+All the logic for the special cases go with it.
+Everything's clear.
+It's like it never existed.
+And I think that to be a very kind of elegant solution for that.
+Now, I don't want you to miss the point here.
+Don't get me wrong.
+This approach obviously isn't perfect.
+Pros and cons everywhere.
+There are some tricks with this approach that you need to know, like regarding how you do hierarchies and entry states and that kind of thing.
+If you want more details about this, ping me.
+I'm available this week, whatever.
+But my point isn't about the state machines.
+I could have just as easily used a planner or some other technique.
+For example, these sort of execution behavior trees are great for use with like a HTM planner where the tasks themselves are the trees.
+My point, and that I'm trying to get to this talk, is that behavior trees are not an ideal technique for decision making.
+We are abusing them, and through that abuse, we're scaring new people from these things.
+I've had situations where I've come to a company and looked at a behavior tree with 40,000 nodes and been like, oh.
+And then it's like a week later, I know maybe one tiny portion of it.
+We are making things unnecessarily complicated for ourselves, and we're sort of drowning in some complexity.
+When you get to a point where you want to do a simple combat behavior, and it takes you three weeks of breaking stuff and kind of trying to figure out a way to crowbar it in, we have problems.
+So, what I'm trying to get at is fundamentally is...
+understand what you're building with, whether it's behavior trees or any other approach.
+Behavior trees especially is that these sort of cyclic problems are not very well discussed or known.
+That's something to keep in mind.
+So in conclusion, I'm just going to give you some do's and don'ts, just basically wrapping up what I just talked about.
+It's simply behavior trees are excellent at describing individual behaviors, hence the name, I guess, behavior trees.
+So use them for that.
+Keep them as small and as simple as possible and combine them with other techniques to get the most out of them.
+Also, things that are bad is, as I said, interruption transitions, the cyclic problem, and please stop building large monolithic trees that have multiple responsibilities.
+You know, don't have this massive tree with the static prioritization of combat over, investigation over this, over that.
+Imagine trying to build a boss battle in a behavior tree.
+It's gonna be a nightmare.
+So, you wouldn't do that, you'd probably use the state machine for that.
+And that's what I'm trying to get at, is kind of understand the tools that you're using.
+And more than anything else, is stop using behavior trees for your decision-making logic.
+Use them where they work.
+So Ben is now going to kick in with something a little bit more interesting and complex.
+Hello everyone.
+My name is Ben Weber and I'm on the science team at Twitch.
+Today I'm gonna be talking about a lot of my experience with behavior trees during my graduate study at UC Santa Cruz.
+So, here's the topics I'll be covering for my section of this talk.
+A lot of my experience was with the reactive planning language and there's a lot of different features of that language that are useful when you're authoring behavior trees.
+So I wanna give some ideas and inspiration for some patterns you can use from that.
+Also, as you start to author more complex trees, you start to see patterns being used over and over again.
+I actually didn't follow Bobby's advice and made one big monolithic tree.
+Had I seen this talk before, I might have done things differently.
+But I'll give some ideas for how I handle that complexity.
+And then third, I'll talk about some extensions to behavior trees.
+So Bobby talked about finite state machines being used in collaboration with behavior trees.
+I'll talk about some learning mechanisms I used with behavior trees.
+So a lot of my experience with behavior trees is actually with the Able Reactive Planning Language.
+And this was a language that was used to author the autonomous characters in Facade.
+So a reactive planning language is like an HTM where you basically execute as you're planning.
+And it has a number of primitives that are similar to behavior trees.
+So you can kind of talk about it in a similar way.
+There's selectors, there's parallel and sequential nodes.
+They just have different terms.
+So I'll try to map those to the common terms here in this talk.
+One of the node types that's really useful when authoring agents that need to handle a lot of goals and do kind of concurrent action pursuit is spawn goal.
+And this is a node type where you basically create a new goal to pursue, but it's a separate thread of execution from the current node.
+Scoped at the node that it's created from, it's basically a selector node, but it's pursued concurrently from the current execution flow.
+And if that node goes away, the parent node...
+is removed, then that goal goes away as well.
+So it's a way of doing concurrent goal pursuit that's scoped within a particular task.
+So I'll provide an example of how that's used within a bot that I produced.
+Another example is working memory modifiers.
+So Mika already talked about these decorator patterns where you can read and write from the blackboard.
+I'll talk about how that's used in the system that I produced.
+And then a third node type is success test.
+And this is a type of node where you basically can combine it with a wait step to suspend the execution of your tree.
+So if there's a set of conditions that you want to become true before you proceed, you can use this node type to do so.
+So you basically continue to perform an action until a set of conditions is met.
+So I use this tool that actually runs asynchronous from the decision cycle thread, and it creates issues whenever you need to actually execute actions in the game.
+This probably isn't a problem if you're using a behavior tree library, but I did have some issues with things like task scheduling and resource contention where you need to make sure that if you have concurrent goal pursuit that you're setting state or locking behaviors so that you don't have multiple goals that are trying to use the same unit or cause multiple threads of execution to happen for one character at the same time.
+Also, I had a performance issue with dynamic behavior expansion, where you can actually pass parameters to your selector nodes.
+So a lot of what you can do to expand the tree is done at runtime, which isn't really too big of a performance issue.
+But in the initial days of Behavior Trees, I think that was more of a concern.
+So a lot of my experience with Behavior Trees was authoring a bot for StarCraft.
+So this was called IceBot, and this was done back in 2010.
+And It was based on this reactive planning language.
+And what I wanted to do was have something that could play at the level of like Flash here, where you could do hundreds of actions per minute.
+You could do really cool text switches.
+You can learn from demonstrations and have this evolving metagame.
+So I tried to author this huge monolithic behavior tree that could handle all those situations.
+So some of the design patterns I came up with as I expanded this tree were things like daemon behaviors where this is a fixation of the agent that's done concurrently with other tasks being performed.
+And it's a way of handling kind of low priority actions that need to continuously be pursued.
+There's this concept of managers where the AI is built into different subsystems.
+So when you have something complex, you have a lot of different actions to take, different competencies to manage, it's good to split up the behavior.
+To coordinate between these different managers, I use some message passing patterns, and that's similar to some of the decorator patterns, but I'll show examples of this.
+And then behavior locking is another version of message passing where one manager will prevent another one from doing an action.
+And finally, unit subtasks, which is basically using the unit for a short amount of time and then giving it back to the manager that owns it.
+So I'll talk through different examples of this and actually provide some ABLE code and talk about how that works.
+So daemon behaviors are basically a way of handling a set of actions that need to be pursued concurrently.
+So I use this in my system to basically make sure that units that need ammunition produced are basically always topping those up if they have them.
+And this is implemented with the spawn goal behavior.
+which then calls a selector node that pursues a goal kind of persistently.
+So it basically spawns a selector node, it has a node decorator that says, while true, continue pursuing the sub-goal.
+So in the case of this ammunition example, it basically spawns a goal to always be topping up the ammunition for the agent.
+So how this is realized in iSpot is through this daemon behavior for restocking units.
+So here's some Able code.
+Able is translated to Java code and then compiled into byte code for runtime.
+So it's not a data structure or a tree.
+It's actually a language that gets compiled, which has some side effects, but it was what I used at the time.
+So first there's two behaviors in this example.
+There's initial tree, which is the root behavior, which is parallel.
+And then there's a second behavior called restock units, which is another parallel behavior.
+Each of these has two steps.
+The root behavior basically says, create a Spawn Gulf to restock units, and then go set up the managers, which I'll talk about in a second.
+And then the second behavior is basically continuing to pursue these different behaviors.
+So with persistent means continue to pursue this, and subgoal is equivalent to selector.
+So you're basically continuing to look at training new interceptors or new scarabs for your carriers or reavers in your Starcraft bot. So these are units that are empty in terms of ammunition when you start them, so you need to actually produce units for them to be useful.
+So to decompose StarCraft gameplay into something more manageable, I used this concept of managers, which is basically different subsystems.
+And this is something that was pretty common with StarCraft bots that were authored for the AI competition, where people would make like a tactics manager that handles combat, a strategy manager for handling the build order.
+things like resource manager, tactics, reconnaissance, and so on.
+So here's some examples of some of the managers that I used in my system.
+You have things like the income manager, which is responsible for managing the worker units for gathering resources.
+You have a construction manager, which is responsible for actually producing units when there's a request.
+The tactics manager handles actually forming squads and then detailed behavior like micromanagement, dancing units around, things like that.
+And then there's a scouting manager which is responsible for reconnaissance.
+So it actually takes a worker unit and goes around the map and later on in the game it handles other units.
+There's also this high-level strategy manager, which actually doesn't perform any actions itself.
+It coordinates with the other managers to actually execute those actions.
+So it selects the build order, but it doesn't go about actually telling the units what to produce.
+That's done through some message passing examples.
+So here's an example of one of the managers in iSpot.
+This is a subset of the behaviors that get called for the income manager.
+So at the top, you have behaviors like pump probes, where this is, again, using that persistent keyword, where it's continuing to run this selector node for pumping probes, which means keep producing worker units while a set of preconditions is met.
+So you would have different instances of pump probe behaviors with different sets of preconditions.
+But basically, this is saying try to produce probes if those behaviors are ready to be activated.
+There's also things like putting workers on gas, taking workers off gas, which helps manage the income ratio between minerals and gas for the unit.
+There's other behaviors where it actually has to coordinate with some of the other managers.
+So for processing an expansion request, the manager doesn't actually decide when to expand.
+That's done from the strategy manager.
+But the income manager is responsible for transferring workers to that new unit, to dispatching the construction requests and things like that.
+And what's great about this is you can actually kind of decouple these managers a bit.
+make sure that the strategy matter uh... handles things like it's now time to attack time to expand and in commanders responsible for more the tactical actions within that So to achieve coordination between these different managers, we need to have some message passing or coordination between them.
+Here's how this is done in Able.
+You basically have these sequential behaviors that I show, basically what a message producer is and a message consumer.
+The message producer has one step, which is a mental act.
+And in Able, this is inline Java code, where you basically say, grab your working memory or your blackboard.
+and create a new object called a message working memory element and put that on the blackboard system.
+So it's basically just saying, grab a reference to this, add an element to the blackboard.
+And then the second behavior here is actually consuming that, dispatching a subgoal to complete that task, and then removing it from memory.
+So there's two steps here.
+First, there's a precondition not really considered a step, which looks for something on working memory.
+So if there is a message working memory element on the blackboard, it binds that to the message parameter.
+It then calls a subgoal with that message.
+So enable, you can actually call selectors with parameters.
+And then once that's completed, at the end, we'll clean that up and remove it from the blackboard.
+So it's a way of actually having different managers communicate with each other.
+And you can create all sorts of different objects with different parameters.
+So I talked about an example where you actually need agents to coordinate.
+So you might have the strategy manager say, it's now time to produce a gateway.
+It creates a working memory element that says, produce a gateway.
+And the construction manager will go process that request.
+But you also have situations where you want...
+another manager to not perform an action.
+So I call this kind of behavior locking, where in StarCraft you might want to remove worker units from gas and focus on minerals.
+So here's an example of where we're actually using the success test node type.
+And the way this reads is basically, first you're gonna bind an assimilator parameter if there is a simulator working memory element in memory.
+And the not condition here says, do not succeed if there's one of these on the blackboard.
+So it's a negation term that you can use.
+So basically the way this is gonna work is, if there's a simulator ready, it's gonna proceed.
+But if there's not one yet, or if there's this element working memory that says don't proceed, it's gonna suspend the execution of that behavior.
+So it's a way of actually blocking other managers from executing.
+So it's essentially a fancy decorator, but this suspending of execution's a great way to...
+execute authors, or I mean, to author behaviors, because you can do a sequence of steps, which is useful when you have things that have a lot of preconditions.
+So this is used in an example when you're doing things like expanding and you want to focus all your workers on minerals versus gas, and you can basically have the strategy manager decide to perform that high-level strategy, and then have the income manager handle the actual tactics of that.
+And then one more pattern I use is this idea of unit subtasks.
+So this is where you're actually using a unit for a few seconds or a duration, and then returning it to its original task.
+So an example of where this is useful in StarCraft is if you have a unit that's being kind of harassed by an enemy worker unit, you want to basically counter-attack and then return to mining.
+So this is where you want to spawn a goal to handle the harassment and then return it to the mining task.
+So this is used in a few different ways in iSpot.
+One is for micromanagement tasks.
+So you group units into squads, but then you want to be able to do tactical behavior where you have units dance around and then return to action.
+I already mentioned this worker defense case.
+And then also another example is construction.
+So you actually claim a unit, you go produce a building, and then you return it to the income manager.
+So this is an authoring pattern I use whenever you have overlapping between managers that have to share units.
+So here's an example of what this looks like with able code.
+This is for a Dragoon dance behavior, where basically if a Dragoon is taking damage, you want to back off and then re-engage the enemy, because it makes your units more effective in combat.
+So here's another example of where the success test is being used.
+This will bind the unit parameter to a Dragoon if there is one.
+on the blackboard where it says that damage is true, so it's recently taken damage, and it's not currently in a flea condition.
+So basically this behavior is kind of executing until this set of conditions is met.
+When that set of conditions is met, then a mental act is used to basically say, set the status of this unit to flee, and then spawn rule is used to actually handle this subset of behavior.
+So, this is actually introducing more state into the tree, but we're actually spawning a separate thread of execution to handle this micromanagement task.
+So there'd be a number of different behaviors to handle, like the actual placement of the unit, how to engage and reengage with the unit, and then once that behavior is completed, it would change that flag again back to, basically it's not fleeing, it's now in attack mode, and that would clean up this behavior.
+So it's a way of saying, like, handle this set of behavior and then return the unit whenever it's available to be claimed.
+So here's an overview of the agent in action.
+It is one big monolithic tree.
+Basically at the start you have these different managers.
+This is basically expanding as new behaviors are being executed in the game.
+So at the start you have things like the construction manager and income manager that are just pumping probes, warping in pylons, creating some gateways.
+And then once the agent progresses further into the game, the tactics manager will start forming squads.
+You'll have the reconnaissance manager grab units and go scout the opponent.
+And later in the game, once you have a big enough force, like the strategy manager will create timing attack working memory element, which basically tells the agent to create a squad to go engage the enemy units.
+So, this will proceed a bit.
+Some units will be produced.
+And then it will start to engage the enemy.
+And then as behaviors are executing, you basically see it turn blue, which means that the tree's been expanded.
+Now the unit's kind of scouting in the middle there.
+And here we go.
+So now the agent's actually engaging the enemy, and you'll see that once these units start to take a lot of damage, they'll basically back off and then re-engage the enemy.
+So that's an example of using that unit subtask behavior.
+So the agent uses just these different managers to do different subsets of the behavior and execution of the agent.
+It's doing all the decision-making within the strategy manager, which is itself implemented as a behavior tree.
+But it's a nice way of decoupling those dependencies between the managers.
+So what I've shown so far is basically a scripted agent where the build order and decision making was done through the strategy manager.
+And what I wanted to look at was how can we actually learn from demonstration from professional players?
+So that was part of the big inspiration for this agent.
+And the way I achieved this was through a few different patterns.
+So here's kind of an overview of the agent architecture where you have a set of learning components which feed off the data from replays.
+They then interface with either the agent's blackboard, which is called the working memory.
+or with the behavior library and active behavior tree.
+So the most direct way of basically interfacing with external systems is basically reading and writing to the blackboard.
+So if you just open that up to other components to read and write to, you can do things like the particle system I used where it basically tracks where it thinks enemy units are, and then the agent can use those estimated locations to determine where to attack.
+Basically, writing to the blackboard was the most direct way of extending the system.
+Another way of extending behavior trees is actually having an external component generate the behaviors to execute. So instead of authoring everything, you can basically have a set of replays that populate some of the behaviors to perform. So here's an example of what this might look like. You basically have a replay file and then on the right you have a behavior that would get generated.
+So this was actually done by a project at Georgia Tech called Darmok, where they actually called it case-based planning, and you basically feed it replays, it creates a behavior library, and then executes those at runtime.
+I did something similar, but I actually did it by basically placing new elements in working memory one at a time, kind of as a build order sequence.
+But I think it's great to show this example here because it shows.
+some of the types of work that can be done.
+And it's interesting to see that you can create behaviors at runtime from examples.
+And then a third way to basically extend behavior trees is by having other components.
+augment the state of the tree, so adding new nodes or removing nodes.
+So this is a basically way of having external components say, here's a goal I want to pursue.
+So I use this in two ways in my system.
+The first way was for, basically, I had a system that detected whenever the opponent was doing something outside of your expectations.
+When this happened, a discrepancy was fired and then a new spawn goal was used to basically say, pursue this new tech switch.
+I also used it for this mixed initial model I built where you basically say like...
+It was a GUI where you basically say select which build order to do and that created a spawn goal for the system to pursue a new behavior to execute. So basically, it's a way of having external components tell the agent what to do and it's useful for removing some of the decision-making logic from the agent.
+So instead of having the behavior tree decide when to attack, having the tree decide what the build order can be, you can have external components do that.
+And if you've set your agent up with this manager subsystem and message passing between them, you can basically swap out one of those managers with an external component.
+So it's a great way of adding some extensibility to the tree.
+And there's also some features of ABLE that I didn't really interact with that are useful to note.
+So joint goals and behaviors are basically an approach you can use to have multiple ABLE agents actually agree to perform an action and coordinate on that.
+So.
+As Roxanne just mentioned in her talk, dialogue was something that was challenging to actually execute, because you have a lot of autonomous agents and they actually need to agree on a task to perform.
+With Able, this was actually a primitive built into the language, so it made it easy to author interactions like where Grace and Trip argue about their trip to Italy or things like that.
+Another feature is meta behaviors where you can actually introspect and change the layout of the tree or change, say, the priority of steps in the tree at runtime.
+And it's a really powerful authoring tool, but it's also kind of dangerous because it's opening up the tree to a lot of potential issues with orphan goals and things like that.
+So you need to be careful when you kind of change things at runtime, but it's a powerful tool.
+And then more of a kind of academic project that was done was this idea of partial programming where you under-specify your preconditions for a behavior and then the proper preconditions to use are learned at run time.
+So you basically specify a reward function and then a policy is developed as an agent runs in order to figure out when to perform those different actions.
+So this would be complicated to do with something, the scale of StarCraft, but if you have a much more refined environment, it's a really cool approach to use.
+I hope you've learned a lot about behavior trees today.
+We talked about node decorators, we've talked about some best practices and some extension to behavior trees.
+They're a powerful tool for authoring and can be applied to a variety of different situations.
+Thanks.
+Thank you.

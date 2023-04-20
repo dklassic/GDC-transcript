@@ -1,0 +1,292 @@
+Good afternoon. My name is Chris Stark, and I'm a programmer at Robot Entertainment.
+I've been in the industry now for around 13 years at several different companies, most recently Robot Entertainment for the last 8 years, where I've primarily worked on the Orcs Must Die franchise.
+So for those of you not familiar with orcs, here's a quick rundown.
+You have one more mage and friends versus hordes of orcs, AI, trolls, ogres, and worse, and weapons and traps to hold them back from entering your rift.
+There are tons of AIs that want to shoot you, stab you, and or blow you up.
+I'm going to be talking today about how to use ranged AIs in this franchise, specifically AIs that fire projectiles.
+I'll be talking about math, code, and design, all three.
+The design drives your math and your code, keeping it fun is your foremost job.
+So most action games have ranged AI.
+Like I mentioned, I'm going to be talking about the ones that do projectiles.
+Some of this, but not much of it, is relevant to hitscan.
+The projectiles need to be slow enough for the player to dodge.
+This way, the player has a chance to have some counterplay against the AIs, and it makes the AIs more fun to play against.
+However, this means that by the time the projectile gets there, the player won't be there.
+If you're not aiming ahead, this is what you're going to get.
+Looks pretty bad, doesn't it?
+You really want something more like this.
+So the first class of projectiles we'll be talking about are linear projectiles.
+And then the second are ballistic projectiles.
+I'm going to be talking through how to aim, debug, and most importantly, miss with both types of projectiles, and a few things I ran across while I was implementing them.
+So let's start off by talking about predicting player movement.
+So first, a few assumptions we're going to make.
+We're typically working over a short enough time frame that we don't need to worry about rotations.
+And we also want to make sure we ignore the player's vertical velocity when they're jumping.
+Otherwise, it's going to throw off our aiming results.
+We're going to be pretending that we're operating in a vacuum.
+It helps keep the math and ultimately the code quite a bit simpler.
+So we need to know which way the player is going to be going.
+The easiest thing to do is look at how fast the player is going right now and in what direction and just use that.
+This works well as long as the player is doing something like this.
+However, when your player starts doing things more like this, it doesn't work quite as well.
+Is there something we can do better than just the instantaneous velocity?
+There is.
+We can use a history buffer, which will give us a more accurate result.
+You're going to want to take that history buffer and tweak it until you're accurate, but players still have a chance to dodge the projectiles.
+So now that we've got a velocity, let's walk through how to use that to predict the player's future position.
+So we'll start with a war mage here in a position.
+In our first two games, just as a side note, the origin of the player was on the ground.
+You want to make sure you're actually using the center of their bounding box and not shooting at the ground.
+We know from our history buffer that they're moving at some velocity.
+And then they're going to be moving for t seconds.
+We don't know how long t is yet, but we'll come back to that here in a little bit.
+So when you put that all together, that will give us our final predict position, X prime, which is the board ranger's original position plus his velocity times the amount of time he's been traveling.
+We'll see this again here in just a minute.
+First, though, let's talk about linear projectiles a little bit.
+This is a linear projectile. There's no gravity on it.
+It's going to go in a straight line forever or until it hits something.
+But before we go ahead and fire one of these off, there's a few things we want to do first.
+We want to predict the player's position, which we'll talk about how we're going to do.
+Then we want to make sure that we're not going to be firing this through a wall.
+We may also want to check against friendly units between us and that predicted player position.
+We wound up not.
+However, we did have the friendlies block shots because players were a little bit baffled where the shots were coming from since our range units tended to be in the back.
+We didn't do a line of sight check though just because we have a lot of orcs and it would have been pretty performance heavy to do so.
+And then the other thing you want to think about is when you're actually going to do the math to do the intersection prediction.
+You can do it before you fire off or you can do it at the actual launch point in your animation.
+So now that we've got that out of the way, let's talk about how we're looking at the projectile.
+So, like the wormage, it's going to start in a fixed position.
+In this case, it's going to be the end of the orc's crossbow.
+It's going to be moving at some fixed speed.
+We let design decide what the speed was.
+We also had a maximum speed or a maximum range, sorry, on our projectiles so that they would time out after a certain amount of time and we wouldn't have a lot of entities cluttering up the world.
+And then it's going to be moving for some amount of time t since launch.
+And since the AI can actually fire in any direction, sp, your speed, times the amount of time it's been out is actually going to form a circle around the AI that's expanding over time.
+So the radius of that circle, like I said, is the speed times the time it's been out.
+X prime, which is going to be our new projectile position, lives somewhere on that expanding circle.
+This can also be written as the equation for a circle, which I've done here.
+I'm going to be doing and showing all my math on my slides here in 2D.
+I, for some reason, am not a very good artist when it comes to 3D.
+So just so you know, this math actually does all work in 3D without any modification.
+So when you take the player's movement and the projectile's movement and you put them together, you can see what we wind up with is a circle versus line intersection.
+And so if we think about a circle versus line intersection, we really have three cases.
+We don't hit it all, we have one potential hit, or we have two potential hits.
+So just keep that in mind as we go here.
+So here are our equations again for both the player movement and the projectile movement.
+So you'll notice both of these have an x prime.
+This is actually gonna be our intersection point where the projectile hits the player.
+And you also notice we have a t in both of these for how long it's been.
+So we don't know t, which is our intersection time.
+So if you take these two equations and you solve them through t, you wind up with a quadratic equation, which you can solve using the quadratic formula.
+a, b, and c here are all scalars.
+There's a bunch of vector multiplies in there that are just dot products.
+For folks interested in how we got from the last slide to this slide, the online versions of these slides, which will be up shortly after GDC, will actually have that whole derivation in the appendix.
+So let's take our quadratic formula that we got from there.
+It's pretty simple.
+It's not too difficult to code this up and go.
+However, there's a couple edge cases you want to make sure you think about while you're working through solving this.
+So first, if you take a look at the bottom of this, your intuition would be if a is zero, you don't have a valid solution.
+But remember, we're actually solving a polynomial, a t squared plus b t plus c equals zero.
+So we actually do have a valid solution if a is zero.
+The next thing we want to do is we want to take a look at the discriminant inside of the square root here.
+If it's zero, we wind up with one solution.
+If it's negative, we don't have any solution at all.
+Otherwise, we're going to get two solutions.
+We want to take the smallest positive solution of the two because you want to hit as soon as you can.
+If you have a negative solution, it's invalid.
+In my experience, you're almost always going to wind up with one invalid solution.
+It's very rare to actually wind up with two valid solutions out of this.
+So once you have your solution for time t, you can circle back around and plug that into the warmage movement equation, and this will give us x prime, the location we're aiming at.
+You can take x prime and your initial firing point from the orc, and that will give you the direction you're firing in, and then if you multiply that by the speed the projectile is firing at, you will have your final projectile velocity, as you can see here.
+So what happens if you don't come up with a valid solution?
+Because it can and will happen to you.
+So if you did your math before you played your firing animation, you can just not fire at all.
+Nobody will ever know anything happened.
+However, if you're like us, and you actually did your math at the time you hit the firing point in your animation, The orcs already played a firing animation.
+It looks really bad in our experience if nothing comes out of the crossbow at that point.
+So what we wound up doing was actually just shooting a projectile at the player's current position.
+Nobody ever really noticed.
+It happened frequently enough.
+It still looked fine.
+And we have a lot of cases, too, where the player wasn't moving around, so it still actually looked pretty decent.
+So once you have your math all coded up and in your game, you may want to actually visually double check it just to make sure it's working like you expected.
+So we did that.
+So the first thing we did is under the orc here, we drew the launch point.
+You can't see it because he's standing on top of it.
+The next thing we drew here in red was the actual predicted point of intersection between the War Mage and the projectile.
+Then we drew the motion of the projectile.
+Every frame we just draw its position in white.
+And then we draw the final impact point in blue.
+So if you notice, the impact point and the predicted point are actually slightly different here.
+But that's expected, since the player's collision isn't a point in space.
+In our case, it's actually a cylinder.
+So that impact point is actually on the surface of the cylinder.
+So those two points are close enough that this is what we would expect to see, and this lines up.
+So now that we've talked about hitting a little bit with linear printer tiles, let's talk about missing with them.
+We're trying to write fun AI opponents here and not aim bots.
+So we wound up giving the design two different accuracy settings, one for horizontal and one for vertical.
+We would then take that and do a random roll between the negative value and the positive value.
+So we defaulted to two degrees, interestingly enough, for both horizontal and vertical, which gave us a total cone of four degrees.
+We would then take those two rotations, generate a rotation matrix, and multiply it by our initial direction vector to randomize the shots.
+One thing we noted, especially on the vertical, is that you want to avoid shooting too far up or too far down, especially if you're shooting to the ground.
+It made the AI look especially dumb.
+They are orcs, but at the end of the day, you don't want them to look too dumb, after all.
+So this worked well.
+We had this in our game for quite a while.
+And then we added barricades, which are obstructions that block the AI's paths and that they can damage.
+And we noticed that archers were really being rough on the barricades, as you can see here.
+Pretty much all their shots were hitting the barricades.
+It looked really bad.
+Players were complaining because all their expensive traps are getting torn up.
+So what we wound up doing is we added a new value into the equation we called tilt that we applied to the vertical value only.
+So tilt automatically shrunk the cone by half.
+So now we had a 2 degree cone instead of a 4 degree cone.
+And then we had a range 0 to 1 where 0.5 kept it centered.
+0 would remove the bottom and 1 would remove the top.
+We wound up defaulting our tilt value to 3 quarters, which got the majority of the shots clear of the barricades, as you can see here.
+We didn't want to remove all of the down because we do want to incent players to not fight around the barricades But we didn't want to be overly penalizing either As it turns out, that actually still wasn't enough to fix all of our problems with barricades.
+We had a number of short characters in the game, as you can see here, whose center point, which is what we were aiming at, was actually below the barricade height.
+So what we did for those cases is we had the AI look at the height of the thing they were shooting at, and if their center was below the top of the barricades, we'd pull it up, but not above the top of the player's collision cylinder.
+We threw a warning if that point actually did need to go over the top of the cylinder.
+Fortunately, it's never come up for us.
+So here's everything all working on a layer projectile.
+So in summary, they have a fixed constant speed.
+You want to take that speed and the player movement prediction to solve for the intersection time and location.
+As far as missing, we used a cone.
+We used a different angle for both horizontal and vertical on that cone.
+And we did need to do some additional game dependent tweaks in UMEI as well.
+So next up, let's talk about their cousins, the ballistic projectiles.
+So this is a ballistic projectile.
+Unlike a linear projectile, it has an upwards initial velocity, or some up velocity to its initial velocity.
+And it's affected by gravity, so you get this nice arcing motion.
+So you really want to do the same set of operations here as you did on a linear projectile before firing.
+You want to predict the player's position.
+One slight difference here is you may actually want to predict on the ground, which because a lot of times you'll have a bouncy grenade and this will actually get you less bounciness and will land it closer to the player.
+You want to do a line of sight check.
+In theory, you'd actually want to do a piecewise approximation of your arc to make sure you're not going to hit anything up in the air.
+However, our hallways in our game were pretty much square and didn't have any obstructions at top, so we actually just kept the straight line check.
+It saved us some performance and was good enough for us, but your mileage may vary on that point.
+And then, just like before, we wanted to look at when we were doing our math, either before the shot or at the time of the shot.
+So this is your basic ballistic motion equation.
+If you're interested in seeing how this is all derived out, I'm gonna refer you to last year's excellent talk on building a better jump, where it's talked through in some depth.
+So after seeing how we solve for a linear projectile, you'd probably assume we just take this and the one-range movement equation and put them together and solve them.
+Except you wind up with this, which is a quartic equation and can be a little bit hairy to solve.
+If you're curious how these are actually solved, I've got some good references in the note.
+GraphicsGems1 is probably the best one.
+We actually wound up doing some approximations here in cheating.
+So how did we cheat, you might wonder.
+Well, we started with an arc.
+And we noted that you could actually break the motion of the arc into horizontal and vertical pieces.
+So we solve the horizontal one first with actually our good old linear projectile code, which we already had.
+The one slight difference here is we actually had a maximum range on this, which I'll talk about more here in a little bit.
+We go ahead, we solve that for t, we get our intersection point, and we're done.
+So we take that intersection point with our vertical motion and say, this is where we want it to land.
+So let's solve for our throw so that it will, in fact, land at our intersection point.
+So we'll start with our projectile equation from a couple sides back, and we'll break into x and y components here, which we're just going to solve at the distance of the target.
+So x is gonna be your horizontal distance, and y is gonna be your vertical distance.
+We wanna solve these for theta, which we can use to calculate our launch speeds.
+So we have two equations and two unknowns, and if you take these and you solve them, you wind up with this, which is actually the quadratic equation again.
+And once you solve that through for theta, you're going to wind up with this.
+And you can use this to get your launch angle.
+So you may have one solution, in which case you're good.
+You know what your throw angle is.
+You're done.
+If you wind up with no solution, we just threw it straight at the player, but we kept gravity on the projectile.
+We found it was important to keep gravity on there just for the feel of things.
+Sometimes it wouldn't land close enough, but frequently it was good enough that nobody ever noticed.
+And then sometimes you wind up with two solutions, in which case we just picked the smaller of the two.
+We felt that looked better.
+The higher of the two frequently was a pretty large arc, which I'll talk about again here in a minute.
+So now that we have theta, we can solve for our speeds, which is a pretty simple solve.
+You just multiply by the cosine of the angle or the sine of the angle.
+And we're driving that from just basic trig equations, SOH CAH TOA in this case, if anybody remembers back to high school algebra.
+So now that we've got these, we actually need a horizontal and vertical vector to throw along.
+That way it all works when you have a case like this.
+So for calculating throw vectors, you're going to have r, which is the vector between the launch point and the target, which may be non-horizontal, as it is here.
+All you want to do is actually just project that down to the ground.
+The math for that winds up being you're just removing the up component of your vector.
+Nice and simple.
+Then you take that component, which I'm calling r prime.
+multiplying it by your horizontal speed and then adding your vertical speed in.
+And you are now in the grenade throwing business.
+So one note here is that using a quadratic equation like we did is not a perfect solution to this problem.
+You will hit where you want to, but it may alter your impact time slightly.
+We found that for us and for the ranges we were fighting at, it didn't matter, and it still worked just fine.
+And the fact that our grenades were AOE didn't really hurt much either there.
+So just something to be aware of if you use this solution.
+So as far as actually calculating what our base throw speed was, we changed our approach between games here.
+So at first, we just had a constant speed that design would set for how fast these were thrown.
+However, it was kind of difficult to work with because they wouldn't know how much arc that would give them or kind of what the feel was on that.
+So we found actually giving them some values to play with that more just described how the projectile was going to behave gave us better looking results.
+So instead of one value, we actually gave them three.
+So we gave them a gravity multiplier.
+So a larger gravity multiplier would make the projectile heavier and feel a little bit weightier like a grenade.
+Making it smaller would give you more of an arc.
+We gave them an ideal launch angle, which we defaulted to 45 degrees.
+That way you'd get, since a 45 degree launch of the projectile will give you the maximum range for your speed, it would actually give us the lowest possible speed there.
+I don't think design ever actually changes from 45 degrees, but the option was there if they wanted it.
+And then, like I mentioned earlier, we had a maximum range.
+We had a little bit of a constraint on how far that could be, which I'll talk about here again in a minute.
+So solving out for our derived throw speed from that works just like before.
+We're splitting into x and y components, like we did.
+And then we're actually going to solve these for where the projectile comes back to the ground at the maximum range.
+And this will wind up being the speed we used earlier.
+Just a friendly reminder, all the derivations for all of these are going to be on the online slides later if you're curious how the math actually all works kind of beneath the covers.
+And then we're actually also going to use those trig identities again to calculate our horizontal throw speed specifically.
+So maximum range, which I've mentioned a couple of times.
+So Art and Design in our game agreed on a minimum ceiling height, which is to say nothing will ever be lower than this.
+Don't forget to take into account when you're actually calculating how high that is that you want to calculate it from the throw point of the character and not from the ground.
+So different characters might actually have a different height here.
+So we would take that height, we would plug it in the projectile equation, and we'd solve it through and wind up with our possible maximum range for that height.
+Debugging this is actually pretty similar to debugging linear projectiles.
+We had the same colors, did the same things.
+One thing you might notice here, though, is we actually had a couple of impact points, since the grenades will bounce around.
+That's OK, and that's expected.
+So one problem we ran across with these grenades is when the players got really close, you got something like this.
+Which, it's not really so good.
+You really wouldn't want to ship with this, right?
+So we wound up cheating a little bit to solve this.
+We noticed it was really only when the player got close.
+So we had a maximum angle of 70 degrees we used in our game.
+And then we had a minimum distance that we set to about two to three meters.
+And that actually seemed to work pretty well for us.
+The players would get close, the AIs would just do a straight line throw again with gravity, and it looked good.
+Later on in the game, we actually wound up making an AI change so that when players got close enough, the AIs would just break off doing range attacks.
+It wound up making this a little bit better, and it also wound up looking better, because an orc shooting you with a crossbow, when he's right up in your face like this, it just looks a little bit silly.
+It also gave players one other way to counterplay against range AI, since it could get up close to them and force AI to break off and continue running down the path.
+There's some other ways you can possibly cheat physics here.
+I've got some more information on these in the references if you're curious.
+All of them have different trade-offs.
+So ours is not the only way to solve it, but we were happy with the results.
+So as far as ballistic projectiles go, you still want to be able to miss.
+So the first project we did these, we actually just picked a random point in a circle around the player and just, or the predicted position of the player, sorry, and then we threw in there.
+Worked fine, we shipped with it, not a problem.
+We actually wound up changing a little bit on our latest game.
+The thing we noticed was players were not always facing towards the grenade-throwing units.
+And so they would frequently miss the fact that a grenade had just shown up and then they'd be like, hey, where did that damage come from?
+That's not cool.
+So what we wound up doing was a handful of things.
+So we added a few sounds of the grenade.
+There was a nice hissing sound as it flew through the air.
+It was 3D, so you'd hear it getting closer, closer, closer, closer.
+Then we beefed up the impact sounds.
+So there's a nice solid clunk when you hit the ground nearby.
+And then as you can see here, we also added a decal to show the danger zone to give the player notice it was there and give them a chance to run out of the way.
+As a result, we actually pulled off the missing in a circle code and just had the grenade throwing units always hit the player.
+We actually were a lot happier with the results of this than we were just trying to throw an encircle around the player.
+So when you put it all together, this is what you get for ballistic projectiles.
+So we had a derived speed on these.
+We threw them with an arc.
+We came up with an approximate solution that we were happy with.
+And then we solved it with a quadratic equation.
+You may need to, if you use that solution, you may need to compensate for high arcs or some other edge cases.
+As far as missing goes, you can either aim around the player or just make the grenades avoidable.
+So wrapping up, make sure you aim ahead of the player.
+Make sure it's fun.
+Fun is your priority here.
+It's okay to cheat as long as it's fun and it looks good at the end of the day.
+Make sure players have a chance to react to AIs.
+We're trying to write a fun opponent and not an aim bot.
+And then make sure design can control your core set of parameters, and then derive your math code and fun from there.
+Any questions?
+If you have questions, by the way, please step up to the mic.

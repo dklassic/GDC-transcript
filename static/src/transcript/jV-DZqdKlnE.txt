@@ -1,0 +1,752 @@
+I'm Jason Grimblatt, and this is Brian Bucklew.
+We're co-founders at a small indie studio called Freehold Games, and we're going to end the day of math for game developers with a talk with basically no math in it.
+So I apologize in advance.
+But yeah, we're going to be walking you through the architecture for one of our big procedural generation systems.
+So the talk is called End-to-End Procedural Generation in Caves of Qud.
+So let's say that you have some familiarity with procedural generation, some various techniques.
+Let's say you've used L-systems to generate some plants or maybe this weird horseshoe creature.
+You've used noise maps to generate terrain.
+Maybe you've used a Markov chain to generate some text.
+But we have a problem here.
+So here's our problem statement, which is the reason why we're here.
+How do you combine Proc Gen techniques to build large-scale generative systems?
+And obviously, large-scale is a relative term, but what we mean for our purposes today is any system that requires you to compose several of these techniques in some novel way, something you can't just go up and look up a tutorial for.
+So who are we?
+Why are we here to talk about this today?
+Again, we're Jason and Brian from Freehold Games.
+We've made some roguelikes, Sproggywood and Caves of Qud.
+A couple of years ago, Tanya Short and Tarn Adams edited this book called Procedural Generation in Game Design, and we have a few chapters in there.
+And then coming out today or something, this Procedural Storytelling in Game Design book is available here at GDC, I think.
+And I have a chapter in there about.
+procedurally generating history, which is one of the modules we're going to touch on today as we walk through this larger architecture.
+So let me give you some context about what Caves of Qud is.
+If you haven't heard of it, it's an open world science fantasy RPG and roguelike.
+It's a tile-based game.
+The tagline is chisel through a layer cake of thousand-year-old civilizations.
+We've sort of weaved a handcrafted narrative, the type you might find in, say, an Elder Scrolls RPG, around some deeply simulative systems.
+like I said earlier, like Brian said in his last talk, we make extensive use of PROC GEN, and that's kind of why we're here today to talk about this.
+So again, we have this problem statement, how do you combine PROC GEN techniques to build large-scale generative systems?
+And we're going to walk you through a little case study here today for how we procedurally generated this large-scale output.
+this whole lot of villages and caves of Qud.
+And where we can, we'll try to generalize it into some wisdom, but for the most part, we're just gonna be walking through the system and you can kind of experience that and take notes and see how you might apply it to your own generative systems.
+So it's going to be a pretty long talk today, and there's a lot going on.
+So this is what we're going to be doing.
+So first, I'm going to establish some design context.
+We're going to tell you about what our broad approach was.
+We're going to get on the same page by agreeing on what a village is.
+I'll show you some of the techniques we use, and then the little starred item here, village generation.
+This is really where most of the talk is going to live.
+We're going to be doing this sort of dive into the whole system flow of our village generation.
+And then we'll try to distill it down to some takeaways at the end.
+So design context, very important.
+So like anytime you're building a large scale system or any system really, I think it's important to frame it with what your design context is, because this is really what's going to be involved in coming down and finally making decisions.
+A couple bullet points here that are somewhat obvious, but benefit from some unpacking.
+So we're making an RPG, so we're taking a simulative approach to design.
+So what I mean by this is a village is something that exists in the world.
+We're trying to reproduce its dynamics to some degree.
+Maybe not perfectly.
+Maybe we have our own things we want to say, and so we're going to heighten certain aspects of our village.
+But by and large, a village is something, again, that we're trying to reproduce the dynamics of.
+Perspective is limited to a player avatar.
+So we have this idea of generating a village, but how players are going to engage with that village in our game is by being embodied in a player avatar.
+They're going to be walking through the village, exploring the spaces that way, talking to NPCs.
+This is different if, say, we were making a SimCity-type game where we were also, say, generating a village, but your engagement model with how you actually engage with that village, you know, is different.
+Maybe it's the course of the village's lifespan over 500 years, and you're looking at all sort of, um, systemic properties of that village.
+But for us, we're actually, we're making an RPG.
+You're embodied in the world.
+You're going to be experiencing the village that way.
+And then this aesthetic principle that we kind of hit on a lot in our talks that we like to frame what we're talking about with is that we value novelty very highly in output.
+So we like to say we let our generators run wild and then we sort of establish a context where that's okay.
+So modularity is good.
+This is another bit of design context.
+So both from the software design perspective, so decoupled modules are tractable, they're flexible, can be combined.
+But also from the game design perspective, this sort of dovetails with the idea that we like to let our generators run wild.
+So decoupled modules can be composed into various and novel, varied and novel output, and you'll sort of see that play out as we walk through the system.
+Okay, this is a mountain.
+This is Mount Fuji, in fact, but we're going to call it Abstraction Mountain today.
+So, this is a silly metaphor, but it's gonna do some work here.
+So, basically, the broad approach we're going to be taking is to model our village very abstractly at first, and then through a process of multi-steps, through transformations, we're gonna get down into Concrete Valley, where we're actually...
+fabricating game objects and building something that the player's going to experience firsthand.
+So a broader approach, what are we gonna do?
+We're gonna be generating a village over multiple steps.
+We're gonna be modeling village facets at various levels of abstraction.
+So the earlier steps are going to be more abstract, and then we're going to be using those abstract data models as inputs into the later steps where we reify them, where we make them more concrete.
+Conversely, if we get to a point where we have to make a concrete decision, and there's no abstract input available, we're going to use some defaults.
+And so what that means is we don't have to fully model meaning, the flow of meaning through our system.
+Sometimes we make a random decision, and we're just going to rely on apophanea, like the tendency for people to perceive patterns in things, and the fact that we do have some meaningful decisions we're making to have it all coherent to coherent output.
+And today it's all about the plumbing.
+We're really going to be focusing on the input and output of our various steps and how we're consuming and then producing more output.
+We're not going to be doing deep dives into the individual modules for a couple of reasons.
+One, we just don't have the time.
+We're going to take up most of the time just walking through the system flow.
+For the second reason, for a lot of our modules, the techniques are quite simple.
+Like, they're things that are well-researched, well-understood, you could go out and learn about.
+Some of them are more complex, and we'll touch on those.
+But for the most part, we're going to be talking about how the joints, where these modules are hooked up together.
+So here's a village in Caves of Qud.
+Again, it's this tile map.
+You see there's a lot going on here, right?
+There's this inner circular building that's surrounded by this outer circular building.
+You see a bunch of doors.
+You see a bunch of villagers here.
+In the bottom right corner, there's building that looks like a library.
+There's a bookshelf in there.
+In the top right corner, you see a building that has an oven and some drinking vessels.
+That's some sort of kitchen or food storage area.
+So we're going to be, you know, this is the final result.
+We're going to be unpacking how we arrived here.
+So let's get on the same page about what is a village, right?
+Village is something, is a concept that exists in the world.
+We can kind of come to some understanding about what we mean.
+And when we're thinking about this, you know, we're both, caves are kind of sort of a far future setting.
+So it actually borrows a lot from, I'd say, the ancient world, is the real ancient world aesthetic.
+So in deciding what we wanted to represent in our village, that's where we got a lot of our inspiration.
+We also have been working on this game for a long time, over a decade now, in fact, and we have villages in the game.
+We have handwritten static villages that we designed.
+And so what we could do is we could take those and unpack those and kind of figure out what we were doing as designers to build out what we had in mind, and then we could try to proceduralize it.
+So what's in our village?
+We have villagers, first of all.
+So those are gonna be represented like they are in most RPGs as NPCs.
+History, like the relationship with the past and the present is very important in Caves of Qud, so we're gonna be wanting to generate some sort of history.
+There's the geography of the village location, how it's integrated into the geography.
+The village is gonna have some architecture that we generate.
+It's going to have a government, cultural practices, religion, all sort of, like we're gonna generate a whole culture essentially.
+A storytelling tradition, you know, the village has some history, but how do they actually relay that history to people who visit the village?
+The village is going to have a relationship with local resources.
+Maybe they cook a particular meal.
+They use a local ingredient to do that.
+They're going to have furniture styles for the furniture that exists in all of the buildings.
+There's going to be some food and drink, like signature dishes for each meal.
+We do this thing where we procedurally generate dialogue for these NPCs.
+And so sometimes they have proverbs that they've sort of invented based on their history and their culture.
+And then finally, we have this sort of collective and personal needs of the village, which we're gonna be modeling, as most RPGs do, as quests.
+Here's a slide with just some techniques we use through the course of this sort of multi-tiered system.
+I'm not gonna, what'll happen is, as I walk through the system, I'll call out some of these techniques as we get there, but here's a slide with all of them.
+So village generation really happens over three distinct phases during the course of a Caves of Qod game.
+So I'm going to focus on the second and third right now, the blue and red ones, and we're going to get back to design in a minute.
+So first of all, when you spin up a new game of Caves of Qod, you hit create world, create new character in the world.
+we're generating a whole new world for you.
+And during that phase, what we call world generation, we're actually generating the history of each of these villages.
+We're going to this next step called resolve neighbors, where we're figuring out where the village is going to exist in the world and what relationship it's going to have with its local neighbors in that local region.
+Then the world is generated, you have a character, you can then go walk around the world.
+We don't actually build the village until you're about to enter the little world map tile that says where the village is.
+So we do this sort of village fabrication on demand.
+Once you actually do, you decide to enter the village, then we're in this last fabrication phase.
+And this is where we're gonna actually generate a specific culture for the village.
+Based on the history, we're going to generate a specific architectural style and map out what the buildings look like.
+And finally, the last step, right before the village actually appears in front of the, like is loaded on the screen for the player, we're going to fabricate game objects where we're actually going to place walls, place NPCs, place furniture in the building.
+This first phase is what we call design phase.
+It's where all of our pre-baked material goes in.
+So all of the static handwritten templates that we're using to seed our procedural generation are done here.
+And this is done at compile time.
+It's just if we have some sort of static blueprints that we're writing, we're going to bake them into the game.
+And then once the dynamic phases start to happen, we're going to be able to leverage those.
+So we have abstraction mountain again so again those 5 steps we're going to lay out here we're going to start really abstractly with the village history.
+Now, we get back to this idea that I was talking about earlier, where because we're generating a village with a very specific engagement model where players are only going to be interacting with it by actually walking through the village and looking at monuments, talking to NPCs, we can get away with generating, with representing the history pretty abstractly.
+Now, when we actually get down to fabricate game objects, we need to actually generate concrete things that the player can interact with.
+But these five steps are arranged along this sort of axis of abstraction.
+We're going to generate history, represent it really abstractly, resolve some neighbor relationships, kind of make some decisions about the history, go down, start to actually make decisions about what the culture looks like.
+And at each step, we're just getting closer and closer to concrete valley here, where we're actually going to be serving the village up to the player.
+So this is a screenshot of a monument in one of these villages.
+We're gonna be using it as a sort of touchstone, like as a sort of a nice consistent thread that we're gonna be able to follow as we do this walkthrough of this big system.
+So we see here it's a little building, some sort of monument hall.
+We see there's some torch posts in the corners, and then there's in the center these yellow and cyan monuments.
+Everything in Caves of Qud is an object, you can interact with it.
+It has a little description here, which I'll read.
+So in 790, the villagers of Nawon demanded that the mayor abdicate and all forms of hierarchy be abolished from their village.
+The two pillars of civic life in Nawon thus became Anarchy and Valatar, a legendary giant dragonfly.
+So Caves of Quds is a game where there's a lot of like uplifted planted animals, so it's very common to see a lot of like sapient dragonflies for instance. And if you see on the right side of this village there's a little statue of a dragonfly which also is part of the village. So we're going to walk through kind of how we came from generating some history about this village to actually producing this monument hall and this monument and pasting this description onto it.
+OK, so we're going to walk through.
+We're on the first step here, generate history.
+So let me describe this slide, because there's a lot going on here.
+And this is the format we're going to use for the rest of the slides in the deck.
+So again, remember I said what's important today is the input and output.
+So we have input coming in from the left and bottom.
+I'll describe the difference between those types of inputs in a minute.
+We have output, each step is gonna have some sort of output at some level of abstraction.
+We're at generate history, so we're gonna start with some really abstract output and work from there.
+And then on the right, you see there's this little right pane where, and all this is us tracking the steps we're on.
+So you see the five steps laid out, starting with generate history, ending with fabricate game objects.
+The step we're on right now as we follow, as we walk through the flow here, is going to be darkened.
+So generate history right now you see is highlighted.
+And then there's this little extra bit of information here where you see at the top it says World Gen and at the bottom of this pane it says Fabrication.
+This is just to remind you where, where and which phase we're in.
+So.
+For the first two steps, generate history and resolve neighbor relationships.
+We're gonna be doing this during world generation, when you click new game and you're spinning up one of these new worlds.
+And then for the last three steps, from generate culture onward, we're going to be doing during the fabrication phase, which is where you've actually entered a particular village and we're generating it on the fly.
+So.
+What are our inputs here? What do they mean?
+So, on the left, coming from the left here, is going to be our dynamic inputs.
+Things that are actually being, like, generated per game and are going to be served down from step to step.
+So the first dynamic input, because this is the first step, the only dynamic input is the world seed.
+So the seed that we're using to seed our random number calls.
+Every bit of procedural generation we do will be using it, and because we have this system of world seeds, we can reproduce that. If you enter the world seed into Kzapkad, we'll produce the same world, mostly.
+At the bottom here we have what we call our design inputs.
+So these are actually the static pre-baked inputs that are coming during that design phase.
+So there are things like we have here like factions, like we have a bunch of factions in Caves of Qud.
+They're all static, they're handwritten.
+We add them at compile time.
+They're the same from game to game.
+We have the sort of map of regions that can't exist in every game.
+We have this graph of cultural relationships.
+These are all the design tie-in inputs.
+And one thing I wanted to mention about this slide is like, you're going to be seeing a lot of slides with a lot of shapes here flowing into each other.
+You don't have to necessarily worry about, like...
+understanding the specifics of every slide.
+More important, it's more of a tool for us to sort of tell the story of the system generation as the information is flowing through.
+So where something is particularly important, I'll call it out.
+But don't worry about seeing a bunch of slides and memorizing them.
+Okay, so let's look at some of these design inputs from the bottom here.
+So, like, factions, again, we have a bunch of handwritten factions in our game.
+So you go to the factions screen, you see a bunch of different faction names, like, again, a bunch of uplifted animals.
+You have antelopes, you have apes, arachnids.
+You have a reputation score with each of these, and that determines how their behavior toward you.
+This is sort of what I mean by factions in our game.
+One really interesting design time input is this graph of cultural relationships.
+So what we have is we have this what it is, it is what it sounds like, it's this graph of cultural relationships that we've modeled as this replacement grammar.
+And it's a little messy because we also embed, we also use it as a replacement grammar for generating text, procedurally generated text.
+And so what we've done is we have a sort of.
+a mapping of relationships between various elements of culture that we've again hand-baked, and then a little textual snippets associated with them that we can call into when we're procedurally generating dialogue. And we'll use that again and again throughout these steps.
+So what are we actually outputting from this step, right?
+We're generating history.
+And remember, we're at the top of Abstraction Mountain, we're at Abstract Peak, so we're gonna be generating pretty abstract output.
+So, you know, this stuff sounds really good, right?
+Okay, so we're gonna give the village a name.
+We're gonna give it a sort of base faction, like the base static faction who decided to found this village.
+We'll give it a palette so that if they decide to paint their, you know, drinking ware later that we know what color to make it.
+We have descriptions of historic events, things like government, things the village finds sacred, things that they find profane, signature items that the village becomes known for, like maybe they're known for creating a particular type of drinking jug.
+signature dishes that they're known in the region for.
+And again, there's a lot of information here, but because we're only going to be engaging with the village history later on when we actually make it more concrete and allow the player to roam throughout the village and look at historical artifacts, things like monuments or historical texts.
+or having a conversation with an NPC and asking about the history, because that's the only way that history has actually surfaced in the game, we can be really abstract with how we represent it here.
+And in fact, if we look at like a screenshot of just, we're inspecting the data structure here, all of village history really is, is it's a bag of key value pairs at the moment.
+So you see we have this, we have properties here, and then we have a bunch of properties, like name, we have the name of the village.
+region, we have the region that the village is in, we can go down and see like governor, the mayor, we have just, like all of those things that we had listed in that previous slide are just represented as strings actually at this point, pretty simply.
+As far as how we actually, how the history generation actually works, we do some interesting stuff.
+I'm not going to do a deep dive here, but we essentially have a little state machine that we walk through, and we have these historic event templates that we pick.
+And we do some interesting things where we actually have a sort of inversion of historical logic where we decide how an event ends and then create a rationalization for why it ended that way.
+So, for example, we might have an event where a village starts to worship a nearby creature.
+And...
+Once we've chosen that event template, we're going to have the village worship the creature, we're going to generate a little procedural text to describe that event, and then we'll create some rationalization based on the current state of the state machine to decide why that village is going to worship that creature.
+If you want to do a...
+Okay, so yeah, this is again our monument here.
+So when we see here this little snippet of text that gets attached to this description of this monument, we have the villagers of Nahuatl demanded that the mayor abdicate and all forms of hierarchy be abolished, so anarchy in the village.
+that happened during history generation, and then that little snippet of text was generated as part of the procedural description of that historic event.
+And now, all the way in the fifth step, when we get there to fabricate game objects, we get to just staple it onto one of these historic monuments.
+If you want to do a deep dive into how the actual history module works, how the history generation works, I gave a talk on it last year at the Indie Games Summit.
+And we wrote a paper on it, so you can go and research that.
+But for now, we're going to keep it at a high level so we can flow through the system.
+So next, we're actually going to enter the second step, where we're going to resolve some neighbor relationships.
+And Brian's going to tell you about that.
+And that's how we're going to end this world generation phase.
+All right, am I on?
+Okay, so we have villages that have been developed at an extremely abstract level.
+You see that they don't exist, they haven't been reified into the world at all.
+In fact, some of the relationships they have with the world are still extremely abstract, like the fact that they worship a creature.
+At this point in generation, they don't even know what creature they worship.
+They simply know that they worship a creature.
+The fact that they worship a creature is interesting, but we need to reify it farther.
+So we're going to take a step down abstraction mountain here into resolving neighbor relationships.
+Let's take a look specifically at our first step, world location.
+This is gonna take a few inputs.
+It's gonna take the world seed.
+This gives us our random variation.
+We're gonna take the village history, that's the output we just took a look at, and we're gonna take a world map, and we're gonna do some processing on it, and we're gonna find a location for this very abstract village, which is gonna give it a little bit more concrete life.
+The world map in Caves of Qud is largely static, the design of the map.
+So in this case, this map is the world every time.
+So the location of individual tiles, like this is a jungle tile, this is a desert tile, this is a mountain tile, these are a few important static locations, is the same every time you start up the game.
+However, the location of the villages is dynamic.
+So you have sort of a static backbone against which we're placing this procedural content.
+In addition to this layout, we have some data that describes what generally is a part of each of these cells.
+So this is, for example, a description of what's in each jungle.
+What's on the surface, particular types of encounters, what kind of music plays there, what's underneath it as you descend beneath it.
+And so what we do here is we go through each village.
+We have an abstract representation of its location.
+So it might say, hey, this is a jungle village or this is a mountain village.
+And we find a good location for it.
+So for example, here we've got Shubul, which we've plopped into a mountain and says atop a high, fastened communities gather in honor of Susiraya, a legendary goat.
+So this makes sense because goats live in mountains, right?
+And so we go through each village and we find a place for it to live in the world, as well as a bunch of other stuff that lives in the world.
+Weird creatures and shoemakers and distilleries are all placed at this point all across the world.
+And villages are one of these objects that's placed concretely.
+So we develop this map and then we do.
+the reification of these abstract relationships.
+So now that we have a map of these village locations, and for instance, legendary monsters and their lairs, we can go through each village and resolve those abstract relationships into concrete relationships.
+So any of these abstract tags that says legendary monster, Now we go and say, well, this village probably is related to a legendary monster that's spatially correlated with it.
+So let's go find a nearby monster that's maybe a couple squares away.
+And now that's the monster that they worship.
+We retrofit the history with this more concrete element.
+So we've done some reification here to give it a very concrete.
+instance and we do that for all the abstract relationships in the village.
+So at the end of this point we've got all those abstract relationships that you can sort of think of as like a linking metaphor.
+We've linked those against real objects in the world.
+And so you can see here the actual data.
+We've got an entry here which says Asterisk worships legendary creature.
+This is an example of the kind of name value pair we generate, it's very simple, and we're doing particular stylized connections for each of these individual tags.
+So for instance, we've placed in these monsters like Kelly Ufat, the legendary boar, and these are linked to the individual villages.
+So does that make sense for everybody?
+Finally, We saw on the previous slide that we had static factions that we've designed.
+So you can be friendly with boars and you can be friendly with bears.
+In addition to this, you can have factional relationships with the villages.
+And in the step of resolving neighbors, we create some physical concrete links between the villages and the faction system.
+So on this slide, you can see for each village, we create a new faction and inject that up against the static world state.
+And so now we have new dynamic members of these that are different from game to game.
+At that point, the world generation is complete.
+So you're dropped into the game.
+And when you visit the village in practice, the rest of these steps happen in real time.
+So you enter the map, and we go, uh-oh, we need to know what this village really looks like, and we start generating the culture at that point.
+Yeah, no, I'm gonna.
+Hello?
+OK, so generate culture in the 3rd step now so now like Brian said where we entered a village we have to kind of generate a we're still in a sort of abstract layer here though but worse working toward actually fabricating the game objects but now we're actually going to take the history and generate a specific culture from it so.
+What are our inputs?
+Again, we have the seed.
+The seed is sort of an implicit input because we're doing random calls, so we're always going to be using our world seed.
+We have the village history, which now is updated to be a little more concrete.
+If a village worships a creature, we now would know which creature it is.
+We also have the village region, the region that the village is placed in, whether it's a jungle or a mountain or a desert, and that's going to affect the culture because we have all these sort of specifications for what a jungle culture might look like versus what a desert culture might look like.
+What are our design inputs?
+Well, we have population tables, which is this tool that we use to encapsulate some discrete procedural logic.
+So I'll be talking about that in a minute.
+And then we have that graph of cultural relationships that I showed you a few steps ago that's being used to generate text and figure out which things are culturally adjacent to each other.
+If a village likes rubies, what are they more likely to like in addition to that?
+So.
+Let's talk about this one output, when we're thinking about what is actually getting output from this step, we're gonna have a culture, all the various facets of a Caves of Qud village culture, one of which is the storytelling tradition.
+So the storytelling tradition ties us back to this monument, this diptych.
+So basically, the storytelling tradition of this village, this particular village, is that they like to inscribe, they like to build monuments that share the story of their history.
+There are other types of storytelling traditions.
+For instance, some villages like to engrave their histories onto their furniture.
+This is an example of an engraved oven.
+Some villages just like to inscribe their history into tomes.
+So this is a little library, again, that gets built.
+And we see a bookshelf.
+And here's a description of a book.
+It's the history of Tabbalah Volume 2.
+And if we were, you know, this is another game object in Caves of Qod, you could pick it up.
+You can open it up and read it.
+And it'll have the history of the village.
+So what does it mean that we're outputting the village storytelling tradition at this point, right?
+Well, it's really at this point, it's just a sort of specification.
+We're just gonna pick a string.
+And the way we do that is that we, what we call roll, this dice metaphor, we roll on this table.
+This is a little table we have.
+Each of these entries has a little weight, and we decide which of these storytelling traditions we're going to use.
+So I wanna, that's an example of a population table, and I'm gonna take a little tangent here out of these steps to tell you about a tool we wrote to make our lives easier with procedural generation called population tables.
+So what is a population table?
+Again, it is this table that we're going to roll on.
+So we see here there's an entry for each type of storytelling tradition.
+Each of them have weights.
+So you see, these are relative weights.
+So it's...
+Doors has a weight of 20.
+If we look down a little bit, monuments has a weight of 40.
+What this means is that it's twice as likely that a village is going to tell their history through building monuments than it is through like painting or engraving their doors.
+Now the thing about these population tables is that they're a nice expressive way to encapsulate a certain type of procedural generation, discrete type of procedural generation.
+Like I already showed you that we can.
+encode various weights here, but we could add all sorts of metadata to express various meaning in terms of our procedural generation fabrication.
+So for instance, this is a table of jungle creatures.
+The point here of the table is to just find a creature that lives in the jungle.
+Maybe we need to like, you know, have an encounter for the player.
+So as you see here, we have these various styles.
+The first style it says is pick one, and what that means is we're gonna look through each of these entries and just pick one at random based on their weight.
+You see they have a number there, so sometimes the number of creatures we're fabricating changes.
+You see the last entry here is actually another style.
+So we can nest these styles.
+And what this means is if we end up, sometimes we'll pick the first entry in this table, in which case the table will just return a boar.
+So whoever called into this population table is just going to get a boar as a result.
+But sometimes we pick this last entry.
+This last entry is actually a nested subtable.
+This table has a style of pick each, and so what that means is instead of just picking one of the following objects, we're gonna pick all of them.
+And this is a nice way to, okay, sometimes we'll generate a boar, but maybe sometimes we want a whole encounter.
+So here we have goat folk, goat folk are like.
+They're goat creatures that live in caves of Qod.
+And so we want to generate a little goat folk encounter.
+So we're going to pick each of these objects.
+There's going to be one or two goat folk savages.
+There's a 50% chance to have one goat folk sower, a 50% chance to have a yurt warden, and then a 10% chance to have a shaman.
+Again, we have all these specifications to generate a diverse array of output, and we've expressed all of them in the metadata in this table.
+This is data.
+We define this during the design phase, and we pre-bake it in, and then it's a nice way to express this sort of logic.
+So the last table was to generate some creatures.
+We could also use it to populate some furniture.
+So this is the table that represents the furniture in an Apple Merchant's tent.
+And you see here we have some extra metadata here, these hints.
+So we can say like, hey, let's put a torch post, and this is pick each, so we're gonna pick each of these things and put them in the Apple Merchant's tent.
+We have a torch post, so we say, let's pick one or two of these, and let's put it outside the door.
+You see colon two, that means within radius two.
+So near the door, put some torch posts.
+We see a woven basket, pick one or two, and put it in the inside corner of the room.
+So this is just some metadata about where we wanna place these objects.
+We can inject into this table, and then the actual consumer of this table, whoever is calling into it, is going to know what to do with those hints.
+So for instance, if we're populating a building, the consumer knows, oh, inside corner, place this in the inside corner of a building, which we've sketched out already.
+If we're populating something else, like someone's inventory, these hints would be meaningless, and we would just ignore them.
+We wouldn't even include them in the data.
+So those are population tables, just a nice, like it was a pattern we hit on, we realized we were doing a lot of this discrete procedural generation, and so we wrote this little tool to be able to express that a little more succinctly.
+So back to our steps here, where again, we're in step three of our five steps on our journey down Abstraction Mountain into Concrete Valley.
+We just picked a storytelling tradition.
+Let's look at another output.
+So let's pick a signature dish.
+So we really wanted to make food important in Caves of Qud.
+We wanted to play and replicate the idea that food is just an important aspect of culture that's often overlooked in games.
+So each village actually has a signature dish that they're known for cooking.
+This village, and you can walk up to their oven and eat their dish.
+This village is known for their fungus and electric schnitzel with goulash.
+Each of these dishes actually has a procedurally generated status effect that it imbues you with.
+So you eat this dish that's based on fungus and electric goulash, and you get protection against developing a fungal infection, which can happen in caves of Qud, and protection against electrical attacks.
+You can also go up, walk up to the villagers here, and there's sort of a currency of reputation.
+You can do this thing called the water ritual with them, which is this sort of like sacred exchange of culture.
+And you can spend reputation to learn how to cook this dish.
+And there's a whole cooking system.
+You can go to a campfire.
+If you have the right ingredients, you can cook this dish and you can get that effect.
+And so, you know, okay, that's all well and good, like I've explained what it looks like for the player to encounter signature dishes, but how did we actually get there to generate it?
+So we actually touch all of these inputs in the course of generating a signature dish.
+So we have some random calls, so we're gonna use the seed.
+We have the village history.
+So these village history templates, sometimes a village's history will include an event that involves food.
+Like let's say a traveling chef arrived and decided to cook a meal, and it was very popular in the village.
+Or the villagers start to grow some sort of crop and start to use it in their meals, and they become known for using that ingredient, right?
+The village region is important, where we actually place the village, because each region has a certain set of local ingredients, right, so your dishes are going to look different in the jungle than they're going to look in the desert.
+So coming up from the design inputs, we have these population tables that are mapping those regions to the various type of ingredients and plant and animal wildlife that exist that are possible to be consumed and used as ingredients to the dishes.
+And then we also have that graph of cultural relationships that is actually mapping together all various sort of text snippets that it's allowing us to generate a sensible name for that dish.
+So like that fungus and electro schnitzel, little text snippets that we have sort of.
+filtered up through our text generation into that dish name.
+And then finally, we output that dish.
+We have a data structure to store all that.
+And when we actually get down to more steps to fabricate game objects, and we're actually building the village oven, we put an interface in there that lets you cook that dish there.
+So now Brian's going to tell you a little bit about how the next step, where we're actually starting to generate the architecture of the village.
+All right.
+Okay, so we've gone through three entire pretty big steps, and we haven't built any game objects, right?
+All of these have been abstract decisions.
+We're setting ourselves up to generate some actual game objects in the game.
+And so this is our first step where we're actually gonna build some stuff.
+But first we have to make just a few more decisions.
+From all of the prior abstract decisions, we now have to make some very specific decisions like building style, and this is gonna start to be a concrete decision.
+This is like, are these gonna be square buildings?
+Are they gonna be round buildings?
+Are we gonna, if you saw my previous talk, what WFC templates are we gonna pull in in order to do the building?
+Maybe these are little tiny WFC templates or big spacious ones.
+What are the important buildings?
+This is driven by storytelling tradition, for example.
+What are the agricultural plants?
+What are the decorative plants?
+And you can see that these are very concrete decisions.
+We've gone from this is sort of a religious village that worships goats to they grow weeds, right?
+I mean, it depends.
+So.
+One of the important inputs here is the actual physical place that the village is placed.
+In this case, we're gonna start, build a village and a canyon.
+And so, we actually first, we generate the zone as if there was no village there.
+And we rip all the monsters and stuff off of it.
+We then make a bunch of these decision points.
+So let's talk specifically about building style, and then the rest of the decision points are pretty similar.
+We're making very concrete decisions using population tables to make this building style decision.
+So let's take a look at these input population tables.
+On the left, you can see a default building style.
+This applies if no other specializations exist.
+Below it, you can see a region-based population table.
+So this is a population table that is selected for a salt dunes region.
+You can see that tents are given very high weight in this table.
+On the right, you can see population tables for specific factions.
+So in this case, you can see the birds always have aries, fish always live in ponds, mollusks always live in ponds.
+And we have an internal order of priority so that if you've got a fish village, it rolls off the factional table.
+If it doesn't, it falls down to a regional table, and if that doesn't exist, it gets the default.
+If we've got, we don't have one of these for each type of faction, for instance.
+We specialize the ones that are important and the rest of them fall through to regional or default population tables.
+Important buildings, this ties back to the monument.
+This decision is made in largely the same way, four monuments.
+If we have a monumental, monument hall style, then we're gonna build a building like this, right?
+And this is another decision that's made in a very similar way.
+So we go through all of these prefabrication design points, and now we have an answer for each of these.
+We know what liquid, what door style, what wall type, what building style.
+So now we've got to actually build a map to place some objects on.
+So we start with this canyon.
+and we figure out where are we gonna place buildings.
+This is actually a pretty non-trivial problem for an arbitrary map.
+This is the answer we came up with.
+You can think of many.
+Each of these colored regions is a seeded Dijkstra map.
+So you can see zeros there.
+What we do is we throw down a random seed into a Dijkstra map, and then we throw down a seed into any places that didn't get filled with that Dijkstra map.
+I encourage you to look up that technique if you don't know about it.
+It's really powerful for as simple as it is.
+and then we start placing seeds at local maxima until the biggest region is no bigger than a defined size.
+And we pick the size based on the style of the building.
+And we get some nice, well-distributed regions.
+We figure out what the biggest internal rect of each of these regions is, and that gives us the places where we can place buildings.
+So then we go ahead and we, maybe we build some square buildings or some round buildings, or if you saw my previous talk, we pick some WFC templates and we gen a building that's gonna fit in that rectangle.
+and we drop those buildings in.
+And so you can see we've got some tents in the lower right, we've got a little green building in the upper left, we've got a couple caves which we're gonna turn into houses, we've got some WFC buildings in the left and right sides here.
+These have been dropped into that Dijkstra map seated space.
+And then we do one farther piece of analysis because we need to know where the inside of the buildings are, where the outside of the buildings are.
+And so, what we do is we drop dexter seeds into each of the individual buildings, and we close off any narrow spaces until we've got nice constrained spaces, and then we have a good analysis of inside and outside in a fairly simple way.
+This works for arbitrary building styles.
+So now we have data.
+We've got a nice map with a set of walls.
+We know where the inside is.
+We know where the outside is.
+You can see a few results of this process.
+And we are finally ready to fill these villages with stuff.
+So we're at the bottom of Obstruction Mountain.
+We're at Concrete Valley now, finally.
+We're actually going to be fabricating game objects to serve up to the player.
+You're going to be walking around the village.
+This is the last step.
+So what are our design inputs here?
+Well, we have what we call object blueprints.
+So each of these game objects, it needs to have some sort of specification, and we generally pre-bake these in during the design phase.
+So...
+This is the XML specification we use for a torch post.
+For each of these parts here is actually a little component that encapsulates some logic or some behavior that is relevant to the torch post.
+So you see the first here is a render part.
+That just tells the torch post, it tells the system how to actually show the torch post what ASCII character to use if we're in ASCII mode, what tile to use if we're in tile mode, what color to make it.
+It has a physics part, so that just means it has a weight.
+We define here whether it's takeable, whether it's a solid object, whether you can walk through it in the same tile.
+If we scroll down, or if we just look down a little bit, we see light source.
+We see here that if it's lit, or it is lit, and then it shines light in radius six.
+So this is what actually makes it behave like a torch.
+So each of these parts encapsulates some amount of that logic that we expect to have from a torch.
+Now, what are we actually outputting as this step?
+Well, it's the last step here, right?
+So our output is actually going to be a furnished and populated village map.
+So again, an example of that is going to look like this monument here.
+We have the map, the monument hall that came in from the generate architecture step, last step.
+So we're gonna build that here.
+We have the actual specification for what a monument looks like defined in a blueprint somewhere, and we fabricate that.
+But then we don't just fabricate it, we actually dynamically alter it.
+And in this case, in the case of a monument, we're just gonna pick one of these historic snippets and staple it onto this monument.
+So we have a little description here, you look at the monument, and that's how we know the history of this village that they abolished hierarchy and forced the mayor to abdicate.
+That's communicated through this monument here.
+So this is that village that we looked at at the start of the talk, or near the start of the talk, with a bunch going on. So each of these game objects was fabricated in the same way.
+So we could walk through and look at a couple of them.
+So this is a village that has a desecrated marble statue of Liramir, the legendary bloated leech.
+We could see it's desecrated here.
+So I know from looking at this kind of what happened, right?
+So what happened is sometime during the village history, the village decided that they were furious at some creature and that they were going to record it in the annals of their history.
+Then during resolved neighbor relationships, we looked at nearby creatures who are good candidates for the hatred of this village.
+We found this bloated leech, decided that was a good one.
+Then finally, when we actually get to village fabricate game objects, we decided that this village likes to, as part of generate culture, we decided that this village likes to build these statues.
+We fabricated this marble statue.
+We desecrated it because the village doesn't like the leech.
+If the village had liked the leech, then they probably wouldn't have desecrated it.
+And we serve it up and we place it in the village.
+Here's a goat.
+This is actually a villager.
+So again, it's quite common to find plant and animal villagers in Caves of Qud.
+A goat has a blueprint just like a torch post does.
+It has a specification for how a goat's supposed to act.
+So again, we're going to have the, game object factory just fabricate a game object from that blueprint except before doing it right before we replace it we alter it. So you can see this goat actually has a tattoo. So this is a different storytelling tradition. Some villages like to tell their stories via tattoo. The villagers get tattoos so this goat got a tattoo as opposed to monuments.
+Now, it's interesting to note here, why did the, you know, we could ask the question, why did the village choose to share their stories in the form of tattoos?
+So sometimes there's an answer to that.
+Sometimes there's some like through line of meaning that we could trace back to the history where there was some historic event where tattoos became popular in the village.
+Sometimes there's not.
+So in this case, with this village, we just made that decision randomly.
+We needed a village, a storytelling tradition.
+Nothing in the history specified what it should be because the histories aren't complete.
+We let them be sort of spotty.
+But what we did here is because we didn't have any sort of abstract representation, we just made a decision randomly.
+And because there are these through lines of meaning for a lot of the decisions, the village tends to cohere pretty well into a meaningful space that you could walk around.
+But some of the decisions are made randomly and rely on the herd meaning around the whole village to make sense.
+And again, we rely on apophanea for players sort of to looking at a strong narrative context that's going to let a player interact with this goat.
+And because of what they know about the world and goats and villagers and all of the lore they've gathered through playing Caves of Qud, they have a context to interpret this goat and its tattoo.
+So like I mentioned, we procedurally generate some dialogue.
+So here is the, it's actually a dragonfly queen of this village.
+This village at some point had converted to a monarchy.
+There's a queen.
+We see a little proverb here, a little snippet of text.
+Resorbing matter is no way to bless the queen.
+I can unpack that a little, because being the designer, I can see where some of these text snippets came from.
+I know that resorbing matter has to do with gelatinous cubes.
+The village had some run-in with gelatinous cubes in their past, but they decided that resorbing matter, what gelatinous cubes do, that's no way to honor the queen.
+We generate these little snippets of text.
+This one is a proverb that gets appended to some of the dialogue whenever you interact with the villager.
+Here is a, we see here, Megolsa Shrub.
+This is a plant villager.
+And we actually have this whole dynamic quest system.
+So this last module, which we're not gonna get into here because it's probably the most complex of these modules, we have this way to dynamically take this history and produce some sort of meaningful quest around it and have you go interact with the world.
+So in this case, this shrub is asking you to go visit this location and it says, you know, what pearls might this place contain?
+Carbon dioxide, ample sunlight, a shrine to the practice of shield slamming, we must know.
+So how is this text generated?
+We look at...
+you know, in our map of cultural relationships, we look at some things that plants like.
+We know this is a plant village.
+Plants like carbon dioxide, plants like ample sunlight.
+We inject those in here through our replacement grammar.
+And then a shrine to the practice of shield slamming, that's a cultural practice that this village honors.
+And I can tell that by reading this, but what had happened is, there was some historic event where shield slamming, which is a skill in the game, became favorable in that village, and now these villagers will actually teach you that skill if you go and interact with them.
+So again, this whole village, each of these objects has some sort of little history like that, and I hope we were able to sort of illuminate the process by which that sort of coheres.
+So this is a complex system.
+Takeaways are gonna be of, you know, whatever, they might be valuable, they might not be, but a couple things that are, you know, we a couple just like nuggets that we tend to tend to like find, be patterns in our systems that we were using over and over.
+So, like I mentioned all the way back at the beginning, you want to think carefully about your design context.
+So all of these decisions are really made, what's driving them is the design, the game design, the vision we have.
+So what a village looks like, we have some very specific ideas when we're designing the game, and so we want this architecture to be able to serve those ideas.
+You want to lean into modularity.
+there's sort of a tendency to couple everything in these procedural systems, especially with this qualitative type of procedural generation, where you expect every decision to have some sort of meaningful through line, kind of like it does in real history. But for the purposes of generating these villages that are only going to be engaged with in a very particular way, you can sort of cheat occasionally.
+have these decoupled modules which make reasoning about your system much simpler and then just combine them and you're often surprised by the results.
+This novel and sort of surprising output is one of the advantages of modularity.
+So you want to use abstraction to your advantage.
+So again, we have a history.
+We only have a specific way to engage with the history.
+We can represent it pretty abstractly.
+We don't need to have a real fleshed out representation of this history.
+and you can think about what facets of your village or system are going to be engaged with in this way.
+What can you do early? What can you do abstractly?
+And then use this input into your later modules.
+So that's the next bullet here, parameterize your modules.
+It's really nice when you have this flowing system of output from one step.
+write your module so that you can consume this output, and again, use defaults where you need to.
+If you don't have a good input that's going to help you make a decision, make one randomly or make one according to some other logic.
+And then finally, this sort of goes without saying, but just build expressive tools.
+So we found this pattern in our procedural generation.
+in our design, we were often making these discrete proctin sort of calls and so we built these population tables that allowed us to express that really succinctly in metadata and it saved a lot of time in design.
+So that's it, thank you very much.
+I'm Jason, this is Brian.
+I think we have a little time for questions.
+If you have any questions, please ask.
+Thanks guys, that was great.
+Brian, I'm a huge fan of your IRDC talk on data-driven design, and the sort of walkthrough through your blueprint system.
+And Jason, you touched on this at the very end, that when you build these holistic systems, you're really tempted to couple things, and so you have this persistent global view of things, especially when you have any kind of physical implications of the structures you're building, I find.
+So I was wondering if you guys might be able to compare and contrast like the beautiful componentization of the Blueprint system with the architecture you've used to generate the world.
+Whether that's sort of like a big serial procedure or whether that actually is composed of these nice little discrete components too.
+Sure, do you have a good answer?
+Here. Oh, yeah.
+How do we live?
+Okay, so the question is, how related is the NV component system to, to these PROC GEN modules?
+And there's some relationship.
+We take a sort of inspiration from that.
+But the reality is that we back into these modules a lot of time, right?
+It's the, the idea that you've got these discrete procedural modules that are feeding each other input and output is something that...
+we haven't really encountered anywhere else.
+And so we're sort of discovering the architecture that allows us to do that.
+So you'll note that this isn't quite as utterly pristine, in part because we don't have the same kind of basic groundwork we had to build off of ECS systems.
+So we're inspired by that modularity.
+We really like the power that entity component systems give us when defining the objects.
+But the fact that you're working on this very, very uneven discrete playing field, right?
+Like some of these things are very abstract, and some of these things are very concrete, makes it difficult to find a very unified architecture to represent all of it.
+Maybe there is one, and in 25 years, we'll be getting to talk about it.
+But right now, I feel like we're just sort of peering in the door at what it means to have these procedural inputs and outputs at different levels of abstraction and concreteness feed into one another.
+Cool, thanks.
+Yeah, and additionally, I would also add to that, like, because it's a game with a really long dev cycle, or we've been working on it now for 10 years, we tend to add things like we're adding things to the game a decade later.
+And so a lot of the modules that we're adding now, we had no anticipation for.
+And so in that sense, kind of by necessity, it's been this sort of composition of modules as we added more and more systems to the game that had no sort of like, had no template in the early versions of the game.
+Yeah.
+Thanks.
+Yeah.
+Hello.
+So, population tables looks like a great tool.
+I can see that it's XML, but I'm wondering, have you considered abstracting this tool into something you could share with the community, given that you're big on sharing information with the community?
+Have we considered that?
+Well, we're considering it right now that you suggested.
+Yes, we are.
+I would love to see that closer up.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Hi, thanks for the talk.
+So I saw some visualizations that you showed was debugging Visual Studio, some ASCII art to actually see what's going on.
+Was that how far you went to visualize what was actually being generated?
+Like if you really needed to see the final version, you just ran the game?
+Yeah, largely. The visualizations you were seeing there were not created for GDC specifically, but were actually the debug visualizations I used to visualize the system. So that alongside with just the Visual Studio debugger is largely the extent of our visualization and debugging tools.
+Yeah. That's hardcore. Did you consider something that would make it easier? Did you just not think you had time or not need?
+I mean, I guess I felt like I built the tools that I needed to get the system to get the output we wanted.
+So, those tools were sufficient.
+Whether that means I like an unpleasant life is arguable, right?
+I probably have a slightly higher threshold for pain as Jason does when developing Games of God.
+But really, the individual techniques are fairly straightforward, right?
+I mean, we're talking about WFC, sounds crazy, it's not that hard to use.
+You know, Perlin noise is not that hard to use.
+The individual techniques are not that hard.
+The hard thing is finding a design space you want to explore and then mapping those simple tools to them, right?
+That once you get into building the individual tools, once you understand what you're trying to build, it really is honestly not that difficult, I guess.
+So you didn't get to a point where something very weird was being generated and you couldn't replicate it, you couldn't really see that happening.
+I guess those kind of concerns in Caves of Qud, we often like, wow, that's really strange, that's okay.
+Yeah.
+Let's leave that in, right?
+I mean, that's an interesting output.
+And so I would say that no, we did not often run into situations where we had some degenerate output that we just couldn't understand.
+It does happen at the margins.
+But the fact that we can reproduce those environments with a seed, for example, makes it really useful.
+So we can go in and say, hey, just send me your save file.
+We can load up that save file, issue a command to rebuild that zone.
+it'll just rebuild the zone with the same context.
+So I can get in there in debugger and walk through that players, that village regenerating and figure out what happened there.
+So because these are repeatable systems, that seed is very useful for debugging complex procedural problems.
+Okay, so in that case you could just get the save file that had that situation, you see that being generated.
+Yeah, exactly.
+That answers my question.
+You can drop right in where the player is and issue a command, you say rebuild, and because our zone building is so discreet, you can rebuild that individual zone and it will walk through the same steps and you'll get the same, whatever it is you're looking for.
+Very nice, thank you.
+And we do actually have a couple more tools.
+There are, like, if you go into, we have a sort of modding tool in the game.
+And you could see, we do have a noise map visualizer.
+We have something for our grammar text generation.
+We've built a couple, but where they're useful to us, yeah.
+OK, thanks.
+Do you do any generation based on user interactions or input at all?
+Yeah, well, I mean, like, a little bit, because we have cases where, like, what the player does in the game is sort of inscribed in this chronology, a sort of player journal.
+And then we use that to seed some of the generation.
+But it's kind of light, right?
+Most of the generation we're doing is done during world generation and then, like, finalized during fabrication.
+And the user's input to it is on the light side.
+Thanks.
+Hi, thanks for the talk.
+I have a question.
+You touched a little bit on it a minute ago about the saved games.
+Do you guys save the full results of everything, or do you save just the seed or somewhere in between?
+Oh, oh, okay.
+So the serialization is just the worst.
+I'm sure everybody who's touched it knows that.
+And in Caves of Code, we actually do serialize the whole world state.
+We save it off in chunks.
+So each of those screens is a discrete chunk which we'll save off to disk.
+And we just serialize the full game state.
+And it's really awful and causes us all kinds of problems, but it mostly works.
+We use built-in .NET binary serialization mostly.
+We just dump the structure to the disk and then we're able to refresh it.
+Thanks.
+Hi. The pipeline you demonstrated seems extremely functional in a way, like it's just a composition of functions that take an input and take an output. I was wondering if you made use of any functional programming techniques like persistent data structures, immutable data, that kind of thing, just at the implementation level.
+So the question is do we use functional programming?
+And the answer is no, not really.
+It's a C-sharp program and we're largely, really functionally generating a chunk of data.
+It's getting stuck in some data structure.
+And then the next module is, it's less that we're really passing it in.
+That makes it look a lot cleaner than it is.
+The reality is that we have a, we go and we generate the culture and it reaches out to this global state and grabs the things that it's interested in.
+You can visualize it as a set of functional parameters and it's cleaner to think about that way.
+but our implementation is a bit messier.
+We've sort of, we've done some abstraction here to unpack what we're doing in order to make it sort of explicable.
+The actual implementation is not like that.
+A little functional occasionally.
+A little bit, yeah.
+Yeah, I mean, we, yeah, the code is like 15 years old and has many, many layers, so there's a little bit of everything in there at some point.
+Thank you.
+I mean, I think you want to start with visualizing at the concrete level, but then, and maybe building some sort of prototypes at the concrete level to get an idea of what you want your output to be like.
+I mean, that's a nice technique to use with ProcGen in general, is to maybe hand design some output that you're trying to interpolate between.
+But then as for the actual system, I think you want to, well, I mean, you probably don't want to build a system this big.
+Well, when you do, I think you want your early steps to be abstract.
+Yeah, I would agree with that.
+I think that what you want to do in a procedural system, the question is do you start abstract or do you start concrete?
+I think the reality is that you start with hand designing what you want your output to be.
+And then whether you start abstract or concrete would...
+If I was going to answer that, I would try to figure out what the riskiest thing is.
+Is the abstract model of this the riskiest thing because the concrete is a simple tile-based game or do I have a very novel concrete representation?
+Is that very risky?
+Then I would probably start there and try to flush the risk out of the system, the unknowns out of the system.
+It would be very dependent on context.
+That makes sense.
+Thanks.
+Sure.
+Thank you.

@@ -1,0 +1,261 @@
+Hello and thank you for coming to my presentation. This is the Rust language for game tooling.
+My name is Dan Olson. I'm a Principal Software Architect at Treyarch.
+A little bit about me. I've been working in games since 2004.
+I've been at Treyarch since 2008. I've shipped several Call of Duty titles in that time.
+I work on Treyarch's core engine team, which is a combined engine and tools team, so we work on both. Most engineers are responsible for working on both tools and engine. I've done a lot of things, but mostly I've been focused on data pipeline and infrastructure tooling.
+I haven't dabbled too much in, for instance, user interface programming or anything like that.
+So that's just where I'm coming from.
+What is Rust? Well, Rust is a programming language. It was started by Mozilla quite a while ago. It had a first stable release in 2015, and that was the 1.0 release.
+And everything since then is backwards compatibility.
+Since then, it's branched out a little bit from just being backed by Mozilla to now being backed by several other companies. The three listed here have all spun up internal compiler teams to try to advance the language. And there's also now a Rust language foundation for financial funding.
+It's also, the language is focused on security and performance.
+If you're working on game tooling, you might not think of security as a very high priority, especially if all your tools are internal. But we all like performance, especially in the game industry, so that's pretty appealing.
+This is just the outline of what I'm going to go over.
+I'm going to try to make a case for using Rust to start out with.
+Then I'm going to go over several interesting usages of Rust that have been helpful to me in my tools authoring.
+Then we're going to talk a little bit about how we integrated Rust at Treyarch.
+First I want to start out by talking about something that's not really Rust at all.
+This is a Python snippet and it's going to be a an implementation of an MD5SUM algorithm. So it's hashing a file and printing out the MD5SUM to standard out. And I just want to rate it on a couple different categories over on the side here.
+This is Python. I think if you're trying to follow this code, you'll have a pretty easy time.
+So I think easy to read and both easy to read and easy to write will get smiley faces from me.
+This was pretty straightforward to write, didn't require much.
+thought or much work or even much typing. Errors are handled. I give this a neutral face, and the reason why is because Python handles all errors by default to its exception handling, but the error messages that it gives are not always great for end users to be able to figure out what's going on. A programmer can dig in there pretty well, but maybe not end users.
+And performance oil is kind of a mixed bag with Python.
+In general, it performs rather poorly, but there's a lot of things affecting its performance.
+Often, library functions are implemented in C, and then they can be quite efficient.
+However, for the most part, the performance of Python is pretty low.
+If we look at this in C.
+I pulled this implementation from Stack Overflow.
+And the reason I use it is because, not because I think it's a really great piece of code, but because it is the highest voted code and the first link that you will get if you search for how to solve this problem in C.
+So if we start looking at this with the same things in mind, easy to read, I'll give this a neutral face.
+It's not bad if you're familiar with C.
+I've omitted quite a large part of it just for brevity, but it's pretty straightforward.
+If you know what mmap and unmap are, then you should be able to figure out what this code is doing.
+As for easy to write, well, this is kind of a long story because this MD5 function that we're relying on doesn't exist in the standard library.
+It's pulled in from somewhere else.
+And the process of pulling in dependencies and C and C++, despite everyone's best efforts towards this, is still pretty hard to do.
+So you have to download, you have to locate the dependency, you have to make sure it's suitably licensed for your program, you have to integrate it into your build system, and maybe even link in the library. So there's a lot of steps there.
+that don't always work together cleanly with what you're trying to do.
+And so I put a cryy face here because dependencies in cnc++ make me cry.
+As for whether errors are handled well, you can see that the author attempted to do this.
+The open is checked and will exit the program, which doesn't really help the user very much to do it silently. But they also missed the fact that mmap can return an error, and if it does in this program, then the program will crash because what mmap returns in the case of an error is a negative one casted to a pointer.
+As for whether this performs well, yeah, we'll assume that it does. C is generally either well performing out of the box, or it has all the tools that you can use to make it perform well.
+So performances is great in C and C++. That's one of the reasons we love them and use them.
+But I want to focus on these two middle ones for a second. As I mentioned, the dependencies problem in C is still a very real thing, and C++ as well.
+And error handling is tricky because all error handling in C is completely opt-in. The language doesn't care if you want to overwrite memory or do whatever, read from an invalid buffer, it just doesn't care.
+Also, there's no real standardization as to how functions in C or C++ report errors.
+And so, if you're writing this code, I'm sure you could do a lot better, but you still have these issues of how do we handle dependencies, and how do we make sure that all our errors are handled when this is totally opt-in, and it's actually pretty hard to validate that you've done everything correctly.
+So, moving on to Rust.
+This is our first bit of Rust code that we've seen, maybe for some of you, the first bit ever.
+I want to give this an easy to read and an easy to write.
+You'll have to take my word for it on easy to write, but pretty straightforward what this code is doing.
+I think even if the syntax is a little bit unfamiliar, maybe strange, you should be able to figure out what's going on here.
+As for whether errors are handled, again, you'll need to take my word for it if you're unfamiliar with Rust, but yes, they are.
+We have the same problem as Python here, where the errors are handled, but they're not particularly well suited for end users to read and understand what's going on. We'll get into this a little bit more later. As for whether the code performs well, well, Rust has many of the same characteristics as C and C++. It's compiled, it's optimized using LLVM, and it's not running into any sort of VM or anything like that.
+there's not even any garbage collection, so there's no potential stalls from that.
+So Rust is a little bit like C and C++ in that it either performs well out of the box, or you have the tools to make it perform well.
+So this is how we get to my Rust sales pitch.
+Efficiency of writing code in Rust, it's a little bit closer to Python, in my opinion. The efficiency of running code is a little bit closer to C++.
+So I feel like this is a kind of a happy medium between these two things, because you've got the high level and the low level, and you can kind of get the best of both worlds with Rust.
+But that's not really all.
+There's more to this sales pitch.
+With Rust, we also get a large centralized ecosystem of what they call crates, which is just libraries.
+It's a Rust term for libraries.
+And the centralized part is pretty important, because that means you can have tooling that interacts with it.
+It also means it's very easy to search.
+And we actually, indeed, do have tooling that works with this.
+It's an integrated build package and test tool called Cargo, which is part of every Rust distribution.
+And this is very nice to use.
+Let me give you an example of the previous program that we looked at.
+If I want to make a new program, I just use cargo new.
+By default, it makes a binary application.
+I change that directory.
+To add a dependency, I can just do cargo add md5, which is if I know what I want to add.
+This takes about 5, 10 seconds of typing.
+Then I write my code, and I can do cargo run.
+The code is basically what we saw on the last slide, except with some...
+additional handling for command line arguments and things like that.
+So I run it with cargo, it downloads if it needs to, compiles all the dependencies, and I see the output here. So this is very straightforward. It's very simple to add dependencies. Some people might argue too simple. I'm not one of those people. I think it's a very great aspect of using Rust.
+But this isn't really all either. There's still more.
+With Rust, you get static compile time validation of common memory problems.
+Common memory problems might be things like use after free, use after move, if you've ever run into that in C++, double free.
+These things are not really possible in Rust by default because the compiler won't validate them.
+And how this works is extremely interesting.
+I'm not going to go into this talk because there's other things I want to get to and because.
+every other presentation on Rust starts out with this. So you can trust me for now, this is static and it's compile-time validated. But that's not all either.
+We also have static compile-time validation of multi-threading problems, specifically what they call data races, which is mutation of data from multiple threads at the same time.
+And this is very interesting because Rust is the only language I know of that's considered maybe a common language that does this.
+It's going to be a real time saver.
+So if you're not convinced, let's look at an example.
+This is Treyarch's image packer.
+This is churning through all our images and mastering them for disk.
+It was rewritten in Rust and deployed in 2018.
+That was two games ago, if you're keeping track.
+It's a heavily multi-threaded tool because it's churning through a lot of data. It needs to do it as fast as possible.
+And it's been an active development throughout its lifetime.
+Especially this last title that we shipped.
+There were some several major developments on this tool.
+And throughout all this for three years the number of crash bugs that we've encountered, two.
+And I put this in quotes because one of these was more of like an unhandled exception type of thing, an unexpected stop.
+It wasn't really a crash.
+the other crash was interfacing with a C library.
+So imagine for the rest of the career, if you had to deal with on average, less than one crash a year, I think we'd all be pretty happy.
+So this is the full sales pitch.
+All these things work together to make a pretty compelling package.
+And I hope that you agree on that.
+Now I'm going to go through kind of lighting quick a number of areas that I think Rust really provides value to us as game programmers and as tools programmers. And these areas have certainly been helpful to me in the tools that I've written with Rust. So I hope you find something interesting here because we're going to go through it lightning quick. Air handling in Rust. There's two methods of air handling.
+One is a result.
+which is basically anything that can fail will return a result.
+And it's encoded into the signature of the function.
+It encodes exactly what errors can be returned, which is really interesting if you're coming from Python or C++ where you really don't necessarily have any idea what's going to throw an exception.
+So this holds the success or failure state of an operation, and we can use it to either handle failure or pass failure on to eventually report it to the end user.
+A panic is more like an instant program failure for an unrecoverable error.
+One example is if you access outside of an array bounds, this will instantly kill the program, and this is part of Rust security focus.
+What they don't want is that to trigger some sort of remote code execution buffer overflow state.
+So they just exit the program. These are things that you want to avoid in your coding.
+You want to write panic safe code, basically, in the best case.
+The results you want to pass on and handle.
+One way to do this is to use the question mark operator.
+We saw this a little bit earlier if you were paying attention.
+What this does is it passes a failed result up the call stack.
+And if the result doesn't fail, it will just return the successful value to whatever you're assigning it to.
+So in this example, if the read fails for any reason, it will pass it up to call stack, which means that the calling function also needs to return a result all the way up to main.
+And if you get all the way up to main, it will exit the program and print a useful message to the user about what happened.
+But the message isn't too useful, as we talked about with both Python and Rust.
+These are just kind of short messages that don't really help the user all the time.
+But we can use this idio-how crate to add context to errors, and I really enjoy this crate.
+Let's see an example. This is the error message you would get if you were just just doing the question mark operator like normal.
+And it's a good error message, but it doesn't really tell you enough.
+Whereas if you add some context to what's going on, you can basically say what you were doing when this error occurred.
+And that produces a much better error message.
+And maybe the user has a chance of figuring out what's going on at this point.
+So I really like this.
+It's very easy to cover all the error paths in your program.
+And to add context doesn't take that much time.
+So I feel like this is really valuable.
+And.
+gives you a really sense of peace that you've covered all the paths.
+Next, to give it a look briefly at multithreading, there's this crate called rayon that is really amazing. It makes multithreading very quick and easy.
+This example here is using kind of an iterative style that's kind of popular in Rust, where we're iterating over a list of file names. We're passing each file name to a function called hash file.
+which is then returning the hash presumably and then we're collecting that into another container.
+So this is a very popular way of programming in Rust's more functional style.
+And if you've programmed in this way to multi-thread this, the only thing that you have to do using the rayon create is change this iter to pair iter. And now each hash file call will get farmed out to a thread pool and the results will be collected into a new container. So ostensibly this will be much faster.
+I mentioned that there's static multi-threading guarantees.
+I just want to demonstrate this really quick with a simple example.
+In here, I've added a mutable reference to the counter that I pass into every hash file function.
+Ostensibly, I would increment this counter to maybe check how many files I've hashed.
+But Rust won't let me compile this because it knows that this is going to result in a mutation that's not safe under across multiple threads. If I change this back to an iter, Rust will accept this code. So already it's preventing us from from causing some serious mistakes.
+Parsing text, I think, is a pretty common use case, especially for like config files and things like that.
+I use the Serde crate.
+I'm not sure I pronounced it correctly, but I say Serde.
+It stands for serialized deserializer.
+And this crate is really great for generic serialization, just serialization.
+I'm only going to demonstrate deserialization here.
+Here, I have a configuration struct, and I have this little odd.
+syntax up here, derive deserialize. And what this does is it tells the library to take my structure and generate code behind the scenes to deserialize my structure.
+And then if I need to actually do the deserialization, I have to pull in a specific formatting deserializer. So in this case, JSON.
+I take a text string, I pass it through this, and I get a filled configuration structure out of it.
+If there's an error in the configuration, I'm missing a field or a bad type or anything like that, I'll get a decent error.
+And if I lose a bet and I have to change my configuration to YAML, that's a pretty simple change.
+I just switch out the deserializer.
+So this is a really big time saver.
+If you're keeping track, I think it's two lines of code.
+to deserialize from a config file.
+You can also serialize as well.
+You're just changing it to toString instead of fromString.
+Very, very nice.
+Very cool, I think.
+Command line interfaces.
+This is pretty similar to the last example.
+Here I have another derive.
+I'm deriving struct opt.
+But in this case, I also have some interesting little directives that tell me, or that tell the library how to.
+how to treat these arguments when it's generating the command line interface.
+And then when I want to get my options, I just call this fromRx function at this top of my program and it will fill out this option structure with whatever people passed in from the command line interface. And if there's an error, it will just print this help message. I can also get help and version for free.
+One thing that I'd like to point out, just because it's awesome, is that also my code comments got translated into help text in the dash dash help.
+So that is pretty cool.
+Parsing debug info, this one is a little bit, maybe something you don't do every day.
+I know I don't do it every day, but ever since I discovered these crates, seems like every few days we come up with a good usage for them.
+One of them is this example on the side, where I wrote a program that I've been wanting to write for a very long time, which examines an L file, pulls out all the debug information, and gives me a list of all the structures that could be padded more optimally to make them smaller.
+You can see that there's this padding here, which if the structure was rearranged would be removed and we can save eight bytes.
+8 bytes might not sound like much, but if you have 70,000 of these things, it can be pretty effective.
+And along with this talk, I'd just like to make a note that Activision has allowed us to open source this tool.
+So if you happen to ship on a platform that uses ELF files, you can go try this out on your own.
+I think it's a very useful program.
+And I want to note that I said I've been wanting to write this program for a long time.
+I've tried in various languages and I think that Python and C++, the ecosystem is actually a little bit behind in the parsing debug info, whereas Rust has some pretty useful crates in that area.
+C-ABI compatibility just quickly. You can bind Rust code to other languages through C-ABI.
+Python is the biggest one, and here's an example here of the py03 crate, making a Python module that does something silly. But we use this to bind our Rust code to Python, which has replaced a couple parallel implementations we had before.
+You can also bind to Node.js, you can bind to C and C++.
+Obviously, you can also bind to WebAssembly.
+So this is really helpful if you're doing something like replacing Python modules with faster C or Rust modules.
+I guess Rust in this case.
+And that's a big use case that a lot of people are doing outside in the wider tech world.
+Web applications, I know every once in a while I have to create quick and dirty web apps, usually using cherry pie or flask, but there's a lot of work to make this work for Rust.
+And so there's a couple of crates that are useful for this.
+I like this one. I'm not sure how to pronounce it.
+I think it's Rue. It's French for Rust.
+But you can create really quick and dirty servers using this if you're going to do something a little bit more substantial.
+you might want to use Tide or Actix Web. These are a little bit more mature, a little bit more full-featured.
+And I think that Tide is my favorite one I've seen, but I haven't really.
+done much practical work in this area.
+So, but I do want to caution as always, if you're going to make anything externally facing, please, please vet your dependencies.
+Rust safety guarantees are really strong, but at the same time, you need to take a look at what you're putting out there in the wild.
+And lastly, I want to look at GUIs.
+GUI programming was behind in Rust for a long time.
+People were having a hard time.
+wrapping their heads around how to mix and match Rust semantics and GUI needs.
+But a lot of useful libraries have started to emerge. Iced is one of them, Druid, eGUI.
+This is just a quick example of eGUI. eGUI is a immediate mode GUI. Iced is using the Elm architecture, which is pretty popular in functional languages. Druid is more influenced by Flutter.
+I don't actually recommend the C++ bindings, but I want to list them here in case you're tied to a specific UI toolkit and you want to use that.
+I think that there's a lot less friction using the Rust native ones.
+Specifically, EGUI is what I would probably use for new stuff.
+I've had the most success with it in my tinkering.
+But I've also seen a really nice application in Rust called Adure, which is a World of Warcraft add-on manager.
+and it uses ICE and it's one of the slickest apps I've ever used. So Rust is starting to get pretty powerful in the GUI space. I want to talk now about integrating Rust at Treyarch and our little journey, our Rust journey. We started working late 2017. I did some feasibility studies on a number of different languages because I was interested in.
+what was out there and if it was better. Rust kind of bubbled to the top as something that was worth looking into more.
+And fast forward to today, we have three major tools written in Rust and several smaller one-off tools as well, kind of like the struct pack that I shared earlier.
+around 120k lines of code, all told, 27 individual contributors.
+I want to make a note that just because someone has contributed to Rust doesn't mean that they would consider themselves a Rust expert or even know Rust, but what you find is that when people are in a code base, they have examples of what to do around them.
+And if what they need to do is, you know, write some conditional statements and print a line of code, like they can do that, or print a string.
+They can usually do that without much trouble. And that's the type of contributions that people have made. I don't want to minimize those contributions because they're all important.
+But what I'm trying to get at is that just because something is in Rust, and Rust is an unfamiliar language, doesn't mean that people can't contribute. We've also had extremely high stability as we saw with the previous example.
+downsides. Rust has a very steep learning curve. I don't want to sugarcoat it. It can be pretty awful. It puts a lot of people off. This is a very different language from C++. And if you go and you actually read about how these static guarantees work, you'll find very quickly that that's true.
+It's a complicated language, there's a lot of corners, but I think this is kind of mitigated by the fact that we already often, most of us use a complicated language in C++ and I don't think any of us know the whole thing. So it's okay that it's complicated from my perspective, but it does put a lot of people off.
+It's heavily reliant on the ecosystem.
+This is really true of every language as well, but it is mostly about how mature is your ecosystem.
+And I think that Rust is in several areas mature enough and in a few areas still working on it.
+Compile times, I don't really run up against this much with the stuff I work on.
+I think it's fine, but this is a very common complaint about Rust.
+So how we approach these downsides is gonna be key to our integration.
+some tips from our own experience, communicate about what you're doing.
+This is a big mistake I made.
+I didn't communicate enough when I integrated Rust, and it caused a lot of strife.
+You want to keep Rust kind of siloed off until you get more experience in your company.
+What I did is I found an unmaintained tool that was actually poorly written.
+And I made it better.
+And through that process, it's been really interesting because.
+People started to see the potential in the tool, and it gained many more contributions than it had before it was written in Rust.
+Start with the best workflow.
+I think this is Visual Studio Code and Rust Analyzer plugin at this point.
+These are also other ones are also tools I recommend to install.
+Clippy especially is a linter.
+And this is extremely important to run as you're learning Rust because it will tell you.
+when you're doing things not enigmatically or unexpectedly, wasting performance.
+And it catches a lot of things and it will teach you a lot about Rust.
+So I recommend running Clippy on everything that you write, especially when you're starting out.
+Bad Rust code is really interesting because it has the same safety guarantees.
+So it's probably, you know, you want to avoid bad code, but what I'm saying is that while you're learning, it's not the end of the world if your code isn't perfect. Whereas in C++, if your code isn't perfect, it can melt down a nuclear reactor or something along those lines. It's very dangerous to have imperfect code in C++, but it's not as dangerous in Rust because of all the safety guarantees. The initial hurdles are high, like I said, but I noticed that there are large productivity gains after you get over those hurdles. I find that I'm more productive in Rust than in any other language and I just enjoy programming it more these days.
+I think that's a pretty common sentiment around people who have pushed through the hurdles.
+But you want to provide time and space to learn and teach the language.
+This means making presentations, doing courses, giving people examples, being available to answer questions, doing code reviews.
+all this stuff. This is kind of like the burden you have of pushing forward on this, is that you have to be available and you have to make it as easy on other people as possible.
+These are some learning resources. If you like to, or if you're anything like me, you want to just get right in and code. I recommend, you know, go on Elite Code. They have Rust built in. You can run some programs. Advent of Code is fun to work through in any language.
+These are just ways to invent problems to solve for yourself.
+And you can get quite a ways with those.
+If you like book learning, these are two of the more popular Rust books.
+And I haven't read either of these, but I've heard very good things about both of them.
+If you just want to stay online, the Rust Language site has a good learning section.
+There's a playground as well.
+where you can try Rust out in your browser and see if it compiles and what's generated and things like that. So that's it for me. Thank you for listening to my talk. I hope that you've learned something. I hope that you're interested in Rust. I hope that I've made a compelling argument for why Rust is good in game tools. And I'm happy to have your feedback as well. And as always, if you're interested in Treyarch, we're always hiring. So thank you for paying attention.
+You

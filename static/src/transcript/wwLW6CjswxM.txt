@@ -1,0 +1,672 @@
+Today I'm going to be talking about a bunch of work we did at Blackbird.
+I'm the CTO for Blackbird Interactive, and was one of the lead programmers on Deserts of Karak.
+I'm covering quite a bit of ground, which gave me some grief picking a title, because there's sort of like four little presentations in one.
+So I wasn't exactly sure what to call it.
+I don't know if the thin attendance is because I picked a weird, confusing, abstract title.
+I thought about calling it How to Make a Multiplayer RTS Game Using Unity and C Sharp.
+But then RTS is so niche, I was worried that would turn people away too, so I didn't do that either.
+How many people know what RTS stands for? Show of hands.
+How many people have played RTS games on the PC in the past year?
+Have you played our game?
+Yay, thank you.
+Okay, so we're going to talk a little bit about how we did what we did.
+But for the people that may not have seen the game, I'm going to show a short video.
+Just to give a sense of what this is all about.
+So that's a quick taste of Deserts of Karak.
+I think 80% of that video was shot in-engine, so it's all Unity.
+There's some hand-animated cutscenes, but most of that's happening in real time using Unity as our rendering engine.
+My agenda is kind of a, here's a breakdown of the title that leads us into the agenda.
+I'm gonna talk about what I mean by the Great Divide and how we separated our simulation layer from our presentation layer.
+I'm going to get into some of how we achieved the unique visual look of the game.
+It's quite painterly.
+We put a lot of work into the terrain system, which is what I'll talk about more.
+And also aesthetic physics, how we decorated the presentation layer with Unity physics without letting them interfere with the simulation.
+I'll talk a bit about deterministic gameplay, why that's important, why we'd want to do that, how we architected it, and how we got rid of floating point numbers.
+And then at the end, I'm going to dig a little bit into some C Sharp code and talk about how we got performance out of the system.
+This is the programming track, but I've got lots of pictures, so hopefully it won't be super boring for everyone who's not a programmer.
+I'll do my best.
+Let's see.
+So, the Great Divide.
+What do I mean by that?
+It's how we separated the game simulation from the visual presentation.
+So you can sort of think of it as gameplay versus graphics.
+What's the core heart of the game and how it plays versus how do we make it look pretty with pixels on screen?
+So core game logic and systems, which were in kind of pure C Sharp code, and then a rich audio-visual presentation layer that we used Unity for.
+So kind of in an abstract sense, it looks a bit like this.
+It's very much like the MVC pattern in the large.
+For us, instead of calling it the model in our business layer, we call it the simulation in our gameplay layer.
+Instead of calling it the view, it's the presentation layer.
+It's where user inputs get pulled in, it's where pixels go to the screen, it's where sound comes out of the speakers.
+And then we connect the two with a little controller layer.
+The controller takes user input, turns it into commands that drive the simulation.
+The simulation updates its internal state, and then pushes that state and event triggers back to the presentation layer to be visualized.
+The simulation is pure C Sharp code with very few external dependencies.
+And then the presentation is where all the unity magic happens.
+So that theme of separating those two is gonna play out throughout every aspect of the presentation.
+And I'll keep coming back to that.
+So that's just a little bit of background.
+We'll get deeper into it later.
+So the terrain system.
+I'm gonna talk a little bit about the different layers of our terrain and how we built up our maps and worlds.
+I'm going to do a little bit deeper dive on our deferred decal system, which was how the artist painted over everything and made it look nice.
+Talk a little bit about how we authored those decals.
+And then a little bit about what terrain meant or didn't mean in the simulation layer.
+There's a lot of sand ahead.
+It's a desert planet.
+There's sand everywhere.
+We didn't have to deal with trees or water or all that other yucky crap.
+It did simplify certain things, but we also put a lot of work into making the sand look really good.
+but this particular brown area of the palette is gonna be in view a lot over the next few slides.
+Here's a bird's eye view of one of our maps.
+The outer layer, there's a big flat ground plane.
+It's sort of like a horizontal skybox.
+Basically, if the camera accidentally looks off into the distance, let's make sure it's still brown is basically what that bit's doing.
+There's a progressive detail skirting area surrounding the gameplay region.
+This area, artists are sculpting it in Mudbox.
+We also use World Machine for an erosion pass to give it more realism.
+And then we pass this through a custom pipeline that breaks everything up into chunks.
+and decimates the height map into a mesh and decimates the vertices on that mesh.
+If you look at the chunk in the corner facing you, you can see some sort of grid-like artifacting.
+That's because the progressive mesh decimation is preserving vertices along the edges of those grid layers to avoid seaming when we go from one level of detail to another.
+So that shows up a little bit when you see the wireframe.
+You don't really see it in the art itself.
+In the middle is a high-detail chunked gameplay region.
+Again, same basic pipeline, Mudbox, World Machine, and then running through our custom process for breaking everything up into chunks so that meshes don't exceed the 65,000 vertices you're allowed to have in Unity, and things are broken up into pieces for culling so you can only draw what's on camera.
+And then there's a layer of set dressing and props.
+Our art team has an interesting idea of what constitutes a prop.
+So some of the props are several kilometers long.
+I think they did this because the height map didn't always do a great job on cliffs, so if you wanted a real detailed cliff, you'd probably want to hand paint it and bring it in.
+And then the gameplay region is overlaid with over a thousand deferred decals, which I'll talk more about what that looks like.
+Scale-wise, the skirt region in this particular map is about 45 kilometers, 45,000 units in Unity, and the gameplay region is about 15 kilometers square, so it's a pretty big map.
+Obviously, everything's kind of relative.
+Our vehicles are pretty big, too.
+So what is this?
+A level for ants?
+Anyway, scale is always a relative thing, but the maps are pretty big, and you get to drive around and do cool stuff with them.
+And there's a banana for scale.
+Getting down closer to the world, here's kind of the base terrain layer.
+So it's kind of undulating.
+It looks OK.
+Not much detail there.
+Here's the prop layer coming in, so we throw down rocks and other things to break it up a bit.
+And then the decals are really what come in and enrich it.
+I mean, it's easy to think of a decal as this extra little sticker that gets stuck on top of the real art, but in the case of our levels, there was a lot more invested into those decals, and they really brought out the detail.
+So toggling back and forth, base layer, decals, base layer, decals.
+So you can see we're bringing in a lot of natural erosion in there.
+We're modulating the lighting.
+We're bringing some detail into the ripples of the sand and trying to make it look a lot better than we could do with a simple height map.
+Not that the base layer is that simple either.
+There's this sort of monster shader on it that...
+It actually, I think, has 15 different texture samplers.
+And basically there's a kind of two control textures that are then blending in combinations of five times bump map plus diffuse and kind of giving the artists an ability to kind of raise and lower different elements of the terrain as they, across the map.
+But I'm not gonna go much into that.
+I just wanted to say that the base layer isn't that simple either.
+So, deferred decals, let's get into that a little more.
+Here's my super awesome programmer art of a piece of terrain that you want to render on a camera.
+So I'm going to give a quick overview of what I mean by a deferred decal.
+Basically, you render all the terrain first.
+So you've built up, rendered your scene, you've got your depth buffer populated with the distance to each pixel.
+And now you want to go and splat a decal on top of that rendered terrain.
+So this little dashed line here represents the bounding box of a decal volume that I want to draw.
+As that volume is drawn, what actually happens is the shader is sampling the distance from the camera, basically sampling the depth buffer at that pixel point, and deciding whether that represents a depth that's inside the bounding box of the decal or not.
+So in this case, 0.1 is inside the box.
+0.2 isn't.
+So at 0.1, we do draw the decal.
+At 0.2, we don't.
+And so you get your decal in the little pink region here.
+When you're drawing it, the decal has a texture associated with it, and the texture coordinates of that decal come basically from the model space of the bounding blocks.
+So it's relatively simple, and that's the basic idea of how it works.
+Again, base terrain, I want to add a new decal, so I drop that in, I've got my gizmos showing me what's there.
+I can move, rotate, and scale it into place.
+I can adjust the position and get it lined up right where I want.
+Ridgelines like this on sand dunes were a thing that we used the decals for a lot because if you try and do a nice crisp ridgeline in a height map, you're gonna get a lot of artifacting based on the kind of geometry of the height map being all on squares, and you get a lot of artifacting as a result.
+But if you can go in and hand paint a nice crisp line, the vertices can be pretty smooth, and it still looks good.
+Here's all the decals in that particular little region, all overdrawn as you see all their bounding volume stacking up.
+And here's how it looks when you put it all together.
+So base layer with all the decals.
+So it makes quite a big difference in the look of the map.
+And here's how it looks in gameplay.
+This is a shot in the level with a lot of depth fog going on.
+So everything's kind of desaturated at this point.
+There's a storm coming.
+You can see some of the decals here.
+So the ridge lines, the sand ripples.
+We also use decals dynamically for anytime something blew up, it would leave a decal behind it.
+And we had a dynamic decal system that could kind of add these decals as the game was running.
+The ones I've talked about so far were all statically done and baked into the Unity scene.
+So what does this look like in Unity?
+Couple pieces.
+There's our deferred decal controller, which is a monobehaviour script with a bunch of properties.
+You can see here.
+The transform was the thing driving the bounding volume of the decal.
+So basically we would just take, instead of having extra data to represent the bounding volume, we just use the size and position of the transform, the scale of the transform.
+Because there's really no geometry associated with the decal, it's just sort of this virtual object with some editor hooks to draw the gizmos and the bounding box.
+But the box isn't really there, it's a virtual box.
+And then we had an overall preferences thing that let you control how the selected decals look like and how the unselected ones look like.
+I found myself toggling this off and on as I use the system because if you have all the unselected decals in their bounding boxes drawing, you get like a huge mass of blue boxes and you can't see what's going on.
+Digging into these settings a little bit more, the material associated with the decal chooses which shader you're gonna use.
+In this case, it's our decals alpha bump diffuse shader.
+It's got a couple texture inputs, diffuse texture and bump map, so we can modulate lighting.
+There's also a checkbox for normals only, so if you want a decal that's only affecting the lighting, you turn that on and don't bother supplying a main texture.
+There's a tint color that you could use to color shift the decal, although generally that was just used as an alpha blend so that you could kind of dial up and down how much of that decal you wanted to appear.
+There's a flag whether or not you want to draw over the set dressing layer so basically you could have decals that go over the rocks or decals that stay under the rocks and to do that we used a stencil mask and that was actually a property of the shader and toggling set dressing on and off was actually choosing a slightly different variant on the shader.
+One thing of interest, we culled front-facing polygons and drew the back-facing ones instead.
+The reason for that was that if the camera got too close to a big deckle box, you'd start to clip into that box and you'd be losing the deckle where it clipped.
+So instead of clipping the front-facing, or clipping those polygons that are closer towards you, we don't even draw those and we draw the back face.
+So you can sort of think of it as a little bounding bowl rather than a bounding box.
+And because you're not actually drawing the polygons, you're just using it to decide kind of where in the scene to run the shader.
+It doesn't really matter.
+It all kind of works out.
+There's a transparency setting.
+This was used procedurally under the hood.
+So we had a budget for how many decals could be on screen at a time.
+And we wanted to be able to fade things in and out gracefully.
+So rather than just toggling, snapping them on and off when we go over budget, they'd fade out over a short period.
+And that's what the transparency would do.
+And then this shader is really just kind of the high level set up the state for the shader.
+The actual work was in this include file.
+I'm not gonna dig into the details of that, but basically it just samples the depth buffer, does the calculation to determine whether or not that depth is inside or outside the bounding volume, and then does the normal sort of lighting and color pass from using its normal map and diffuse map, and then blends the pixel into the frame buffer.
+All of this, nothing super original here.
+The main thing was kind of getting it into Unity and getting it performant.
+Pope Kim from Relic, also Vancouver, a couple years ago at SIGGRAPH gave an awesome paper on all the details of deferred decals.
+So if you want to know more, definitely look that up.
+He's got a slide share online.
+And then one of the render engineers at Unity wrote a blog post and did a demo of deferred decals in Unity using command buffers.
+which kind of got us going as to seeing how to integrate it into Unity, how to set up the shader in the Unity environment, that kind of thing.
+We then did a bunch of work on optimizing how we sorted them and culling and things like that to kind of integrate it into the engine and into our game and get it performant.
+Quick aside, if all the sand you've been seeing looks sort of familiar, you may have seen similar sand on NASA galleries because of course, our nearest dusty desert planet, we were gonna look at that for reference.
+Recently we came full circle and JPL actually approached us about doing a visualization of a Mars base of the future.
+So over the past month a bunch of guys at work in their, mostly in their spare time, kind of put together this quick visualization project, which was a reimagining of a Mars base of the future using terrain data and texture data from NASA, putting it into our terrain engine.
+deckling it up to make it look pretty, and then building some crazy futuristic Mars bases.
+This was presented at DICE about a week or two ago, and we've been getting a lot of good press coverage out of it since.
+That's also built in Unity.
+We're still trying to decide if we're gonna make it available or what happens next with this project, but it was a fun little thing to do.
+Okay, so that's terrain on the presentation side.
+What about in the simulation?
+Do we have terrain there?
+Almost not.
+The simulation is 2D for all unit movement.
+mostly.
+This is a Homeworld game.
+Homeworld was renowned as being the first 3D RTS game.
+And when people heard that we were gonna bring it down to ground level and make it a 2D game again, they were like, oh my God, what are you doing?
+You can't do that.
+So we needed some sort of 3D in there.
+Here's what that looked like.
+We took a course height map, brought that into the simulation.
+So there's a notion of how high or low units are.
+The white you can think of as being high ground and the dark as being low ground.
+We gave the designers a mechanism for drawing in ridge lines, which are basically along the crests of dunes.
+Ridge lines block line of fire, so you can't shoot over a dune, you need to get up on the dune to shoot.
+And the higher unit, a higher unit firing on a lower unit will deal more damage, so there's a height advantage there.
+So it brings in 3D elements of gameplay, but all the math is pretty much 2D under the hood.
+So the units are driving around on a flat plane.
+The ridgelines act like sort of these infinitely high walls that you can't shoot through.
+And when two units are in battle, you'll just sample the height map, see which one's higher and give him an advantage.
+So it kept all the calculations pretty simple.
+Unique visuals, let's move on to the next step.
+Aesthetic physics, what do I mean by that?
+Key part of our game was to convey a really rich vehicle fantasy of these giant vehicles lumbering around in the desert and leaping off sand dunes and getting air and all the rest of it.
+But we needed to reconcile that with our 2D simulation layer.
+So what we did was we have a fairly simple driving model, a fairly complicated two-dimensional driving model, which is deterministic, so we can use it within the RTS framework that I'll get into more.
+And then on the presentation side is where the jumps happen, the vehicle suspension happens, and all the cool stuff like that.
+I'll talk a little bit about how we did this.
+So here's a scene from the game, and here's another scene.
+So there's stuff blowing up, there's vehicles getting air.
+How do we do it?
+If movement is 2D, what does that mean?
+So if you give a unit a move order, you queue up a set of waypoints.
+What we do is the driving model understands the top speed of the vehicle and how fast it can turn and things like that.
+And so we can take the turning radius, kind of lay it onto the waypoint, and figure out the tangents that bring us into the waypoint, turn as tightly as possible given the mechanics of the vehicle, still hit the waypoint and then move on to the next waypoint.
+So in this image here, let's see if I can do this laser pointer thing, that would be cool.
+So basically we've got a straight line segment, a curve segment, another straight line, another curve, another straight line.
+what we get is an analytical solution for where the vehicle is gonna move given a set of waypoints.
+It's kind of like a control curve that the vehicle follows along.
+There's also a bunch of subtlety in there like the, as we're coming into a corner, there's a mechanism for skidding and drifting and things like that.
+So the model isn't totally simple, but it is a 2D analytical model of where the vehicle's gonna go.
+It's not, we're not throwing it into PhysX or rigid bodies or doing discrete time step simulation or anything like that.
+You're thinking, but I saw that vehicle get air.
+How did that happen?
+Here's kind of how we approach it.
+So the presentation layer is this gorgeous butterfly that flaps its wings, and then the sim is a pin that just stabs through the butterfly and holds it in where it wants to be.
+So the sim can move the butterfly around, and the butterfly can flap its wings and look pretty, but it's under control of the sim as far as positioning goes.
+If you don't like killing butterflies, we could talk about carousel horses.
+There's a carousel across the street.
+Same kind of idea, you've got the beautiful painted horse, and the sim is the rod that holds the horse in place and forces it to go round and round in a circle.
+So let's talk a little bit about how we rigged the vehicles to make this work and to get the kind of the rich aesthetic vehicle fantasy look without having to simulate every little piece of it and have it affect gameplay.
+We've got our vehicle set up with wheel colliders, so there's a fairly complex rig on the vehicle.
+There's also a rigid body on the vehicle itself.
+If you look here, you'll see that that rigid body is constrained so the physics doesn't affect X or Z position or Y rotation.
+That's basically the pin.
+Those are the degrees of freedom that the simulation controls.
+And what's left over is the ability for the presentation layer physics to bounce the vehicle up and down on the y-axis, roll it side to side on the z-axis, and pitch it up and down on the, you said it'd be the x-axis or something like that.
+But anyway, we sort of split the rigid body down the middle and let the sim control half the degrees of freedom and the presentation layer control the other half.
+Also, those wheel colliders, there's no geometry associated with them, so we're not.
+letting the wheel collide with the ground and then having that move geometry directly.
+What we do instead is we have this little magical animated suspension script.
+What it's doing is monitoring the position of the wheel collider and the compression forces acting on the springs of that wheel collider, basically how much tension is it under and how far out of its rest position is it, and feeding those parameters into a blend tree.
+And then there's a whole pile of one frame animations on every unit that then get blended together based on the steering parameters and the position of the wheel colliders and the orientation of the wheels to steer left and right.
+So those poses look something like this.
+There's basically different positions of the suspension of the front end of the vehicle in this case.
+And they get blended together in different degrees to give the illusion that the vehicle is compressing and the shocks are moving in and out and all the rest of it.
+We also, I don't have a very good picture for this, that arrow is supposed to represent an impulse force being applied to the rigid body of the vehicle.
+So we have those forces are applied to give the vehicle air when all four wheel colliders go off the ground, we detect that point and give it a bit of force to lift it up in the air and kind of bring it back down on a decent parabola.
+We also have to deal with six wheeled vehicles and treaded vehicles and hover vehicles.
+So there's a whole bunch of different variations on this theme.
+And each of those units has a fairly complex rig that uses the techniques I've just shown.
+When it works, it's great, and every now and then, there's some super weird bugs when the sim and presentation layer kind of disagree about what's going on.
+We also had a long-standing bug with the carrier.
+It's this, like, massive land crawler in our game.
+Every now and then, we never did fully resolve it.
+We'd give it a huge impulse force upwards, and the carrier would fly way up in the air and then come crashing back down again.
+Fortunately, the sim's still chugging along fine.
+Like, the vehicles are in the right XZ position, and they're facing the right way, so it doesn't care.
+Gameplay's fine, but it made for some pretty amusing bugs and outtakes.
+Okay, so that's the aesthetic physics.
+Next I wanna talk about deterministic gameplay and how we structured the RTS game to work well in multiplayer.
+which is the reason for being deterministic.
+So we've got this rich game and we want to replicate the state of that game across multiple peers, over these thin little series of pipes that makes up the internet.
+So, bandwidth.
+In a first-person shooter, there's a limited amount of state, but in an RTS game, we've got position speed, health, power, turret orientations, amount of ammunition, potentially in multiple weapons, the position of projectiles in flight, which abilities are active on which units, and what state of the cooldowns are on those abilities.
+Each unit can have a queued up set of goals and move orders as to where it's going, and then which other units are of interest that it's supposed to be targeting.
+And then buffs, all of the attributes in the game pretty much can be modified when you go into a zone or get hit by a weapon, or like there's constant attribute values changing and fluctuating.
+Ideally times 800 plus units, depending on how many players are in the game.
+And the pipes cannot cope.
+We can't.
+we didn't feel confident that we could send that much data and have an authoritative server feeding out that ginormous amount of state to all the different clients.
+So we followed a pattern that was established eight years ago and went with determinism.
+The basic idea being that you run the same program on every computer, you give each computer the same inputs, and then they produce the same outputs and everyone stays synchronized because you're all running the same procedures.
+So it's great when it works.
+Basically, you have this simulation presentation split happening on each player's computer.
+You're gathering commands from each player.
+You share those commands over the network.
+The commands are nice and small, so that's good on bandwidth.
+And then each simulation runs that same set of commands and produces the same results, and everyone experiences the same world.
+At least, that's the hope.
+So, what could possibly go wrong?
+Being deterministic has a bunch of implications.
+It means that your simulation can't expose any state-changing API to the presentation layer.
+That red line is super important.
+It's like the, we called it the great firewall.
+You've got to be really careful how you cross that boundary.
+Ideally, you let commands in, you let state out, and there's no other way to interact with the sim.
+You need to run the simulation at a fixed update rate.
+So you want to make sure that you're you're running commands at a predictable interval and the interval is the same on every computer, the commands you run at each tick are the same on each computer.
+No floating point numbers, because FPUs are prone to optimizing things in ways that cause differences in the low order bits.
+So we wanted to be able to do cross play between different architectures and AMD Intel, 32-bit, 64-bit, and not have things diverge, so we didn't trust floating point numbers.
+which then has a side effect of throwing away all kinds of other stuff like PhysX, like Unity, pretty much all of Unity because its transforms are all floating point.
+Basically, the simulation has to be sort of very pure and clean and in order to remain deterministic.
+So no Unity here.
+Unity up here, great.
+Not so much in the sim.
+How do we get this to work?
+What do we do?
+Here's our Visual Studio solution.
+The simulation, there's a whole lot of projects altogether.
+I think we have 36, it says.
+The main, the core of the game was bbi.game.
+That was the simulation layer.
+Bbi.unity.game was kind of the Unity presentation layer.
+And the dependencies are very different.
+If you look at the references from each of those projects, the simulation layer is referencing bbi.core, which was some useful helper utilities we had, and bbi.game.data, which was a small assembly containing data types, and .NET system, and that's it.
+Over on presentation land, we've got all kinds of stuff in there.
+There's NGUI and Playmaker and Unity Engine, which doesn't appear in the sim, and then all of our other project references.
+So by separating assemblies, we kept it more clear what belonged where by setting up the references properly. We made sure that you couldn't accidentally call unity from the same because it's not even in scope so visual studio won't let you do it. Another thing we did a lot was a lot of the stuff in the game assembly uses what's called internal scope. So I don't know how familiar you guys are with C sharp, but basically internal scope means you can only call it from within the same assembly.
+So that way you can effectively have something that's public for the SIM, but out of scope for the presentation.
+So you can't, someone on presentation side can't accidentally call into that SIM piece.
+There's always sort of these like deep call stack threads where you have an API on the SIM, say the SIM controller that you intended to be called from presentation and then later you accidentally added more stuff and it dives way down into the SIM and calls something it's not supposed to.
+So you've got to make sure that doesn't happen and get rid of it as it comes up.
+Tim Ford used a neat expression the other day when he was talking about Overwatch.
+He talks about digging a pit of success.
+Like basically, make it easy to do the right thing.
+So put your programmers in a place where they sink down into the thing that works.
+So by setting up things in this way, it was pretty easy not to screw up, was basically what we were trying to achieve with our project architecture.
+Multithreading I wanted to touch on.
+Unity uses a ton of threads internally for all of its rendering, physics, audio, asset loading, et cetera, et cetera.
+But it only gives one to us as C sharp developers.
+We get one thread.
+Everything's running on that one thread.
+All the monobehavior updates are on that thread, et cetera, et cetera.
+However, we're in C sharp.
+We can create new threads.
+So for us, we create a new thread for the simulation.
+Again, because Unity is single threaded in their.
+I don't know if it's debugged.
+Definitely in the editor, there's thread guards against calling a Unity API from the wrong thread.
+So this actually had a side benefit where by putting the simulation into another thread, we were pretty much prevented from calling Unity even if we tried really hard.
+Also, being multi-threaded comes with its own set of pain points and conventions and guidelines, as I'm sure you're well aware.
+So by putting presentation and simulation in separate threads, it made it that much harder.
+Like you really had to scrutinize how things were coordinating between them.
+So multi-threading actually, again, encouraged the divide and helped keep things separated.
+And we had some other threads too, but the SIM one was the main one.
+The original idea was to take advantage of CPU performance, obviously, and squeeze out as much CPU as we could.
+But it had some of these interesting architectural side effects as well that were beneficial.
+How do we make the SIM run deterministically?
+Here's a quick overview of presentation layer, feeding in some commands.
+The command scheduler is deciding which SIM tick each command is going to run on and putting those into a buffer accordingly.
+So here you've got the simulation running over at a specific tick rate.
+It's got commands queued up.
+And this is happening on every player's machine.
+The schedulers are communicating over those pipes.
+And as long as we have commands from every player, by the time we get to the tick we want to execute, so tick K or whatever, we need to make sure we have a command packet from each player.
+You'll see a couple no-ops in there, so in this particular tick, player two didn't do anything in that tick.
+That's fine, but we still need to know that they didn't do anything, so we have this sort of empty command packet to represent that.
+So once everyone's got all the commands, you'll notice that player three doesn't have as many commands as player one.
+That's okay, as long as he catches up in time for tick K plus one.
+So the commands can be kind of flying over the pipes in the background while we're executing the commands for the current tick.
+On the sim tick, we execute all the commands, we run a bunch of entity processors to update the state of the sim, and then we feedback game state and events to the presentation layer.
+Again, these are queued up on a per tick basis.
+So the presentation.
+Sort of doesn't care what tick things happen, but it also, it does a bunch of interpolation and things like that, so it needs to know that the state at a certain tick and the state at the following tick, and then when it goes to render it, sort of needs to know where it is in between those ticks.
+Also the events, it was sometimes important to know definitely what order the events happened in, but also what tick they happened on, so we'd have a little packet of events to go with each SIM tick update.
+We'd also, the state of the game at each tick would be checksummed, and we'd use those checksums.
+Those would be communicated around the network, and if two players, if their state diverged, the checksums would differ, and we'd throw up a horrible screen that we never wanna see saying the game is desynced.
+You know, please send your logs to the developer and curse their name forever.
+Desyncs were actually pretty rare.
+We were pretty fortunate, I think in part due to the way we set up the architecture and kept things pretty clean.
+We kept thinking we'd do like hierarchical checksums and debugging tools to help analyze and figure out exactly what desynced, but I think we literally had like four or five desync bugs over the course of development, so it wasn't a big deal and we didn't invest in that tooling.
+All of this has been done before too.
+So 2001, there's an awesome Gamasutra article from the guys who did Age of Empires about lockstep deterministic RTS games, command scheduling, all the rest of it.
+We pretty much followed their model.
+We do some stuff, I'm not sure if they did, like we have an adaptive scheduling horizon, so if the internet starts going to hell and we're frequently not getting all the commands we need for a given tick, we can schedule further into the future.
+And so we take on some additional latency in that case, so it's gonna be longer between issuing a move order and seeing the vehicle move, but at least you're not gonna be hiccuping, waiting for those command packets to come in.
+And then if the network improves, we can bring the scheduling horizon back down again.
+But other than that, I think the guys pretty much did it all like 15 years ago.
+Okay, floating point numbers.
+This was a kind of an annoying part of building the sim.
+Because floating point math is pretty handy and there's a lot of stuff you'd like to use it for.
+We decided it was necessary to go with fixed point.
+I talked to a friend of mine who works at Intel on chip design.
+He said it's getting more and more likely for FPUs to do different things, not less likely.
+There is an IEEE standard for how floating point should work.
+But a lot of the time, the BIEEE standard bit gets turned off on an FPU because you get a little more performance out of it.
+And then you may get different lower order bits.
+You may get different not a NAND result, or not a number results.
+So we ended up deciding to take the plunge and convert all of our math to fixed point.
+So we wrote our own deterministic fixed point math library.
+And I've talked about no unity dependencies, no third party floats.
+You can make fixed point numbers, you know, look and feel a lot like floating point numbers.
+You can still declare them as simple variables.
+You can initialize them with constants.
+You can add them, whatever, do operators.
+Here's a little bit of what that looks like.
+Our fixed point numbers were a pretty simple struct that wraps a 64-bit long.
+See if I can show that here.
+So here's the actual long value that we're representing.
+We're using this field offset trick to split the long into its upper and lower parts, because some operations like multiplication are easier to do if you've got access to those pieces.
+But it's kind of like a C++ union, that data is on top of each other, so it's all the mraw lower and mraw upper, just aliases for the upper and lower part of the raw value.
+Here I'm showing fixed operator plus.
+This is how you overload operators in C Sharp.
+And so this is doing the addition operation on two fixed point numbers.
+You can see some extra logic in there to handle overflow.
+If you're building a fixed point math library, you need to decide, are you gonna go as fast as possible and leave it up to the user of the math to deal with edge cases, or are you gonna deal with the edge cases yourself and be diligent about infinity and not a number and divide by zero and all the rest of it?
+We aired on the side of handling all the edge cases and later regretted and wish we'd gone for pure performance.
+And I think next time around what we probably do is make all the simple math operators be as quick as possible and then have slow precise versions of things for the occasional time when you actually care about infinity.
+I'm also showing a conversion operator here.
+The this guy at the bottom.
+is how you convert from an integer to a fixed point number using this implicit operator.
+Implicit means you don't need a typecast, which is how I got it to work on the previous page of just saying x equal 42.
+And so it's gonna take that integer value, shift it up into the right range, and then give you a fixed point number.
+Our representation was 32.32, so we had 32 bits of integer, 32 bits of fraction.
+So the biggest number we could represent was 2 to the 31, which sounds like a pretty big number, but the square root of 2 to the 31 is 46,000.
+And if that number sounds familiar, we had maps that were so big that the square distance between two points on the map was too big a number for our fixed point numbers to represent.
+And that's a problem because in game code, you often use square distances because why would you do a square root?
+That's stupid.
+So in this particular case, the fact that we implemented infinity properly sort of saved us because then you'd always have, you know, if my weapon range is 300 meters and my distance to target is infinity, then of course, 300 meters is less than infinity, sorry, 300 squared is less than infinity.
+So we're golden.
+Um, but yeah, we kind of wish we'd done maybe, um, 48 bits of integer and 16 bits of fraction.
+And then we could have had way bigger numbers and 16 bits of fraction should still have been plenty.
+Did it work?
+So if you look at our game on Steam, we do Windows, we do Mac, we do 32-bit, we do 64-bit, we do AMD, we do Intel, and we haven't had any reports of people going out of sync because of, anyway, processor architecture, which is great.
+Our EP is particularly proud that we got Mac versus PC cross-play working, because he used to work at Relic, and they could never figure that out.
+Was it necessary?
+We had very few cases to prove that floating point divergence would have been an issue, but there was one interesting one that came up where we were getting desyncs between 32-bit and 64-bit systems right at the start of game, and what was going out of sync was the position of a resource point.
+And it turned out what had happened was that we gave the designers a way to place resource points in a scene in Unity, and so of course, Unity is positioning that as a transform.
+and not just a transform with three numbers in it, but a transform with like eight matrices in it.
+And for some reason, the designers took a whole resource field and rotated it by like 53 degrees or something.
+So there is a non-identity transform down that hierarchy, and the math that was being done was coming out different on 32-bit systems and 64-bit systems.
+The resource point was landing in a slightly different place on the map, and then our checksums were going out of sync because the thing wasn't in the same place on different games.
+What we ended up doing about it was kind of doing in a cheeseball floating point quantization on the resource point position before we fed it to the sim and that worked. In theory even the quantization could have gone wrong depending what exact floating point numbers we had. In practice it got us out of the hole. What we would do in future is position those things using fixed-point numbers in the first place and just give designers a way to edit the fixed-point numbers in Unity.
+Performance, how do we make all this run fast enough?
+Our min spec machine was a relatively modest 32-bit system with three gigs of RAM.
+Performance was an issue.
+It's not the absolute buttery smoothest experience we'd like, but we got to a pretty good place.
+A big part of it was using pretty aggressive level of detail settings for the presentation layer.
+Because presentation doesn't need to be synchronized, we can sort of dial it way back, and as long as the player still knows what's going on, then it's great.
+And of course, you wanna be able to let the hardcore people go up to like 4K or whatever, and try and max out every possible system.
+Most of this is pretty standard stuff that would show up in any game.
+There's a couple interesting ones.
+So the decal system, again, we had kind of a budget on how many decals we could draw and gave the user a setting to control how many decals to help with performance there.
+We also had a physics option, so because our physics is aesthetic, we can turn it off and what that would mean is the wheel colliders would get turned off and the vehicles would just kind of be in a fixed pose and they'd sort of slide around.
+We normally use that for the really low LOD ones that are off in the distance so you really couldn't tell the difference, but by adjusting this quality setting you could kind of pull in how far away that started happening.
+and save a bunch of work on the animation blending and the wheel colliders and things like that.
+So that helped with performance.
+Of course, we tried to make everything run as fast as we could.
+So I mentioned the terrain chunking system and the culling of the decals and things like that.
+But once we squeezed out all the performance we could, we turned to quality settings.
+I want to talk a bit about C Sharp as well.
+I'm guessing a lot of people here are probably C++ programmers more than C Sharp.
+Who thinks C++ is better than C Sharp?
+Show of hands.
+Who thinks C Sharp is better than C++?
+Okay, fight!
+All right, I know there's some skepticism around C Sharp, and rightly so.
+By performance, I really mean memory, because that's where we usually found performance to be an issue with C Sharp, and that's mostly what I'm gonna concentrate on.
+C Sharp uses managed memory, so you can do things to create new objects, but you can't delete them, and all the C++ programmers cringe, because that just sounds really dirty.
+The C Sharp programmers are like, hey, don't worry about it, it'll be fine.
+That's what Microsoft would have you believe.
+This fancy, shiny garbage truck is the .NET garbage collector.
+He's super high tech and modern.
+He can do all kinds of cool stuff.
+He can collect more garbage in an hour than you would imagine.
+Unfortunately, Unity is on an older version of C Sharp, and they have an older garbage collector.
+Here's old man Boehm.
+He's going around picking up the trash for the week.
+There's a good reason for that.
+Unity has done a lot of custom work on their version of Mono because they've got it running on like 6,000 different platforms.
+So they're a long way behind the master branch.
+It's kind of cool that they're on GitHub and you can see just how far behind they are and how much extra work they've done.
+I know they've got plans to kind of upgrade to a newer version of Mono and bring in the new garbage collector, so we can look forward to that.
+But in the meantime, too much garbage is always a bad idea.
+You don't want to do this no matter how good your garbage collector is.
+So, what can we do?
+How can we avoid generating garbage in C Sharp and avoid allocating memory and therefore help things run faster?
+We spent a lot of time with the Unity profiler, which has a column showing how much memory is allocated as you're going through each stage.
+We often found that the amount of memory allocated was very highly correlated with the performance or lack thereof of a given system.
+And so we generally got in the habit of focusing first on reducing memory allocations, ideally to zero, and then looking at the raw performance if there were still things that were too slow.
+I think what's probably happening under the hood is that the bone garbage collector is chewing through a bunch of memory and then coming back quite a bit later to reclaim it.
+And so in the meantime, you're basically killing your cash constantly if you're allocating new objects.
+So I've got a few little C sharp tips and tricks to kind of help with managing memory.
+Collection capacity.
+If you want a list of things, you create a new list of things, you add some things, you add a bunch more things.
+And at some point, you're gonna allocate beyond, you're gonna add an item beyond the capacity of that list.
+The default reallocation strategy in .NET is to take the array that's backing that list, allocate a new array that's twice as big, and then copy over the old array into the new array, and then drop the old array into the garbage collector.
+16 was my guess.
+I think the default capacity is 16.
+When you hit 16, it doubles to 32.
+When you go beyond 32, it doubles to 64, et cetera.
+So again, if it's not 16, it might be 10.
+It might be 8.
+It depends on the implementation, but regardless.
+If you know how many things you need ahead of time, or you can put an upper bound on that, you're always better pre allocating it to that size.
+So now I can add the 17 things and there won't be any allocation.
+You may need to over allocate in order to do this, but it's probably worth it because you're better off allocating once at your Max than continuously allocating and reallocating.
+Also consider writing your own collection classes.
+Like you could write a version of lists that has a forced capacity and can't exceed it.
+It's basically an invalid operation to go over the end of it.
+We did a bunch of stuff like that.
+Temporary lists, quite often you find you want a little temporary collection of things that you can then hand off to some method to do stuff on those things.
+Here's the obvious way to do it.
+And of course, you're setting your max capacity because you know better.
+So you allocate your list, you add a bunch of stuff, and then you do things.
+but you had to allocate a new list, and that's gonna take memory, and when you go out of scope in this method, you're gonna drop that list into the garbage collector.
+One thing we ended up doing quite a bit was this kind of dirty trick of having static temporary lists that we would add some things to, we'd perform the operation on the group of things, and then we'd clear the list when we're done with it, and leave it for the next method that needs a list of things.
+Obviously, there's issues if, deeper down your call stack, they wanna do things with things as well, and they start reusing your temporary list that you're in the process of using.
+You'll generally get like an invalid operation as you attempt to iterate the list if you're modifying it at the same time.
+So again, it's a little bit dirty, but it's a way of avoiding allocations.
+You get a one-time allocation instead.
+I put this little comment here.
+If you're looking at this line where we clear the list and you're wondering if that reset the capacity we said initially, you can either test it and see.
+You can also go look at the Microsoft reference source, which is a really handy way of looking at what's going on under the hood in a lot of .NET collections.
+You could also, I guess, go on GitHub and look at Mono, because that's probably what you're actually running.
+Anyway, having source to the .NET framework is pretty cool and helps you learn some stuff and is really good for.
+educating yourself on how to build your own collections.
+Object pools.
+So instead of allocating and freeing objects all the time, just pre-allocate a bunch of them and reuse them.
+Super important in Unity, if anyone's a Unity developer, you're probably well aware, instantiating a prefab has a bunch of costs to it as Unity creates those objects and gets them bound in and hooked into the engine.
+If you instead just pre-instantiate an instance of that prefab and then disable it and then enable it when you want to use it, that's much better.
+But you can use this concept for other C Sharp object types as well.
+It's nothing Unity specific about it.
+Just make sure to clean stuff up before you put them back in the pool.
+Here's a quick little framework of what an object pool might look like.
+So you have a couple of lists.
+You pre-allocate them to a max capacity.
+One list is what's available. One list is what's in use.
+And you give an API for reserving objects and returning them to the pool.
+And I mean, this is just bare bones.
+You may need like some extra stuff around, you know, predefined callbacks on what to do at cleanup time on those objects and stuff.
+But it gives you an idea of how this might look.
+This line of code has a bunch of problems.
+How many objects are being allocated here?
+Here's the API.
+So string.format takes a format string and then an open-ended list of parameters.
+There's actually.
+One allocation to box X, X is an integer, but string.format wants objects.
+In .NET, everything is an object, except you gotta be careful, because any value type, which is to say, primitives like integers and floats, or any struct, in order to treat it as an object, you need to take it off the stack, allocate a little blob of space in the heap, create a pointer to point to it, so that you now have a reference type you can deal with, and that pointer is now the reference you can pass into an API that wants an object.
+So you had to take that X that was sitting on the stack, allocate four bytes of memory off the heap, copy the 42 into it, and then take that as a reference and pass it into string.format.
+There's another allocation for the params object array.
+It's a temporary array that if you look at the, you can disassemble .NET code really easily.
+So you can look at an ILSpy or something like that and see what's going on, and you'll see that temporary allocation of an array.
+copying of the object reference into the array and then passing the array to the API.
+There's gonna be another allocation because under the hood, string.format is gonna call toString on X, so that's gonna allocate a temporary string representing the string 42.
+And then of course, you're making a new string, so you're gonna have to allocate that as well.
+With unsafe code, you can do some fancy stuff with string pooling, but it's tricky to get it to work right, so mostly just be careful with strings.
+This is a little bit better.
+So instead of using string.format, if you're just doing something simple, you could just concatenate strings instead.
+And if you call toString yourself, then there's no need to box X, because the compiler knows that you're calling toString on a value type, so it can just go ahead and do the right thing.
+You're still gonna call X.toString and allocate that temporary string, and then create the new string S, but it's a lot better than the previous slide.
+So I mentioned boxing.
+There's a number of things you can do to avoid boxing.
+Here's the sort of canonical example.
+You've declared a value type.
+You've got a structure.
+It's gonna be a value type sitting generally on the stack, but when you pass it to an API that wants an object, you need to do the boxing operation, allocate it on the heap, copy it, get the reference, pass the reference to the API.
+So this will be boxing here.
+So you think, okay, no problem.
+Maybe if I use an interface, it'll be cleaner and objects are kind of dirty anyway.
+It's like Void Star.
+I'm going to declare an interface that has a size getter and a name getter.
+I'm going to have my struct implement the interface, which is fine.
+Structs can implement interfaces, no problem there.
+I'm going to change my API to take an I thing, but it still boxes.
+Because I thing, when the compiler is compiling that method do the thing, it doesn't know that I thing is going to be a struct thing.
+So it's going to assume that it's a reference type and treat it accordingly.
+and you're effectively gonna have to box your struct in order to call that API.
+There is an escape hatch though.
+If you do this, you can use generics and say that you're gonna do the thing on a thing of type T, where that type implements the interface you want.
+So because you put the where constraint on there, the code in the do the thing method can treat it as an I thing, and the API will work.
+And because you've used the generic, when the compiler compiles the call to do the thing with a struct thing, it knows that you need to be able to handle that particular value type, and it will emit code to handle struct things in the do the thing call.
+So you're trading off, you're generating a bit more code, but it's probably not that much, and you're not having to box your struct things in order to pass them to the API.
+Enumerators get some special treatment.
+C-sharp programmers like to say for each thing in things, do a bunch of stuff on the thing.
+How many allocations to do for each?
+In this case we're allocating over a custom collection type, so the answer is it depends.
+How did my collection implement IEnumerable?
+Here's sort of the standard way.
+You might have a private class that implements your enumerator.
+You've got your getEnumerator method that's satisfying the IEnumerable interface, and you're just returning a new instance of that enumerator.
+However, let me back up.
+So here you've allocated a new class, so clearly you're allocating.
+Every time you do a forEach, you're gonna allocate.
+So you're thinking, okay, I don't wanna do that.
+What if I make my enumerator a struct?
+Then it's a value type and it won't get allocated.
+That's fine.
+but you're gonna box when you return it as an interface because of the reasons we just talked about.
+What you can do instead is have a method called getEnumerator that returns a myEnumerator that is a struct.
+And this doesn't directly satisfy IEnumerable, so you're gonna need a couple other overloads to keep that guy happy and make the compiler compile your code.
+But there's a technique called duck typing, which is an optimization in the C Sharp compiler where when they're compiling a foreach, They'll look at the thing you're iterating over, and if it looks like an enumerable and it quacks like an enumerable, then by God, it must be an enumerable and we'll let you enumerate it.
+So they'll recognize that there's an optimization they can take, they can grab the struct enumerator and iterate over that and avoid the boxing.
+Unfortunately, if you've declared your collection by the interface, the compiler no longer knows that you're iterating over this custom type that has that custom enumerator, and it can't duct type anymore.
+which makes you sad.
+I'm gonna give a super quick look at our Entity Component System, and this is gonna be unsatisfyingly brief, and it probably deserves a talk of its own.
+But there were a couple talks earlier in the week that mentioned Entity Components, so I wanted to mention it as well.
+And it also puts together a lot of the C Sharp lessons I've just been talking about.
+So our Entity Component System, we used it in the simulation layer.
+It's somewhat analogous to game objects and components in Unity, so it's kind of like, Unity game objects and components are the presentation equivalent of the entity component system, but in the game we're not using Unity so we can't do that.
+We also have the, we do it a bit more, I guess purely, so entity component system rather than having update methods on components.
+We leave the state in the components, we pull the behavior into processors and we run processors over entities that meet constraints.
+So this is a genuine bit of code out of our code base where we.
+We query the entity system to get all the components that have the position component, that have a mover component, that do not have a mobile component, which might have been, they may have been stunned by an attack or something.
+Do not have the death component, because we had a bunch of pain around making units die, and we had to throw a component on there at some point in there to avoid a bunch of other processing.
+For all the entities that satisfy those constraints, do the movement process, which looks something like this.
+So we have a static class for the movement processor.
+It's got no internal state.
+It's got a static method that processes entities, and that method can get components off the entity and do stuff with those components.
+So this is kind of the flavor of what it looks like.
+How it's implemented.
+Our entities are structs, and they basically just wrap an ID.
+All they really are is an index into some bookkeeping data in the entity system.
+Basically this stuff here, so we've got this struct collection was a thing we wrote that allows you to add and remove structs from an array without actually moving anything around and keeping track of what's free and what's not free.
+So we had custom collections in there, custom iterators, etc, etc.
+We pre-allocate to the max number of entities in the system, which I think we shipped with 5,000 was our max.
+I don't know what we actually had anyway, probably several thousand.
+What else?
+The entity query is also a struct to avoid allocating, and it does this duck typing friendly struct enumerator trick that I talked about.
+And anyway, all the pieces kind of come together that the basic plumbing of the entity system, once you've initialized it, there's basically no additional allocations required to use the entity system other than what you might be doing yourself in terms of whether or not you pulled components and that kind of thing.
+but the core of the system itself is pretty tight and doesn't allocate memory.
+It's also pretty quick.
+We end up iterating through the entire entity system probably a couple dozen times per frame, which we always thought would be a problem we'd have to come back to, but it kind of worked out.
+Ah, so much code.
+All right, so in summary, just a few quick key takeaways.
+Some people sort of criticize Unity games for looking all a bit the same.
+I think that's unfair criticism.
+I think really it's up to all of us as creatives to kind of take the engine we're working with and make things look amazing.
+And I think Unity is just as capable of other engines as doing awesome stuff if you've got the right content and the right shaders and the right techniques to really push it to the limit.
+Deterministic simulation.
+I know there've been some experiments to actually state sharing from an authoritative server.
+But we concluded that deterministic sim is still kind of state of the art for RTS multiplayer and the best way to do things.
+There's some challenges there around anti-cheat, because if you're effectively trusting all the clients, and so we're thinking about ways of kind of, maybe we run some of the simulation on a server and leave most of it on the client.
+Haven't quite cracked that yet.
+And I think C Sharp is pretty much ready for AAA game development.
+It's definitely taken the world by storm in mobile development.
+I think it's now got a place on console and PC as well.
+There may be some diehard C++ programmers in the room and you're free to disagree with me.
+C++ clearly has its place too.
+But C Sharp is actually getting to a pretty good spot and you can do some pretty neat stuff with it.
+So thanks to everyone at Blackbird.
+I certainly didn't do all this myself.
+There were a ton of people involved in making it all happen.
+Thanks to Gearbox for supporting us in our development.
+The people we referenced and other people we didn't whose techniques we took and built upon.
+And thanks to you guys for coming on a Friday afternoon and watching.
+So we're just about out of time, but I think, hope we can take a couple of questions.
+Yeah, go ahead.
+So I know that planetary annihilation used a different technique for ensuring the same state on different clients, where they transmitted curves over the net and then set the time step. Did you look at using that or was that?
+We did consider it, and when I showed you the way we compute curves across waypoints, we basically have a sort of an analytic solution for where units are gonna be in the future.
+So in theory, we could take that set of curves, pass it off to the presentation layer, and let it just interpolate its way along there.
+The biggest problem we found with that was not that that didn't work, it did, but that when units got into close proximity and high combat, their immediate short-term goals were changing so rapidly that we were constantly sending new curve data.
+and so we weren't getting the optimization we would have liked out of it.
+I'd definitely like to know more about how Planetary Annihilation did all their stuff under the hood, because I think they're the ones who've come closest to doing what I've just said isn't the best way to do it.
+Leave the head, put on a blog post that goes into some detail.
+Okay, cool, yeah, I'll check it out, thanks.
+Is it possible for divergence to be introduced because the client simulations triggered GC at different times?
+Sorry, for what to?
+For divergence or desync.
+For the simulation to diverge because of...
+Garbage collection triggered at different times.
+Oh, it wouldn't cause divergence.
+It would cause...
+Basically, we've got the simulation thread and the presentation thread running independently.
+And so, if the simulation doesn't meet its deadline, it's bad, but it doesn't really matter.
+Basically, we can catch up.
+So, if one tick of the sim takes twice as long as it should, then it's good.
+As long as on average we're under the deadline, we'll be able to catch up again.
+And the commands will just queue up in the meantime.
+And then we'll kind of grab them quickly and catch up.
+We did have some problems where a prolonged period of being too slow would then accumulate a lot of commands.
+And then you get this weird little racy thing happening where units would slow down and then they'd suddenly speed up again.
+So definitely you don't want to be missing your deadline too much.
+But if you miss every now and then, it's not the end of the world.
+Any other questions?
+Okay, thanks guys.

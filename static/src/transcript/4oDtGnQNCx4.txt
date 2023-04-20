@@ -1,0 +1,475 @@
+OK, so my name is Branislav Grudzik, and I'm a 3D team lead programmer from Ubisoft Toronto, and I had the pleasure of working with Christian on Far Cry 5.
+Hi guys, I'm Christian Kudocheres.
+I'm part of AMD's developer technology group.
+I work with developers to make sure that their games are running smooth on Radeon on PC.
+Awesome, so just a little agenda we'll cover today.
+We did a little introduction, but then we'll talk about the history of water in previous Far Cry games.
+We'll talk about Montana, as that's where Far Cry 5 is located.
+We'll look at the engine tools and rendering goals.
+And we'll actually look through a full render of a frame of water in Far Cry 5.
+And then Christian will talk about how we optimized our computators with half-precision math.
+And we'll close it off with the problems, how we actually debug these problems, and the future.
+So just to get this started, this is a screenshot of Archive 5.
+Rendering-wise, it was the old Blinn Specular rendering model.
+Water was the same.
+We had planar reflections.
+So we moved on to Far Cry 3.
+Far Cry 3 was the first introduction of PBR in the Far Cry engine.
+Although water remained relatively non-PBR, it still looked quite good.
+Far Cry 4, we did PBR version 2.
+Also, water's starting to look quite nice, although we were starting to struggle with waterfalls in our game, and the reflections in the normal map, it was trying to distort the image a little bit too much, which we didn't like.
+And then Far Cry Primal is where we actually really started to consider redoing the water system as we were trying to hit the limits of what we wanted it to look like.
+So this is a screenshot of Far Cry 5.
+You can tell everything has gotten an overhaul, including fully PBR water with flow maps, reflections, and refraction.
+So before we get started how we actually render this, our first approach is to...
+Look at some reference images of Montana, where Far Cry 5 is located.
+We knew that we could technically do this with the old water shader, but that's not what we wanted to do, as when you go to Montana, you'll see a lot of rivers that are really fast, and there's no way you can get this kind of displacement from just a normal map.
+Then we get to rapids.
+If we wanna do rapids, you're gonna struggle with flat water, so we really need a system that will handle slope water.
+Waterfalls.
+Surprisingly, there are a lot of waterfalls in Montana, probably 50 or more.
+And in the previous Far Cry games, we made all these manual, and we had to deal with the connections between the river, for example, and the waterfall, which was quite tedious.
+And if we made any single change to the terrain, we'd have to go edit the things we did before, which was unacceptable.
+Montana also has some exotic locations such as sulfur ponds.
+At this point, we already knew that our previous lighting model would not work, so we wanted to tackle this.
+So in terms of our game engine, there's three sides that play together to get our awesome water system, which is the engine side, which deals with the data generation and streaming and all the textures.
+And we have a very simple water queries API.
+We have an awesome tool, which is artist-driven and procedural.
+And the rendering, I'll talk about this fully.
+So from the engine side, we had many functions that handled the water level before.
+But once we started doing this, I think I had about a 93 file change list, which went through the entire engine and cleaned all of it up for it to be a single function that returned the water level and handled everything for you.
+This deals with water quadtree for any water that is moving and all the baked water height maps that are streamed in, such as lakes, rivers, and waterfalls.
+And one thing to note is we also support the ocean for things we'll see soon.
+Flow in physics, everything we do in the GPU, we have to replicate in the CPU because we can have objects that are moving around in the world according to the flow map.
+And last but not least, it's the baked material map.
+We need to do underwater, so we need to know exactly which material is where in the world.
+So just for reference, this is how this function looks like.
+There's an engine level and a render.
+a rendered thread function, which returns you the water level and the get water flow directions.
+And from an API perspective, our entire engine simply uses this and nothing more.
+Tools-wise, in the previous Far Cry games, the Far Cry engine is a sector-based engine, which means we have 64 by 64 sectors in the world.
+And if an artist wanted to place water, they had to turn on the water per sector.
+And if you want to get a lake, you have to do this probably 20, 30 times, changing material in each one.
+And if you want to slope water, you're kind of out of luck.
+You'd have to terraform the terrain around the water surface to actually get this to work.
+So, for Far Cry 5, we went more of a procedural generation route.
+and this is just a little video of how that works.
+So an artist would simply place a bunch of points on the terrain using our lake creation tool, and then we could switch to the river tool, which places a spline, which allows us to modify the width and the depth of the spline, and this actually modifies the terrain underneath it as well.
+And then the artist simply clicks one button and he gets fully procedural water generated.
+One thing to note in this video is we're actually doing this in Houdini, and this handles all the materials and textures underneath the water surface as well.
+So you'll see here there's rocks, moss, and the dirt that connects to the rest of the terrain.
+And we didn't have to do anything in terms of connecting the water bodies, which was quite painful in the previous Far Cry games.
+So this is kind of the bulk of the work we did.
+We wanted to experiment with a screen space distillation, which is what's gonna give us this awesome look.
+Per pixel material, we're moving towards with each pixel containing data from the material buffers, so we don't actually have to deal with reading things from world space.
+And this allows us to do blending, because now we have all the data per pixel, and we can know what other materials are in this pixel.
+We do everything in Compute as much as we can, minus the depth test and rendering the depth out.
+And we do flow maps with foam, as previously in the Far Cry games we only had a scrolling UV texture.
+So just a little bit of the things we achieved before we get into the actual rendering algorithm.
+This is a simple water plane that artists can just place, can move up and down.
+Particles also interact with it fully.
+This is a more exotic lake.
+This is a wide river.
+As you can see, there's displacement at the bottom and it will fade out in the distance.
+We have a nice LOD transition between the high tessellation and low tessellation.
+This is another example where we have a river that is modulated by its depth and its width, which drives how the foam is generated in this specific location.
+And foam will also follow around any rocks and the terrain.
+So out of this tool we also have procedural waterfalls.
+Artists simply place a spline, click that button, and let me just play it again, and they also get waterfalls with flow maps.
+We talked about some exotic locations, but this is one example of where there's a helicopter that's affecting the sulfur pond below it, and you can see the helicopter spawning displacement particles on top of it, which are disturbing the water surface and creating foam.
+So on top of having to support all of this in the Engine, we also have to support all these features in the World Map, as you will see once you play Far Cry 5.
+And this is our Far Cry Arcade in-game editor, where we also support ocean rendering.
+Not only do we do all these things, we also support a nice underwater effect.
+And I really like this slide because it really shows you how much water there is in our world.
+This actually brings us to one point where we not only need to render water close to the player, we actually need to do it in the distance as well.
+And this has to go really fast on the GPU.
+Okay, so we're gonna talk about how we do all of this in Screen Space and how we achieve Screen Space tessellation.
+The general idea behind this algorithm is that an artist gives us a very low resolution mesh and they also give us a material which will guide how we actually tessellate.
+And from this we will create a Screen Space tessellated mesh.
+So from the artist's point of view, all they give us is simple parameters such as amplitude, roughness, speed, scale, and we bake this out into a structure buffer.
+One problem with DirectX 11 is that we can't actually deal with textures if we're going towards a screen space approach.
+So instead, the artists are simply using indices into texture arrays for any texture they want per pixel.
+And that also gets baked out into a texture index and a structure buffer.
+So if you can imagine when you're running around in an open world game, there's materials constantly being loaded.
+So what we actually do is have one fairly large structure buffer which runs a compute shader and takes the data out of that material into a structure buffer.
+And then from this point on, we handle everything using just an index per pixel.
+And at this point, we actually link everything using per pixel.
+So this is the actual overall rendering algorithm.
+We'll go through all the stages in how we actually do this.
+So don't worry about this large graph.
+So the first stage is always visibility.
+How do you actually handle rendering water close by and in the distance?
+For water near the player, we actually use a conditional rendering approach with occlusion queries.
+and we simply store the query per mesh instance.
+In the distance, we actually do a GPU pipeline where we have two cases, which is flat water and a height map water.
+Both of this data is loaded from a quadtree on the GPU, and we use this to do a sector occlusion.
+and create the indirect draw arguments buffer.
+And this part's fairly simple, because the Compute Shader can just fetch from the height map, and it can know whether it's a flat piece of water or if it's a waterfall or a river.
+And once it does this, it will actually pass the data through the indirect draw arguments buffer and give us...
+a draw call.
+Now, this is very important.
+It's a large open world game, so in a typical scene, you might have 80 to 90 draw calls.
+But once you do occlusion, you might end up only doing 10.
+There are some really heavy scenes where you might actually end up having 600 water bodies.
+And this is why we actually had to split the water into near rendering and far rendering, where the far rendering is a single draw call, but the water bodies close by are actually multiple draw calls.
+So if we want to do everything in screen space, we kind of need a mini G-buffer, which is a little bit lower resolution and a higher FOV, which defines the surface shape.
+And as I mentioned before, artists do not give us tessellated Meshes.
+We actually do screen space tessellation.
+So in the pass we call the position pass, we write out three Textures, which is the data Texture, the Mesh Normal, and Depth Buffer only containing the water planes.
+Once you do this for all the water nearby and in the distance, you get textures that look like this.
+Now, what do you actually store in these textures?
+In the data texture, we store the shader ID, which is an 8-bit.
+texture, and that contains shader features, which could be, is it front face, does it support lighting or not, and is it a valid pixel or not.
+We also store the material structure buffer index, because from this point on, everything is done per pixel.
+And you'll notice we're also storing the MIP level of the algae and the foam, because we are doing things in screen space, we don't have access to DDX, DDI, so we kind of have to pack this out in the early stage.
+Water is a very interactive thing, so we implemented something called Vector Displacement Maps.
+And this is a fairly simple particle editor extension where we render projected box decals for each particle.
+And the way that works is when you render the box, we sample the depth buffer that has water in it, and we do position from depth to project that onto the water surface.
+We also have to invert to object space for applying the UVs, otherwise you will notice distortion in screen space.
+At this point, we also clip all the offscreen pixels, sample the displacement textures, and also do any sort of animation that the artist might want, because if you're doing splashes, it's probably multiple frames, not a single frame.
+The most important things from this slide is the fading of the displacement towards the edges of the box.
+If you're applying a projected box decal on a, for example, a waterfall, you will see displacement exploding as it gets to the edge of the box, which you don't want to do.
+And how do you actually blend all of these?
+We do a max alpha blend, where we clear the texture to a negative flow max, and we do alpha blend max to get all these textures.
+So, at the end, we get a texture that has all the displacement splashes in it.
+We actually went away from giving control to artists to paint normal maps, because we found that that creates a lot of repetitions.
+So instead of that, we create noise to get the general surface shape, which is the high frequency noise.
+And for that, we used the fractional Brownian motion with nine iterations per pixel.
+If you don't know how that works, basically each iteration adds more frequency as you double the UV scale.
+And this is one thing to remember, this is fairly expensive because it's 9 texture fetches per pixel.
+So we actually do an LOD approach where in the distance we do 3 fetches and close by we do 9.
+And we don't want to go to 0 because otherwise the reflections look really bad in the distance.
+And there's two errors on this diagram.
+One is that this texture is not cleared.
+Because we have many passes, and we have a valid mask on the screen, which tells us where there is water, there is no need to clear these textures.
+So in every pass, it will just simply check if there is water or not.
+If there is, it will sample the valid data.
+Otherwise, it does not.
+And the last thing is, the second error is we combine the splashes with the high frequency surface shape.
+So now that we know the surface shape and all the displacement, we actually need to do screen space distillation.
+But we don't want to do this for tiles that don't exist.
+We need to do some sort of occlusion paths.
+So the way this works is we divide the screen into 32 by 32 tiles.
+We found 32 by 32 is the best for all hardware.
+We first started with eight, went up until we found the one that works.
+And the way this works is we simply get a per tile pixel count.
+And you have two cases, like a tile might have a pixel that has water or does not have water.
+If it has water, we do an atomic add into a structure buffer, but we also use the group shared memory to store this before we actually write it out into the structure buffer.
+One thing to remember is if you're working on console or DX12, you could actually use the ballot instruction because we have a per pixel Boolean we can test against to reduce this from 64 atomics to a single atomic because we run this in a grid of 8x8 threads.
+Once all the threads are finished and the group thread ID is zero, we actually write out the total pixel count into a structure buffer.
+And then we do another pass where we simply iterate this list and get the pixel count.
+If it's greater than zero, we increase the...
+indirect draw arguments buffer by one.
+And the last line there is very important because we will write out the tile ID into a second structure buffer.
+And you can see from a render.capture, this specific view has 606 mesh instances on the screen with each one being 1536 indices, so it's highly test-related.
+So now we know.
+what water is visible, which tiles are visible, we need to actually render this mesh.
+So from the previous pass, we know exactly which tiles will have water or not have water, and we will render a mesh that's tessellated per tile where it is visible.
+How do you actually figure out the density?
+In this example, I'm using a 512 by 512 buffer, which will get upsampled to the viewport.
+And we just take the 512 divided by 32, which is our screen tile size, and we get 16 by 16 quads.
+And this actually gives us constant density tessellation.
+And we use drawIndexInstanceIndirect to actually draw each tile on the screen.
+This is why we need to know which tile will have water or not.
+So just to run you by how each tile is rendered.
+You'll see it renders a highly tessellated mesh.
+But how does it know where to render this mesh?
+From the previous pass, we wrote out the instance IDs, or the tile IDs, into a structure buffer.
+And that maps to a draw call.
+And then for each vertex, we can figure out which instance it belongs to.
+From each instance, we can figure out how to create the UVs, because our mesh is simply storing a 16-bit position that's compressed.
+And we can convert that into a...
+UV. Once we have the UV, we could actually sample the depth and compute the world space position in a larger field of view, and then sample the displacement texture which contains the FBM and splash. And at this point, we use NAND to clip all of our vertices because there's no other way to clip in a vertex shader.
+At that point, we also project into screen space with a regular FOV and do depth test with the screen buffer.
+Sorry.
+And what you get is this.
+So as you can tell, there's no pixels that are black, where there's the mesh, because it's per pixel tessellation.
+Again, with the depth buffer test.
+And again, it's screen space, so we have to write out the UVs to match this discrepancy between the larger field of view and the lower field of view.
+Why are we doing this large field of view example?
+If anybody has done any ocean rendering, you will know that when the camera gets close to the water, it will clip.
+And we actually want to fix this.
+So when we do this in the larger field of view and do the tessellation, we upsample.
+And we get this.
+There is some amount of distortion between the large field of view to the lower field of view, but it's hardly noticeable with motion.
+So that's kind of the deferred pass for a mini G-buffer.
+But as I mentioned before, we don't actually give the artist the normal map.
+So we need to generate a screen space normal map without ddx, ddy, which we use position from depth to do this.
+And one thing to notice, because we are a first-person game, when you get close to the water surface, this will actually create artifacts, so we increase the sampling radius as you get to the water surface.
+We do blend with the Mesh Normal to remove any of the discontinuities, because we do get a low-res Mesh from the artist, which is blended with the high-frequency Displacement Normal.
+So this is probably my favorite slide because before doing this, we actually found that we're getting a lot of specular aliasing and we actually do this for our offline textures as well.
+But because we have a reference normal that we're storing in screen space, we need to filter it.
+So we're doing a variance-based approach where we simply compute the Gaussian normal per pixel and we solve for smoothness based on the reference smoothness.
+And why is this important?
+If you don't do this, you'll notice that actually the variance increases quite a lot.
+So you will lose some of your specular.
+But lucky for us, we have a per pixel material map.
+So we could actually use that to scale it back into the range we expect water to be with the variance we actually need to fix the specular aliasing.
+And if you do this, you'll see your specular has come back.
+So talk a little bit about the foam.
+Foam is fairly straightforward.
+It's just a noise texture modulated by a noise texture.
+But the more complex portion of this is the flow map, which is sampled using two different offset phases in order to avoid pulsing.
+And where do we actually show this foam?
+It's driven using a sine distance field based on the shorelines and the rocks.
+And at this point, we also blend in the displacement foam with the shoreline foam.
+So we are an open world game, so we can't actually afford to do all this at runtime.
+So we actually bake out the entire world's flow map and run the generation at runtime in an offline process.
+This is how it looks.
+Some of you might think, oh, this is Fluttville, which it is, so we run a Fluttville algorithm.
+But flood fill is kind of tricky because some pixels will arrive at the destination sooner than others.
+So we actually use a signed distance field to guide the flood fill around corners, which also works for rocks.
+And out of this, we get a flow map texture atlas, which we have two variations.
+One is a high resolution texture, and one is a world flow map.
+The high resolution close to the player gets streamed in as the player is running around the world.
+And the world flow map is baked out once.
+The way the world flow map actually works is an old trick where we, based on a sector ID, we can figure out a UV remap table, which is stored in the texture itself, which can help us figure out which portion of the atlas to read.
+And this is a self-contained texture, so any feature that needs the flow map could actually read this simply based on the world position.
+And this is also our world height map, which we also bake.
+The low-resolution textures are eight meters per pixel.
+OK, so we generated all the things that we need for a water surface.
+But how do you actually light this?
+Because everything is in screen space.
+So there is one important thing that I mentioned earlier, is our water does write depth.
+So at this point, we need to sample the.
+the depth with and without water, and also all the material IDs per pixel.
+So you'll see in the screenshot on the right, we get the material ID, and we also get the blend material ID.
+This is very important because artists can place two rivers with having very different materials, and we actually need to gradually blend from one river to the other without any discontinuities.
+And we have a function that actually interpolates the material properties.
+We don't actually want to blend all the material properties, but only the specific ones that are required, because it's kind of a waste of ALUs to do the rest.
+So now that we've actually blended all of our data, we need to actually read all of this from the structure buffer.
+and compute the lighting.
+In the previous Far Cry games, water simply supported the directional light, but now we do full-tiled Z-bin lighting on our water surface, which is pretty much the most expensive part of the lighting pass.
+And now we support the GI reflections, the directional point spotlights, and we also support exposure lights.
+So in terms of actually lighting the water surface, the way we do light transport is we went away from giving control to artists to give a specific color.
+But instead, they actually deal with the scattering coefficients.
+So we have a table of water types that the artists can pick from, or they can create their own.
+The way that works is just got RGB scattering coefficients with a turbidity value at the end, which is based on the physical properties of the water.
+So with this, you can create oceans, rivers that are quite muddy or clear.
+We also sampled the foam refraction in caustics buffer in order to compose the final image.
+This is just gonna show you how these buffers might look like if you did this.
+So this was the refraction.
+This is the light transport.
+This is the screen space local reflections.
+This is a low-res environment map, 64 by 64.
+And once you combine all of these, you get something that looks like this, which handles everything physically based.
+So you'll see we have the splashes, we have the particles interacting with the water, you have refraction, there's foam, and it works great with the rest of the terrain.
+But I did mention that this is a very VGPR heavy pass, so you have to be very careful how you actually handle this.
+That's what actually Christian's gonna talk about.
+All right.
+So it looks like we're doing very good on time.
+I was planning to speak through my optimizations pretty fast, but thank you, Bane, for mentioning about the VGPR usage of this shader.
+So what I'm here to talk about is about a way in which you can optimize your shaders by using half precision, which is 16-bit precision, by saving vGPRs.
+And this relates to Ben's talk because the material blending done in the SurfaceComposite pass is...
+Well, it's vGPR heavy, just like you mentioned.
+You can see there are a lot of different attributes being sampled.
+And these are very easy to optimize just with the change list you see here in this slide.
+So if you look at the yellow font, that was the only change that was needed to be done in HLSL to actually save nine vGPRs off this path.
+This resulted in an increase of occupancy.
+The shader went up to three waves per CMD from two waves per CMD.
+So the overall result was that this pass was running 25% faster from this simple change.
+Now, no actual change needs to be done.
+C++ size, so this is everything that really needs to be done.
+And now I know you're all, I know exactly what you're all thinking seeing this.
+What is Min16Float, right?
+So luckily, I have a slide for that.
+It's an SRSL basic data type.
+So there are no extensions needed for this optimization.
+It just lets the compiler know that it can reduce the precision down to 16-bit.
+And this stands for integer as well.
+So there's a min16 int data type in there as well.
+But then it's up to the software and the hardware stack to decide whether it can take advantage of the lower precision to actually speed up the performance of the shader.
+So this doesn't actually force the shader to use that precision, like I just mentioned.
+And it's very important to note that this doesn't specify the resource format in memory.
+It actually just allows the GPU to use 16-bit precision when it stores the values to VGPRs and when it actually performs the math.
+This is why no C++ changes are necessary.
+It's just because this is internal to the GPU execution, not to the resource itself.
+And please don't confuse this with the half keyword in HLSL because that's like 32 bits.
+And counterparts exist for GLSL, so this is not an HLSL-only thing.
+You can implement this on different platforms as well.
+And precision lowering cannot be automatic.
+That's why we have the keyword in the first place.
+The software stack cannot possibly guess when it can lower a residue.
+precision without actually impacting quality.
+So then it's up to the developer and actually the quality assurance department to make sure there are no quality issues.
+And it's up to you to find those particular variables and those particular bits of math that can be safely lowered down to 16-bit.
+And you see here listed a few examples, typical examples, when this is not safe, which I will not go over.
+And.
+Not trying to bore everybody, but just trying to remind you, register pressure is a common bottleneck.
+And the way you optimize for it is that you're really trying to increase occupancy on the GPU.
+And that occupancy increases at discrete thresholds of vGPR usage.
+So if you narrowly miss one of these thresholds, it's not ideal.
+So you really want to spend that effort to get on the right side of the threshold.
+And obviously if you target shaders that are particularly VGPR heavy, you probably are targeting the right bottleneck there and you're likely to see higher percentual gains from that.
+And there are multiple sources of eGPR pressure.
+One is I call the main source of eGPR pressure, which is what everybody's thinking mostly when they talk about eGPR pressure.
+It's just how many maximum number of live registers you have at the same time.
+So basically, how many temporary values need to be stored cached, however you want to think of it during the actual execution of the shader.
+And pertaining to this material blending example, the reason why it's particularly eGPR heavy is because Every material has a lot of attributes, and to reduce each wave's latency, it's often optimal to have all the memory read in at the beginning of the shader execution, and then all those values are cached basically in VGPRs until they're actually used.
+And now think of having to sample multiple materials per pixel, like in case of Far Cry 5, they sample up to two materials per pixel.
+So then those attributes need to be cached twice, you're caching twice the number of attributes.
+And even though a certain pixel is not using both the materials, the shader still needs to allocate the full VGPR in case it needs to allocate twice.
+So that's a real concern there.
+Obviously, packed math helps the average VGPR occupancy case because with packed math, you can store two 16-bit values in the same space you require to store a single 32-bit value.
+But there's a different dimension to VGPR pressure, which is actually the focus of my talk today.
+Not a lot of people are actually familiar with the fact that there is allocation overhead for vGPRs.
+And you can think of this as just like waste, like vGPRs that are really used.
+wastefully and that cannot be avoided.
+And it's because of certain restrictions.
+And these restrictions are related to the way memory operations work.
+So if you look mid-slide, you can see in monospace font an actual hardware instruction that loads four components from a buffer.
+You can see buffer load format x, y, z, w.
+And the first parameter is the actual output.
+It reads these four components, x, y, z, and w, into the registers.
+one to four, V1 to four, and that's an actual registered range, and that's a key concept.
+So the actual components need to be read into consecutive registers.
+You cannot spread them out over arbitrary registers.
+And the order of the components in the registers has to be exactly that order.
+So V1 will contain X, and V4 will contain W.
+There's no way to swizzle the components at the instruction level.
+So these are significant constraints that end up causing allocation overhead in ways which we'll show next.
+And this also would stand for texture dimensions.
+So if you look at the ISA example here, you can see the texture coordinate is the second parameter is V0.
+This is because it's a buffer.
+But if this would be a 3D texture, the same sort of constraints would apply.
+So how do you know if your shader is actually suffering from allocation overhead?
+For that, you need to perform live register analysis.
+And on PC, we have the Radeon GPU analyzer, which is our open source tool that allows you to do just that amongst many other things.
+It basically takes an HLSL as input, and it will generate a bunch of helpful outputs amongst which the live register analysis.
+And you really need this to be able to optimize your shader, and especially to detect the allocation overhead.
+So I'll be showing two examples.
+I will be showing two shaders, one shader which features no allocation overhead, which is on this slide.
+And then the next slide will show a shader that actually suffers from one VGBR allocation overhead, and is a slight modification of this shader.
+So at the bottom right in the red box, you can see the HLSL listing for the shader with a bit of pseudocode added to make it easy to read.
+And at the top, you can see the RGA output, which is the actual live VGPR analysis.
+And if you look at the HLSL listing, you can see this is a very simple shader that reads from an input buffer.
+It reads four components, and it performs some math of the components, and then the result is a three-component vector of...
+the initial four components.
+So you can see in yellow font, you can see that that is all the math that is performed on the input, contained right there in pseudocode.
+So at the top, what is the live VGPR analysis?
+You can see the RG output to the leftmost column is just the line number.
+which is still useful, so I can refer to it.
+The second column is the actual number of maximum vGPRs used at that specific location in execution.
+So it matches the particular instruction.
+And then the third column actually contains a matrix, and the matrix has its...
+own lines and columns, and it encodes the live VGPR state of each individual VGPR at each individual location in the instruction timeline.
+So within this matrix, the lines correspond to the instructions of the columns.
+They correspond to the actual VGPRs.
+So VGPR0 would be the leftmost column, and then VGPR4 would be the rightmost column.
+The characters encode the state.
+So we have the carets.
+You can see four carets at the top.
+A caret means that a particular VGPR is written into at that location by the instruction.
+And obviously, the value will have to be stored for later.
+And then the V letter, which you can see four Vs at the bottom, that means that value has just been read by that instruction.
+And the value is no longer needed.
+And then the x character, the x letter there, means it's a combination of the caret and the v.
+So it means that that particular instruction read a value from that register, and it overwrote that register with a new value.
+And when you see a column character, that just means the register is live.
+So the particular instruction might be reading from it or not doing anything with that register, but in any case, its value is needed for a later time.
+And when you see a blank space character, that just means the BGPR is free for usage.
+It stores no value of consequence at that point.
+So how does the shitter get compiled into actual machine instructions?
+You can see the first instruction is reading the four components.
+It's exactly the instruction we looked at earlier.
+And then the second instruction is just waiting for the memory operation to finish, at which point we have the actual math.
+And now, if you look at the actual math that needs to be performed, you will see that if the hardware is to be efficient about the way in which it goes and computes all the three components of the result, is it actually can do this with only three additions if they are done in this order.
+If the X plus Y is added first, if the Z component is added afterwards, and then if the W component is added last to all these intermediate results.
+So all these intermediary results will have to be stored in VGPRs for both purposes of computing further math and also for the purpose of them actually being output.
+Now if we skip straight to line six where the output is actually stored, it's written out, we can see again when it's written out, it has to be written out in a range where again the VGPRs one to three are written out and they have to be consecutive and they have to be in that exact order.
+So this creates constraints on the math for the math to be efficient.
+So we see the first addition at line three, that it has to add the x and y components.
+Obviously it has to read v1 and v2, and you can see in yellow font, you can see that the output is v1.
+And the compiler only has a choice of v1 or v2 at that point, because it just read those values, so now those registers are available to store intermediate values.
+So in this case, it stores the value at v1.
+And then, it's important to note with the second addition, that now the output, in order to avoid any...
+inefficient swaps, it will actually have to allocate that value into v2 because remember, it has to be all output in consecutive registers.
+So it's actually able to compute the math in the proper order and to store it in v1, v2, and v3.
+So everything is good here, no allocation overhead.
+Five vGPRs are used, five vGPRs are allocated, everything is good, the math is done in place.
+And now we're going to slightly modify the HLSL for our second example.
+And as you can see, the HLSL has been modified just by changing the component order in which the math is done.
+So now the math is done on the W and Z components first, and then it has to add Y, and then it has to add X to be efficient.
+So it's exactly backwards.
+And this really affects the way the shader runs on the machine, because the first edition, now it has to read from W and Z.
+But those are stored at VGPR 3 and 4, because remember, when they come in, they have to come in in consecutive registers.
+So now this means that the result of this addition can only be stored in v3 or v4 because v1 is still busy with x and v2 is still busy with y.
+So once that's done, once the compiler actually uses v3 to store an intermediate result, to be able to actually now store the output in consecutive registers, it's forced to go on to store the next results in v4 and v5.
+And when it actually allocates v5, we can see on the third column, the one with the matrix that encodes the vGPR register states, we can see red highlights vGPR2 and vGPR5.
+And we can see VGPR5 with a caret, it just becomes allocated to store the intermediary value, and then it quickly becomes deallocated as it's written to output.
+But we notice that throughout its lifetime, we notice that VGPR2 is completely empty.
+So this is what allocation overhead is.
+It's the fact that...
+the shader compiler has to allocate an additional VGPR even though one would have been free because of additional constraints.
+And this can further degenerate in a complex shader to cause further allocation fragmentation because once the actual ordering of the VGPRs matter, it can all cascade from there.
+So how does...
+half precision actually help allocation overhead?
+Well, the answer is actually very simple.
+Two VGPRs, only two VGPRs are needed consecutively.
+So.
+When a memory operation is loaded, it only needs those two consecutive EGPRs.
+That creates a lot less opportunity for fragmentation.
+And that's the simple story of it.
+So basically, if you are able to identify the locations where you have significant allocation overhead, you will be able to very effectively counter it by using half precision.
+And that's it for my optimization.
+Back to Bain for further water discussions.
+Okay, so basically we spent a lot of time experimenting with this and we were shipping Far Cry 5 is coming out next week.
+So I thought it would be interesting to talk about a lot of the problems we had trying to do the screen space distillation and water writing depth.
+So yeah, first line is water writes depth.
+The moment you make this decision, you're setting yourself up for a lot of bugs.
+When I say a lot, I mean a lot.
+This is kind of a little bit of a curse because you essentially have to have two depth buffers in your engine at this point and everything has to decide whether it's going to sample the one with or without water and you really need to actually think about how to actually implement this because in some systems, you can actually copy the depth buffer after you have the depth buffer with no water, but on some of them you can't.
+And what do you do with the stencil?
+If you copy it without the stencil, then all the passes that require the depth with stencil, you can't actually do that.
+Or you might even have one pass that does a down-res multi-sample, which you could potentially fix this, where you write out the depth, read it back in, and write it out through your chain of depth buffers.
+We have a lot of small textures on console.
+This is not really an issue because we do a lot of packing between passes.
+So we'll know exactly the layout of our data structure.
+We can pass one texture's value from one to another.
+And we do a lot of ping pong.
+simply because this allows us to pack the textures.
+And we do a frame allocator, so we know during the frame when the texture's gonna be free, so we can release the texture and regain it when we actually need it, so we don't use up a lot of memory.
+Screen space distillation, there are two major issues with this.
+The vertex shader is quite slow, and on the current GPUs, if you're actually launching a lot of large vertex shaders, but very small pixel shaders, you actually end up stalling the GPU.
+So we did a lot of optimizations where the vertex buffer is actually just a 16-bit integer, which is encoded for UVs, but it basically has to be the lightest possible vertex shader you can imagine.
+But lucky for us in the future, because we are doing per-pixel to vertex tessellation, we could do a compute pass which does all the ALU operations beforehand, and then we simply do a fetch from a buffer instead of actually computing everything.
+vertex buffer. We also had a lot of edge issues. I'll show you a picture of what this might look like. So if you do things in screen space you could actually end up with two connecting water bodies which ends up stretching the mesh in the distance which is not really ideal but we actually did end up fixing this.
+And the way we fixed it is we simply ran a compute shader that actually tracks where the two water bodies connect and lowers the displacement.
+This is actually a result of the FBM displacement being in screen space.
+We do plan to actually move that into world space FBM generation into some sort of atlas that we can fetch and fix this issue later.
+But for now, this is what we did.
+So we figure out the edges, and then we blur using a compute shader.
+The way you actually do this is, it's very simple to do, just like you would downsample a cubemap.
+Okay, the other really annoying thing we had to deal with is in Far Cry 5, we have a fishing minigame, which is quite nice, but this creates a fishing rod, which is actually a near Z and far Z.
+So it's partially UI and partially 3D.
+And if you have screen space reflections, you're gonna get this nasty line that's created by this line.
+And this line also changes color.
+So as you're fishing, you'll see the water's constantly flickering.
+We did actually manage to fix that by running a post-processing pass after we do the ray tracing for the screen space reflections.
+Just some little debugging tools we use to debug this.
+When you're generating a lot of data, you might want to create tools that help you debug this.
+In this case, we're showing the world flow map in a specific location along with the water level.
+And this is how the two materials would blend in screen space.
+You'll see also on the left side there's a little map for artists to know which material is which.
+And the colors essentially indicate the blending range in screen space.
+and they have control over controlling this range.
+So an artist can say, I want these two water bodies to blend over three meters, six meters, 12 meters.
+We typically use six meters.
+And we also showed the assigned distance field, which we used to debug all the water flow problems around rocks and shorelines.
+So I know somebody's thinking here, how much does this take?
+Our budget was two milliseconds on the GPU.
+these are all the passes listed and how long they take.
+The things in green are actually running async compute in our game, but if they're actually running on the main pipe, this is what the performance would be like.
+And if you look at the numbers, the two most expensive things are the tessellation, which is at .2 milliseconds, and composite passes actually is .87, which is mostly done by the tile Z bin lighting.
+So once we actually run this on async compute, our time goes down to 1.337 milliseconds.
+However, this assumes that you actually have gaps in your async compute pipeline.
+In our case, we did, because we have full control over when our async pass is run.
+So we got that large win.
+And this is just a little video to demonstrate all of this in action.
+So just before, we have two more slides just before we finish.
+So there's actually a bunch of other Far Cry 5 talks happening this week.
+The first one is terrain rendering by Jeremy Moore.
+The next one is the asset build system of Far Cry 5 by Remy.
+And the last one is the procedural world generation of Far Cry 5.
+These talks are all really good to attend, because they are all kind of counterparts to our water system, especially the procedural world generation, because it feeds all the data into our system that we use to render.
+And last but not least, a big thank you to the Far Cry 5 team.

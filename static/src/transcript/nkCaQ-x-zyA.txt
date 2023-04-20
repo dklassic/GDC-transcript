@@ -1,0 +1,774 @@
+So welcome to the performance and memory post-mortem for Middle-Earth Shadow of War.
+My name is Piotr Mintus.
+I'm a technical director at Monolith Productions.
+I've been with Monolith for the past 15 years.
+I originally joined the team at Monolith to work on a game whose code name was Action Movie, and it ended up shipping as Fear.
+Shadow of War uses the Firebird engine.
+It's a Monolith proprietary engine.
+This is the...
+engine that used to be called LifTech.
+It has been since rebranded to Firebird.
+And I've been working on this engine for the past 15 years as well.
+So Shadow of War is a third-person action adventure game.
+It retailed October 10 of last year.
+It sim-shipped on many different platforms.
+And from the very beginning, we were always targeting 30 frames per second on the consoles and 60 frames a second on the PC.
+And for those of you in the room who have not played Shadow of War, I'm going to play a short clip to kind of introduce you to the game, to kind of set the stage for this talk.
+Death calls to you again, Ranger.
+How do you answer?
+We bring this war to you.
+So Shadow of War uses the Nemesis system.
+We're not gonna be talking about the Nemesis system in this talk, as it's not really relevant to the performance and memory optimizations.
+However, it is a core design pillar of Shadow of War, and as such, it dictates that every single AI or character or actor you ever encounter in the game is unique.
+They have unique personalities, they have unique traits, but what's important to us right now for this talk is they have unique visuals.
+And the other thing I want you to take away from that last video is that.
+From Shadow of Mordor, now in Shadow of War, we're going to have a war, which really indicates there's going to be more.
+So this talk is broken up into two parts.
+We're first going to talk about the performance optimizations we did on Shadow of War, trying to get it run at a target frame rate that we were aiming for.
+And then after that, we're going to talk about how we actually got it to fit in memory, because we also had problems getting this game actually fitting into memory.
+So let's start with performance optimization.
+So back on Shadow of Mordor when we were working on the game, we actually were challenged by the fact that we moved from eight AI that we had in FEAR 2 over to 60 AI.
+There was a console transition that occurred at that time.
+However, the hardware did not have an almost 8x increase in performance, although we did increase our AI count by 8x, or about 8x.
+On Shadow of War, because we're going to do war, we need more than the 60 we had on Shadow of Mordor.
+So we decided, or design decided, to push the game to 200 AI.
+And I also want to emphasize that, once again, this is the Nemesis system.
+So it's 200 AI, but they're unique AI.
+And this is an issue for performance, especially for rendering, where you can't just stamp 200 guys out using instance rendering.
+We have to actually render unique guys every single time.
+So a quick table here of facts between Shadow of Mordor and Shadow of War and what changed.
+I already talked about the fact that we increased our AI count by almost 4x.
+But we also, since we moved exclusively to the current gen consoles, we no longer have a last gen version of the game, we increased our mesh counts to push them to a more higher fidelity than we had in the last project.
+And that went up almost 12x in count.
+And this is on the highest LOD, so it's the LOD you see really up close.
+Our mesh density went up by about 5x.
+We did this because on Shadow of Mordor, it was, again, cross-gen, and we used tessellation to tessellate for the current gen consoles.
+But now that we didn't have that issue, we actually increased the mesh density directly.
+And then our bone counts also doubled.
+We're gonna do some quick math here, and we're gonna get back to this math later, but since we're already on the slide, we got 48 pieces, and we have 64 bones per piece, and this gives us about 768 bones per character.
+We're gonna get back to this number later, because it is going to be relevant to the talk.
+Other systems that we pushed, we took our effects, and we decided, well, we're gonna need way more effects, so we actually increased our effects cost by about almost some.
+10X, our GPU particle emitters just skyrocketed.
+And our maps are about three times bigger per zone in Shadow of War versus Shadow of Mordor.
+So our nav mesh is three times as big too.
+And our nav mesh in both games actually spans the entire world, the entire level.
+So we're approaching beta, and we're profiling the game on the consoles on a PS4 or an Xbox One.
+And this is the result we get using the Shadow of Mordor engine.
+We pushed everything so far.
+We've got 200 guys now instead of the 60.
+They're all way more expensive to render.
+Just the AI logic and the rendering cost is insane.
+And so now we're at 90 milliseconds.
+And we're still trying to ship this game.
+And everyone's still pushing forward.
+So at the time, this was my reaction to it.
+And it was basically me running around the office screaming.
+So we have to, sorry, actually, I want to point out that from this point forward, we're actually going to be kind of going on the journey, trying to get this 90 milliseconds down to the 33.
+And that red line you see right there, that's a 33.
+That's our target frame rate.
+So for the rest of the performance talk, we'll be attacking that.
+So the first thing we're going to do to attack that is we're going to thread systems.
+The first thought that we had, well, let's thread some more.
+We threaded a bunch in Shadow Mortar.
+But we could thread more.
+We could see how we could offload some systems to make that performance increase.
+So obviously, we had 200 AI.
+That's a huge cost for our AI logic.
+So one of the systems we had to thread is just our AI logic.
+And there was actually a number of game systems that we ended up threading in the end.
+And I'm not really going to go into much detail on the individual game systems, as they are very specific to Shadow of War.
+But it was a huge undertaking for the engineering team, and it was a huge performance win.
+So it can't be understated.
+Here are some of the huge systems that we did end up threading in Shadow of War that were not threaded in Shadow of Mordor.
+So our effect system, again, we went from 2 milliseconds.
+Now it's 20.
+It can't just be on the main simulation thread.
+So it's been thrown off.
+AI, again, trying to.
+Control 200 AI for them to have all the logic and so on.
+That had to be threaded off to another thread.
+Pathfinding, now because we have 200 AI and the world is three times as big, you got 200 guys pathing all the time, searching a much bigger nav mesh.
+That had to be offloaded.
+Path regions, so we have destruction in the game.
+Every so often, something gets destroyed and ends up carving out the nav mesh, which then requires all the nav mesh regions to be updated.
+And that's a pretty significant cost.
+So again, that had to be offloaded.
+We also added a fire simulation to Shadow of War that did not exist in Shadow of Mordor.
+And we had to offload that, because that, too, was pretty expensive.
+And then finally, player and AI motion just got more complex since the last game.
+And as a result, it, too, had to be pushed off to a background thread.
+Things we could talk about, though, is one of the things we did in Shadow of Mordor, we started doing in Shadow of Mordor, is we moved to what we started introducing a lot of these lightweight atomic spinlocks.
+I'm not really going to get into what atomic spinlocks are.
+If you don't know what atomic spinlocks are, you could Google that, and you should be able to get examples of that pretty quickly.
+But what I'm trying to say here is we actually moved a lot of our systems to just using atomic spinlocks instead of using kernel parameters, such as critical section.
+So any time we were.
+doing any data access protection that we wanted to protect the data atomically.
+We are now using atomic spin locks.
+In most of our cases, there's no contention on those spin locks and when they do occur, what we're really looking for is to avoid a context switch and having our threads swapped out because the context switches are very expensive.
+the registers of the threads that were getting saved and restored, that's expensive.
+It's the fact that the caches will get evicted by the time your thread swaps back in, and you're gonna pay the cost of a cache miss all over again.
+And we still use kernel primitives if we actually do want a context switch.
+The other primitive we introduced that we didn't have at all in Shadow Mortar is a multiple-reader single-writer primitive.
+So what we use in Shadow Mortar for these scenarios was essentially a semaphore, a kernel semaphore, and those things are really expensive.
+But there are lightweight versions of that.
+Microsoft and Sony both have primitives for this.
+The Microsoft one is called the Slim Reader Writer lock, and if you Google that, you'll probably be taken straight to the MSDN page.
+And we use this, for example, for our physics system, where we have our physics system is written once a frame.
+But then for the rest of the frame, any thread on any core could read into that physics system.
+And using a semaphore for that was actually quite costly.
+You could also implement this primitive yourself without using either the Microsoft or Sony implementations by just using two atomic spinlocks that guard the reader and the writer, and then an atomic counter that counts the current active readers.
+The other thing we started looking at is on the consoles, you have two CPU clusters.
+Each CPU cluster has four cores, and all those four cores show a single L2 cache.
+The problem that we started seeing on Shadow of War is we started threading everything, and so what ended up happening is, on the single cluster, all four cores were pegged.
+They were all maxed out 100%, constantly using that shared L2 cache.
+And each core was essentially evicting the data that another core just put in.
+And they were all just fighting between this data that was in and out and just thrashing the cache nonstop.
+So we started looking into ways of how could we avoid all this thrashing?
+Can we somehow find solutions where more of our data remains in the cache without it being evicted?
+And so we realized that we could probably segregate the game logic from the renderer.
+And what we ended up doing is we put the entire renderer on the second cluster.
+and we kept all the gameplay logic in the first cluster.
+And for Shadow of War, because there was so much stuff going on, this actually gave us about a 10% performance gain once we actually achieved this and did it properly.
+The problem is actually achieving this, because we actually tried to do this exact same thing on Shadow of Mortar a few times, and we failed every single time.
+But we reached our performance target without this, so we ended up just shelving it.
+But on Shadow of War, we were just performing so poorly that we had to re-evaluate this and see if we could make it work.
+The problem occurs in scenarios where you have data in both CPU clusters that are in one of the other caches and they're both being accessed at the same time.
+This causes both of the CPU clusters to do a really expensive sync and that sync is extremely expensive.
+So if you attempt this for the very first time, you'll probably see a massive negative win or just a loss in performance.
+So it took us a while, and that's why I'm calling it black magic, because it's basically looking at your data and trying to figure out what could possibly be in a cache that is stalling me, until you figure it out.
+And then all of a sudden, oh, look at that.
+We got a 10% performance gain.
+So at Monolith, when we thread our systems, our approach to threading our systems is actually we try to keep our jobs really large.
+We no longer have SPUs, so we don't have a hardware limit on the size of our jobs.
+And so, because of that, we prefer to keep our jobs large.
+And we do that because we have a lot of junior engineers that come in and we're not really...
+We don't really trust them with threading a lot of systems.
+It takes...
+From my personal experience, it takes a few...
+years of experience to really know how to properly write threaded code and what the patterns are and what to look for and so on.
+And if you don't do it right, everything might work, but you'll have a race condition that shows up in a crash once a week or something like that.
+And trying to track that back down is such a pain that we just try to avoid that as much as possible.
+By keeping our jobs large, we also avoid a lot of synchronization.
+Because no matter how you synchronize your jobs, even if it's really fast, the more synchronizations you have, it's always going to be slower than not having them.
+And large jobs also kind of utilize the CPU cache a little bit better, mostly because if you're crunching on this data all on a single core, all your data is in that L2 cache.
+It's all in the L1 cache of that single core.
+If you split it up.
+Obviously, the L1 is not shared, so you might have to go back to the L2, or you might have to go back to memory to get the data you need.
+It's not a huge win, but it is a pro.
+So the way we approach these large jobs is we kind of move our entire large systems over.
+We don't try to thread the individual system.
+We just move the entire system.
+So for instance, our effects system, we move the entire effects system over.
+We didn't thread individual keys and created a million little evaluate the keys, we didn't thread the actual effect at an effect level, we actually did the entire frame level system of here's the effects for the frame.
+They're all gonna execute on a single core elsewhere.
+And the way we schedule these across all of our cores is perhaps a little bit chaotic, but what we have is a spreadsheet essentially, where we have here's all of our cores, here's all of our really heavy duty threads.
+We basically map them out onto those cores.
+We give them fixed affinities.
+And they are not allowed to ever jump cores.
+They're always executed on that exact one core.
+And if you have two threads that don't fully take a full frame, or three or four, we basically map them out on that core.
+Every single one of these systems has a budget that it shouldn't exceed.
+And we just kind of have a layout, core layout of all of our threads.
+There's obviously a lot of downsides to this.
+Unlike a traditional job system that has a lot of small cores, none of these will pack really nicely into a nice, thin, kind of like a Tetris style where all the blocks just fit and the line's clear.
+The other problem is that, crap, I actually forgot what the other problem is.
+So, we're gonna skip the other problem.
+Oh, actually, no, I remember.
+Woo!
+All right.
+If you get a new console, and it say this time it doesn't have the six cores that the current consoles have, it has 12, it's not gonna scale.
+It's that we can't just pop Shadow of War into that, and all of a sudden it's, yeah, we're taking advantage of all those 12 cores, because we've mapped these out individually.
+So we basically would have to go back, remap them, probably rethread them, because each individual one is now too long.
+So it doesn't really scale, but for this product and for the hardware that we had, this worked for us.
+So I mentioned our first problem was the CPU gaps.
+So the way we approach those gaps on the CPU is we kind of use the same technique that the GPU does with asynchronous compute.
+So what we have is we have these hard working threads with these giant systems that are authenticized to these cores.
+But then we have low priority threads that could jump in anytime these.
+large systems slow down or basically switch out and sleep.
+So we have a bunch of these low priority threads such as file IO, streaming, audio streaming, and we have this concept of asynchronous raycasts where on the very beginning of the frame, the game might request, oh, I need these 500 raycasts, but I don't need them now.
+I'm gonna get the results 25 milliseconds into the frame.
+So you have 25 milliseconds to find some CPU gap somewhere to gather these raycasts.
+So a quick example of that, imagine this is a single core.
+It's our whole 33 milliseconds.
+We have one giant thread.
+Let's just call this the render thread.
+So the render threads didn't have any work in the very beginning because the simulation thread didn't give it any work to do yet.
+Then it had a bunch of work until about maybe the 80-millisecond mark.
+But then it ran out of work, so it went to sleep.
+And then it came back at around the 25 millisecond mark.
+So then there was a low priority thread just hanging around.
+Maybe it was doing our texture streaming.
+So it was streaming our textures, but it's low priority.
+We don't really care if that texture comes in this exact frame or the next frame.
+So it's executing, it's doing its work.
+All of a sudden this render thread came in and kicked it out of the way.
+The render thread executes.
+Texture streaming resumes, texture streaming is done.
+We have another thread that comes in.
+In this case, maybe it's audio streaming.
+It does some work.
+It gets all its work done.
+And then there was a little gap remaining, so maybe the asynchronous raycast basically took that little gap.
+So I was gonna show you a first-party trace of this in Shadow of War in the worst-case scenario, but I wasn't able to get those slides.
+You're going to have to trust me.
+There are scenarios in Shadow of War, if you ever played it, you do those Fort Assaults where things get super crazy.
+And we have every single core that basically looks exactly like this, that fills up to about 99% CPU utilization across every single core in the consoles.
+And we were basically barely running at 30 there.
+So this large and powerful approach that we use at Monolith, we kind of love to call this thing the monolithic approach.
+Get it?
+So, all jokes aside though, I just want to point out that we're not really advocating for this approach.
+The reason we actually took this approach was, a lot of it was due to just resource limitations and time constraints.
+It was an easier approach for us to take than to, invest into, for instance, the effects system, threading the entire system with a million different jobs.
+It was a lot easier to just move the whole thing over.
+And inside the system, the entire effects system remained single threaded, so none of that had to change.
+It was just the input and the output of the system that had to be synchronized.
+So the other thing we do on Shadow of War, and we actually did some of this on Shadow of Mordor, is we pipeline.
+And what pipelining is, is we, as opposed to just spawning off threads and then joining them back in, we pipeline our threads out.
+We pipeline, we have a water falling pipeline where we have work, we offload work to another core, to another thread, and this thread runs on another core simultaneously as the original thread.
+And we use these circular command buffers to pipeline this work over.
+And we do this mostly for the renderer, so.
+We do this so that every single one of these stages in our pipeline gets a full frame and doesn't have to be synchronized back in to the first originating thread on the very beginning.
+Because then they wouldn't get the full 33 milliseconds of a frame.
+So let's take a quick look at this.
+So our first stage of our pipeline is a simulation thread.
+It's 33 milliseconds.
+Next stage, it pipelines work into the render thread.
+it also gets 33 milliseconds.
+Then we have a thread that we call the driver thread.
+It's, you can think of this as the render thread being the platform agnostic renderer and the driver thread being the platform specific renderer.
+So the platform specific renderer now gets a full frame of 33 milliseconds.
+It ends up writing out the GPU command buffer.
+That ends up getting a full 33 milliseconds to execute on the GPU now.
+Once it's done it for a frame.
+It ends up writing out the frame buffer, and then it puts it into the display queue, and that is that little block there.
+That's the display queue.
+Once a V blank occurs, we can now flip, and now it gets displayed on the screen for, again, 33 milliseconds.
+And when you show all the frames, it looks something like this.
+And this is actually, I want to point out, the best case scenario for pipelining, because I'm going to show you the worst case in a bit.
+So this red line here is only here to illustrate my point.
+If we spawned the render thread off of the simulation thread and then asked for it to join back before the simulation thread ended, then we wouldn't have a full 33 milliseconds for the render thread.
+And then the same thing for the driver thread.
+If it spawned from the render thread and then joined back in, it would not get the full 33 milliseconds.
+And this only applies to the CPU workload, so only the blue rows.
+Because the GPU, that is just how the GPU works, and we have no control over that.
+So when we pipeline our threads, we make sure that none of these stages in our pipeline falls behind by more than one frame.
+If it does fall behind by more than one frame, we end up stalling the stages before it.
+So.
+Ideally, what we want out of our pipeline is the picture I showed you at the very beginning, where every single stage executes just maybe a couple milliseconds after the other.
+And as a result, the end user can't really tell that this pipelining is occurring, because the entire pipeline is maybe adding at a maximum maybe 10 milliseconds to the frame.
+And no one playing the game is going to notice that there's an extra 10 milliseconds going on.
+And all this is great, as long as the first stage is the stage that you're bound by.
+But in retail, we're actually bound by the last stage.
+Because in retail, the last stage is the V blank.
+The V blank is always taking exactly 33.
+And if we did our jobs correctly and we're not dropping frames, every other stage has to take exactly less than 33 in order to not drop those frames, which makes that very last stage be the stage that we're bound by.
+When this happens, our entire pipeline just starts telescoping out.
+Because every single stage before it, is now basically blocked on this one frame behind scenario.
+So when this occurs, here's our stages, our six pipeline stages.
+And if every single one of these stages gets 33 milliseconds, because it's exactly one frame behind, the net result of this is that now what you're seeing on the screen is 200 milliseconds behind the very first stage in our pipeline.
+This is a huge problem for us because at that point.
+Now we have a 200 milliseconds input latency, because we actually got their input on that first stage, and all the rest of the stages are rendering, and we're not doing input in the renderer.
+And 200 milliseconds is something that is noticeable to the end user.
+So in order to solve this telescoping issue, we implemented a dynamic frame pacing system.
+So what we do is, on the consoles, you could actually monitor display queue.
+find out exactly how many frames you have buffered up in that display queue that are waiting, be blank.
+So we're sitting there every single frame, checking what's going on, how many frames do we have buffered up.
+If we have too many, or if there are frames buffered up, then we know we are now GPU bound, we're telescoping out.
+And when this occurs, we try to basically compensate for that by going back to the very first stage in the pipelining into our simulation thread.
+and making sure that it takes longer than any rest of those stages.
+So we know the last stage is 33.3, so we have to have this first stage take longer than 33.3.
+So what we do is we basically give it an extra millisecond every single frame to try to, and by doing so, it ends up contracting the entire telescope.
+So here's an example of that.
+So imagine if our Actual simulation thread typically just takes 30 milliseconds because it's not missing frames.
+30 milliseconds could be a good number to hit.
+And we're going to go and say the render thread is also taking 30.
+Driver thread is also taking 30.
+The GPU is taking 33.
+But then this play queue is now taking a full frame too because it's full and it's waiting for that next V-blank.
+And then it finally gets displayed on the screen.
+So as you can see, the entire pipeline is kind of being telescoped out.
+And this is not the worst case.
+I tried to do the worst case on the slides, but it would go way off the slides.
+So this is kind of the best you guys are getting.
+But you kind of get the idea here.
+In the worst case, every single one of these blocks would basically be connected tip to tail, and it would telescope way out.
+So we detected the display queue was full.
+And so for the next frame, we had the simulation artificially stalled until 34 milliseconds.
+We leave all the rest of the stages alone.
+First time around, this doesn't really do much to the frame.
+And so everything still appears about the same.
+But then on the next frame, we're still doing this because we're still behind.
+If you look at the row second from the bottom, you'll notice that the display queue now is shrinking because all the frame buffers that we had buffered up in the display queue, well, they're going away because we're.
+technically dropping frames, but because we have these display buffers queued, we're still not really dropping frames.
+And we just keep doing that.
+And our display queue just keeps shrinking.
+And eventually, the display queue will go away.
+And when it does go away, we just let go and go back to where we were.
+And we do this from the very beginning of the game.
+So we never really let this pipeline telescope out, because the second things show up in the display queue, we engage this dynamic frame pacer.
+And so if you were to do a real-time trace of this, you'd probably see it kind of wiggle around, where it's engaged, disengaged, engaged, disengaged.
+But this whole wiggling, it only adds maybe a handful of milliseconds, 2, 3, 4, 5.
+So the frames might be five, there might be a five milliseconds difference between when the input is being really gathered, but that, the end user cannot tell that, but they could definitely tell the fact with that, if the whole thing was telescoped out and it was taking an extra 200 milliseconds.
+So now that we did all that, we threaded all of our systems, we got rid of a bunch of kernel primitives.
+We did, we pipelined.
+By doing so, we shaved off about a good 40 milliseconds off of that simulation thread.
+But we haven't done anything for the renderer yet.
+So now we're going to go ahead and try to get this renderer in line.
+Some quick facts on Shadow of Mordor versus Shadow of War again.
+We ended up moving to a much faster first party graphics APIs on Shadow of War.
+So that helped a lot of performance.
+On the PC, we actually had to move to D3D11.1.
+We shipped on D3D11 because we were a Windows 7 game.
+We had to move to 11.1 for performance issues or performance gains out of 11.1, actually.
+We could not stick with just 11.0 on the API level.
+And the hardware limit is still feature levels 11.0.
+And after all the optimizations we ended up doing on the render for Shadow of War, we actually got it to use less of the console cores than it did on Shadow of Mordor, even though Shadow of War does just so much more.
+So the first thing we did when we were profiling the renderers, well, it's taking 90 milliseconds.
+Let's do some profiles.
+Let's figure out what is going on.
+So in Shadow of Mordor, we never used...
+It was still a cross-gen game.
+It had... The last gen was still D3D9.
+Current gen was D3D11.
+We didn't have any named constant buffers.
+So everything was basically setting out individual constants and then building up a global constant buffer and sending that over to the GPU every single frame.
+And not only that, we had a lot of copies along the way because we had a bunch of abstraction layers.
+So we'd have the copy.
+The first copy would be the value the game would send to the platform agnostic renderer.
+The platform agnostic renderer would then set it to the platform-specific renderer, which would make a copy.
+Then at the very end, on the very last stage, when we're actually generating the draw call, we would then allocate memory for a constant buffer, and then mem copy that value to the platform or specific layer already had into that constant buffer and send that over to the GPU.
+But that was just a lot of copies.
+All the mem copies really add up.
+So the first thing we did is we basically introduced named constant buffers into our render.
+And this is just a traditional approach of what you would do when you introduce named constant buffers.
+You look on the update frequency.
+You probably create like a frame constant buffer, a view constant buffer.
+Frame one only updates once a frame, so you don't have to touch those constants ever again, and so on.
+The other thing we did to avoid the copies was we exposed, through accessors, the actual platform-specific constant buffer all the way back to frame code.
+So instead of making all these copies along the way, Using accessors when the game code asks to set a value, it actually ends up writing the value directly into a constant buffer that is used directly by the GPU on the consoles.
+So we track all our constant buffers with a dirty state in the frame code.
+And we do this because from the very beginning, we're actually writing final platform-specific constant buffers.
+And we tracked our dirty state.
+So the game actually changed the value in it.
+Now it's dirty, and the GPU does not know about it.
+So when we go to the first draw call that needs to use this constant buffer, we detect that it's dirty. So we upload it back to the GPU.
+So if it's, for instance, a constant buffer one, and it's dirty, we set constant buffer one again, but then we don't ever touch constant buffer one again until the next time it's dirty. So for instance, for the frame constant buffer, it's dirty once a frame, we set it once on the very beginning of a frame and we never set that constant buffer ever again for any draw call following.
+And so when it is dirty, we give the GPU that copy, and then we make another copy for the CPU, and then the CPU could keep working on this new copy while the GPU already has this copy we sent to it.
+And the copy we sent to the GPU, we mark it with a frame code, which just means that we cannot touch that memory until that frame code is cleared by the GPU.
+And then we just recycle that memory.
+Binding constant buffers is now just on the consoles, on these super simple, it's just a pointer.
+We no longer allocate special memory for a constant buffer, mem copy everything in, and then upload it.
+Now, since we're dealing with platform-specific constant buffers, it's just a pointer set.
+And then we also notice that, well, we have these materials constant buffers, or we have basically values that are tools set.
+And they're set by artists, so we can't set it in code.
+but they're tweaked by artists and they're tweaked before it ever gets to the game.
+So at cook time, we could actually generate these material constant buffers and we could generate them to be 100% platform specific constant buffers and then we set them up and simply again, just set them using a pointer to set those material constant buffers and never really, we don't need to actually even know what is inside those buffers, they're just a black box that we know the shader is eventually going to use.
+So here's the name constant buffers we added in Shadow of War.
+In Shadow of Mortar, obviously, we only had the global.
+I want to point out these two constant buffers.
+So we kind of went over the bone count in the very beginning of this talk.
+And I want to point out that we also have a previous bones constant buffer.
+And the reason we have that is because in Shadow of War, we also introduced temporal anti-aliasing.
+And for temporal anti-aliasing, you need to know about the previous frame in order to generate your motion vectors.
+So now we were sending not just the current frame bones every single time, we were sending the previous frame bones every single time.
+So we'll do some more math again.
+So if you remember the numbers from before, we had 48 pieces, 64 bones.
+But now we have two frames worth of that.
+And we have 200 AI on the screen.
+So that adds up to about 307,000 bone transforms that we're trying to send to the GPU every single frame.
+But wait, there's more.
+We have four render stages, because we have the GBuffer stage, and then we have three cascading shadow map stages.
+And each one of those, the way the renderer worked, it would regenerate the bone's constant buffer for every single one of those stages every time it had to render a skeletal model.
+So the net result was 1.2 million bone transforms being sent to the GPU every frame.
+And our bone transforms are made up of two vector 4s, one for position and one as a rotation quaternion.
+So really, it was 2.4 million vector 4s being uploaded to the GPU every single frame.
+So this is why we can't have nice things.
+So what we did to solve this is we actually went for every single one of our constant buffers, not just the bound ones, but it was really for the bound ones.
+And we gathered heuristics on these constants.
+We determined two things.
+Two things that were important to us.
+One was how often was each constant used?
+and how often was the constants actually set to zero.
+And the constants that were used heavily by most of our shaders, they got basically put to the very beginning of our constant buffer, and the ones that were very rarely used basically got pushed down to the bottom.
+And the same thing for the ones that were typically set to zero.
+And the reason we did that is we only now allocate constant buffers big enough to hold our used constants.
+And so any constants that is not used by the shader, if it's not there in memory, it's obviously perfectly fine for the shader.
+But the other thing we also did is any constant that is zero, we don't actually have to back it with memory.
+Because when the GPU goes ahead and tries to read the value out of the constant buffer, the net result is it just returns zero back to the shader.
+So if you're going to allocate memory just to memcpy a zero in.
+then send it to the GPU, then have the GPU dereference that memory, put it in its cache just to read a zero back.
+It's kind of a lot better just to have the GPU return zero as an error code, which just works out perfectly for what we're trying to do.
+The biggest problem we have with that is all of our first party graphics APIs just spam like crazy, saying that we're just doing everything wrong.
+Then your game basically runs like a frame a second because of all the error spam.
+Luckily, you could turn that off on absolutely every one of the APIs.
+The other thing we did for the bones specifically is we actually now cache our constant buffers with our render nodes.
+So if they're encountered in different stages along the way and they haven't changed, we just reuse the ones that were built in the previous stage.
+So if we built the bones in the gbuffer stage, we just reuse it in the constant.
+the cascading shadow map stages, so we don't have to actually rebuild them all from scratch every single time.
+And as I mentioned before, we switched to much faster first-party graphics APIs.
+We also removed frame-to-frame reference counters.
+So we used to have these atomic reference counters in our renderer.
+And atomic reference counters seem as if they're fast.
+All they are is atomic increment, atomic decrement.
+a single CPU instruction.
+But if you're doing it in a renderer and you're doing it like 10,000 times a frame, that really adds up.
+So we got rid of all that.
+And now we're just using our frame codes to track absolutely all lifetime.
+We were kind of doing a mix of that in the past, but we basically went through and just cleaned the whole thing up so that we're not using any frame-to-frame reference counting.
+The other thing we did, which was a significant undertaking, was actually we cached the graphics API state on every single one of our platforms.
+Because we noticed that if we were doing any redundant state changes, even though if they looked minor, a lot of times what would happen, it would invalidate some kind of state in the graphics API, which would be a lot more expensive than it actually looks.
+So all of our state is completely cached.
+And we pretty much just generate these CRCs for every one of our states.
+We check those CRCs.
+If the CRCs is the same, then we just never.
+set that state if they're different than we obviously set it.
+And a lot of stuff is also pointers, like a texture is just a pointer, is that texture already set into texture slot two?
+If it is, then just leave it alone.
+And this was a huge win, obviously, on PC, because now we're avoiding all those com calls, but it was actually also a win on the consoles.
+So the next thing we did is we got rid of a lot of our flushing.
+So we used to do a lot of flushing to be safe.
+It's a good thing to do, but it's also pretty expensive.
+So on the consoles, we got rid of all of our CPU and GPU flushing.
+We did this by using write combined memory on the consoles for most of our GPU data.
+So when we're writing to it on the CPU, it only takes about 500 cycles before it's committed into that memory.
+And because there's so much stuff going on in Shadow of War, by the time the GPU ever sees this data, it's definitely committed into memory.
+So we don't really do any tracking to make sure that 500 cycles have occurred.
+We just assume they have.
+and we haven't seen any problems with that.
+On the GPU though, what we end up doing is we allocate all the memory we ever sent to the GPU on a cache line boundary.
+So not only is all the memory allocated on the cache line boundary, it's also padded out to a cache line boundary.
+So if you, for instance, have a constant buffer that all it has is one vector four, it's obviously not using the entire cache line.
+It's gonna get padded out to the entire cache line because if we send up that one vector four to the GPU early on in the frame, The GPU will put it in its cache.
+We then allocate another constant buffer that's maybe, again, one vector four.
+And if it ends up being on the same cache line as the previous one, we could change it on the CPU.
+But without a cache flush, obviously, the GPU is not going to see it.
+Then you're just reading garbage data.
+And because we don't want to do that cache flush, we basically pad everything out to cache line boundaries.
+The cache lines are pretty small.
+So there is some memory wasted here.
+But it's pretty insignificant compared to the five gigabytes you have on a.
+current gen consoles.
+And then we have dynamic resolution scaling on the GPU.
+And that's great.
+And a lot of people have used that.
+But that scales the GPU on load.
+And we have a somewhat open world game.
+We have no idea what the end user is going to be able to do.
+They could create scenarios that are just crazy.
+So we're looking into ways, well, how can we dynamically scale the CPU too and not just the GPU?
+So we ended up doing two things.
+One thing is we're constantly monitoring the CPU workload of the renderer.
+If it gets really heavy, if it gets maybe about 30 milliseconds, we start throttling, we start pushing out all the LODs of our character models.
+And that helps us because the LODs that are further away have less draw calls.
+So right away, there's a lot less draw calls to set up on the CPU side.
+Also, most of those LODs further away use cheaper shaders because we typically only use...
+We only use tessellation on the LODs that are up close.
+Then as you get pushed...
+push further away, it's just vertex pixel, nothing else.
+So again, it's a lot simpler to set up those draw calls than tessellated ones.
+And then if shit really hits the fan and we're now dropping frames, we actually end up, we stop streaming textures.
+We stop all textures, high MIPS.
+And we do this because it lowers the CPU usage.
+Not streaming is basically not doing any additional work.
+So that gives us more holes in our CPU timeline.
+And it also, there's a lot less memory pressure because we're pulling all this stuff in and out of memory.
+So by basically pausing that for a while until we regain our frame rate fixes that as well.
+And there's also a cost between virtual and physical page mapping.
+So doing all that, got our render thread down now to 45 milliseconds.
+So we're getting there.
+So now we're going to look into our memory, see if we could do anything with memory to get us running faster.
+So a huge performance win on Shadow of War was actually switching to 2 meg pages.
+We used to use only 64k pages exclusively on Shadow of War.
+Now we're using 2 meg pages.
+We're actually using a mix.
+I'm sorry, we're using a mix between 2 megs and 64k pages.
+And that gave us about a 20% performance gain over Shadow of War.
+A lot of it just came from the, oh sorry, over Shadow of War.
+A lot of it actually came from the fact that there's just so much going on, so much random memory access.
+And this.
+This is where the large pages shine.
+We actually implemented this on the PC as well.
+However, it's not that noticeable to most of our users on the PC because we're GPU-bound on the PC.
+And it does make the CPU faster, but unless you're actually CPU-bound, you'll not really get much out of this.
+So we end up allocating these pages at when we start the process.
+We do this because we have a mix.
+There's no way you're going to find a contiguous two-meg page.
+So we basically, here's a breakdown of our memory of Shadow of War.
+We allocate 1.5 gigs of GPU memory, 2 gigs of CPU memory, 256 megs of GPU memory that's cached by the CPU.
+And then there's that gray block that's split out.
+That's about a gig of our 64k pages.
+And we actually use that mostly for our textures.
+So doing that, switching to the two-meg pages and getting that 20% performance gain, we're now down to about 40 milliseconds on the simulation thread and 36 on the renderer.
+So we're almost there.
+What can we do to get this game actually running at frame rate?
+So in our development builds, we use DOLs.
+And we do this because it's great for iteration times.
+You could change the CPP file.
+All you have to do is build that one DLL.
+You don't have to rebuild the entire game.
+We have incremental linking turned on, debug, fast link, all this great stuff.
+It's great for iteration times.
+It sucks for performance.
+And our executable is just a tiny stub that has absolutely no code in it.
+And all it does is it just loads those DLLs.
+And this is for a development build.
+For a retail build, we convert these DLLs.
+We target them to become libs at this point.
+We turn off all the things that make iteration times great, such as incremental linking and so on.
+And then we use our stub executable to now link in those libs as opposed to load those DLLs.
+And the beauty of that is that when you're doing linking, the way it works is it only pulls in code that is referenced.
+So it's basically, the linker is basically dead stripping your code, or getting rid of all the code that is dead.
+And since our code base is 20 years old, there's a lot of dead code.
+And that alone just gives us about a 10% boost in performance by getting rid of all the dead code and getting rid of all the DLL.
+boundaries.
+The other thing we do is we have link time code generation turned on.
+And we did this actually on Shadow of Mordor as well.
+And we do it for all of our middleware as well.
+So we go into every single middleware package and turn on LTCG.
+LTCG on Microsoft platforms gives us about a 10% boost in performance.
+And the reason it's greater on the Microsoft platforms than on the Sony ones is because of.
+And the way the Microsoft compiler works, you can't actually inline between OBJs without turning on LTCG.
+We also use PGO, Profile Guided Optimizations, on all of our platforms as well.
+And this is the first project we actually shipped with PGO.
+And that we found about a 5% gain on top of LTCG by using PGO.
+And a quick pro tip there, at least this works for us.
+If you're using a Microsoft, if you're compiling for Microsoft platforms and you have comdat folding enabled, it will shrink your executable.
+But from what we encountered is it basically gets rid of the gains we got out of PGO.
+So we end up turning off comdat folding.
+So doing that, we finally got our game running at frame rate.
+So we could, I mean, it's good to ship frame rate wise.
+I feel great.
+It's awesome.
+So now we're going to try to get it to fit in the memory.
+Because we can't really ship without it actually fitting.
+So modern GPUs use virtual memory.
+We no longer have a last gen console which doesn't have virtual memory.
+And so we have this virtual memory.
+We've had it around for the CPUs for a while.
+We no longer have to allocate contiguous memory on the GPU.
+So what can we do to actually get this?
+Can we do anything with this virtual memory to save on memory?
+We know that physical memory can be mapped and unmapped into virtual memory on a page granularity.
+And we also know we could take a single physical page and map it to multiple locations in virtual memory.
+And a quick example of that, we've got virtual memory on the top, physical on the bottom.
+We could allocate a physical page.
+Anywhere in the physical memory range and we can map it anywhere in the virtual memory range. So there it is pretty straightforward. We take another physical memory page and allocated right next or map it right next into the address space of the virtual memory and so from the virtual very perspective. It looks contiguous even though I don't at the physical level it is not and this is OK.
+And then there's another, you could allocate another page, and you could actually map it into two completely separate locations in virtual memory.
+And this works too.
+So we're going to use 64K pages for this, and this is why we have that giant 1Gb 64K block.
+And the reason for that is it's a lot easier to find scenarios where you could share a 64K page of data.
+2 megs worth of data is pretty difficult to share.
+It also means that if there's any memory that we...
+don't use out of a 64K page because we want to do some kind of memory trick where we're not losing too much out of that 64K page, as opposed to a two-meg page where there might be a bunch of data left over.
+But obviously, there is a downside to it.
+They're slower.
+So the first thing we started thinking is, can we move our mipmaps streaming over to these pages?
+So in Shadow of Mordor, we, um, We never, we mip mapped stream, but we actually never unloaded those mips, because we moved, we were cross gen again.
+We moved to this great new console, had five gigs.
+Oh my god, all the memory in the world.
+What, you know, there's no point of unloading this data.
+The only reason we streamed those mips in, in the first place, was to lower load times, because our load times were pretty significant.
+But we had all the memory to keep them in memory.
+On Shadow of War, because we were out of memory, we started looking at, started looking at our texture streaming and think.
+And wondering is there a way to save on memory by maybe moving this these MIPS in and out of memory constantly?
+And this is just a quick reminder that out of any textured high MIP caught it memory wise cost 66% of the rest of the texture. So if you get rid of that high MIT, all you're left with is 33% of the memory usage.
+So we implement a mipmap streaming system at cook time. We analyze every single one of our meshes.
+And we find the largest triangle, the worst case scenario triangle that has the greatest texel density that would basically require that high MIP to come in first.
+And we save it off.
+At runtime, we do some quick math to basically project that triangle onto the screen, determine what its MIP map value would be, and approximate that MIP map value.
+And I highlighted approximate because you don't really have to do the exact same math that GPU does here.
+because you're going to be bound by the streaming system and not so much by the accuracy of your math.
+So finding the fastest way to do this is a lot better than being accurate.
+So a quick example, we have this tribute here in the middle of the screen.
+We have a bounding box for every single one of these objects.
+And we take this triangle we saved off at cook time, and we simply project it onto that bounding box, camera facing the screen space, figure out what the mid value would be for that triangle.
+A triangle is obviously not to scale.
+We don't have triangles this big.
+But if I used a real world triangle, you wouldn't see it.
+So the entire streaming system operates on the CPU.
+And it's throttled, so it doesn't take up too much time.
+We only evaluate about 60, well, we evaluate exactly 64 of these meshes of frame.
+We have a frame code on it, so we don't evaluate the same mesh twice.
+And we put a dampening system in there to avoid.
+thrashing of the MIPS so that we don't pull them in and out every single frame.
+And as a result, we could evaluate about 1,920 of these every second.
+So after a few seconds, we evaluate the entire scene, because we're only evaluating this.
+Only the stuff that is being rendered is evaluated.
+And so the CPU cost, as a result, is fixed at about 0.1 milliseconds per frame.
+So the high MIPS, they use a memory pool, and we pre-allocate these 64k pages the second we start the game again so that we always have the memory for this pool.
+And we just slow the MIPS in and out until we're out of memory, or until the high MIPS are depleted.
+And then we just don't give them the texture a MIP if it requests one.
+And so every single one of our textures we create without a high MIPS.
+So virtual memory is mapped out for entire texture, but it's only backed by physical memory all the way up to the high MIPS and the high MIPS is ignored.
+So a quick demo of that.
+Imagine this texture here.
+That's a virtual memory layout of a regular texture 2D.
+And then we have our base memory, which is just memory that if we run out of that, it's a error that we're out of memory.
+But if we run out of a high MIPS memory pool, that's OK.
+We'll just never...
+displayed a high mip to the end user.
+It's still more of a warning to the game developers than an error to us.
+So every one of these blocks is a 64k block.
+We end up basically assigning the 64k blocks to all these different mips.
+And we're doing this manually.
+We're mapping the physical memory to virtual memory here.
+At this stage, the texture would be considered loaded by the game and would be handed off until.
+the Mipmap streaming system determines it needs a high MIP.
+Once it determines it needs a high MIP, all the 64k pages from the high MIP pool are now assigned to this high MIP until it doesn't need it anymore.
+And then they're just thrown back into the high MIP memory pool.
+So doing this actually saved us about a gig of memory over keeping all the high MIPS in memory for Shadow of War.
+So the next thing we started thinking about is texture 2D arrays.
+We actually use a bunch of these texture 2D arrays on Shadow of War.
+We use them for terrain, we use them for character models, we use them for a lot of our structures, and we use it for our effects flip books.
+So the benefits of using these texture 2D arrays is we use them for blending a lot.
+So it's great for blending, because when you sample them in the shader, you're guaranteed that every single one of your slices is gonna be the exact same mip level.
+It also kind of simplified our shaders, because we didn't have to do as many brenching in our shaders, checking if the regular texture 2Ds were valid or not.
+And at this point, we're just calculating indices into the texture 2D array.
+But there are issues with texture 2D arrays.
+First one is padding.
+So on the AMD hardware that exists on the consoles, the texture 2D arrays are always padded.
+The slice count is always padded to a power of 2.
+So if you requested a three-slice texture array, the return memory layout will contain four.
+3 and 4 is not so bad, but since it's a power of 2, imagine you wanted 17 slices in your texture 2D array.
+The return memory layout would contain 32, and you'd be paying the cost for all 32.
+The next issue is duplication.
+So we're using texture 2D arrays everywhere, and this is great.
+But we're using it for blending.
+So in our snow level, for example, every.
+artist that creates a texture 2D array wants a blend of snow, so they're always going to add that same exact snow slice into their texture 2D array.
+And traditionally, what would end up happening is you're just baking this texture 2D array down at cook time, and the snow is just duplicated in every single one of your texture 2D arrays.
+So in order to get around the padding, what we end up doing is we're already mapping 64k pages for all of our texture loading anyways, so we analyze the texture array and just ignore all the areas that are padded.
+So in the case of the 17 slices going all the way to 32, you get 15 slices.
+You're basically useless, taking up memory.
+We just never actually back them with any physical memory.
+The virtual memory is still there.
+Textures have this concept called pack MIPS.
+This is actually a direct 3D term.
+These are the MIPS.
+that are smaller than one 64K page.
+And since they're smaller than one 64K page, we actually just give them a 64K page.
+And for texture 2D arrays, it gets even more complicated because typically what happens is you have all your tail mips in this one last 64K page.
+In texture 2D arrays, you'll have the tail mips of multiple slices in that one page, which gets really complicated with texture 2D arrays.
+So because it's one 64K page, we don't really care about it and we just...
+always have physical memory backing for packed MIPS.
+So an example of this, here we have a texture array.
+So this is the virtual memory layout of a texture array.
+On top left corner, where we have the wood texture and the high MIP, that's where the virtual memory layout of a texture to the array starts.
+It goes through all its high MIPS first, including, so in this scenario, I'm doing the three slices that we're using and we're paying the cost for four.
+So this is where if I asked on the consoles to allocate a three-slice texture array, this is the layout I would get.
+So you go from MIP to MIP.
+You basically do all the high MIPs first, then the next slid of MIPs, and so on, and then you have the packed MIPs.
+And so when we map things out, we're always going to give the packed MIPs physical backing, because we don't really want to look into that, how they are really packed in there.
+But then when we get to this point where a MIP is actually using a 64K page.
+We never back that very last mip.
+So we just leave it blank.
+And we just keep doing that for the rest of our mips.
+And then we do the same thing with our high mip memory pool.
+Only the slices that we use are back.
+The rest are blank.
+GPU never reads the memory that's blank.
+And everyone's happy at the end.
+Duplication, we solve that by sharing our 64k pages.
+So all of our texture 2D arrays, they just contain references.
+And at runtime, we map those references back and build a texture 2D array at runtime.
+So at cook time, our texture 2D arrays have references to regular texture 2Ds.
+And then we reference count those slices.
+So again, packed MIPS, we just duplicate them.
+And then the solution of actually sharing these slices by using references has the benefit that we could also use that entire slice as a regular texture 2D.
+So if you have another shader that uses the texture 2D, we could do that.
+And it also helped our cook times because before we had to cook the entire texture 2D.
+Now we're actually just cooking one slice at a time because we're just referencing it at runtime.
+So here's a quick example of that.
+We have one texture array that uses stone and then wood for the next slice, and one that uses wood and then stone.
+Typically, if you were just cooking this offline, it would be two completely separate texture arrays.
+And when you load them at runtime, you'd just be duplicating all those bits and data.
+But since we're using references, we know it's the exact same slice.
+So we're only going to pay the cost for one.
+So for the packed MIPS, again, we don't do anything.
+We're going to back them with 64k pages.
+So that's done, but now what we're going to do is we're going to take one 64K page, put in the bits for this stone texture, and bind it to two virtual addresses, and share them that way.
+And we just keep doing that.
+We just keep sharing and only using the memory for one texture array and not for both.
+And again, this basically saves us all the memory of, it basically avoids the duplication costs completely.
+And we do the same thing with the high MIPS.
+So by doing this, by avoiding the duplication, we saved about 300 megs of memory.
+But it's really scene dependent, because it all depends on how much duplication there is.
+The padding, I can't really claim that we saved memory, because what we would have done if we didn't have support for non-power of two textures is we would just not allow the artist to ever have non-power of two texture array slices.
+So if they wanted to do 17 slices, we would just have the cooker return an error saying, you either have to do 16 or 32.
+And thank you.
+And we're hiring.
+And if you like what you saw, please come join us.
+If you didn't like what you saw and you thought it was really bad and you want to come and fix it, well, we're hiring as well.
+And we have four other talks here at GDC on Shadow of War.
+So if you're interested in Shadow of War, I would highly recommend you go see them.
+The last two talks are still to come.
+One is actually today at 4.
+In order, any questions?
+Yeah, I have a quick question.
+In DirectX 12, they support bindless buffers.
+Now, did you look into that at all for the PC?
+And would that give you any savings?
+So on PC, we were still all 11 on Shadow of War.
+So we're now really looking at 12 at this point.
+We did try to, so I actually had a bunch of PC slides in this deck.
+But as you could tell, it runs really long.
+And so having another 30 minutes of PC slides is way too long.
+So on PC, we actually tried to use tiled resources for a lot of things, because it's kind of the same idea.
+You're mapping 64k pages at a time.
+But with D311, there was a lot of limitations.
+For instance, you could only have one memory pool per resource, so it couldn't really separate a high memory pool or a high MIP pool with the rest of the pools.
+And in addition to that, tiled resources don't actually work with texture 2D arrays.
+Basically, all those packed MIPs I was showing.
+For texture 2D arrays, they're just unsupported.
+So you could have texture 2D arrays.
+You just can't have tail MIPS.
+And for us, that's kind of useless.
+So on PC, we actually ended up not sharing any of that memory and just duplicating it all and just loading high MIPS the traditional way and not trying to exchange memory back and forth.
+Yeah.
+Hello.
+So my questions in in terms of quality assurance so when you talk about the was it the dynamic frame pacing So you mentioned how it was basically like dropping a frame so in terms of quality assurance How do you distinguish between those frame rate drops and actual frame rate drop?
+Well, it doesn't really drop a frame because our pipeline buffers out enough frames ahead so it's I only said that because we're going beyond 33 milliseconds.
+And traditionally, in our older games, if we went beyond 33, we would be dropping frames.
+But because we're buffered out and you have multiple stages in that pipeline, those other stages absorb the fact that you went beyond 33.
+So we're at 34.
+We then start, because we're telescoped out, that actually kind of also means we're buffered out.
+which means these buffers could absorb the fact that we just lost a millisecond in the first stage, but we didn't lose a millisecond at the very end.
+So there's actually no frame drop at the very end.
+Figure of speech then.
+Yeah, it's more like a figure of speech.
+Thanks.
+Hi, you said you were at 90 milliseconds at beta.
+How many months before ship was that?
+A lot less than I would want.
+That was, I mean that was probably let's see.
+It's probably a year maybe.
+OK, thanks.
+With your threading model with a low priority tasks, are they floating between the different cores?
+And if so, did you ever have problems where a low priority task would be interrupted by a high priority task for a long time before it finishes?
+Yeah, we also had yes we did so.
+So the low priority tasks being interrupted for too long, we didn't have, but we did run into issues where, for instance, a low priority task might take the lock on the allocator, then get swapped out for a high priority task.
+And now the high priority task wants the allocator, and now what?
+And luckily, it almost never happens.
+And so all of our spin locks that I mentioned we used, eventually they go into a kernel primitive anyway, so they will stall out.
+So this high-priority task ever needs something from the low-priority task.
+It will spin there for a little bit, and then be like, all right, I can't get this.
+I'm going to sleep.
+So it stalls, then this low-priority task restarts again, lets go of that, the lock on the allocator, but then it gets swapped out right away because now the other thread could go.
+So it basically wakes and goes back to sleep, and then the other thread keeps going.
+So was that a big, did you solve that problem?
+Yeah, I mean, so we solved the problem by eventually, so we actually had a bigger problem on the Sony platforms.
+So on the Sony platform, I'm not sure how familiar you are with the PS4, but on the PS4, the problems we had was the priorities for threads work a little bit differently.
+If you call, for instance, yield on a PS4, all that will yield to is to a thread that's equal or higher priority, and not one that's lower.
+So if you had a scenario of like, well, I have this really high priority thread that needs to run, but it can't get the allocator lock because this lower one does, well, I'm gonna yield, but this one's lower priority, so it never gets that CPU slice.
+So we had that problem, and we solved it.
+Trying to remember exactly how we sold you know how we sold that we sold it in a really really bad way eventually what happens is.
+We find out that we're basically stalling out too long here something's wrong alright so instead of calling yield let's just call sleep one.
+So there this thread is completely going to sleep it's letting go of this entire core.
+And then that out the low priority threads could kick in we actually do that on the PS4 because it's not necessary on the Microsoft platforms.
+Thank you.
+Do you do affinity locking on desktop platforms and is it worth it?
+We do not right now.
+There is that whole like new Windows 10 game mode thing that we were considering doing some affinity locking on that.
+But the truth is we basically have to get this game running on the consoles and the CPU on the consoles is frankly not all that great.
+So by the time it runs on the consoles it flies on the PC.
+We basically don't authenticize, we let Windows schedule all the different threads all over the place.

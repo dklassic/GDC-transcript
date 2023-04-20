@@ -1,0 +1,376 @@
+My name is Robin Virich.
+I'm a gameplay and AI programmer at Cappy Games.
+In the last two and a half years or so, I've been working on Below.
+Below's this top-down survival exploration roguelike game where the player comes to an island, dives down into these depths, and explores the world, fighting enemies, trying to stay alive.
+My part in Below was building the Dark, which is this complicated tentacle monster enemy.
+And today I'm gonna be talking about the process of building the Dark.
+But to start, we'll start with a short video of the Dark and some of its behaviors.
+Starting out a little sneaky here.
+Moving into some more world interactions, messing around with other enemies in the world.
+And then into full combat encounters.
+Okay.
+So what is the Dark?
+The Dark is this tentacle monster, obviously.
+It's this omnipotent ancient evil that's been sealed away in the island with this godlike intelligence.
+But it's also something that's really sadistic and natural and animalistic.
+We often talk about like a cat with a mouse, sort of playing with its food sort of style.
+And there's a thematic balance between these two things, between the planned cohesive intelligence of the Dark and this reactive animalistic nature.
+And so today I'm gonna be talking about the iterative dev process, going, building this crazy thing.
+Some of the unique challenges and technical solutions that we had to come up with to solve these increasingly complicated problems.
+Okay, so let's get started with some background.
+So a dark tentacle is a 30 bone mesh.
+You can see it playing this bespoke squirmy idle animation.
+So we have a pipeline from Maya to create these sort of animations.
+And then on top of that, there's a second layer, which is a kinematic chain.
+And this is kind of the core of all the movement of the dark in the game.
+I'm moving around a base node here, and there's also a tip target node, which is sort of where the dark is looking at.
+It's the inverse kinematic target of the tentacle.
+And the AI is going to be moving both of these two pieces around the base and tip target.
+And then we blend these together.
+So we can create separating, sorry, we can separate AI logic from the animation by basically building it into a blend tree.
+So you can see I'm moving it around, but it's also playing this sort of idle animation in the background.
+And we can change either of these things independently, which helps the pipeline.
+From a code standpoint, there's a base entity and there's a tip target entity, like I said.
+And the C++, sorry, the C++ side that's pumping updates into the Lua behaviors.
+It's, on the Lua side, there's a Lua hierarchical finite state machine that has a behavior stack, and we can push and pop behaviors onto that stack.
+So in this example, we have like a stock behavior that's pursuing, and then if the player gets too close, it'll retreat and then go back to pursue.
+And then that Lua side can also call back into the C++ side to do more complicated things like movement or animation.
+Okay, so where do we start?
+We have these basic systems.
+We knew we wanted combat in the game, obviously, with this thing.
+So let's start with that.
+Let's move around a single tentacle and make it attack.
+So there's two parts of this.
+Simply move and attack.
+Start with move.
+So the movement system in the game is basically a function of taking a current position, which is the tip and base position, and a target position, pumping it through some move function and outputting a goal position.
+I'm not gonna be talking about locomotion.
+We'll just say that's handled separately and we'll start with ignoring clipping for now.
+So let's talk about a pursue behavior.
+We want to move the tip target to the player and then pull and push the base away.
+from that tip target.
+So we'll draw a line between the tip target and the player.
+We'll move it out by a little bit, then find a line between the base and the new tip target position, grab the length of the arm, and then starting from the tip target, pull back away from the player, and within a little bit of wiggle room, kind of place the base along that line.
+And then we get a final goal position out of this.
+So this works, and now we need to perform the attack, and this is very simply playing an attack animation.
+There's an attack system that's linked into the animation system.
+I won't get into detail on that.
+We're just gonna do this.
+So we have basic reactive movement.
+This works, but immediately we hit some problems.
+So this animation is actually the exact same attack animation that I showed before, but since the arm is in this weird state, the kinematic chain is in a weird position, the animation's blending poorly.
+How do we fix this?
+It's a very difficult problem.
+We started out saying, actually let's just not fix it.
+Let's keep the arm straight, which is kind of thematically what we wanted anyways.
+So that works out.
+And then we just introduced some constraints saying that you can't turn too much on the kinematic chains.
+You can't get into a super wonky position.
+And then also during those animations, we'll lock the kinematics.
+So we'll say, we don't want the kinematics to influence this during the attack.
+Using these constraints, our attacks are much more consistent and a lot less wonky.
+Clipping becomes an issue, obviously, immediately.
+You can't clip through walls.
+It's super unfair.
+We always kind of made the concession that we could clip through things while moving around a little bit, cover it up with some smoke and mirrors, like some particle effects or something.
+But you can't, it's unfair to attack a player through a wall.
+So to fix this we did some radial shapecasts, which basically just means shapecast around a target in a circle.
+And I'll go through that process quickly.
+So say we have this setup, we're trying to get to that player on the left there.
+We take a box shape, this is the shape we're going to cast, and see it's only a third of the arm.
+And that's because the player is really only ever interacting with the tip.
+We don't need the whole base to be, the whole tentacle rather to be, like not clipping through things.
+It's just the tip that we care about.
+And we make it a little bit larger than the arm to accommodate animations as well.
+This little wiggle room.
+So rotate this to face the target.
+and cast it forward, hits an obstacle.
+So we'll rotate out around, in a circle around the target in both directions, cast those.
+One of them hits the target, which means there's nothing in the way.
+That's good, we can go there.
+So adding on to that pursue behavior, we now have an unobstructed goal position.
+Then we pipe that into the pursue behavior to get our final position.
+So using shapecast, we can prevent clipping.
+We're able to move and attack reasonably fairly.
+But so this function of it's not really interesting.
+We didn't really want to introduce combat at the beginning of the game.
+We always wanted the dark to ramp up from sort of a foreshadowing, creepy, sneaky guy into something with a little more flavor, interacting with the world a bit more to something that's high difficulty combat with interesting fights.
+So the next obvious step is to add a little bit of flavor with these world interactions.
+So we wanted to add a little bit of personality.
+The dark inhabits this world, so we wanted to interact with it, create a bit of atmosphere.
+And the key point here is that the player is no longer the target.
+So some examples of these behaviors might be like eating rats, or like stealing gems off the level, or killing cultists.
+And I'm gonna talk about stealing gems today.
+So that looks something like this.
+The dark moves in, picks up the gem, and steals it off the level.
+The player needs gems in the game to refill their lantern and various other things, so it's pulling resources away from the player.
+So since the player is no longer the target, we immediately hit some issues where it's just ignoring the player.
+Obviously, if there's no code to make it react to the player, it's not gonna care.
+And the player starts being able to see the severed end of the base of the tentacle.
+Something actually I'll note here too is all these videos are debug videos.
+There's always fog around the player and they can only really see that first third that I showed in the shape cast video.
+Okay, so how do we prevent this non-reactive behavior?
+Back to the movement rules, we had push and pull before, we added obstructions, let's add some new ones.
+So we'll add keeping the base off the level and staying on the opposite side of the target.
+So you can see as the player's running around the gem there that's fallen, the arm is on the opposite side of the target.
+So these new rules allow a lot more reaction.
+We can target non-player targets and have the dark still react to the player.
+But this quickly explodes into a long function chain of rules.
+And what ends up happening with this is it's hard to guarantee any sort of behavior consistency.
+So I can say, like, steal a gem.
+It'll run through this and figure out where to go and do that.
+But I can't say steal a gem within three seconds.
+And every time that we ask it to steal a gem, it's taking a little bit longer.
+Or it depends on the situation, right?
+Like if there's a level with lots of stuff in the way, it might take a little different detour to get there.
+And it's kind of difficult to tune this.
+Like it's hard to add and remove things or know which order these things should be in.
+And there's a sort of implicit order of execution issue that's happening here.
+So.
+We have all these disparate concerns, let's move into a utility system.
+And the way that works is, we're gonna generate positions around the target, and we're gonna apply a score to each of these positions, and then choose the best score.
+So the first step of the process is just to remove any completely invalid positions, and in this case, the arms would be just clipping through some rocks or something.
+So we'll just get rid of those.
+And then we run through each of those different rules or heuristics individually.
+So line of sight might be an example.
+Like these ones aren't gonna be clipping into that rock, but they're not gonna be able to see past it, so it's worse than if there's an open space.
+Red is bad and green is good, just to make that clear.
+Also, travel distance is another example, if you wanted the arm to not move around too much, to not take a super long time to complete its task.
+And then in the end we combine these all together and find the best one.
+I'll just note that there's probably nine, I think, there's more than two rules in the system.
+Here's a quick video of an in-game tool that is showing this.
+So I have a selected arm and you can see as I'm running around the level, it's recalculating the best positions for the arm to be in based on the geometry and the rules that we've set up.
+So we've gone from something like this, which has this implicit order of execution, or behavior through order of execution, and something that's hard to change, to something a bit more flat, where we take the initial and goal position and score each one independently.
+And also, we have the ability to add configurable weights to this.
+So what this results in is, again, those order of execution concerns are gone because we're doing these all independently.
+It's really easy to add a rule to this.
+And since we're in this iterative process right now, or at this point in the process, we need to have something a little more extensible.
+And it's also easy to configure.
+We can say that we care more about avoiding the player than hiding the base or something like that.
+So this works.
+We have utility positioning.
+It's providing consistent and extensible movement.
+but we're still noticing that our positioning, or sorry, our pathing is looking a bit weird.
+So the paths up to this point are all circular around the target.
+And this makes the cross-level paths take a long time and also...
+Lateral movement with a tentacle looks weird.
+Like if a tentacle's moving like this, it just really looks unnatural.
+So it's better to kind of move forward and backward like this, pull out and kind of hide that and then pull back in.
+So to do that, we introduced a few different pathing strategies depending on the type of movement we were doing.
+So the first one's direct paths, simple quick movements.
+The second one is oval paths where the arm will pull out into the fog, do that lateral movement and then pull back into the final position.
+And then finally, the extension of that for very large movements is pulling out, teleporting, and moving back in.
+Okay, so this allows some faster movement, looks a little more natural.
+And we're interacting with the world a bit more now.
+So we have these world reactions working, things are extensible and configurable, but it still feels really empty because there's only one or two tentacles up to this point, so let's add some more tentacles.
+First thing we try is to crank up the tentacle count, and it's completely random chaos.
+It's insanity.
+All the arms are trying to kill the same rat at the same time because they're not communicating with each other.
+So we want to create something more cohesive.
+And there's three major questions that come up when we're working with this.
+The first one is how do we control those groups of tentacles to achieve the same sort of task?
+How do we choose what they do once we have that sort of control?
+And how does this scale up?
+How many arms can we do?
+How does this run on a computer?
+Let's start with the controlling tentacles.
+We created this concept of the dark brain, which is this cohesive center of the dark.
+It's going to manage the tentacle behaviors, the spawning and despawning of them, and make high-level decisions.
+We're into this, the fundamental issue here I think is groups versus individuals.
+So we want to be able to control these groups of tentacles to work together, but we still want them to act as individuals and respond to player input or world input.
+Like if the player hits a tentacle, we want it to have a hurt reaction.
+So we can move all of this into the brain, but that, we tried that, it quickly becomes hard to manage and change.
+And controlling every single small decision of every single arm, it just bloats everything and makes it unmanageable to work with.
+So where do we draw this line, essentially, of how much does the brain control and how much do the arms control?
+We introduce this concept of tasks to kind of manage this.
+So tasks are multi-arm behaviors, and they have assigned arms and a target.
+Some examples might be like eat enemy.
+You might have like three arms come in and kind of like eat an enemy up.
+And these are all managed by the dark brain.
+So these manage high-level goals.
+And arms are going to keep managing their own world reactions separately.
+And they're gonna communicate with each other, the task and the arms, through message passing, which I'll talk about in a second.
+And arms can refuse commands from tasks if they're in an invalid state.
+So as I mentioned, the tasks have a configured set of targets as well associated with them.
+So we set this up when we build a task.
+Like you can't steal the player, it just sort of makes sense.
+So let's go through this example of a two-arm attack task where we have two arms that come in and attack something.
+When the task is made, it needs some arms to run.
+So there's this pool of arms that the brain creates when it spawns in the world.
+The task is gonna choose a couple of arms from this pool.
+And those two arms are gonna be chosen and they're going to start in an idle state.
+So the first thing that happens is the task is running and it's like, okay, I need to start a pursuit.
+It asks arm six to start this approach.
+It's available, no problem, it starts pursuing.
+And then during that time, the player comes around and hits the other arm.
+And so it's in this hurt state, it's like kind of recoiling or retreating a little bit.
+And when the task asks that arm to do something, it can't, so it says no.
+So what do we do when it says no?
+The first thing you can do is just cancel out completely.
+The second option we found was much better is trading arms.
+So if the task has two arms associated with it, it's gonna find another arm that's close by and available if one of them is hurt or in an invalid state and trade those two out.
+And this leads to some faster behavior completion and also a lot more cohesion.
+So it just makes sense that if you have a bunch of limbs, you're probably gonna use another limb if one of them gets hurt.
+creates more consistent timing with this arm trading and feels more cohesive and we can create these multi-arm goals with these tasks. So we have a system to do this now.
+The second question is, what do we do?
+we built this concept of task-target pairs, which is basically a verb and a noun like eat rats and attack cultists or attack rats, and you weigh those against each other to create a full configuration.
+So we'll go through a decision-making process here.
+Say we have this configuration of these task-target pairs.
+And the first thing we do is look around and say, okay, are the targets available for our configuration?
+There's no gems right now, so we can't do that task.
+And it's not just whether the target's available or not, there are other considerations, like sometimes there's cool-downs or recent player actions that are gonna feed into the weighting of these different rules, or the final weight.
+And then once that's done, we take all of the remaining task target pairs and do a weighted random choice.
+And weighted random is used here just to create a little bit more decision variety, but it's still bounded with the configuration and the weights that we create.
+So, right, the Dart can now make some decisions and we can configure those.
+Last piece is, will this run well?
+So what's the performance like?
+The major scaling up problems we found were performance and audio.
+So I'll talk about each of these.
+Performance, a lot of it was just moving from Lua to C++.
+Lua's okay, but it's just not even close to as fast as C++, so get that out of the way.
+And we're also finding that the physics thread is maxed out.
+We figured out that it's because of those shape casts from before.
+Like sometimes there's 72 shape casts per frame, per arm, because if it's a really dense level, there might be like not a lot of valid positions for the arm to go.
+We can't really reuse this stuff because there's lots of different targets moving around and the dark's doing lots of things.
+But maybe we can pre-process something.
+I'll note that the levels are procedurally generated here again So it has to be a runtime like it has to be at the level generation time. It can't be a priori stuff So what can we cache?
+So let's go back to the shapecast again We'll split the world up into a grid and we'll choose the tile where the player currently is and say okay We want to cache some information about the obstructions around this tile So again same shapecast system from before we continue rotating and fill a full circle around that Cast those in And we'll get this, so we have three okay directions here and five obstructed ones.
+So we're gonna try to map this into something we can cache into that tile.
+So what we can do is say obstructed is one, okay, unobstructed is zero.
+And then actually just create a bit mask that stores the obstructed state for these alias directions in a circle.
+So we store this in that tile, and in the game we actually have a 64-bit tile.
+cache tiles, so there's about five degrees of accuracy here, which turned out to be enough.
+And we just do this for the whole level.
+So this is a crazy debug view of the obstruction cache, as we call it.
+So that works, that makes the lookups fast, we don't need to do anything at runtime.
+We can do that at level gen time during a load, and I'm gonna skip over the actual generation of that for now.
+And the second major issue we had was audio.
+We had one emitter per arm, and once we scaled that up, we had tons of emitters all over the place, and it was just way too noisy and hard to control.
+So for that, we used an influence map.
+Every frame, each arm's gonna pump influence into this map.
+More red is a higher influence.
+You can see there's more red around those clumps of arms there.
+And we use this influence map in audio like this.
+So instead of having an emitter per arm, we have two emitters.
+So we split the level in half and the influence map in half down the center, wherever the player is.
+On the left side, we move the left emitter.
+And on the right side, we move the right emitter to the highest influence tile.
+And that represents essentially the highest density of arms in an area.
+And we also then feed that influence value into the audio event so that the audio designer can say, okay, if the influence is one, there's probably about one arm there.
+If the influence is 10, there's about 10 arms.
+And you can create these different layers and kind of change the sound as necessary to create the sense of groups and lots of tentacle groups together.
+without overloading it with an emitter per arm.
+Okay, so that works out pretty well.
+We can use this to control our audio.
+So things are working here.
+Our perf's pretty good.
+Everything's doing what they should.
+We can configure what they're doing, what do we do now.
+Now, the final core component of all of this is that combat system.
+And we always wanted combat to be this whole dark experience where all the arms are together and filling the available space around the player and focusing in on the player.
+And at the same time, we can't have any of that, as much randomness as we do with the world interactions, which are just mostly for flavor.
+It needs to be much more consistent and learnable and readable.
+And this boils down to these main questions here.
+So how do we use that full space?
+How do we create any interesting and more readable attacks and remove that randomness?
+And how do we pace out the fight once we have that working?
+So we'll use full space first.
+So we go back to the obstruction cache.
+We basically transformed this data into what we call fronts.
+And what a front is, is a contiguous piece of space around the player that's unobstructed.
+So it's a piece of the circle that doesn't have anything in the way of it, basically.
+And these are basically areas where an arm could be.
+So I'll show a quick video of an in-game tool.
+with this in action.
+There we go.
+Okay, so as I'm running around the level, you can see it regenerating the fronts based on the positions of where the player is and the obstructions around there.
+And you can see those white lines, those are the ideal directions of arms.
+And there's a heuristic back in the movement system that says, try to go to your ideal direction.
+So the arms are trying to get to those positions.
+And they're basically just distributed across the available fronts.
+So that creates a big surrounding, full use of space.
+The next logical step here is to go into formations, which are basically just configurations of fronts.
+And these allowed us to create recognizable patterns of arms.
+So here's an example of a surround formation.
+We have a semi-circle formation like this.
+We have a flank formation, so opposite sides.
+Three-prong formation.
+Yeah, so these two things together allow us to create some interesting and readable changes in the dark positioning.
+But how do we create something that's— how do we create attacks that are more consistent now?
+And we do this through attack tasks.
+So these tasks are just regular tasks except they have a couple of special properties.
+The first is they combine with the formations and those two things together kind of form a tell.
+So an example of this is if we had a one, two, three attack, it would usually show up in a three-pronged formation.
+Or if we have a one, two attack, where it's like boom, boom, that would usually show up in like a flank formation, so opposite sides.
+So we can use those to kind of communicate to the player what's coming up next.
+And the second piece that's important with attack tasks is they have strict timing.
+So if it's gonna take too long, we just cancel out.
+Sometimes we'll trade arms, but oftentimes we need to ensure the consistency and learnability of the attack task or the attack, and that's much more important than necessarily completing the task.
+So we just cancel out a lot more often and replace them with new ones.
+Cool, so the attack tasks give us very consistent timing.
+We can use the space in a really readable way now, using the combination with formations.
+And our last piece here is how do we pace this out so that it's interesting and creates a dramatic experience for the fight, gives the player a little bit of breathing room at times, instead of just constantly bombarding.
+Our main solution for this was what we called stances.
+Stances were pulled and kind of influenced, inspired rather by, like sort of watching boxing matches or like fencing or something.
+Where when you start, you see the two fighters sort of on the outside of the ring and then maybe they'll move in and they'll be like kind of ready to, you know, getting ready to punch and then they'll like throw a punch or two and then they'll move back out and maybe if they got hit, they'll move back out and like recover for a second or something.
+And that's essentially what we were trying to go for here.
+And so if we map that onto what we have, we have a relaxed stance, where the dark sort of stalking in the background.
+There's a setup where it's preparing and it's showing the player like, I'm gonna attack you now.
+And then there's a pounce where it actually goes through and does a bunch of attacks.
+And then it's jumping in and out of these.
+And this is really effective to show the player what the arms might do and where they are in the fight.
+but it's also a really good feedback source for the player where if the dark jumps into that pounce stance and the player gets in a few hits and then the dark pulls back out into a recovery or a setup stance, then you can kind of just assume that, oh, I heard it.
+It feels like I'm making progress by doing that.
+So stances are here to help pace out the fight.
+All right, so, there's a bunch of stuff.
+I'll just go over quickly what we were talking about today.
+We started with a basic movement with one tentacle, the kinematic constraints that we added to avoid wonky animations, and the shape cast we used for clipping.
+Moved into the world interactions, adding some flavor, how we used utility positioning to manage and control the positioning concerns of the tentacles, and how we added pathing styles to create something a little bit more natural.
+We ramped up the tentacles, introduced the dark brain and tasks, as well as arm trading to control multiple arms together to achieve the same goal.
+We talked about the obstruction cache and how we cached that information on level load or generation for fast obstruction lookups and the influence map used to move the audio emitters around.
+And finally, combat and how the fronts and formations helped us use the available space and how we used the attack tasks to create consistency.
+And finally, stances and how they helped us pace out the fight.
+And that's it.
+Thank you. . . . . . . . . . . . . . . .
+This is really cool.
+Thanks.
+The inverse schematics feels now like it's a little bit underutilized, just because we're having to keep in the straight lines.
+Did you explore any in doing more with that in?
+breaking out of straight lines or having it like slither around obstacles or anything interesting like that?
+The slithering around obstacles, not so much.
+In terms of what we did with the inverse kinematics It was mostly about like trying to...
+So the other thing is like from the design perspective or from the direction, we wanted them to be straight.
+Like most of the time keeping them straight was good and adding a little bit of curve was more just flavor.
+So we've just mostly played around with just essentially that those constraint values and how they map.
+So the way we map them is actually exponentially.
+So the tip...
+has higher, more direct constraints, like it has to stay straighter, and the base is a little bit more loose.
+And by doing that, you can get these attacks where it's kind of coming into the side and bends around, but the tip still stays straight, if that makes any sense.
+That was sort of the extent, I mean, we played around with it a bit, but in terms of what we actually shipped, that's about it.
+Oh, hey.
+Hi. Okay. So I saw the attacking, like the point, the cache of the location where you restore the eight directions of the attacking, like in a radio fashion.
+Yep.
+Is this in the game all the way axis aligned?
+like eight, but with the four of them aligned x and y.
+Yeah, and so there's actually 64, because we store a full 64-bit number in there.
+Okay.
+And yeah, and they're aliased to the same directions in each tile, basically.
+Oh, okay, because I thought it was only eight, but if it's four, it should be high enough to ignore the direction.
+Exactly.
+Yeah, like five degrees is about good.
+So here's a question, when it comes to everything you put together here, reuse is always good, right?
+So do you feel like there's things, obviously knowledge and lessons identified, right?
+I steal this from the Brits, if you guys haven't heard this, we don't learn anything, we identify it and then hopefully learn.
+But kidding aside, do you feel like there's other things you've built that now you'll be able to reuse, especially if it's a different type of game?
+It's an interesting question.
+I mean, it's a pretty weird thing to build in the first place.
+Absolutely.
+But by the same token, in some ways it's like swarming, right, with just customized terrain.
+Yeah, yeah, sort of that.
+Yeah, I think a lot of like the sort of thing I would pull out of this is just the importance of directionality in this and considering that as opposed to like positioning really.
+Like directions matter more than positions or something like that.
+So maybe that's my main takeaway.
+Other than that, I don't know.
+Okay, thank you.
+Thanks.
+Okay, that's it. Thanks guys.

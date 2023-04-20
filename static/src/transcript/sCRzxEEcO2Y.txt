@@ -1,0 +1,541 @@
+OK, so OK, my mic's working.
+Great.
+Good morning, everyone.
+Thanks so much for showing up so early.
+And welcome to day one of the main conference.
+If you've been to the summits over the past couple of days, I hope you enjoyed them.
+And welcome to those of you just joining us today.
+Before we start, I've got a couple of messages to pass on from the CAs.
+So the first thing is that if you can check all your phones or tablets or whatever are set to silent or turned off.
+The second thing is that about 15 minutes into this session, you'll be emailed a link to an assessment form.
+If you can really try and give any feedback on that, it is super useful.
+The speakers get to see it, and it's just incredibly appreciated if you could fill that out.
+OK, so let's get on with the talk.
+I'm Ines McKendrick, and I'm a programmer at a little UK indie game company called Hello Games.
+I've been there for about five years now.
+So I joined just before we released Joe Danger 2, the movie.
+and then have been working on a sci-fi exploration game, No Man's Sky, for about four years since then.
+So I started on that project really near the beginning when just four of us went and shut ourselves away in a little room in the office, right through to shipping, and now we're continuing to work on updates.
+Because we're quite a small company, and just because it suits me as well, I'm a bit of a generalist as a programmer.
+So I've worked on a number of areas across the project.
+So early on, I worked on a bunch of engine-related stuff.
+I've touched a whole load of the proc gen content, so things to do with foliage placement, some texturing, some model composition.
+I've also done some work on the visuals, for example, the atmospherics, the water rendering, and I've been involved with a whole bunch of gameplay-related programming as well.
+So, this talk is going to kind of reflect that. It's going to cover quite a lot of content across the board of the game.
+So, this talk is about continuous world generation in No Man's Sky.
+And what I mean by that is the technical architecture of the game.
+It's the code that lets us generate and simulate this world in real time as the game is running.
+But what it really means is, here's our story through a bunch of the really interesting and exciting problems that we got to solve while working on the game.
+And some of the aspects that make it a bit different to a lot of other games that are out there.
+in terms of the technical problems we got to work on.
+So, to give a brief summary of what I'm gonna talk through, first I'm gonna go over how we structure the world, how geometrically we build our planets on spheres and how we transform to that, how we work with voxels.
+Then I'm gonna talk through our generation pipeline.
+I'm gonna go through, step by step, the process of how we create worlds in real time, what's involved in taking an area of terrain and creating that through from being an empty space to something that we can render and play on.
+The threading, the parallelism and ordering issues to do with that.
+And finally I'm going to talk about our simulation itself, the special considerations that we have to take because we're working on a game that's generated in real time and occupies a space bigger than we can know a lot of information about.
+I think to understand the reason behind a lot of the technical decisions that we made on the project, you have to know a bit of background to it and to the team that I'm working as part of.
+So people probably know No Man's Sky is a sci-fi exploration game, but for those of you who aren't super familiar with it, it involves the players all starting on planets spread out across a vast galaxy.
+And you can take off from those planets and fly continuously and land on another piece of terrain.
+And the simulation continues throughout that.
+So so much of the tech is focused on that core design decision.
+Hello Games itself is a small team.
+As I said, we started off with just four of us working on the project.
+That's three programmers and an artist.
+And we've grown and changed size a little bit.
+And now we're settled at around 20 people for the time being.
+And that's about 10 programmers, so quite code heavy, and five artists.
+And on a team that size, I mean, everything is hard and everything has to count.
+You know, shipping a game, shipping a disc-based game with 20 people was a real challenge.
+I think it was a real achievement that I'm super proud of.
+But also it means when it comes to the work our artists are doing, the work our coders are doing, we have to be really careful about what we take on.
+Every asset that the artist produced has to count for so much more than the work they're doing.
+It has to have a real meaning in game and every technical decision that we take on as programmers has to be really pragmatic.
+We can't, we don't have an R&D team to go off and play with a lot of things for a long time.
+So we had to be really careful about our progress through the project.
+In terms of our philosophy as a company, we're fairly fast and iterative, and that's one of the benefits of being a small team, I guess, is that we can do that and it's a really enjoyable way to work, but it meant we could come across problems, find our way through them, and then see if there were...
+other design approaches and other technical approaches that could lead off from that.
+So we had fairly flexible design goals as well.
+We'd be really driven by people playing the game rather than by some solid design document laid out four years before the project shipped.
+As I noted, we have to make the most of our artists, but that doesn't just mean making the most of the content they produce, it also means generating content in a way that they have real control over.
+And that's something that is sometimes missing when people talk about PropGen, they talk about replacing artists.
+And hopefully through this talk, you see that that's not our philosophy at all.
+We want to be able to enable our artists to produce more rather than replacing them with an algorithm that doesn't quite do the same job.
+to give a bit more detail on our tech.
+So we work on our own engine, and that's written in C++, which is kind of inconsequential probably, but it's the first question everyone seems to ask, so I put it on there.
+If we had to make the decision of what engine to use now, I think that's a way less clear-cut thing.
+So you have to remember that we made the choice four years ago to work on our own engine at the time when there weren't really major voxel-based projects that had a lot of visibility that we could see in Unreal and Unity.
+So the thought of taking on...
+an existing engine and having to optimize in that and having to to work with boxes in that when we probably wouldn't have source code access and we wouldn't have a lot of support was a really daunting task for us, our own tech. We know what's going on there, you know, we know we have a lightweight renderer, we know what we can do to it.
+We know the sort of time that might be involved in expanding and improving that.
+So I'm not necessarily saying it's the right route for everyone to go down, but it was the right choice for us at the time for sure.
+We shipped simultaneously on PC and PS4, and we just worked simultaneously on both platforms throughout development, which again, as a small team, is a tricky thing to do.
+Just getting test coverage on those kind of things is an interesting problem.
+As the focus of the talk implies, we use runtime generation.
+But that has a number of really interesting consequences for the game and for tech problem solving within the game.
+So any generation that we do, because we're producing this vast amount of content, it's more than we can store offline, it's more than we can load into the game.
+So we're generating it at runtime and that gives us performance constraints on all of the generation work that we do that we might not.
+face if we were able to bake out a load of textures rather than generating them as you warp into a system or bake out a set of terrain rather than generating it in regions as you move around. That's really you know the significant bulk of the work that I'm going to talk about today.
+The other thing that comes from that is that we have to be able to simulate gameplay with only a small knowledge of the world.
+So if we're generating this whole planet...
+And that's a bigger space than we can really get much information about at all, you know.
+We can maybe know a few points of interest, but beyond that, any kind of data we have about it is too much data for us to keep in memory and for us to argue about all the time.
+So, any work that we do has to be able to work just in its own local space without knowledge of whether there's a lake over that mountain, whether you're at the highest mountain on the planet or just a mountain.
+And that's a really significant thing to keep in mind, I think, as I'm talking through this.
+A final note is that our engine is really agnostic to procedural content.
+I think people sometimes talk about No Man's Sky as the procedural game, and I'm not sure that's the right way to look at things.
+For us, our engine doesn't really care whether we generate the content online, or whether we've loaded it, or where it comes from at all, to be honest.
+You know, a texture is a texture.
+And that's a really significant and useful thing to say.
+And it's a useful thing to say about the game as well.
+The players shouldn't necessarily know whether your texture was generated or whether an artist created it.
+The sheer size of space that we're working with implies we have to generate content.
+But I guess one of the end goals for a lot of Proc Gen work at the moment would be that you can generate this massive space, that you can create a load of content that would be indistinguishable from something that an artist has authored directly.
+So like I said, to start with, I'm going to talk about structuring our worlds, working with our spherical planets.
+So to understand our simulation process, you kind of have to know how everything is laid out in this way.
+And also, it's just an interesting problem that we work through.
+It's one of those things where I say, we're dealing with planets in space, and we want you to be able to take off and land from them.
+And everyone has an opinion about how we should have done this.
+And we have a lot of opinions too.
+But we worked through a number of different things and I think it's probably interesting to talk through the different approaches that did and didn't work for us.
+So, our driving design goal is that ability to fly off the planet, fly to another planet, fly back.
+But it's also that we have distances that have meaning to the player that we're simulating.
+A large enough space for some of those to be significant to them.
+So we need to simulate a space where someone walking around the planet, if they want to walk to the other side, that should feel like a really weighty and significant thing for them to do.
+Or if they want to fly around the planet in a ship even, that should take a significant amount of time.
+And again, that changes the way that we work with things.
+We want our players to explore, to feel alone.
+And that needs those distances to be suitably large.
+So like I said, we went through a few iterations and here's the first one. So our first driving goals We essentially thought of this problem like you being a sphere which is an annoying problem you know if you've had to UV spheres then there are a bunch of issues there with poles and things like that, but Our first consideration was that we wanted to have a flat plane for the terrain to exist on.
+We wanted to simulate on an XZ plane in the way that you typically would in a game, have that flat, have the Y axis always be up, because that makes things a lot simpler, not just for simulation, but also for generating our terrain.
+There's no complications about distortion because you're just generating it in a really continuous XZ space.
+So what we did was we took this plane while you're on the planet and we let you explore it infinitely.
+So if you walk along in the x direction forever, we'll just keep making terrain over there.
+And same if you walk in the Z, but the moment that you leave that planet we'll take whatever space and terrain you have and we'll just wrap it around a sphere and we'll wrap it around with polls that are placed as far away from the player as possible so that the kind of pinching that you'd expect to see on the polls when you wrap a flat texture to it would at least be as far away as possible and we handled that in a shader so those fears in space for all actually entirely implicit.
+But of course, there are some problems with that.
+So you can kind of see the pinching at the bottom of the screenshot.
+This must be one of the oldest screenshots that we have of the game.
+It's pretty early on.
+You can kind of see the pinching at the bottom, some distortion there.
+And that's not that bad.
+the thing that makes that really bad is that you're moving around continuously, so you get some swimming coordinates on the sphere.
+And the really significant problem for us was that you end up with some impossible places on your flat terrain that you can't possibly map in a useful way to the sphere.
+So if you have these points of interest, maybe you want to share them with other players, you know, because we have some network aspects that use that, then they can't possibly have the same points, because the way your sphere looks depends where you take off from it or where you come into it.
+And...
+Also, our infinite generation has precision issues.
+And while you can fix that by wrapping all of your generation functions, we could have interpolation between noise or come up with a new noise function that tends to be more expensive than the generation we were already doing, and cost was a major factor.
+So I'd consider this a kind of naive approach.
+But at the same time, it would have been workable.
+I think you could take something like this and probably ship a game using it.
+But it wasn't the right one for us.
+So the next thing we thought about was like, well, a lot of people have been thinking about mapping terrain to spheres and to flat planes to a really long time, so we should look at cartographers and what they're doing.
+So I went through the Wikipedia list of all the good map projections and tried to find the ones with the least distortion because if you've ever experienced the cartography community, you've probably heard people complain about Mercator projection, which is fair, or if you came from Greenland, you probably know why that's bad.
+So, we tried to look for ones that would be more appropriate.
+But generally, there weren't solutions there that were useful to us.
+A lot of the transforms were either expensive or really expensive to invert.
+So, we need to transform from our flat plane to our sphere and back.
+Very often for like loads of vertices or loads of points. So that wasn't really an option and and some other Some other techniques that looked promising are really designed for the planet Earth. So that image on your left Yep had to check it was left I think is a Pierce-Conseal projection.
+I don't know how that's pronounced because I've only seen it written down, but that really only works if you have oceans in kind of the places that Earth has oceans and becomes pretty useless when you generalize that to arbitrary planets that we were generating.
+So we gave up on this one as well and moved on to the scary approach that we had been trying to avoid.
+And in some ways, this is the simplest approach, but it's the one with a wide-ranging number of consequences for us.
+So that approach is just to run our simulation on the sphere.
+So all our coordinates are nice and consistent within our solar system.
+You can be standing on a planet, you can be standing on space, and you just have this 3D continuous coordinate system.
+So that's nice in terms of gameplay.
+But on the other hand, this complicates all of our gameplay coding, because now, whenever you stand on a sphere...
+you don't know which way up is you have to do that calculation all the time and If anyone is like a physics programmer in the room, you're probably thinking ah So now my gravity is always going towards the center of the sphere or if you're a graphics Programmer in your shaders, you can never simplify anything to be 2d around your world You're always working on this curved plane. So it has knock-ons in just about Every area of code that you could think about it makes it more difficult to integrate other people's libraries because they're going to assume That you have an access that's consistently up I will be really excited to one day work on a project where I always know what up is and it's the same thing But it It is workable though, because you know, it's a simple calculation to do, you know, calculating your up vector from your position on a planet is just considering your position relative to the center, so it's cheap and simple.
+But there's a second problem that gets in the way just about all the time when you deal with things, and that is the hairy ball problem.
+So, this is a really intuitive theory and that's that if you take a sphere and you imagine it's really hairy and you try to comb it, you can't have continuous hair around that without having singularities, without having little licks, you know, picture that.
+So you can't have continuous tangents around your sphere.
+So that causes problems with lighting, with normal mapping all the time, and various other places where you don't really think about the fact that you need to use tangents that are in a continuous space.
+But suddenly, when you don't have them, then it's really obvious.
+But we can mostly counter that by using projection onto our sphere from three planes, like triplanar projection in some places, or along a single plane in other places.
+Or we can use local mapping, where maybe our tangents won't be deterministic, but they will be continuous.
+We can just calculate them from the first point we reach the planet, and then move them continuously from there.
+So it's definitely workable.
+And what we stuck with is just interesting for new people joining the project.
+The other thing about spheres is they're not a really great way for us to store data.
+Generally, if we have something like voxels or any other data structure, we want to store that in a contiguous cube-based system.
+So we do store data on a cube.
+we do a projection from our sphere to a cube, so we simulate everything on that sphere, but when it comes to store voxel data, we're mapping that onto a cube, and you can kind of see in the sphere in the diagram how it just about maps to the face of the cube.
+You can see where the vertices match up there, hopefully.
+You'd think that would cause a lot of distortion.
+So if you imagine that we're generating terrain on one of these, when we project to the other, then we're having some distortion in the size of the polygons we're generating, or the space that the voxels take up.
+But it's generally not a huge problem, because if we generate all our terrain and do most of our work in simulation space, and then only map it to a cube when restoring it, then it's just that the density of voxels or the space that that data is able to take up that's lost.
+So for example, it means in some areas, we'll have a mountain that's composed of a lower density of voxels than another one.
+It'll maybe be slightly lower poly, but that's probably not noticeable, but we won't have mountains that become half the size or something.
+A question I get sometimes is why we didn't just simulate on a cube, but having edge cases at corners, like literal edge cases in your world, seemed like a nightmare to deal with, you know, having testers come back with problems that only occur in very specific places on your terrain.
+So, simulating on a sphere seemed like the right way for us.
+And that sphere to cube transform, that's really super simple.
+So we can do it just by calculating our height offset above the planet, projecting that down onto the sphere just by normalizing that direction and multiplying it by radius, and we can calculate which cube face we're on just by taking the absolute value of the largest direction.
+So this is a really...
+simple bit of code to write and it's really cheap and we can do it all the time without having a load of concerns about the fact we're working in two spaces at once.
+And our result is not on the face of a cube.
+That's the other thing to note is we're, when I say we're working on the sphere, we're not working directly on the sphere surface.
+We're working on, you know, a height map or some terrain offset from the sphere.
+So we end up with some space offset from our cube at the other end.
+and going along those lines.
+That means we're only mapping a limited space offset from the sphere.
+Because the further out you get from the surface of the sphere, intuitively, the more distortion you're going to see.
+So if you imagine the point at the center of the sphere, you're going to see a lot of distortion.
+versus the point at the center of a cube that's going to be infinitely small in sphere, whereas you can make it up of a number of regular voxels in the cube.
+And if you progress along that you can see the distortion gets worse and worse as you go inwards or outwards from your sphere.
+So we can only simulate a limited space and we choose about 128 meters of height for the sort of voxel data that we store there.
+Which isn't enough, I mean 128 meters gives you some little hillocks maybe, it's not particularly interesting, it doesn't give us the kind of deep oceans that we want or the high mountains.
+So what we do instead is we add this elevation data.
+We add it into our transform, so rather than considering the radius of our sphere to be consistent, we choose it, we consider it to be varying based on noise over the surface of the sphere.
+So we have an offset of about 600 meters to a kilometer, which allows us to get really high mountains and deep oceans up to that, and then still have our 128 meters of voxel data offset from that.
+That's really cheap, and we can also cache the results for the local area we're in, so that when we're doing those transforms, then it doesn't cause a problem either.
+and that's kind of how it fits in with our transform.
+So really all we're doing is calculating a single point of noise every time we call this transform.
+And then at the other end, we're projecting that down still onto our non-elevated surface of our cube.
+So working with voxels, I've mentioned voxels a few times, let's go into some details on how we use them.
+So we consider our voxels in chunks, we have regions, and...
+For the time being, I'm just talking about the nearest lot, where all of our voxels are one meter cubes.
+So we take all these regions, and we process them individually, and each one comes out to be a single area of terrain.
+Our regions are 32 by 32 by 32 meters of in-game data.
+But we need some additional voxel data there.
+So we need one row of voxels around the edge so that we can polygonize safely because we're creating vertices in between eight of our voxels.
+So we need that extra space to get to fully cover the area.
+But in addition to that, we want to polygonize a little bit outside each region and have some overlap.
+And that just covers for seams between the terrain due to precision issues.
+So in the end, we end up polygonizing an area that's about 36 by 36 by 36 voxels.
+And our individual voxels are about six bytes.
+So we have two bytes of density data, a byte each for two different materials that are made up of them.
+So our voxels tell you that they're made of grass or rock or mountain or sand, which we need in texturing and placing things on them later.
+And we have two bytes that tells us the extent to which something is rock or grass versus the other material that it's made up of.
+So we retain these in memory right throughout running the game, so there's definitely a limited quantity that we can store.
+That's just to let us do really quick terrain edits, and we do height tests and other tests against the voxels fairly often.
+So it's useful to keep around, but...
+it would be possible to discard it and load it again.
+Similarly, it would probably be possible to compress it, and we just haven't done that because it's an expense, and also because compression is a lot less effective than if we have something like Minecraft, where your voxels are binary one or zero, because we have varying density data, and we want any compression that we do to be lossless.
+So it's probably something that we'll look at in future as we try and regain more memory from.
+the game to put in new features and fill it with other stuff, but for the time being, it's just uncompressed in memory.
+Of course, our 36 by 36 by 36 meter regions, we can only have a limited number of those.
+They're taking up a fair amount of memory.
+So it's pretty obvious that we're going to need to deal with LODs, especially since we're flying off to space and back.
+So we want to have a bunch of these that will be quicker to generate.
+And what we do is simply subdivide our regions down.
+So we deal with six lods, each one being twice the size of the last.
+And again, we still have that overlap at the edges, so our lower lod terrain...
+has half the density, so it's going to be lower poly, it's going to be less interesting.
+But we tend to match up at the edges just by polygonizing a little bit over and we tend not to get holes between the LODs and it's far enough from the player that you can't notice that you're going from a lower density to a higher one directly in most cases.
+The other thing is that we reduce density within those regions.
+So again, just as a memory saving thing, and based on a visual decision of what looks acceptable to us, we reduce the density within that.
+So our lower LODs aren't actually 36 by 36 by 36 voxels.
+We might half that or quarter that.
+And we tend to do it in the height a lot more than in the x and z.
+Just because that looks OK, we can get away with reducing the data there.
+The other thing is we're splitting these voxels down, these regions down by half, but we only have this 128 meter area to fill.
+So we have four regions to stack on top of each other, you know, at 32 meters in the nearest lod, but quickly we stop having to do that when we get to lower lods.
+So the point there is that really quickly we end up with lower lods that are incredibly cheap, which means we can have close to us, high density voxel data and far away from us, really low poly data that fills in up to the horizon.
+And we store those in an octree where, you know, binary subdividing things, it kind of makes sense, it maps well, it lets us keep up to date with where our regions are as we move around the cube, and it's really quick to find voxel regions when we're within one of them or want to look up one of them.
+The thing to note there is that our cube is actually around the surface of a cube So we have our octree, but the regions that exist are ones around Outside the surface so when we've projected from our sphere to our cube And we have the data existing outside the edge of the cube. That's also where it exists in the octree Those get, even low resolutions, those get pretty expensive.
+And we can't cover a whole one of our large planets with even our lowest LOD of voxel data, so we also have a much cheaper low voxel LOD that exists per planet.
+We have a high, that octree, that exists one for the whole solar system, and we just swap it between the planets, transfer, cancel creating regions as we need to as we move around.
+But we also create, just as you fly into the system, these low density voxel spheres.
+They're just two voxels high, so there's really very little data there at all, they're pretty cheap.
+And we just generate six separate polygonized cube faces that map onto our sphere.
+And that gives us those planets in a much cheaper way from any point in the system all of the time.
+Okay, so next I'm gonna talk through our generation pipelines, so how we fill in that voxel data, what we do with it once we've got a whole load of voxels and we need to render it and turn it into a game we play.
+So we do some generation at load time.
+there's kind of a hierarchy of where you want to do your generation.
+So ideally, if we could do everything offline, that would be super cheap in the game, but we can't.
+So we do as much as we can at load time, and then we do what we have to as the player is moving around.
+So the kind of thing that we can do at load time is sort of rendering some procedural textures, loading any vertex data that we need in order to create models.
+But creating the terrain itself, because there's so much of it, we can't generate a whole planet.
+We have to do that continuously as we're moving around as the player is playing the game.
+So we just do it in the background along with things like texture streaming.
+So here are our stages that we go through.
+So we have our voxel region, and we want to take that through to something that's playable.
+We go through the following stages.
+So first we generate it.
+That's filling in the voxel data from noise until we have our completed density data for that region.
+We polygonize it, so we have a vertex mesh.
+We then spherify it.
+So we've done those two stages just as a voxel cube.
+And we then spherify that vertex data so that it'll fit on our sphere planet.
+We then construct a physics mesh, we construct like a nav mesh for creatures, and then we finish off by covering that region in plants and creatures, buildings, gameplay props, anything that we need to make it playable.
+So of course if we're going to do all that stuff is removing around we have to do it. Using it. We have to do it off the main thread and we do it using a job system so threading in our game is relatively simple we have a main update thread and a main graphics threat we have a sink point each frame for those and we try to make the terrain interfere with that as little as possible as we're going around on PC all these jobs are handled on the CPU, but on PS for we do some of them in compute shaders now.
+So to see how our threading kind of works, in terms of all the numbered points we can do in jobs, and then all of the other points are points where we have to interfere with the world.
+So at some point we have to get hold of a vertex data buffer to fill in.
+At some point we have to add our physics to the main physics of the world.
+We have to add all our creatures and position models and things like that.
+But almost everything else we can split off and just run as a job.
+And of course, what that means is we have all these voxel regions around about us and we need a tactic for ordering those jobs.
+I can kind of show that filling in here.
+So this is, this GIF is pretty much real time run on my laptop before, and I think it's LOD, LOD 2, so maybe the second furthest away LOD from the player, so you can see we're dealing with a lot of regions, each one of those little squares is a region that we're creating, and you can see it filling in in real time.
+So when it goes again, you'll see each of those regions flipping really quickly through a number of colors, and that's them going through their generation, polygonization, all of those stages.
+The way that we order those is based really highly on visuals.
+There's no real driving factor aside from what the player experiences and what they see.
+So when those regions are going black, that's them being filled in by a nearer LOD.
+So we're able to fill in this low LOD real quick.
+and then we start to bring in more detailed terrain over the top because that's the most beneficial to our player.
+We generate using a point-based system, so the stuff in front of us, if we go now, generates first, and then the stuff around about us spreading out from the camera.
+So now we've seen how our regions progress through the steps.
+I'm gonna talk about those steps in a little bit more detail, starting with our terrain generation.
+I'm not gonna go into loads of detail on all our noise-based techniques, but Sean Murray is giving a talk tomorrow at half five, and that does just focus on terrain generation and the specific maths and noise techniques of that.
+So you should go to that one.
+So it helps here when we're going to talk about generation to have a bit of an understanding of how we look at generation in No Man's Sky in general.
+So we see generation as this top-down approach always.
+You're always feeding data through one generator, coming up with some more data.
+feeding that into the next generator and just doing that continuously until you end up with what you want.
+So in the case of terrain, we're starting by knowing which solar system we're in, and we know that by a positional seed. We feed that through and generate some info about the solar system, how close the planets are to the sun.
+what kind of sky it has, what the atmosphere is like.
+And then we can feed that data through to each planet along with the planet's position-based seed, generate some information about whether it should be rocky or cliffy, or cliffy, I don't think is a word, but it has cliffs, you know, or have mountains or oceans, and we can feed that through.
+into our terrain generator, which will then come out with the voxel data that we have.
+And this might seem like a really trivial thing, and it is.
+It is simple, but it's really important because the significant part here is that any point in between those generators, we have a piece of data.
+We actually have it mostly as...
+XML data that we can write out and store.
+So when it comes to debugging these processes, that's hugely useful because any time that we see a bug or something, we can step into this generator at as many different levels as possible to see what might have gone wrong.
+We can load up future data to check that we can, we can see the same things again, to replicate the same problems.
+And we can store past planets and load them again to check for performance degradation, things like that.
+Sorry.
+All right.
+So with that in mind, when it came to writing this particular generator, the generator that would output our terrain, which is, you know, one of a number of generators, along with our texture generator and model generator, they're all just independent things that are taking data as input and then outputting something that we can use in the game or something we can use in another generator.
+So we have a number of requirements that we'd set out for writing that.
+The first is that it has to be directable and consistent, and that comes back to what I was talking about at the very beginning, that our artists or a designer needs to have control over the output, and they need to be able to work that out from the parameters that are going into it.
+Actually, in the case of the terrain, it's largely Sean, so the person that wrote a lot of the generation techniques that's actually set up the parameters, but he still needs to be able to sit separate to being a programmer and fill in those values and get some meaning from what he's writing there.
+It needs to be real time, of course.
+We need to generate this as the game is running all the time.
+It needs to be varied, so the output space should be large.
+So we want a load of different terrains, and we want them to be...
+to work, you know, and not have holes in them, but to look different to the player.
+We want to create things that are both real world and abstract shapes.
+We want our whole system to be adaptable, modular, easy to add to.
+And then there's a final point.
+We want our generation to be data local.
+And that's the kind of interesting and tough point in all of this.
+So if we're generating a single voxel, it can't know anything about any of the other voxels round about it.
+It's stateless, so it can't know whether it's halfway up a mountain or at the top of a mountain aside from.
+that it is a mountain, it has maybe 50% of a mountain.
+And that becomes a real problem when you want to map out water flowing and things like that.
+So, that means we have to look at generation techniques that look as though they've evolved over time, that look as though they know information about what's next to them.
+We have to model erosion, but you don't model erosion as the process of eroding.
+You model it as the end state of all those things.
+You model something that looks like it has eroded over time.
+So to break that down to how we actually do it, let's start with 2D terrain generation.
+So our first stage as an optimization, more than anything else, but also because it simplifies things conceptually, is to block out some shapes in 2D.
+So we'll split areas into mountains, into maybe some smoother plains down there, there's a river on there.
+And this doesn't come out as voxel data.
+This is just a series of values that are saying the extent of which this voxel is a mountain or is smooth or is a river.
+So it's a much larger amount of data, but we're only retaining it for a short period of time until we go on to 3D generation.
+And we do this essentially for each voxel column.
+So if you imagine we were generating on a flat plane, it would be across the XZ.
+But because we're generating on a sphere, then it's across the surface of our sphere, but without any height.
+So what comes out of this is like generating a height map.
+You know, without any overhangs or caves, we have the height of hills, things like that.
+So, to step through how that looks.
+So, we have our terrain, there's no noise.
+It's probably a real boring game.
+And then we generate our elevation.
+So, that's generated as noise, like I said, in the same way as anything else.
+What you can really see here is that our elevation data is really low in interesting points.
+It's just some really smooth noise, which is why it's really cheap.
+And we store that at this point into a 2D array so that it'll be cheap to look up later as well.
+And then we can start to add some 2D features.
+So this is our height map that I was talking about without overhangs or caves, but with some points of interest.
+There's some rubble in there, there's some noise.
+This is generating without thinking too much about materials at this point.
+I'll talk about that later, which is why it's all flat and sandy and brown.
+But we've got pretty far just talking about our distorted height map.
+But we want more interesting terrain, we need those 3D shapes.
+That's what I come on to next.
+So our 3D terrain generation works in a really similar way to our 2D, in that we're layering Perlin or simplex noise or other techniques like some Voronoi noise or cellular noise, but in 3D.
+And we're having some turbulence on our input positions and that creates some nice like pinching shapes and things like that.
+But the significant thing is that if you generate a 3D noise field and polygonize it, what you'll tend to see is like blob data in 3D.
+You'll have big floating islands. There won't be any meaningful shapes like hills or mountains.
+So we have to...
+We have to fade through that and try and cut off the floating islands, which we do just by reducing the density by height as you move away from the surface of the planet.
+And that keeps us with nice mountains and hills that can't possibly have a high density when you go up high if we didn't have one lowered down.
+And like I said, we just write this out into our cube space for the moment, but we're generating as though we're on a sphere.
+So each of those voxel positions, I'm showing it as a cube, but then we're mapping it here.
+We're generating it as though we're on a sphere, and that avoids our distortion.
+So here's some 3D shapes that we've created.
+We've got some Perlin worms going on there, and those are just some Perlin noise, but with a threshold on it so we can take.
+a slice through that noise and get some cool looking 3D shapes.
+The blue thing that you can maybe see there is some grid noise.
+So a nice technique that we do is we consider a grid over the surface of our terrain and we just pick some of those points to put some shapes in.
+We can put in cubes or more distorted and more natural looking spaces just spaced out periodically.
+And that's really useful for something like terrain resources.
+So we let the player mine resources from it and we have real control over how often they show up.
+So that's real useful.
+But we don't just do additive techniques, we also do subtractive.
+So we can generate caves and things by again taking those perlin worms but subtracting them from the terrain and considering the mouths of caves to be big open spheres.
+Things like that, just to try and build up our toolbox of techniques that we can apply to try and make a diverse range of terrain.
+So all right, after going through those steps, that leaves us with our region that's made up of voxels, and it's just a load of essentially density data.
+It has some information on materials as well, but the density data is the significant thing from which we have to generate our polygon grid.
+We use that using dual contouring.
+We started out with marching cubes, and probably on the left, no, the right, your left, your right, the yellow diagrams.
+you see the typical marching cubes sort of diagram.
+So when we polygonize in this way, the significant point of this is that if you imagine you have your eight voxels and you're creating polygons between them, marching cubes will only create polygons that lie on the edges of those.
+So it's really bad for creating corners.
+It loses a lot of data to do with shapes when you have really sharp angles.
+So that's why we moved to using dual contouring.
+And there's some really good information on that, not just on the technique, but on other isosurface techniques as well, just in the bottom.
+link there, which is where that leftmost diagram is from, and that shows how we retain the corner data.
+We do have to do a little bit more work on that, to avoid corners that lie way outside of our cube.
+We have to consider mass points and things, but it's basically pretty simple to work through some of the code and gets us a way nicer result.
+And that's what gets us, for example, the hills in this image.
+But the thing we do with our voxel data is we don't just polygonize it once, we polygonize it through different polygonizers to get different sets of data.
+So looking at the cubes in this image, we also do a cube-based polygonizer to get these nice terrain resource indicators. And that's more similar to the way in which something like Minecraft polygonizes.
+So it tends to be vertex heavy, but it's quite cheap.
+So we're just considering any point, considering the faces around it.
+We consider if there's a sign difference.
+So if you have a dense region with a non-dense one next to it, so you have mountain with air next to it, then we just create a flat plane there and we can build up that cube data fairly easily.
+But like I said, it's quite vertex intensive.
+So we only do that in near LODs, whereas we'll generate the actual terrain as far as you can see.
+And finally, we have our third super cheap polygonizer, which is just a flat plane polygonizer for the water surface.
+The point to note on this is because we use elevation, then sometimes we're generating water planes that are way above where our voxel data exists.
+So we're not just generating within those regions, we have to polygonize across the entire surface of a planet to see whether we should be putting water there.
+I think in future we'll probably move away from polygonizing water, we'll probably do it entirely implicitly in a shader, but for the time being we've still got that running.
+All right, so moving on from that to how we actually get our terrain looking like an interesting terrain that's not all flat, brown, and sandy like the one you saw before.
+So when we polygonize, we don't just create our vertex positions, we also output normals, and we choose to retain two normals, a smooth normal and a face normal.
+The only reason to do that is visual.
+It's just a visual decision that we've made.
+The smooth normal we use for texturing, whereas the face normal we use for lighting, and that gives us a slightly low poly look, but lets us get continuous blends across the surface.
+And we just store that octahedron encoded so we can stick it in Vec4.
+And we also store our two materials.
+So before I was saying that in our voxel data we have two materials.
+And when we polygonize, we're not just considering a single voxel or a polygon.
+Our vertex comes from the eight voxels round about it.
+So we're losing some data there.
+It would be really nice if we could afford to store a whole array of different materials that our voxels could be made up of in the vertex data and use that to texture, but it just wouldn't be performant.
+So instead we have two materials and a blend value between them, so the voxel will be whatever it's made up of most of.
+So grass and rock for example might lose some data that also we would like to blend a mountain texture in there, but generally it will look okay.
+And then we can use that to triplanar texture our sphere.
+So basically if you haven't encountered triplanar texturing, that means taking our texture and projecting it along three axis with a blend zone as is incredibly badly circled on the diagram.
+So the thing to note about that is we are in fact projecting across the whole sphere.
+So we're not projecting on an axis that's local to our bit of terrain, it's across our entire planet, which you would think would have really bad artifacts in some areas.
+You'd think that blend zone would be across an entire region of the planet's surface and we'd have an area where we're blending between two textures in a really ugly way.
+But actually we found that wasn't the case.
+Just because of how our terrain is shaped, we tend to distribute those blend zones across the whole planet.
+fairly evenly. They tend to come up everywhere but not be overwhelmingly ugly to look at anywhere.
+And in terms of the texturing, what we're passing in is basically a height map there.
+So I said that our vertex data had those materials and a blend value.
+What that actually means is that we have an atlas of textures that relate to those different materials and we choose those and blend between them based on a height texture.
+And that's just an artist-created thing. We recolor it in the game, but it It's an area where our artists creating something really carefully, really outweighed trying to synthesize these textures.
+The other thing to note is that we apply these textures at two different scales.
+So we have a lower detail texture mapped over a much larger scaled, higher detail, a higher size texture.
+And we just continuously replace those as you fly away from or towards the terrain.
+So far from the planet, you'll see the same texture, but at a much larger scale.
+And when you zoom in close, then we'll continuously replace in half those sizes and replace them down until we have our two scales of texture still.
+And that helps us with our terrain blend as we fly into the planet.
+All right, so we have our terrain.
+We have it textured off in our shader.
+It's polygonized.
+We can render it, but it's not very interesting.
+We have to do stuff to it for it to be useful in the game.
+So a real important point is that when you're generating your terrain in game, your work isn't just generating that terrain.
+Things that you'd normally bake offline, for example, physics or navigation measures, you also have to calculate as jobs in real time.
+And that takes up a way more significant chunk of our time than actually generating or polygonizing the terrain.
+And the first step in that is placing a bunch of objects.
+And again, that can end up to be quite a significant cost.
+It's something that we do in Compute Shaders on PS4.
+And the basic approach is really similar to the noise that we're using for generating the terrain.
+So this is kind of a top-down view.
+So hopefully you can see the kind of green bits are grass, and there are some rocks and plants in there.
+and you can kind of picture quite quickly that that might have come from some simplex noise, something like that, and we're just placing objects with a cutoff at the highest points, and we're also applying an additional layer of noise that just cuts down on the density to kind of really quickly give us control over the spacing that we want.
+The driving factors here are artistic, and this is something that Kate Compton talked about before, is that if you ask an artist, then...
+If you have a tree, that's kind of nice.
+You can have a tree on a terrain.
+If you have a tree with a small rock next to it or a small bush, that's much nicer.
+And if you can work all the way down in scale recursively, continuously, the more stuff you add, the nicer it kind of gets.
+So let's have a tree with some bushes, with some small plants, with some pebbles at the bottom, and we start to build up our terrain in a nice way.
+So this noise-based technique is our way of doing that.
+We additionally use an offset grid, and that's just similar to the terrain-based technique that I was talking about before, so that we can place gameplay objects when we really need control over how far apart those are.
+So we just split our terrain into grid cells and choose how many of those should be active.
+And so stepping through, we also place our terrain, our objects separately on our terrain across the LODs.
+So we can place much larger objects on our lower LOD terrain.
+So here's LOD two.
+LOD one, we're starting to add in some bushes and things.
+And LOD 1, we have our full set of objects, and we have our grass that's only appearing up close where that LOD comes in.
+And that presents a problem because we're placing our trees, for example, on that lower LOD of terrain, but we're replacing that whole terrain with something higher detailed as you get closer, so we need to reposition them onto the surface, and we do it something like this.
+So there you can see them fading between impostors to real models and also readjusting to the surface.
+So it's kind of cheesy that they interpolate like that, but it's far better than popping into position.
+And generally it tends to be much further off from the camera.
+This is me flying really quickly in Flycam to an area.
+And it's just slightly more subtle than them just popping.
+Building placement, we use a really similar technique.
+So these buildings are kind of the one thing that we need to see from space.
+We need to know about their points before we get to the planet, which means we need a technique where easily we can take any point on our sphere and determine the nearest building.
+So we use an offset grid technique.
+So if we split our terrain down into regions, and we can consider each of these points as offset from the center of that, and we can quickly recalculate that.
+from any position you can generate a Voronoi diagram of this real easily.
+You can see your nearest building from any point.
+Okay, so now quickly I'll go through actually simulating on this world that we've just generated and covered in plants and physics and things.
+The first thing to talk about is our creature routines.
+They're one of the things that vary most based on how our terrain is generated.
+And not knowing where they can go is a significant thing.
+So, as you can see in this GIF, we generate these paths for them to follow.
+But we don't actually add the creatures until you get in really close to them.
+So we know ahead of time where there potentially will be a creature, where that creature is going to be, and whether the camera is going to reach that point.
+But we don't bring it in until there's actually an intersection.
+I'll just go through that again.
+So there's our gray path.
+Pink means they've become active, so we know there's a creature in that area, and then we get close enough for them to actually come in, which means we can go away and come back and have those creatures remain in their same positions.
+And we do a really similar thing with all of our objects.
+We fade them in as you fly away and come back.
+And we use this dither based technique just in a shader.
+We pass in a zero to one value for all of our terrain and our objects that we can just use to make sure it comes in appropriately as you're flying around.
+So again, we've got some gifts of that.
+So here you can see the terrain generating around you.
+And again, this is me flying really quickly to a point and bringing all of the terrain in.
+So it's really noticeable that we're doing this, that we're starting with really low res terrain and bringing in some slightly nicer terrain over the top.
+But this is a little bit more subtle as we're flying around.
+So you can definitely still notice it, but it's not quite as in your face as when I showed you before.
+So this, you can see that blue rock only existed in the nearer odds, so it faded in there.
+So this is all time-based.
+We kick that fading off as that region is ready to come in.
+We fade it in and then we're able to see it.
+But we also do a distance-based fade for things like grass.
+So this is just thinning out grass, and that's just a cut down on the quantity of grass that we're rendering.
+You can see that the grass is slightly different to the terrain underneath it.
+And it thins out as we move away.
+I would really like to move a lot more of our fading to be distance-based.
+I think it's much more subtle.
+You don't notice it so much as you're flying around.
+So that's definitely something that we'll look at in the future.
+But it needs you to have generated enough terrain far enough away from you that you can afford to do it based on distance.
+Whereas if your terrain comes in quite late, then you really need to fade it in as quickly as possible.
+All right, and finally I want to talk about evaluation and evaluating our content and our world and evaluation of procedural content in general.
+So I've spoken about different things on No Man's Sky a bunch of times and I kind of like to finish on the importance of this because it's really meaningful to us.
+It's meaningful to the artists when they're generating content that.
+They don't just see their content in context, they don't just create a model and look at it in the game, they see vast quantities, all the assets that come from that model.
+And that's true for our planets as well, we need to not just create a planet and look at one of them, we need to be able to really quickly go through loads of planets and say...
+Why are all my planets red? It's valid that one planet would be red, but there's clearly a bug going on there that's caused all of them to look like this.
+Or there's this whole space that we haven't explored in terms of generation and we could maybe look into that in future.
+That's a really big one for the artists to go back to especially, but it's true for us looking at generation techniques for terrain things as well.
+But it's also an important thing for performance, that we're not just looking at one planet, that we're looking at a vast quantity, and that we're looking at it regularly.
+So this is Simon's smoke test tool, which is really fundamental to us while we're working on the game.
+So we can see performance degradation and things over time.
+We just, every time we run a build, then we see all these screenshots, we get these captures, and we know how we're doing in terms of performance.
+And it's important that we're doing that on the same planets because we're generating loads of different planets, and some of them will be way more performant than others.
+Some will be filled with foliage and life and will be really pushing us, and some will be really cheap, and they're not a problem at all.
+So.
+we need a way of keeping track of that throughout the project.
+And I think if you're doing any generation stuff at all, focusing on these tools is a really significant thing to do.
+So to summarize this talk, I've just got a few important takeaways.
+I don't know if what I've said today in terms of the specific techniques is useful to you.
+Maybe it's interesting to you, and I'm happy to talk in some more technical detail to those of you that are interested.
+But I hope the way that we're making this game is interesting.
+I hope that people will consider it for games in future.
+I hope they'll think about the fact that we can make interesting spaces in games.
+We don't have to work on a flat plane.
+We can work on spheres or on a torus, and we can achieve loads of interesting gameplay that we haven't looked at through that.
+We can make deformable voxel worlds.
+We can do that in a large scale game.
+We can do it on current hardware.
+And again, people think about voxels and look at like Minecraft, but there's so much more that we can do and we can keep doing with that.
+We can have procedural based games where artists remain in control of the content that's coming out.
+We don't have to look at procedural generation as a way to replace our artists.
+We can look at it as a way to augment them and to create more content.
+And finally, we can create generative worlds, and we can create them in real time as the game is running.
+And we can do that today, again, on current hardware.
+If we can do that and ship a game as our tiny team, there are so many more options for people with more resources out there.
+I think it's a really valid avenue for us to be pursuing as game developers, I think is hugely exciting.
+All right, so thank you all again for coming today.
+If you wanna ask me questions, I'm gonna head over to one of the wrap up rooms, but also feel free to shout me online and standard plug for my company.
+I love it very much.
+You should come work with me.
+It's great, and thanks again.

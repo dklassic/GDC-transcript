@@ -1,0 +1,544 @@
+My name is Johanna Stelianis.
+I'm a rendering engineer at EA Dice.
+I've been working there since 2014 and shipped a bunch of titles like Battlefield and Battlefront.
+Today, so we're gonna talk about ray tracing and we're gonna start off with some project background, keep it short, and then Jan will dive.
+right into the details of the GPU ray tracing pipeline.
+And I will talk about, when he's done, I will talk about the actual engine integration of DXR, which is the DX12 ray tracing API.
+Over the entire presentation, we'll mention a lot of GPU numbers, because a big focus is obviously GPU performance and on how to actually make this run in real time.
+So like I said, Battlefield V is a first-person shooter set in World War II.
+It was released in November 2018.
+We worked on it for about 10 months.
+So we started when the game was in full production.
+We had four full-time engineers on this.
+And obviously, a bunch of people from both DICE and NVIDIA helped out along the way.
+And this was the first game released with DXR.
+So we're quite happy about that.
+But it wasn't easy.
+It was quite challenging, actually.
+So first of all, the game was in full production.
+It was decided right in the middle of production that we were going to do ray tracing.
+So that means.
+All the content in the game was already there.
+It was not built for ray tracing at all.
+So all the tech we made had to adapt to the content we already had.
+We also didn't quite know how big the engine changes would be because adding ray tracing is quite a complex operation.
+It's not like a post-processing pass that you just plug in and then it works, even though our title suggested it just works.
+So, yeah.
+We also didn't really know the performance of the Turing series cards because they weren't out when we started development.
+We had to run on older generation GPUs, so ...
+We had to guess a lot on how much we would do ray tracing and how much would be denoising How the ray count would be versus pixel count and so on And as extra punishment, we had to deal with being early adopters.
+So we had to deal with APIs not being final, constantly evolving, causing us to rewrite certain systems.
+And then, of course, because it was experimental, and like driver hangs, blue screens, and so on.
+And no tools to help us along the way.
+So we had to develop a lot of our own tools to help with this.
+But despite all of this and the short time frame, we managed to ship the game.
+And we are very happy about that.
+Yeah, thank you.
+Now Jan will take over.
+Yeah, hi everyone.
+So I'm Jan, and if you looked at this talk earlier, you might be expecting someone else.
+Originally, Jasen Uludag was supposed to give this part of the presentation, and much of the work I am going to be presenting is his work.
+Unfortunately, he couldn't make it, so you have to make do with me.
+So I'm, yeah, I'm Jan.
+I've been at Dice for the last six years.
+Right now, I'm the lead for the Dice rendering team.
+And over those six years, I've worked on everything from Battlefield 4 to Battlefield 1, Mirror's Edge.
+I've had my hands in engine tech, and particularly rendering during the entire duration.
+And what I'm going to present now is essentially all the machinery surrounding the actual ray tracing.
+So you could say that my part of the presentation is on the ray tracing part of this ray tracing talk.
+So to frame this a little bit, let's start with a simple ray tracing pipeline, just to see what steps we need to perform.
+So first we need to decide where from and where to we shoot our rays.
+So we'll have to do some logic to figure out what we're actually gonna do.
+Then we have this magic black box, which Johannes will detail later, which is the actual intersection and ray tracing part.
+For my part of the presentation, the only important thing is that we will get the material or G-buffer data back from this.
+Since we're a deferred render, we from the start decided we're going to do a ray tracing with deferred lighting as well.
+So for now, for the next 30 minutes, this is just going to be we shoot rays, and then magically we get material data back.
+Okay, since we just get material data, we actually have to light it.
+So we light all these results, calculate the radiance, and then we need to recombine that with our rasterized result that, by this point, will also be lit.
+Okay, let's look at these in a little bit more detail.
+We have a G-buffer, we have a sample point we wanna potentially, or we wanna shoot rays from.
+We have the view vector, and since we've decided to do reflections, the interesting part is the specular lobe of the BRDF.
+We can sample this at lots of locations.
+I've picked some of these.
+And one thing to start out with, a lot of the parts in my talk are based on a presentation by Tomas Stachowiak and Jasmin Ulladag at Advances in Real-Time Rendering 2015, which was Stochastic Real-Time Screen Space Reflections.
+And one part here that they found out is that you really do not want to sample the tail end of this BRDF if you're not going to want to do crazy amounts of denoising or want to deal with a lot of fireflies.
+So we did this from the very start.
+We decided once the BRDF distribution gets too low, we're just going to chop it off and normalize it.
+So for details, you can go and look at that talk.
+We then use a Halton sequence to choose one of the rays, and that's the winner.
+We're going to shoot it.
+And also, we will produce a lookup texture so that later when we get our 1D buffer of ray results, we can find the screen space pixel it came from again.
+Then magic.
+Now we trace rays.
+Don't really care.
+We get material back.
+Now we have to light it.
+To start out with, let's just look at the most simple thing you can possibly do.
+You loop over all your point lights, calculate the radians for each, sum it up, loop over spotlights, loop over reflection volumes, so on and so on, and return the result.
+You're done.
+Great, we have a radiance value.
+Now we have to combine that with our asterisk result.
+In our case, we use an energy-preserving ggx, so we have the ratio of specular to diffuse, and we can just multiply it by that and add it to the output pixel, and we're done.
+And we use a lookup texture to fetch the actual right ray.
+Then you get something like this.
+So this was made, was just shooting one ray per pixel, using something similar to this very simple pipeline.
+What you notice here is that it's actually very noisy.
+So even this not super rough water surface here is quite noisy.
+Then other parts is extremely slow.
+So this scene took about 18 and a half milliseconds just for the ray tracing part of it, which, yeah, that's not gonna ship.
+Also one thing to notice is that there's a lot of areas where we actually shoot rays, but they don't really contribute much because this specular to diffuse integral ratio is pretty low, so we end up multiplying the result from the ray trace with a very low number unless it hits something like the sky or something extremely bright, it's not gonna contribute.
+And starting with that, we'll start with our first improvement.
+Areas where we don't really care that much what the raytrace result is maybe don't need that much rays since it's gonna become super blurry afterwards.
+We're gonna kick the ball further to the denoiser anyway.
+Okay, starting with our simplified pipeline, we start by adding a variable raytracing.
+And for that, we start with this diffuse to specular ratio which we know we will multiply the ray result with, the radiance result.
+We split the screen into 16 by 16 pixel tiles.
+And for each tile, we check each of these tiles, we check what the max ratio is.
+Then you get something like this.
+And then we normalize it, so we divide it by the total sum, which is pretty easy to calculate.
+Then you get essentially what percentage of your total rate budget you want to shoot in each of these cells.
+Then we round that to the nearest power of two, and we use a dithering pattern to make sure we actually get close to the target result, so we use a random noise texture to choose either the round down or round up result based on the difference.
+Otherwise, you'd end up always undershooting or always overshooting your target ray budget.
+Okay, we only choose power of two because we have a pretty simple way to allocate our samples.
+For 256 rays, for these 16 by 16 tiles, it's pretty straightforward.
+We just shoot all the rays.
+For 128, we pick a checkerboard pattern.
+For 64, we weren't really sure what to do, but if you look at these little squares here and you just make them larger, then you get something like this, and then you can scale that to any lower ray count, and you get less and less rays.
+In order to actually produce more data and vary this over multiple frames, we just integrate, add to the pixel count every frame as we go through it.
+Okay, success, this works.
+On the right you can see a visualization of what you get from here.
+The red cells are, shoot all rays, if they're bright rays, bright red, so they're 256 per tile.
+Then blue is like, I think like six or eight rays or so, and yellow is like somewhere in between.
+And what you can see here is that very reflective surfaces where the reflection contributes a lot, shoot a lot more rays.
+Other areas still shoot rays, but significantly less.
+Also you can see we get a lot more rays on grazing angles where the Fresnel effect will produce much stronger reflections.
+Okay, more problems.
+You remember that the actual tracing was extremely slow.
+So a big part of that is how divergent the rays are we're shooting.
+One cause of that is us randomly sampling the BRDF.
+So for white BRDFs that will produce very divergent rays.
+Maybe there would be some way to fix it, but you have more problems even if you were to do this, even if they were coherent or you had perfect reflectors, because art gives us content like this.
+This is a wrought iron fence where each of these fence poles is like a square that has been twisted and you end up with your ray reflections pretty much going in all directions all the time.
+And content like this, we noticed our performance was about four times slower than normal content.
+So if you walked up to this fence, you had a four times lower frame rate than you were just playing the rest of the level.
+That's not really ideal.
+If you want to ship this, you'd at least want to average these numbers out, even if you take a little bit of a hit in the better scenes.
+So what do we do?
+We bin our rays.
+So we try to group rays that go into similar directions and go from similar locations.
+How do we do that?
+We have a rate, shooting from the reflected off the sphere.
+We want to calculate a bin index.
+Based on the screen offset of where we shot this rate, we calculate some high bits.
+We use four bits for this, two bits for the vertical and two bits for the horizontal screen space position.
+The lower 16 bits, eight bits for longitude and latitude, we just take the direction.
+This is very simple.
+If you visualize what this looks like, it looks something like this.
+So you can see this kind of like, in this case it's just like noisy BRDF sampling, but you can see that it essentially groups all the pixels with the same color together in a bucket.
+How do we do then the actual binning once we have these indices?
+We have the rays.
+Each ray knows which bin it wants to go into based on this index.
+Using atomic increment, we calculate the size of each of these bins.
+Atomic increment also helpfully gives us the local offset back, which is the index this ray will have in that bin eventually.
+Now we know the bin sizes and the index of the array within the bin.
+We need to calculate where the bin will be located in the defrag result.
+We use exclusive parallel sums from Mark Harris, which is a CUDA paper, but we just implemented it.
+And then you get the offset of the bins.
+You re-add the local offsets.
+Now you have your array location, and we just produce a lookup table from this that we then reference when we shoot the arrays.
+More problems.
+This is what you get in our initial implementation here.
+Well, after you've added the denoising.
+You can see that these concrete blocks are not being reflected.
+That's because we have a custom system for scattering objects in the level that is done very late and that essentially re-scatters them every frame.
+We didn't have enough time to rewrite this and add these objects to the GPU world and just naively adding them every frame would have been way too expensive.
+So, there wasn't really an easy way in time to add these to the ray tracing world.
+However, if you do the same scene with screen space reflections, you actually see these blocks.
+And we considered that sucked a lot if players were gonna turn on RTX and then actually saw less reflections.
+But since they show up in SSR, maybe what we can just do, we can just take SSR and mush it into our ray tracing pipeline.
+So we have arrays, we do a hierarchical screen space trace.
+If it misses, we give up.
+We know we've hit the sky, who cares?
+Don't need to do any ray tracing for this array anyway.
+If we hit something, instead of taking the radiance, we actually take the material data, send it through a lighting pipeline.
+And if we think our screen space trace is bad, it's rejected, we run the full ray trace.
+Based on what we know, we start it off where the screen space ray actually, where we considered went bad, like it tried to move behind an object.
+We fetch the same material back because we do deferred lighting.
+and send that in the same lighting pass.
+And this is why the two things match.
+Because normal screen space reflections, they don't take into account that things like specular actually are view dependent, since you just fetch a sample on different locations on screen.
+And that would cause severe discontinuities.
+Since we relight all of our screen space tray samples, we actually get, you will not see any discontinuity here.
+even though the sample location moves by like sub-pixel accuracy, but that didn't turn out being visible after denoising.
+Okay, so if you wanna implement this hierarchical screen space trace, I'll refer you back to Sokovic et al. 2015, since it is like beyond the scope of this talk in our time.
+One change we had to do is we have to decide when to reject rays, which is not that important if you just do screen space reflections.
+So this ray here, we reject, and the way we do this is at the intersection location, we sample the depth buffer, and if that differs too much from where the calculated intersection location with the depth buffer is, we basically say, we're a little too far from the surface here, maybe we're behind an object, and then we try to trace that ray instead.
+So the green one here would be an example where we would accept the screen space trace.
+What do you get from that?
+So you get decals.
+They just work in screen space ray tracing.
+So when you move the camera down, you see that they vanish because they come from the screen space, but just in a typical situation, you just magically have your decals for free.
+Also, all our scattering works just fine.
+This would also apply if you have any GPU-generated geometry.
+It will show up in ScreenSpan's reflections.
+You don't have to worry about fitting BVHs to it.
+You just get it.
+Assuming this is not a particularly big object that caused a lot of disocclusion, this is fine.
+Okay.
+Now we've done our trace, so we do no more changes before our actual trace, and we get our rays back.
+Some of these missed and some of these hit.
+If we just light this now, unfortunately this happens, where all of the pixels that just missed everything, they'd end up, they don't have any lighting work to do, because the sky is, you don't need to do much lighting for the sky.
+So.
+What do we do? We add a defrag operation.
+This is pretty straightforward.
+You assume each ray that is a hit is a one, and each ray that is a miss is a zero.
+You run exclusive parallel sums, same we did earlier.
+Calculate how many rays are hit before the current one, and then you create another lookup table to basically be able to find just the hits, and you use that when fetching the data from your lighting shader.
+Here's a lighting shader, fully busy now.
+Great, except it still takes about two milliseconds.
+Anyone who's ever written a deferred render will not be surprised based on how we did this.
+Still a problem.
+Inspired by deferred renders, we just use Percel light lists here.
+So we splat a grid over the entire world.
+With cells, we loop over all the lights, we figure out which cell it's in, we create a linked list for that cell that points back to the light data, and we keep doing that for all the other lights.
+So we add append to the previous linked list.
+The red light here goes into the other cell.
+We create a new linked list.
+Finally, the blue light, that overlaps two cells.
+We add to both linked lists.
+And then, when actually doing the lighting, we just look up the sample of return of light in which cell it is.
+We loop over all of the lights in that cell and only apply those.
+That fixes that problem.
+Then we have our next problem, which is that, the bit, the elephant in the room, and that it's really, really noisy.
+We heard denoising is good, so I guess we've expected we always have to do this, so now it's actually the time.
+We're adding a denoise pass.
+When denoising, you wanna figure out what your variance is, you wanna gather lots of samples, often you do this, you could shoot more rays, that's totally unacceptable, so we will try to reuse spatial information that is from other rays around us, and we wanna reuse temporal information that is rays in the past.
+Unsurprisingly, if you've paid attention, Stakovec et al. 2015 also did this.
+So we'll steal ideas from that presentation as well.
+They had a BRDF filter, which we're gonna steal and modify, and a temporal filter, which we're gonna steal and modify.
+So now first the BRDF filter.
+Let's see this array.
+There's a BRDF specular lobe, where we've been sampling, hit the sphere.
+If you look at the data you have for neighboring rays, each of them also has a BRDF lobe with their sample.
+And what you might notice, I mean, the surface, you can assume that the object you're reflecting off is kind of a flat plane, and you can ignore visibility and the fact that these are view-dependent, you know, a little hand-wavy, and then you can basically say, you can just look at how bright would these samples be if they were on our own BRDF instead of the neighboring BRDF, and adjust them accordingly.
+This is the equation to do this.
+This might look a little complicated at first, but it's actually just a weighted sum over all of these samples you're gonna steal.
+In the original paper, this always ran on four samples.
+Because we have a lot of noise in our image, that didn't get us very far, so we ran a lot more samples of this.
+But when you're running a lot of samples for big, like rough surfaces, you don't want to run that many samples for very shiny surfaces or like very good reflectors because you end up just, there's not that much noise in those, right?
+So we want to have someone figure out what kernel size should we pick for each pixel.
+Okay, so here's a BRDF lobe.
+We're trying to figure out what kernel size should we pick, assuming that what we're hitting is a plane, like something like this range would be a good area where samples we're interested in might be, like somewhere in this cone.
+So then we can project this cone back into screen space, and you have something like this BRDF shape in screen space.
+So based on your BRDF, which is based on the roughness and the angle of the surface, you can essentially calculate what shape your kernel should have in screen space.
+Now there might be samples outside of this kernel, but that's where you expect most of the samples that are interesting to you should be.
+One thing that I skipped here is we don't really know how far this plane is away, this imaginary plane, because we've been randomly sampling the BRDF and we know the distance to that random sample, but that's noisy like hell and that plane would move back and forth constantly, which would like, our kernel size would fluctuate, which would give you pretty noisy results or pretty bad temporal stability.
+So this is a random sample.
+We decided to pretty straightforward, since we don't have a lot of good data here, to do it with the simplest approach.
+We just take all of our neighboring pixels in a five by five kernel, and we average them just to calculate what is the average distance to an object for this pixel.
+It turns out this is still not temporally stable, so we take the second hammer that us real-time engineers are used to, and we just go with temporal reprojection.
+So now this average ray distance, we reproject from the previous frame based on the virtual reflection.
+This is also based on Stachowiak et al., so you can fetch the correct temporal reflection from your screen space.
+Yeah, then we have a pretty good average object distance we can use to calculate our kernel size.
+We use a pretty high weight, I think it's like between 80 and 90% for the previous frame.
+Because if we assume we have previous frame data, it's actually pretty good for this.
+So now we have our BRDF kernel.
+We're this thread, we wanna evaluate all this stuff.
+We have a pretty large kernel.
+We obviously can steal stuff from other threads, but we have all these pixels we don't have the data from.
+What we use is we use LDS to essentially add all this extra information, fetch the stuff, and we can still share everything within the warp.
+Our actual size are a little larger, because we have, actually support pretty large filters.
+In practice, we run them slightly smaller, but this is what we can run up to.
+Then you get something like this that is still noisy even though we allow up to 81 taps So now it's time for the temporal denoising, which everyone does anyway.
+But then you have to decide, because you want to get rid of ghosting, what is actually a good sample.
+So you need some kind of rejection metric.
+Particularly if you move further to your reflector, or closer, the size of your roughness changes.
+And if you were to just, you get ghosting of where the very rough, blurry reflection keeps staying blurry all the time, because you're reprojecting all the time, and you actually want it to become sharp.
+as you move closer.
+Okay, if only we knew that kind of had some information what good samples were.
+But actually in the BRDF denoise filter earlier, we did look at all these other samples here on the surface.
+So we have a pretty good idea of what the radiance values on all our surrounding pixels are.
+this might be like have been our distribution of all our neighbors.
+We can just in the BRDF filter fit a axis-aligned box around this, and then basically send that over to the temporal filter, and the temporal filter now can just clip the, clip the sample it's taking to this.
+Now you'll naturally get as like this spread of the samples you've been taking in the BRDF filter became more narrow, and very naturally you'll sharpen up your image, and you will stop including things you shouldn't be including.
+Great.
+That helped a lot, but we still have some noise that we're trying to clean up, unfortunately.
+So at this point, we basically threw everything that was vaguely physically based out of the window and just said, well, we have this kernel size based on average distance we've already calculated, and I mean, if you squint a little, maybe that just looks like a gaussian.
+So we just kind of fit a gaussian to that kernel size.
+This is, by the way, this can be stretched, as in it's anisotropic.
+So this will have different widths and heights based on the angle.
+So fitting this Gaussian is quite expensive.
+We do it offline.
+Then we generate a lookup texture with based on angle and roughness.
+You can basically fetch the width and height for a unit length, ray T, for the current screen.
+And then you just have to multiply that by ray T and you have your screen space kernel.
+And then you have a Gaussian you can run.
+Great.
+One thing that we've kind of done very, very wrong now, though, is we're applying two filters that are roughly the size of the projected specular globe.
+And then you basically just, when you convolve those two, you just get a larger filter.
+So everything is just now blurrier than it should be.
+So if you compare this against your reference image, you'll notice all of your reflections are rougher than you expect.
+Easy fix, we just like to make both of them smaller until the result matches.
+Great, now we've gotten rid of most of the noise.
+We still have some artifacts, but in most actual in-game scenes, this is much better.
+This is a really pathological case because we're always sampling MIB0, so this very rough reflection here is trying to denoise horrible input data.
+So now we have our new pipeline.
+We start off with variable ray tracing.
+This is in the range of 0.37 milliseconds.
+We generate some rays.
+Takes about 0.2 milliseconds.
+We do the binning, takes 0.15 milliseconds.
+Screen space hybridization, about 0.36 milliseconds.
+Then the actual trace, which costs us about two milliseconds so essentially most of up to here has been pretty cheap compared with the actual trace and it all makes the ray tracing much faster.
+The screen space tracing gets rid of about 40% of our rays.
+So then we defrag the result here to improve the lighting.
+Takes about 0.08 milliseconds.
+Our improved lighting takes about 0.46 milliseconds.
+Then come the expensive passes, our spatial filtering at about one and a half milliseconds, the temporal filter at about two, four milliseconds, and the image filter takes about another one millisecond.
+That one could easily be improved.
+I think the way we're doing our gaussian is really bad right now.
+In total, it takes about 6.3 milliseconds for our entire ray tracing pipeline.
+I don't actually remember which GPU this was taken on, so I'll take this just as relative numbers.
+But there's plenty of benchmarks on the internet where you can see how slow ray tracing is, so I'm sure you can find out your absolute numbers very easily by Googling.
+But then this is the result what this gives us.
+So compared to the 18 milliseconds of just doing intersections, we're now at a bit over six milliseconds, and we have a pretty clean image.
+The reflection you see here doesn't really show any big artifacts, there's some, but it's not particularly bad.
+And otherwise it's been cleaned up.
+So yeah, that is everything around the actual ray trace.
+So now finally we get to the ray tracing part of the ray tracing presentation, and I give back to Johannes.
+Thank you.
+So far, we ignored the actual ray tracing part, the DXR API part.
+I will talk about some practical issues that we encountered and our solutions to those issues.
+They weren't always super clever, but they were sometimes, most often, easy to implement considering our timeline, timescale.
+So, there are two parts that you need.
+First of all, you need to find intersection points in the scene, so building the acceleration structures.
+And then, once we do that, we need to find the material data of that intersected point.
+So, we'll send that to the shared SSR ray tracing lighting pipeline.
+So first of all, we need to build the bottom level acceleration structure.
+That is basically just some geometry that you send to the GPU, the GPU processes it to build the acceleration structure.
+Typically, this is like a mesh, like a chair or a car or something, and then you reuse that same bottom level acceleration structure for the entirety of a bit, a while, as long as that mesh is used.
+Then you can combine multiple of these bottom level acceleration structures to create the top level acceleration structure, which typically contains the entire game world.
+So then you have objects that are not static and need to be updated each frame.
+So for those who run a simple compute shader that transforms the vertices and then rebuild the bottom level acceleration structure.
+This process is repeated each frame, and this is the topic of the next part.
+this can be quite expensive.
+So first of all, which objects do we keep in our acceleration structure?
+In regular rendering, you do frustum calling, and you do occlusion calling, and maybe distance calling and some other calling techniques.
+But these two don't work very well with ray tracing because your rays can go anywhere in the scene, right?
+So the solution is quite simple, no culling for ray tracing, right?
+We tried that and we have this level, Rotterdam level, basic level in Battlefield V.
+If we disable culling for ray tracing, then we have about 20,000 top level instances and we have about 1,000 bottom level rebuilds each frame.
+That is quite a lot of process.
+The CPU struggles quite a lot with this.
+These are approximate numbers.
+I measured many times and I got different, but the bottom line is it's extremely expensive.
+And also the GPU has to process all these rebuilds, and that's also very expensive.
+Costs more than many, many milliseconds.
+More than we can afford.
+So, what we do is we try to reduce the instance count.
+And we're gonna use a calling heuristic anyway, even though it's wrong, but that's what we have to do.
+And we're gonna accept some minor artifacts, but we're gonna try to reduce them.
+The idea is that objects that are far away are less important than objects close to the camera, unless those objects are large, then they will show in the reflection and they actually are important.
+So we're trying to figure out some kind of heuristic that would combine these two.
+And the simplest we could think of was basically taking all the objects and their bounding sphere, check the radius of this bounding sphere, compare it to the distance to the camera, do some math, and then you find a calling angle.
+If this culling angle is lower than a certain threshold, then we simply remove the object from the acceleration structure.
+This is how it looks.
+On the left side, we have no calling enabled at all.
+In the center, we have a four degree calling cutoff.
+On the right side, we have 15 degrees.
+15 degree, you should probably see quite a lot of objects missing.
+Four degree is a bit harder to tell from these slides, but if you look closer, you will see, for instance, the wheels of the truck have disappeared, some street signs, some objects in the far distance.
+But overall, it looks OK.
+And if you do some denoising and it is a blurry surface, it's probably not going to matter too much.
+So if you do 4-degree crawling, then our 1,000 updates goes down with a factor of 10 to 100.
+And our 20,000 top-level instances go down to 2,000.
+So this is a huge improvement.
+Now, the CPU is happy.
+The GPU rebuild times are OK.
+We do see some occasional popping and missing objects.
+But considering the benefits, we definitely have to go with this approach.
+Further optimizations you can do to these bottom level acceleration structures is that you can stagger full and incremental updates, because you can choose to either do an incremental update of a bottom level or a full update.
+The incremental one will reduce the quality of the actual acceleration structure for ray tracing.
+But yeah, since you do this each frame, it will be a net win.
+Then you tell the driver to please build as fast as you possibly can and sacrifice raytracing quality.
+The last thing we do is run all of this as in compute during graphics.
+That saves another 0.8 milliseconds.
+That's all about acceleration structures.
+Now we have the acceleration structure, all we need to do is do the actual shading, but first we need to get the material data.
+But there are the requirements.
+To get reflections, the raster version and the reflected surf, the reflection version, must match exactly.
+So if we have one triangle that's being rasterized, right, and the pixel shader is executing on the sample location at the center of the triangle, if we would shoot a ray at the exact same sample location, we want to have the exact same output, obviously.
+To our help we have the closest hit shader and any hit shader.
+The closest hit shader is executed on the surface closest to the ray origin.
+And any hit shader is executed on any potential hit along the ray.
+So shaders in Frostbite work like this.
+Artists sit in these shader graphs, they take some textures and yeah, some other constants probably, and then they define the output in the output node, node which is like normal, roughness, and yeah, whatever, some more stuff.
+And these graphs are then converted in offline pipeline time to a bunch of shader, HLSL shader codes.
+And we have thousands of these, and they are updated constantly, so doing manual conversion is obviously not possible.
+So we have an automatic pipeline step to do this for us.
+So this is our basic heat shader template in ray tracing.
+We have a heat shader, and on ray intersection, we need to unpack the vertex data of this triangle that we hit.
+So vertex buffers and UVs.
+And then we run the vertex shader three times, one for each vertex.
+to transform this to a world space, for instance, or have a vertex shader fragment that can do anything that any artist that arbitrarily defined it to do.
+Then we interpolate the results, pass that to the shader graph, and write the resulting output to a payload, and that's it.
+However, there are a few considerations and some troubles.
+Some instructions are not really translatable well to ray tracing, for instance, screen space gradients.
+They require information from neighboring pixels, and we don't have pixels, so we don't have any neighboring pixels.
+So, our solution to this was simply to ignore the problem and hope that it didn't show up to be a problem.
+Slightly related to this, actually this works, we didn't do anything else in this.
+But slightly related to this is the texture MIP level, because the gradients are used to calculate the MIP level.
+And we could spend, some people have spent time on how to solve this.
+We didn't have that time.
+So our solution was simply to sample MIP level zero always.
+It introduces a bit of noise.
+It's not cache efficient, but this is what we did, considering the time we had.
+And there are more instructions.
+This instruction, clip.
+So the instruction to terminate the pixel shader as it's executing.
+If you ignore this, though, you're going to run into these issues.
+You have a tree here that's alpha tested.
+And if you're going to ignore the alpha testing in the closest hit shader, it's going to look pretty bad.
+The array is going to hit, and it's going to return a black color when it should just skip through the leaves.
+For this we used any hit shader to do along the possible intersections along the ray, we check the opacity value and check if it's actually going to be a valid intersection or not.
+Doing this looks pretty good.
+However, it turns out that checking these opacity values on every possible intersection, especially for complex geometry like a tree which have many overlapping triangles, is quite expensive.
+This is a visualization of the Rotterdam level again.
+And this is using ray tracing, shooting direct rays into the scene.
+And the brighter the pixel, the more expensive it is to shade.
+And as you can see, the brightest object in this scene is the trees and the vegetation.
+So, summary, closest hit shader we always generate, and the hit shader is optional, and we only use them for alpha-tested geometry.
+And we try to avoid them if possible, because they're very expensive.
+And then we run this compute shader for dynamic geometry.
+Right, speaking of the payload, so what is actually returned from all these closest hit shaders is a payload.
+It's basically just data with the same format as a G-buffers, which is required to have consistency with lighting.
+But it serves another good purpose. It keeps the payload small, tightly packed.
+And also we can easily verify that our closest sitch shader are actually doing the right thing.
+So what we can do is take the rasterized output and then shoot rays in the exact same sample locations with the same camera and everything and just check the difference.
+And if there is a non-zero value in any pixel, then you have a bug.
+Then you fix the bug possibly or ignore it, depends on how severe it is, and you're done.
+But then we have all these shaders that have been generated offline, and we have about 3,000 per level.
+On level low though, when you run the game, these shaders need to be compiled into collections, which is like a PSO for ray tracing.
+And it turns out that doing that is quite expensive.
+Any single one of these shaders costs over 100 milliseconds, typically.
+Some of them are more than 100, like multiple of hundreds of milliseconds.
+So compiling them in a single frame is not possible.
+So you will either have to live with some popping as the objects are streamed in and you're compiling shaders.
+or you compile all of the shaders in the tile level during load screen.
+This is what we chose to do.
+There is still quite a lot of time.
+So the first time you start a game, this actually takes one and a half seconds, one and a half minutes on a multi-core machine.
+But on consecutive runs, when the driver shader cache is warm, then it's much faster and just takes about 15 seconds.
+Now we're gonna talk about particles.
+So particles are very important in Battlefield.
+It's set during World War II, so fire, smoke, and explosions are obviously important.
+And when I talk about particles, what I actually mean, technically mean, is transparent billboards.
+And billboards is just a 2D plane that's always facing the camera direction.
+To render them in ray tracing though, it's quite a basic algorithm.
+You shoot a ray in the top level acceleration structure containing all of your opaque geometry.
+Then you have a second acceleration structure containing all your particles.
+And then you shoot a ray with the same max T and you find the first intersection.
+calculate the alpha and opaque value, and from that point, you trace to the next plane, and keep accumulating the alpha and opaque value, and you repeat this process until you find no more intersections.
+Once you're done, if you have any alpha left, you simply blend with the opaque hit, right?
+The first problem with this is that they are camera aligned billboards.
+That means if you're not looking at them from the camera direction where they're directed, they're going to look really bad.
+You're going to see those billboards quite clearly when looking from a mirror or from another angle.
+We tried many things to get rid of this problem.
+One thing we tried was to always rotate the particle against the ray, so the ray would always sit at a 90 degree angle.
+The code was quite complex.
+We needed to use intersection shaders, and they are quite expensive.
+And it didn't look quite right.
+I wish I had screenshots to show this, but this was a while back.
+So we scrapped that idea anyway.
+We tried something far more simple, and that was to a pipeline code change to just simply every other particle rotated 90 degrees around the Y axis.
+It turned out to be, considering the code change and the actual result it gave, we simply decided to stick with it.
+As you can see here, it's now much more volumetric in the reflection, without costing any more extra performance, basically.
+The second issue with particles is performance.
+So we had to accumulate intersections along this ray.
+So if we shoot, for instance, one ray per pixel, in this case, we're now going to have to shoot n rays per pixel because of this loop that we introduced.
+And shooting rays is expensive, so we don't want to do that.
+So we wanted to have another solution.
+This is, oh yeah, this is how it looks.
+This is a smoke, the smoke and the fire are particles.
+And it costs about one millisecond to trace this.
+Excuse me.
+So our idea was, use the NE hit shader again.
+It's kind of the same thing, you shoot a ray, and for every possible intersection point, you execute a shader.
+So basically, every particle along the ray.
+The only difference though, between this and a loop, is that this any hit shader thing is executed out of order.
+The order is undefined in which the any hit shaders are executed.
+So inspired by this paper, we made up some weighted, blended, order-independent transparency technique based on alpha value, luminance, and the RGB of the particles.
+So we use this because we want to enhance fire and explosive things, and not let them be occluded by smoke and stuff like that.
+Just keep in mind if you try this, use this flag because any hit shaders may be executed more than once.
+It's quite not intuitive, but apparently that's an optimization they do in the driver.
+So the result from doing this is that it's much faster and it looks practically the same.
+It's only if you look very closely that you can see that since we gave more weights to the fiery and bright particles that the smoke, yeah, it's slightly incorrect, basically.
+But considering the speed-up, we are very happy with this approach.
+And that's it for our presentation.
+Thank you for listening, and I think we have time for questions.
+Hi, with any hit shader you just talked about then, do you take all of the hits or do you limit it to a certain number?
+We take all of the hits.
+All of them, very cool.
+So I was really impressed by the patch that you released that doubled the performance.
+So were all the optimizations that you talked about for ship or were some of those in the patch that you released later?
+So which optimizations were in the patch versus the one we shipped?
+That's your question?
+Or were there additional things that you did that you didn't talk about in the patch?
+I actually don't remember exactly what we did for the patch.
+I think we did variable ray tracing for the patch.
+Variable ray tracing was added.
+What else?
+One thing I forgot to mention was that...
+Alpha tested trees were quite expensive.
+And one thing we did for the patch was to add a load bias to all the trees so that they were always rendered at the lower level of detail, which made them a bit cheaper.
+The screen space tracing was also added in that patch.
+It didn't exist before.
+Also, there's a trivial optimization to that that we didn't ship at all yet.
+After the screen space trace, about 40% of your arrays are gone, but we forgot to kind of get rid of those, so our actual trace ran at like 60% occupancy.
+It still does.
+So we tried it out locally, and this gives another millisecond almost of performance back.
+So...
+And that's just a very silly omission.
+Great job, guys. Thanks a lot.
+Hi, thank you for very impressive presentation.
+I still don't understand why every company uses their own denoiser, because NVIDIA advertises their machine learning denoiser, why it's...
+Every stick is used every time.
+It's one question, and the second question...
+Have you tried to ray trace an object with high overdraw like trees and do not use alpha testing and trace the rays and if the rays is blocked by trees you stop the ray?
+And another thing for particles, if you have more denser particles, also the benefits of ray tracing is that ray stops in the dense particles and you shouldn't draw all particles.
+It's like a perfect occlusion.
+So have you tried this?
+So the first question was why we didn't use the NVIDIA denoiser.
+I don't think we actually tried it, but it was not as completed at the time when we started this work.
+So this is from November 2017.
+I know NVIDIA had improved their denoiser several times.
+But I mean, we started this work before the machine learning GPUs were out.
+So that is probably one of the reasons we didn't use them.
+And then the second question was, I didn't get the alpha test the tree part.
+Uh, yeah, yeah.
+That, uh, tree scene, if you have a lot of trees, you have a lot of overdraw.
+Yep.
+So it's maybe better use ray tracing to...
+So, our trees are...
+...stop overdraw.
+The unfortunate thing is trees are our biggest problem in ray tracing.
+No matter what we do, they're by far the slowest thing to trace, and they're much worse than on rasterizer.
+And we're, like if you have any ideas how to ray trace trees efficiently, we're very happy to hear that.
+We've asked a lot of very smart people, no one has come up with a good answer yet.
+Can choose between geometry and alpha testing and both is kind of crap.
+So.
+Just make games without trees if you want to do ray tracing.
+Yeah, and the same is for particles, because particles have effects, have heavier draw, maybe 10 times, 50 times.
+Particles weren't as bad for us, because for particles, we can use any hit, which means we don't like, we don't like go out of the tracing part.
+Like we just get all the samples and we can shade them.
+For the bad part about alpha testing is you basically, so you want to stop when you hit the actual intersection.
+You have to like evaluate the shader over and over again.
+So we didn't have as much performance issues tracing actual transparencies.
+Compared to a rasterizer, transparencies are not as bad as alpha testing.
+Alpha testing is much worse.
+OK.
+Thank you.
+Yeah.
+If there's no more questions, then thanks everyone again.
+Thanks.
+For coming.

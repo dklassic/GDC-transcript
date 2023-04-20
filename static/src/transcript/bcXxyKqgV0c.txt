@@ -1,0 +1,332 @@
+Hello, everyone. My name is David, and I'm going to talk to you about game server performance on The Division 2.
+A little bit of info about me.
+I've worked at Massive for about 12 years now, on a bunch of different games that you can see here, from World in Conflict to The Division 2, most recently.
+I've had a couple of different roles, but mainly in gameplay and AI.
+But the last couple of years have really been focusing on server performance, both the workflows that we employ on the team and the optimization parts themselves.
+So the contents of today's presentation will be focused around how we maintain a large player base on our servers.
+And I'll be going through this in three main parts.
+One is the code architecture that's required to maintain this.
+And the second part will be about the tools and processes that we have to be able to debug performance problems and monitor performance over time. And the third part will be some examples of problems that we ran into and the solutions that we found. And then we'll round off with some conclusions and takeaways as well. So let's start with a video to show you a little bit of the game and what it's basically about.
+...reports that the peacekeepers are trying to take a Rikers control point.
+So there you go.
+The Division 2 is a third-person shooter, as you can see.
+It has a typical client-server architecture, and it has an authoritative server.
+So we use the server to validate all kinds of player actions, like shooting and movement, using animations, physics, and mav mesh.
+The servers are fairly large scale.
+It's about 1,000 players per server.
+And on that kind of server, we have around 20,000 NPCs at any given time.
+It runs at 20 FPS, except in some dedicated PvP modes where we run at 30 FPS.
+So we took a decision early on to maximize the number of players that we have on any given server.
+And this helps us in a couple of ways.
+One of them is that we wanted this kind of seamless transitions between your own personal part of the world into the more social spaces, like the dark zone and the hubs, where you can meet other players.
+And having a lot of players in that case also helps us populate those areas in a good way so that whenever you go into a dark zone, for example, it's usually filled up with people or should be most of the time.
+And lastly, it also helps us on the hardware side because we don't really have to do any streaming from disk once we've started up the server.
+So what does the game server really do if we're focusing specifically on the server?
+Well the server updates worlds and the worlds have a bunch of stuff in them like all the AI and all the players and all the different kinds of systems like the mission script system and the skill script systems which are used to implement things like player skills and so on.
+So each world is updated once per frame, and runs through updates of all those systems.
+And each single update is also single threaded.
+So each world update is single threaded, and it doesn't have any cross references to other worlds during the updates.
+And since we have at least one world per player, this means we have a thousand worlds or more at any given time.
+So this makes it a really good candidate for sort of parallelizing process.
+So let's take a look at the frame structure.
+The way we structure the frame is that in the beginning of the frame, we have this small non-parallelized segment.
+And after that, we have tried to parallelize world updates as much as we can, basically.
+And then at the end of the frame, we have a small non-parallelized segment again.
+So we have two types of tasks, mainly what we call short tasks and long tasks.
+And the short tasks are what we use to update the worlds.
+They run on high priority threads.
+The long tasks are used to update more background kind of data like caching save game data to disk and instancing nav meshes and so on.
+And also deleting worlds if a player leaves the server and creating new worlds when a player joins the server.
+We're looking at this, you can see here that in the middle we have short tasks doing all these world updates.
+And we really want to parallelize this as much as possible to get the most performance out of the system.
+So how do we distribute this work on a typical machine?
+On a 40-core server, we would use perhaps one or two cores reserved for the operating system.
+And the remaining 38 cores would be available to all threads.
+So we don't use any thread affinities to set any limitations here.
+We just let the scheduler do the work for us.
+And on such a 40 core machine, we would spawn 36 short task threads, which take care of this world updates that I mentioned before.
+And this leaves us with about two cores worth of CPU to run long tasks as well.
+So that should give you a rough idea of how we do the CPU work, basically.
+So let's take a look at the actual tools and the pipeline we use for this.
+So on a high level, we want programmers to always have all kinds of performance data available to them for debugging server performance issues.
+The data generation, however, in collection can vary a little bit with context.
+So for example, if it's the live environment, or if it's the production environment.
+And this is something we're looking into fixing further.
+So Björn Törnqvist is also going to do a talk here at GDC about unifying this, we always have the same kind of environment, both in development and when we go live.
+So this can be further improved.
+But at least for Division 2, we made sure that all the data is always available for debugging server performance issues.
+So let's start with a tool we call Grafana.
+This is basically a graph viewer on top of a database.
+And what we do on the game server is that we send… data every frame from the game server to this database.
+And due to its high-level nature, this becomes the point of entry for most investigations into performance issues.
+We keep tracking this for all servers at all times as well.
+So this data is basically always available for programmers to look at.
+The second tool we're going to talk a bit about is the Snowdrop Profiler.
+The Snowdrop Profiler basically has two parts.
+It has the runtime component, which constantly records profiler events and performance data, and it has a UI part, which you can see here in the picture.
+And the UI part can be used either directly live as we are debugging a running executable or debugging the process for performance, or it can be used as a offline tool where you load up old performance data that you've saved to disk in some previous run.
+We use it for both cases, but it's quite nice to have that sort of live debug ability.
+If you want to tweak some values, for example, while you're running, you can tweak a little bit and look immediately and see if this had any effect on performance.
+You don't have to restart or save something to disk and then load it up in an external viewer, for example.
+And what you see here in the profiler UI is basically a single game frame in our internal profiler.
+These colors represent the different game systems.
+So you have the green for pathfinding, for example, and you have the blue for...
+AI updates in general, and you have the pink here is agent updates.
+And just to break this down in terms of what we talked about before with the frame structure, this pink part here in the beginning, the begin frame, you can see that it's very small and needs to be very small so that we because we can't run anything else in parallel with that, at least not world updates.
+And then you can see I've marked here as well, the different worlds and how they are sort of updated one by one on each on each short task.
+So how do we use this in a day to day?
+Well, every day we have automated bot tests running on the latest builds.
+And the bots are very lightweight AI agents.
+And they try to replicate behaviors that the players have as closely as possible.
+Not necessarily from a functionality standpoint, but at least from a performance standpoint.
+So we really want to make sure that they are similar to players in terms of the server load that they have.
+And this is something we verified during production by having QC tests, directed QC tests, for example, that would, so we would test with a hundred bots and then a hundred QC players and make sure that the server load was roughly the same.
+The bots themselves are part of the game solution, and this really helps us implement additional functionality into the bots.
+It's a small side note, but having that, make sure we can use server code and client code and data directly in the server bots.
+And it's very quick to iterate over features using the bots.
+The main point here is that we use the bots to fully load test our target hardware every day.
+So we run a thousand of these bots on the actual hardware that we're shipping the server on every day.
+Each test generates a report, and we get links to Grafana that I mentioned before.
+There's also a link to some binary profiler data that was output during the test if there was any issues.
+And we get links to crash reports and so on as well.
+So some source code coming up.
+It's been heavily modified just to make it readable and understandable here.
+So...
+So, but I hope it's the concept comes across anyway.
+So the profiler data export that I mentioned, the sort of binary profiler data that's available, we output that from the server from a couple of different cases.
+One of them, the most simple one is that when the frame time exceeds the target frame time, in our case, 50 milliseconds on a regular server.
+The other one is that an individual system has actually gone over its own budget.
+So each one that each system has its own CPU budgets like AI system, for example, and the dark zone and so on.
+And if either of those go over their own budgets, we also save profiler data to disk.
+The third one is when an individual scope actually takes longer than anticipated.
+In this case, we create, first of all, a regular profiler event, but then we also create this timer object that you can see here, which tracks if the scope actually took too long and does a profiler save in that case.
+The data export itself is nearly lock free, and it runs on a low priority thread in the background, so it has almost no effect on frame rate whatsoever, and can basically be running constantly during normal operation of the server.
+It allocates memory on the first use, which is not super relevant for the server, but since this is available for the Xbox and the PS4 as well, for example, we need to make sure that we don't use this memory, if we don't allocate this memory, if we're not going to use it.
+And you can see here as well that in this task, which is actually the code that is running on the low priority thread, we call into the runtime of the profiler to save its state.
+And the way we do that without interrupting the execution of the process or the threads is that the profiler at any given time has a number of used blocks that contain profiler data that has been recorded.
+And it has a number of free blocks as well available for use.
+And when a specific thread, so this is organized per thread.
+So each row here is per thread performance data, basically profiler data.
+When a thread fills up the current block, it's going to the profiler grabs a free block and puts it in the front and starts filling up this block again.
+And then once per frame, at the end of the frame, we do a sort of a cleanup where we go through all of the oldest memory blocks here in use by the profiler and move them to the free blocks pool.
+And what happens when we do a save is that we're going to lock this per thread data one by one.
+and copy it basically.
+And if that thread is currently recording events, which is usually the case, then we simply take a new block from the free blocks and put it in the front and continue to record data.
+This way execution can continue on the thread without, even though we're currently saving down the state as well.
+There is one edge case here where we actually could run out the free blocks.
+And in that case, the current thread that is trying to record something actually has to grab the oldest memory block for that thread and move it to the front.
+And if that happens during a save, then we actually end up locking execution of that thread.
+And that is something we really want to avoid.
+So we need to make sure we keep the number of free blocks available needs to be big enough to never run into that example.
+Okay, so.
+We store, we save the internal state of the profiler and we store it to disk.
+We store it to disk based on the source trigger that did the save in the code.
+This makes it easy to find for the programmer who's looking for something, for example, the dark zone in this example, debugging performance issues in the dark zone.
+The data will also always be there because we don't allow sort of these different game systems to overwrite each other's data.
+They don't share a single disk budget, for example.
+They have individual disk budgets.
+Using Grafana from code as a programmer is also very simple.
+Here you can see, for example, we have two, a couple of simple one-liners to report load factor and update rates.
+And this is something we really encourage people to do as well.
+For programmers who write the system, if they can think of any type of value in that system that they would like to track over time to be able to compare it with performance, for example, they are encouraged to do so.
+And this helps with, at the early stage of most investigations, to narrow down what the problem could be.
+Here's an example of that, where we see, for example, we have all the different...
+The numbers of AI in each particular load level, for example, and the number of raycasts we've done, and the number of state syncers for interactions, which have this sort of runtime data, runtime state of interactions in the world.
+Just briefly, going into how it works on the live environment is very similar.
+We still have Grafana, and we constantly monitor all of our live game servers.
+And if we see an issue like the spike here in this case, instead of going to Windows Explorer, we just go to Google buckets and it's structured in the same way.
+So you'll find your dark zone data there, for example, if that was the problem you were having.
+And then you simply download and open the profiler data and can start debugging.
+So that's it for the tools and process side of things.
+Now I'm going to go into a couple of examples of things, of issues we had during development and the solutions we found.
+The first one was that at some point we were seeing that some short task threads were not running for the entire frame, basically.
+So this means that several cores are not really updating worlds for that entire frame.
+And this is with the sort of performance model we have, that means that we've lost CPU work that was supposed to go into updating worlds, right?
+So the first question is, do they not have work?
+Is there nothing to do?
+But looking at what we do, we spawn a number of tasks equal to the number of threads.
+And then what each of those does is to grab a world from a global list, update that world, and then grab the next one.
+So there's, on that global list, like these different tasks that will do that until that global list is done and we've updated all the worlds.
+So there's definitely work to do.
+You can also see here in the above section of the code that we list we sort the world models based on their estimated costs, the estimated update costs.
+And the reason we do that is to avoid frame time spikes.
+So looking at this example here, which you saw before as well, we actually have one world that's taking a very long time to update at the end of the frame.
+And this delays the entire frame execution or the entire end of the frame.
+And it also creates this pocket of low CPU utilization here at the end, which is also really bad.
+So the solution here is to make sure that the system understands that this world will be expensive to update and then it will be sorted and be updated at the beginning of the frame instead.
+But back to the issue.
+So each task and thread, there's definitely work to do. So next we enable the context switch data in the profiler.
+And this uses the Windows event tracing API.
+And we can see clearly that three threads are never switched in during the entire frame.
+And then two of them are switched in after half the frame.
+At the same time, we have five long task threads running.
+So long tasks are doing something.
+At the same time, short tasks are not doing anything.
+And the only conclusion here is that the low priority threads, they get to run while the high priority threads are waiting.
+And the explanation is that for Windows Server 2016, at least the highest priority guarantee is really only valid within a single core group.
+And core groups have up to four cores in them.
+And each core group only has its own ready queue of threads waiting to run.
+So I've given here's an example in the picture where you can see that.
+Core 7, for example, is running a, is executing a low priority thread while there's a high priority thread waiting in on another core group.
+And core group 2 is not really gonna steal any work from core group 1 here until the ready queue for core group 2 is empty.
+So this can go on for quite some time.
+And with 48 cores, we're gonna have 12 of these groups.
+So we can expect this pattern to happen.
+And you should expect that using this schedule.
+We made one attempt to sort of get around this.
+Using the function called setThreadIdealProcessor, we tried to map each short task thread onto its own core, basically, without using affinities and making it a hard requirement.
+But this didn't have any real effect.
+And it mentions that in the documentation as well, that this is more of a hint to the scheduler than anything else.
+So generally, oversubscribing to the CPU is good for throughput.
+You get a lot, you get the most work done that way usually.
+But in our case, we could spot the 5 to 10% perceived performance drop because the threads we want to run are not running.
+But it made us rethink the role of priorities a little bit because we were not sure how to do that.
+So we decided to go with the standard Even if we managed to succeed and enforce that short tasks are the only ones running at this time, or at least all short tasks are running, then you would have long tasks that need to run, wouldn't be running anymore instead.
+So it could lead to some sort of starvation in those systems.
+And this is something we saw as well in development.
+So I'm going to go into some examples around that.
+Yeah, so we spotted basically overnight, this server was crashing.
+we ran out of memory.
+And looking in Grafana, we could see that this was connected, probably connected to a list of pending deletions being built up over time.
+So what this is, is that when a player leaves the world, we take their world, when a player leaves the server, we take their world and put it in a delete queue.
+And then we have background tasks running to delete that over time.
+But they weren't able to keep up because they were starved for CPU.
+So long tasks, they are, long task threads are low priority, but it's crucial that they run within a given time.
+Remember that they are doing things like caching save game data and instancing nav mesh around the player and deleting worlds in this case, of course.
+The Windows scheduler isn't really built to handle this, and this is by design, especially under high amounts of pressure.
+And in fact, the better CPU utilization means that we have a larger risk of running into this issue.
+So the better we are at packing sort of the main part of the frame with world updates in a perfectly nice, parallelized way, we run into this issue instead.
+The solution for us was to add an internal wrapper around long tasks on the server.
+And what it does is basically it adds an estimated cost to a global value whenever we start a new long task.
+And as soon as the long task is done, we remove that estimated cost from that global value again.
+And this gives us a nice sort of, yeah, estimated cost of the total amount of work that is currently queued up to be done or being done on long tasks.
+And the way we use this is that if it goes above a certain threshold, we increase something called a starvation level.
+And if it goes below another threshold, we reduce the starvation level again.
+And then when we spawn tasks to update the worlds, we basically, instead of just spawning a number of tasks equal to the number of threads, we also subtract the starvation level.
+We don't want to change the number of threads we're actually running, we just spawn less tasks.
+So those some of those short task threads are just going to be idle during the frame.
+Here you can see how that works in practice, looking in Grafana.
+So you can see as.
+As work here in the top graph, estimated work for long tasks starts building up.
+In the middle graph, you can see that we are starting to sort of yield short tasks in order to allow more CPU to be used for the long tasks instead.
+And eventually, we can see that the effect of that is that quite quickly, the amount of long task work drops off again.
+And in the bottom here, you can see this is from a workstation, so it has a slightly more exaggerated effect here, but you can see that frame time goes up a little bit when we yield short tasks to long tasks.
+But this is expected, and that's the sort of trade-off you want instead of complete starvation for some systems.
+Another example we had was with regards to memory allocation.
+So overnight, we were spotting a lot of contention in our graphs.
+These graphs show aggregated execution time for every system per frame basically.
+So during a single frame here, we had 306 milliseconds spent in contention, which is an enormous amount of waste, of course.
+And again, this data is available for basically all game servers all the time.
+Just a side note on this is that the data here is per frame, but the resolution sample in Grafana is one second.
+And the reason I bring this up is that if you look into this kind of thing, be very careful with data compression, how it's handled in every step of the way.
+So in the game server executable itself, we have a report interval of one second and there are different ways to deal with that.
+And what we did was to make sure we preserve the maximum value through all of those steps. So if there is any, at any point on any frame, there is a spike, we will, we made sure that it will reach Grafana. We will see it in the graphs.
+But yeah, if you use the wrong kind of averaging methods on any of those steps in the middle, for example, you can actually squeeze the data and miss a lot of important information.
+Back to the issue, contention.
+Here's what the profiler data looked like when we downloaded the file for it.
+So this, what we're looking at here is a full game frame of about 74 milliseconds in this case, so too long.
+And one of the short tasks is stuck in contention for 42 milliseconds, which is a very long time.
+What's worse is that it's waiting for a long task to actually release the mutex.
+And that's so it's a priority inversion issue.
+It's the worst, we don't know when this mutex will actually be available again, especially under heavy load.
+And what it's hitting is a.
+global mutex inside the allocation system. So all allocations above 256 kilobytes hit that mutex.
+So here's how you can see sort of how the allocator looked. We have different heaps for different sizes of allocations and this heap system is used basically for all game systems.
+The smaller sized heaps also had some locks in them, but we had less contention here, but it was still a bit problematic.
+But you can see here if I go back in the page heap allocator here, you can see the sort of the main global mutex that we were hitting.
+So just to give an example of what kind of allocations we were having that were 256K, when we create a new AI, a new NPC in the world, we give them a behavior.
+And these are generally pooled and reused, so we don't create new ones.
+But there is a small part of the runtime data that is actually reallocated on every new NPC that is created.
+And since behavior graphs are about 10,000 nodes, and many of them have some small runtime component, this actually ended up being a lot of data.
+And the reason that we have to have to reallocate it is that we use these very highly compressed data structures inside the node graph system.
+So it was always, even on the...
+It was always reallocating the memory, basically.
+We managed to fix this eventually by optimizing just the size of the runtime data.
+So we got below 256 kilobytes and then it was less of a contingent problem.
+Another example we had that ran into this large allocation was NavMesh sector deletion.
+In some specific cases when we were going to delete the damaged sector. Usually that's done on a background thread, but in some specific cases when the player had run out of range before the the sector was fully streamed in for example we would actually end up deleting ending up with the last reference to it in the game code and we would delete it in the short tasks.
+This was also fixed. This was basically a bug so we just made sure that during the deletion we can detect that it's about to get orphaned and then we would spawn a a specific short or long task just to do that deletion instead, making sure that it runs on a background thread.
+So both of these examples were fixed to avoid doing these big allocations in the world updates.
+But we weren't able to fix all of these cases at the time.
+This was a bit later in production, we didn't have that much time left, and some of the systems were quite complex to try to refactor.
+So we had to take a look at the memory system.
+So the first step was to refactor the heap to be lock-free.
+Remove the mute access, make sure there is no locks left in there.
+But we could still see that, as you can see here in the picture as well, the blue highlighted parts, memory allocations were still taking a lot of time.
+And there was some lock still in effect, because as you can see in the second frame there, when everything, when all the allocations are happening at the same time, we would see this prolonged effect basically.
+So some kind of lock was still in effect.
+It turns out Windows Server 2016 had an internal global lock in the soft page fault implementation.
+And we were lucky to detect this at allocation time by having memory stamping in our debug builds.
+So we would see this as soon as you allocate memory.
+But if we were running this on one of our release builds that don't stamp memory, we would see this whenever a specific page was touched the first time by the application.
+It would have been a bit trickier to find it.
+So the solution was to have the lock free heap and combine it with a commit cache.
+So what that means is once we commit memory from the operating systems, we from the operating system, we basically don't decommit it again.
+We keep it in fixed size buckets, and buckets based on the allocation size.
+And these are global, they're shared by all threads.
+So we have a lock free access pattern to them.
+And we still run into this Windows lock the first time we touch a page.
+But since we don't decommit the page again, we basically only do that on startup and at the very beginning of execution and then all those occurrences taper off very quickly.
+So looking a bit at the new implementation, the new page heap allocation doesn't have a mutex anymore.
+And each bucket entry commits just as many pages as it needs for that allocation. It doesn't decommit them again.
+Here's a look as well at the bucket allocation implementation, if you're interested in that. I won't go through it in detail here.
+It took some time to find a good solution to this problem.
+And the main reason was that the code here is shared between all Snowdrop supported platforms.
+So the PS4, the Xbox One, all these types of clients and the PC server as well.
+And this needs to run on all of them.
+And we can't really introduce any regression on any of these other platforms when we do this rewrite.
+There's not a lot of room for server specific changes here.
+And the second thing to note really is that it may seem obvious that it's bad to have a mutex.
+on a global level in the allocator, but this was never visible on a 12-core workstation, basically, on the PCs.
+It was only started appearing and actually quite significant on 40 cores or more.
+Next example is a crash that we had in open beta.
+So basically, on the first day of our open beta, we had a crash.
+hundreds of crashes, I think. Certainly, game servers were crashing every few minutes.
+It was affecting thousands of players and we didn't get any crash dumps or any call stacks whatsoever. There was no information. Machines just went down and then automatically restarted. So we drew the conclusion that we have to catch this with a debugger attached.
+So we had to go and talk to the infrastructure team and sort of convince them to deploy a debugger, WinDBG, to a live game server machine and give us remote access.
+And we did that, and we attached the debugger to the game server process.
+And we immediately saw that every single player was off the server.
+So it turns out that WinDBG breaks by default when you attach to a process.
+And goodbye to those 1,000 players, basically.
+So we added the G flag to WinDBG, which makes it not break on attaching by default.
+And we sat four programmers around the laptop, remoting into this game server machine and waiting.
+It took a couple of hours, but we got the crash eventually.
+Turns out one of the UDP channels was deleting a linked list by recursion, basically.
+So the stack was running out of memory.
+And the problem here was that the crash handler was dependent on stack allocation itself.
+So there's a couple of solutions to this.
+You can either use a set threads that guarantee call to make sure that you have some space left when you get this problem and then use the crash handler can use that, or you can just use static memory instead, either thread local or locked with some sort of mechanism.
+Okay, time for some conclusions.
+The first one is that we managed to reach our performance targets fully.
+And this was due to the sort of heavy-duty testing that we did throughout the project, always running on the target hardware, always testing with a full server every day in production.
+We had very few performance issues actually slip past release.
+This was...
+And the ones that we actually had, they were fixed easily, found and fixed very easily, thanks to all of this data being available, like I said, in live as well.
+You can just go in and look at any server and see if it has any problems.
+And then you can find the binary profiler data for that specific server if you need to look into something specific.
+The third one is that the team and the management were always aware of the performance work that we had to do before shipping.
+So this relieved a lot of stress, I think, from the team and made sure that we knew the work that was coming up.
+We still did most of the optimizations quite late, but we knew exactly what we had to do.
+The next one is that this actually helped us find a lot of rare server crashes.
+So just looking at an example, if it takes a single dev tester about five hours to find a single bug or like a rare crash, and using a full server with bots, we can find it usually within 20 seconds.
+That's sort of the scale of how much faster we can find it.
+One thing that we need to improve, I think, is our tools for regression testing.
+So today, what most programmers have to do, if they make a change and they want to test if their change has any effect on performance, they have to test with and without their changes a couple of times.
+I want to improve this so we have a more kind of deterministic test.
+And should generally it should be available as some sort of pre-flight mechanism as well.
+So you just click a button somewhere and.
+your change list gets sent off and it gets tested by bots in a good deterministic way.
+And then you get a report back which systems were affected by the change, how are they affected and so on.
+So takeaways for you.
+My primary tip is to make sure you test your absolute worst cases continuously in development.
+This helped us find basically all of the examples that I've shown you before.
+with the thread priority issue and the memory allocation issue.
+We found them in development early on using bots because we were testing on target hardware with the max amount of players.
+This is really key.
+And the second one is to have some people or at least one person dedicated solely to looking at performance.
+This also helps because that means that that person will continuously also can improve the processes for the other programmers and how they work with this.
+The third one is to plan, implement and test your debugging pipeline for the live environment early on.
+This is sort of self-explanatory why this is a good idea, but it really helped us be very reactive once we went live and immediately analyze and fix some performance issues.
+But again, this is something that preferably you would want to have the same debugging pipeline in development.
+and when after you go live and this again is something that that Björn will talk talk about here at the GDC like I mentioned before.
+And that's all I had for today. Thank you very much for listening everyone and if you have any questions or any any comments please don't hesitate to to contact me on the email address you can see here. Thank you.

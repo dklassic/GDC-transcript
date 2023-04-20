@@ -1,0 +1,449 @@
+So my name is Ka-Chen.
+I'm a technique architect at Ubisoft.
+My job is to go to different projects and help them to build new technologies or improve the games.
+Last year, I had the opportunity to work on Far Cry 4 and developed a technique called adaptive virtual textures.
+With this technique, we are able to render thousands of decals on terrain surfaces in less than one millisecond.
+and achieves 10 pixels per centimeter resolution.
+It gives our artists the freedom to place as many details as they want and achieves great result in FabFly 4.
+So the content of the talk is divided into five parts.
+First, I will give an overview of virtual textures technique.
+Then I'll talk about Far Cry 4, terrain rendering.
+Our first approach, implementing a procedural virtual textures.
+The problem with that, with Far Cry 4, and why we would like to develop adaptive virtual textures.
+After that, I'll talk about what this technique is, how it works, and why we call it adaptive virtual textures.
+Then I'll talk about the challenges we faced during the implementation of the virtual textures.
+and how we solve them.
+At last, I will show some screenshots from the game, talk about the performance, memory, and give a summary.
+Virtual textures is not a new technique.
+It was first mentioned by John Carmack as megatextures from ID software.
+Megatextures emulates a very large map of textures.
+This texture is too large to fit into the memory, so it is divided into multiple equal-sized pages.
+For example, the page size could be 256 by 256, or 128 by 128.
+We allocate a smaller size physical texture cache in the video memory to cache the resident virtual texture pages.
+We also use an indirection texture to map the relationship between the virtual texture page and the physical texture page.
+The content of this indirection texture is used to translate the virtual texture UV address into physical texture address.
+The virtual textures are used in some games.
+For example, mega textures.
+in read and procedural virtual textures in Battlefield 3.
+Mega Textures pre-bakes all the textures used by the game into a very large virtual texture, and it is stored on the disk.
+The rendering engine then decides which page are needed, depending on where the camera is looking at.
+It then loads the required page from the disk and updates the page table.
+This way, the final pixel shaders know the location of each virtual page inside the physical texture cache.
+On GDC 2012, DICE presented a new technique called procedural virtual textures.
+It is a bit different than the mega textures we talked about, because it neither bakes the textures into the virtual texture in the tool, nor stream them from the hard drive.
+Instead, it displays the terrain rendering into virtual textures at runtime, and uses this as a cache for future frames rendering.
+By doing that, it can save the expensive rendering cost of terrain material blending once they are cached in the physical texture and improve the terrain rendering performance.
+Since the missing virtual texture page are rendered by a graphics engine into virtual texture, UV space.
+The prime of the physical texture cache is much faster comparing to loading them from the disk.
+So there is much less visual popping up comparing to standard virtual textures.
+Our adaptive virtual textures is actually based on this technique.
+Now I will explain the basic Factory 4 terrain rendering pipeline and our visual target.
+I will also explain our first approach using procedural virtual textures.
+Far Cry 4 is a cross-platform game we developed on both current generation and next generation.
+It has a very large world, as 10 by 10 kilometer size.
+The terrain is divided into two parts, far distance terrain and near distance terrain.
+We render far distant terrain by offline baked geometry and textures.
+We call this Vista terrain.
+The near distant terrain geometry is generated from a high-res height map.
+The rendering is done by blending four detailed material layers using a mask texture.
+We also support float splines and decals to add unique details on terrain surfaces.
+Our visual target is as high as 10 pixels per centimeter, so that the terrain surfaces are displayed with fine details when the camera is very close.
+It is worth mentioning that we would like to apply our virtual textures on near distance terrain only.
+To distinguish the next generation platforms from the current generation, we would like to add a massive number of details.
+which is procedurally generated into the terrain to enrich the environment.
+I'll show a difference between without and with procedural generated decals.
+This is without, and this is with.
+Another example showing the difference, and this is without.
+This is with the procedural decals.
+We would like to achieve a unique and diversified terrain looking by adding decals with leaves, pebbles, sands, cracks, and trees, for example.
+A simple deferred decals rendering would be too expensive to render decals in this quantity and quality.
+So, we are thinking about baking these decals into procedural virtual textures as an optimization.
+Our first approach is implementing procedural virtual textures.
+We allocate a 512K by 512K virtual texture, and the page size is 256 by 256.
+We use an indirection texture to map from the virtual texture to physical texture.
+The size is 2K.
+Our physical texture size is configurable, and we set it as 9K by 9K.
+We have three of them.
+They are Aerobito, NormalMap, and Specular.
+The information for required virtual pages are computed during the GBuffer rendering pass.
+For every pixel on the screen, we output the page index and the mipmap level of the virtual texture into a full screen render target.
+We call this Page ID Buffer.
+We will explain the format for this buffer later in the talk.
+We analyze this page ID buffer on CPU to see which pages are needed at which bitmap level.
+We then allocate physical texture pages and render both terrain material and the decals into this page.
+Finally, we update the indirection texture to be able to translate from the virtual address into physical address.
+These pages are cached in our physical texture caches, according to our least recent used algorithm.
+Once in the cache, the terrain shader could just fetch from the virtual textures, and we completely remove the rendering cost of terrain materials and decals in the future.
+And with conventional virtual textures, we use an indirection texture to map from the virtual UV into physical UV.
+Each entry of this in-direction texture represents a mapping from the virtual address into physical address.
+The content of this texture is used to generate the final physical memory location for the virtual texture page.
+The format of this texture is 32-inch bit with the first 16-bit representing the final physical texture page offset.
+and eight is representing the MIPMAP level of this page.
+The last bit is for debug only.
+So procedural virtual textures works quite well to cache the rendering result of the terrain and the decals as an optimization approach.
+But there's a big problem for the Far Cry 4.
+Since the standard virtual textures applies the virtual texture onto the whole world uniformly.
+With a 512K by 512K virtual texture on a 10 by 10 kilometer world, this means the texture resolution is only 0.5 texels per centimeter.
+This is too low.
+To achieve a 10 texels per centimeter resolution, it would require 10 million by 10 million sized virtual textures.
+This is definitely over the limit of the next generation platform.
+So we need to find a better solution.
+So our goal is to develop a procedural virtual textures technique in a larger world and achieve a high texture resolution of 10 texels per centimeter.
+This seems impossible when we're applying the virtual textures uniformly onto the wood.
+But one thing in our favor is that we only need that 10 texels per centimeter resolution when the camera is very close to the terrain.
+For terrain surfaces that are a bit further away, a 5 texels per centimeter might be enough.
+And it would require even less texture resolution when the terrain surfaces are very far away from the camera.
+So the key is to find a way to apply the virtual texture non-uniformly onto the world based on the distance from the camera.
+This is how our adaptive virtual textures come into play.
+Now let's talk about adaptive virtual textures.
+It is based on procedural virtual textures.
+And it improves it by increasing the texture resolution.
+We divided our world into multiple sectors.
+Each sector is 64 by 64 meter size.
+For all near distance sectors, we will allocate a virtual image for each of them inside the virtual texture.
+A virtual image is simply a square space inside the virtual texture.
+And the size of this image increases.
+for the sectors nearer the camera and vice versa.
+This is why we call it adaptive virtual textures.
+We adapt the resolution of the virtual texture based on the distance from the camera to the sector.
+Nearest sectors are located at full resolution of 10 pixels per centimeter.
+So we allocate 64 by 64K virtual image.
+Further sectors allocate less, like 32K by 32K, or 16K by 16K.
+The minimum size is 1K by 1K.
+We display our allocation of the virtual image inside the virtual texture as an overlay on the game screen, marked as the red square.
+Inside the virtual textures, the colored square.
+here represent the allocated virtual images for all needed sensors sectors.
+Every sector saves its virtual image, UV offset, and size.
+And this information will be passed into TerrainShader to determine the page ID and the mipmap level for every pixel on the screen.
+Now let's have a deeper look at the allocation of the virtual images.
+First, we find two sectors nearest to the camera and we allocate two 64x64 sized virtual images.
+Then we found six sectors further away from the camera and we allocate six 32kx32k virtual images.
+For multiple sectors that are even further away, we allocate 16K by 16K virtual images.
+We continue this process until all the needed sectors are allocated inside our virtual texture.
+At runtime, during each frame, we calculate a target virtual image size for every sector based on its distance from the camera.
+If this size is different than the current size of the sector, we will allocate a new virtual image as the target size and remove the older one.
+Now I will play a video demonstrating the adjustment of the virtual image for all the sectors during the game.
+You will notice that when a player moves forward, some sectors are becoming closer or further to the camera so that their virtual images are adjusted dynamically by allocating a new one and remove the old one.
+Let's look at some place here.
+Here you will notice that there's like a blue virtual image is allocated with the bigger size when this sector is closer to the camera.
+Then later on, it is removed from the virtual texture because this sector is behind the camera and it moves further away from the camera.
+These two pictures show the upscaling of the virtual image when the camera moves closer to a sector.
+The virtual image size is increased from 32K to 64K to provide higher display resolution.
+And these two pictures show the downscaling of the virtual image when the camera is further away from the sector.
+the sector. The size is decreased from 64K to 32K, as higher resolution is not necessary.
+Now let's look at what happens when we upscale a virtual image from 32K to 64K.
+Our adaptive virtual textures need to be updated to reflect the changes of the virtual image and make sure the rendering is correct.
+The naive way would be render all the visible pages inside the new virtual image from scratch and update the direction texture entries for these pages.
+But this would be too slow.
+In fact, the rendering result of the terrain material blending with additional decals is already cached in our physical texture.
+We don't want to render them all over again.
+We could just shift them around by updating our in-direction capture entries and reuse the content.
+Since we are scaling the image from 32K to 64K, we realized that the MIP map in the old image are exactly the same as the MIP map when MIP lower in the new image.
+So we can accomplish most what we need to do by remapping the virtual texture so that the old MIPS from 0 to 9 becomes the new MIPS from 1 to 10.
+The 32K by 32K virtual image contains 16,000 pages, so we use a compute shader to rewrite the indirection texture.
+Note that the indirection texture contains the MIP level, so the modification needs to be a little bit more complex than the simple copy of the indirection entry.
+We now demonstrate how to update the indirection texture entries to reuse the MIP0 of the old image for MIP1 of the new image.
+For example.
+We mark the MIP0 old virtual image as red square inside the virtual texture and its related space in indirection texture.
+We also mark the new virtual image MIP1 inside the virtual texture and the indirection texture as yellow square.
+What we need to do is to remap the virtual texture so that we use the content.
+of the red square in yellow square, to yellow square.
+So let's look at the specific in direction texture entries, pointing to a page inside our physical texture as offset 3, 2, and the MIP 0.
+To reuse this content, we simply copy the page offset into a new place and shift down the MIP by 1.
+We do this for all the pages inside the MIP 1 of the new virtual image.
+For the pages in the new image from MIP2 to MIP10, the updates are very similar as what we explained for the MIP1.
+So now we have updated all the direction texture entries for MIP1 to MIP10 in our new virtual image.
+Then what about the MIP0 pages?
+This page don't exist in the old virtual image because they have higher texture resolution.
+These pages need to be rendered in the next frame.
+But in this frame, we cannot leave it like that.
+Otherwise, there will be some random color displayed on the screen, because these pages are not rendered yet into our virtual textures.
+By the nature of the MIP map, we know that four MIP0 pages correspond to one MIP1 page.
+So we will temporarily map them to corresponding lower page.
+to prevent visual popping up.
+They will be correctly updated when the pages are rendered in the next frame.
+As a result, the terrain surface will look a bit blurred in this frame, but in the next frame, it will become sharp.
+This happens very quickly during the frame, so it is generally not noticeable.
+Here we show how we duplicate the image.
+in direction entry to do a remapping.
+We simply duplicate MIP1 in direction entry into four corresponding MIP0 entry to remap the virtual texture.
+We don't shift down the MIP level in this case.
+And we will do this for all the pages inside the MIP0.
+You notice that we set the MIP map level as one in the in-direction texture entry instead of zero.
+This would tell the rendering of terrain to display a lower MIP level instead.
+The pixel shader that handles the terrain rendering uses the in-direction texture entry to calculate the final physical texture UV address.
+It will shift.
+It will scale the UV coordinate by shifted MIP level and display a lower MIP level result.
+I provided the code snippet for your reference.
+Now let's look at downscaling a virtual image from 64K to 32K.
+The process is actually the reverse of upscaling a virtual image.
+Again, we update the corresponding in-direction texture entries.
+to reuse the content of the old image.
+In this case, the MIP1 to MIP10 from the old image is the same as the MIP0 to MIP9 in the new virtual image.
+So we use a computer shader to rewrite our in-direction texture entries.
+Note that the MIPS 10 pages don't exist in the old virtual image, so we cannot remap from there.
+But in fact, that MIPS that are smaller than 64 by 64 shouldn't be utilized by our virtual texture system, because this page are very far away from the camera, and it is handled by a different rendering system, which we explained before as far distance terrain rendering.
+So in reality, we just ignore these MIPS and use a higher MIP instead.
+Now I will explain some challenges we faced during developing virtual textures and how we solved them.
+The first challenge is to reduce the memory footprint when we are outputting the virtual texture page ID during the gbuffer rendering pass.
+Our page ID buffer is 32 bits.
+The first two bits represent the page ID, and four bits for the MIP level, and four bits for the virtual image size.
+We need to keep the data minimum to reduce the memory footprint.
+footprint and bandwidth.
+We use 1 by 1 eighth read-write buffer instead of a full screen render target so that the actual memory is only 1 64th of the full render target.
+We have to set early depth stencil attribute in the shader so that any pixels filling the depth test won't be outputted into the page ID buffer.
+This is how our game scene and page ID buffer look like.
+Caching of the virtual textures can take a long time when many new pages are requested in a single frame.
+For example, when the camera is moving fast, we need to render a lot of pages.
+This happens in Far Cry 4 when the player is driving a vehicle or flying with the windsuit.
+Our solution to this problem is called distributed rendering.
+We sort required pages by their MIP map level, from low to high.
+Lower MIP map pages are rendered before higher MIP pages.
+So if the rendering cost for the adaptive virtual textures is higher than the threshold, for example, one millisecond, we will postpone the remaining high MIP pages into the next frames.
+As a result, there is a transition from blurred to sharp for terrain surfaces in several frames.
+But it happens very quickly, so it is generally not noticeable.
+Here I will show four continuous frames when we do distributed rendering.
+You will see that the frame.
+transition from blurred to sharp in full frames.
+But it really happens very quickly, so you can't see it.
+Because our adaptive virtual textures can render so many decals efficiently, our artists would like to place a massive number of decals in the game.
+But placing such amount of decals by hand is not a solution.
+So in Far Cry 4, we developed a.
+procedural content generator to place these decals automatically.
+The artist can set the rules to generate decals, like leaves, sand, stones, on the trees, and beside the bushes, with random shapes and colors.
+This really helps our artist director achieve our graphics benchmark.
+Here we show the.
+road rendering with procedurally generated decals.
+We mark the procedural decals as red squares.
+These are cracks, dirt, stones, leaves, for example.
+Another example with procedural decals.
+We place automatically the stones, leaves, sands, under trees and beside the bushes.
+And we can have thousands of them automatically attached.
+If we use a bilinear filtering for virtual textures, the image will look very blurred when you view the terrain surface from a very sharp view angle.
+So we would like to support 8x anisotropic filtering for virtual textures.
+But because of the nature of the virtual texture, the neighbor physical texture pages are not necessarily adjacent in the world space.
+So there will be a color bleeding when the textures are filtered across page border.
+To solve this problem, we add a four-textures border to our physical texture page.
+And our physical texture page size becomes 264 by 264.
+We render the page with enlarged viewport so that the border pixels are rendered with color that are adjacent in the world space.
+Doing that, we can support 8x anisotropic filtering nicely.
+If we only do anisotropic filtering with a bilinear filtering.
+We could see visible seams on terrain surfaces when there is a MIP level change in the area.
+So we need to do something better.
+We support a software tri-linear filtering for Far Cry 4 to fix the problem.
+The solution is very simple.
+We just fetch the virtual textures twice with two different MIP levels.
+and we do a linear blending between these two colors to get the final color.
+This works very well.
+Another solution is to use a hardware trilinear filtering.
+You can do this by creating a quarter-sized MIP-1 physical texture, and you update this MIP-1 physical texture cache whenever the MIP-0 physical texture cache is updated.
+So you basically keep two MIPS of the physical texture in the memory.
+But this would require 25% more memory for the physical texture cache.
+Our physical texture in Far Cry 4 use 200 megabytes in the video memory.
+So we basically save about 50 megabytes by using software virtual tri-linear filtering.
+And the performance difference between the software and the hardware approach is very small in Far Cry 4.
+Here we can see with only bilinear filtering, the image is very blurred.
+And also you can see here, there's the seams, because the image in front of that with, for example, a lower BIF map, and the image below that is with a higher BIF map.
+And anisotropic filtering makes the image quite sharp in this case, but we can still see visible seams here.
+Using trilinear filtering and anisotropic filtering has the best result.
+Now I will show some screenshots from the game and talk about the performance and the memory.
+We only support adaptive virtual textures on the next generation platforms rendered with procedurally generated decals.
+On current generation platforms like PS3 and 360, we simply disable virtual textures and procedural decals.
+Here we can see the difference between current generation platform and next generation.
+This is current generation, and this is next generation.
+This is another example showing the difference between the current generation and next generation.
+Again, another example.
+We can render a massive number of decals thanks to our adaptive virtual textures.
+And they really enrich our environment by adding a lot more variety into the game.
+We captured the rendering performance for adaptive virtual textures on PS4.
+The rendering cost for adaptive virtual textures is less than 0.2 milliseconds for a static scene.
+For dynamic scene where we need to cache a lot of virtual texture pages, the rendering cost is less than one millisecond.
+This is quite good because to render such amount of decals with a traditional deferred decals rendering, it would probably take more than 10 milliseconds.
+So our adaptive virtual textures is more than...
+10 times faster and achieve better result.
+The memory usage for adaptive virtual textures is around 220 megabytes.
+Here we have 16 megabytes for indirection texture and 200 megabytes for our physical texture.
+Our physical texture is actually compressed into GXT and the BC format to save the memory.
+And this is done in the runtime using a compute shader.
+So to summarize, procedural virtual textures is a good technique to improve the terrain rendering performance.
+adaptive virtual textures to increase the resolution of virtual textures.
+And then we can achieve a great visual result by drawing a massive number of details on Far Cry 4.
+I would like to thank the Far Cry 4 rendering team and art team for the support of the technique.
+And also GDC advisory for the review of the slides.
+I provided some reference for the virtual textures on the slide.
+And thank you very much.
+So if there's any questions, you are free to ask.
+Just stand in front of the microphone.
+Hiya, great talk.
+Just wondering whether you considered using partially resonant textures at all, whether you think that would fit with this technique?
+Yes, we evaluated the partially resonant textures during the game, and we finally didn't use that because...
+During the development of Far Cry 4, the features are not completed on all platforms, and the implementation is all different in PS4 and Xbox.
+For example, Xbox is called a tiled resource, and PS4 is more like partially rendered textures using virtual memory.
+It is good to use a software approach because we can keep the same rendering API and on cross all the platforms and it really saves a lot of effort for us and it's actually the soft approach is quite fast.
+It doesn't really slow than the hardware approach.
+Quite good, but in the future we might consider using that if because a soft a small problem of the software Software approach is that you have to add a full textual border on the physical texture page that we explain for the Filtering so we you might save some memory by using a hardware approach Thanks One question, do you use any kind of parallax occlusion mapping or any kind of parallax mapping on a virtual, on a terrain?
+I beg pardon?
+Do you use any kind of parallax mapping?
+Okay, okay, okay.
+So you're asking any, if I use any kind of parallax mappings for the terrain?
+We have some kind of parallax decals for the terrain, but for these decals we don't render with virtual textures.
+Because this is depending on the view angle, so we cannot really bake them.
+But in the future, we are thinking about baking a height map into virtual textures.
+So you can have kind of like, tessellation, you achieve hardware tessellations with virtual textures.
+So you save diffuse, normal map, and specular, and also 8-bit height map.
+This will be compressed into BC format.
+So if you use hardware tessellation shader, you can fetch this height map in the tessellation sheet, and then you can get that directly from the virtual texture instead of...
+rendering these decals with parallax.
+So it's using a tessellation shield instead.
+Or you can do whatever you want.
+Hi.
+Great talk, thanks.
+I was wondering if you are allocating the virtual texture pages dynamically.
+Do I see it correct that it gets a two-time indirect fetch in the pixel shader?
+Can you repeat that?
+If the whole terrain is mapped on one virtual texture, the UV coordinates of the terrain are pretty obvious.
+But if you are allocating dynamic tiles, it's two times indirection?
+So are you asking if I allocate this for...
+virtual image dynamically? Yes, we do. Like we said, we have to dynamically adjust the virtual image size depending on the adjustment from the camera. So when we need to change the size of the virtual image, we have to remove the old virtual image and create a new one. So this is really dynamically allocating.
+So one thing I didn't talk about that is that we have kind of the allocation system.
+So you can just standardly remove the older one and have the new one.
+But it's kind of like a quadtree style.
+So there's not much fragmentations when you are looking at a new one and remove the new one.
+So it's always like a land on the power tool.
+So that's it.
+Yes, I had a question.
+Concerning your physical texture, I was wondering if you had any issues with fragmentation on that texture, and also if you had any issues with thrashing your texture cache.
+So you're asking if I have fragmentation for the physical texture.
+And if I have some trash, you mean the physical texture is full?
+So in the physical texture as you're allocating bigger and smaller textures into it, did you run into any issues where your fragmentation was filling it up bigger than potentially it could hold?
+We don't have fragmentation issues because we allocate the same size.
+Every page is 264 by 264.
+So we don't have any fragmentation issues.
+But we do have some kind of like, yeah, you, the texture, physical texture cache could be full, right?
+Because you are rendering into physical texture all the time.
+So, but we use, like I said, we use a least recently used algorithm.
+So the least used physical texture pages will be swept out automatically, and we render with a new, with a new rendering into this physical texture.
+So also, we set the size of our physical texture as 9K by 9K.
+So we can adjust this size.
+So we find a good spot for the correct size for our physical texture.
+So we don't see a lot of the swiping out and swiping in of the rendering.
+So otherwise, if you constantly swipe out, then you don't save much by using the virtual textures.
+because you want always to keep the result in the memory for the terrain that's in front of you, for example.
+But yeah, sometimes you face some problem and the way you go forward and you turn around, there might be some issues with that.
+But with all this distributed rendering and the mid-level rendering, you don't really see them.
+So yeah, that's it.
+and the second part, so did you do anything to minimize texture cache misses when you're looking into your physical texture space?
+Do I do anything to maximize my texture?
+So your texture cache, when you're grabbing that texture to render your different decals, sections, it could potentially look at all sorts of different spots on that physical texture, and potentially your texture cache can get thrashed and you need to pull in more textures.
+Did you run into any issues like that?
+No, we didn't see any issues for that.
+The rendering of the terrain is very fast.
+It takes less than one millisecond.
+to render all the terrain and the decals.
+So I didn't really check for that.
+Thank you.
+So you mentioned that you rendered during the GPL for pass, deferred pass, you render page IDs.
+And then you said that you use quarter size page ID buffer instead of full resolution.
+Does that mean that you actually?
+shrink after the full screen different paths, shrink the size to get it, because otherwise I...
+Okay, so the question is that if I render into full screen render target, or if I render into a 1-8th size of the page ID?
+This is different, yeah.
+So actually, rendering into a full screen render target is our first approach, then later on we change that approach.
+So we do not render into a fullscreen target anymore.
+Instead, we render into a 1F size.
+So you're not taking occlusion into account if some tree, for example, or big stone, or house occluding part of the terrain, it still be in a page ID buffer, it still be like there's no occlusion.
+No, it's okay, because I, as I explained, I didn't write in the slide, but I have said on the notes that I also talked that when you do a read-write buffer, you can set attribute in the shader.
+You can set as early depth stencil.
+So with that shader, you, any pixels that failing the depth test won't be writing to your read-write buffer.
+So if it's occluded, it won't be right.
+And if you have two pixels, which is behind that pixel, and this won't be right again into your page buffer.
+So you have to downsize the depth buffer in each area?
+No, I don't downsize the depth.
+It's in the gbuffer rendering path.
+It's ultimately done by the shader attribute.
+So it's like rendering to the render target, same as rendering to render target.
+But the difference is that if you don't add that attribute into your shader, it will output all the pixels into your read-write buffer.
+But as soon as you add that shader, which is an attribute from the shader language, and then it will do it same as the render target.
+But you can still render into the buffer.
+So you don't render any pixels twice, or you like that.
+Is it clear?
+Hi, I have sort of two related questions.
+First, you mentioned that the budget for rendering new pages was 1 millisecond, right?
+How many texels could you actually fill in 1 millisecond?
+How many?
+How many texels?
+So, I mean, the 1 millisecond...
+implies some kind of actual amount of texture you could actually fill for creating new MIPS, so...
+Are you talking about how many new virtual texture pages I can actually render?
+Well, I guess physical texture pages.
+Yeah, physical texture pages I can actually render.
+Yeah.
+maybe 10, 20, I don't remember, maybe 10 something.
+Okay.
+Because you don't really, when you, when the player walks in the game, they are not updated frequently, right?
+So the related question is, what about weird extreme cases, like a player taking the helicopter?
+and flying it very close to the ground very, very quickly, like hugging the ground, so creating like a worst-case scenario where you're zipping over the ground and you're sort of getting ahead of the cache.
+Yeah, yeah, so...
+I mean, you mentioned that you fall back, but are there cases where the blurring of falling back can become actually obvious?
+So yeah, I mentioned I have a fallback to low-res virtual maps.
+Right.
+Yes, actually you're right.
+You could sometimes, like when you really run a lot of pages in one frame, and you could not finish, and you have to postpone to the next frame.
+For example, if you walk forward.
+And if you walk backward, like do this, and you suddenly turn 180 degrees around, you could see the pages transition from blurred to sharp.
+And sometimes it's quite obvious.
+So we have a different algorithm for this.
+So in this case, we sort the pages according to their importance.
+So I always render the important which is in front of me first, then the page that are farther away from me.
+So you have a lot less visual popping up in this case.
+It works quite well.
+Okay, cool. Thanks.
+man 2 Can I still elaborate here?
+Because it's free frames of latency, right?
+You analyze on CPU, meaning from GPU, meaning it's GPU readback.
+Typical PC driver invokes free frames of latency.
+So in that case, exactly you've mentioned, you're going backward, then you turn around.
+Although you can do that very fast when you realize what's happening, but there will be free frames of latency where you'll see blurred image.
+We also have a kind of like a CPU page ID feedback.
+So because the GPU page ID feedback, you only feedback the pages that in your view first term, right? And we increase that first term a little bit larger.
+so that some pages that are beside you, outside of your platform, they're also included into the feedback of the page ID list.
+But they are a bit like low res, but still it helps because when you turn right, like you said, you have free latency.
+So it's already there.
+So I think it will help.
+And also, uh, Usually you don't really see that much because a page is quite large. So you always have that cached and you always go like this So most time it's okay Thanks So I just wanted to clarify from the question that was over there.
+So you're actually, you're rendering the scene again, presumably with low resolution geometry at, you know, an eighth size buffer, is that right?
+No, no, we don't render the scene again.
+We only render the scene one time in the G-buffer.
+But we output it into a low-res read-write buffer.
+Okay, right. Okay. That was the bit that I okay, so you're just selecting that based on on presumably some One of the, just the...
+Yeah, one of the, one of the, so yeah, I should have said that.
+Right.
+So you have like 16 pixels.
+Right, yeah.
+And you select one pixels.
+Okay.
+Because it doesn't matter, because usually the page, the near close pixels are sharing the same page ID.
+Right.
+If they don't share the same page ID, it doesn't really matter if you have one level lower in one pixel.
+Yeah, totally, totally.
+Okay, thanks.
+I was just curious, what are the different maps that you're supporting currently?
+You talked about wanting to have eight maps later on, but currently it's with diffuse, normal, specular.
+What kind of maps currently are you managing with your virtual texture?
+What kind of map I'm managing with the virtual texture?
+So we have diffuse, which is XYZ.
+We have normal map.
+which is XY We have specular occlusion and we have roughness We have what else?
+I don't remember. It's like that Physical textures, how much physical textures you do the, so maps, normal map, diffuse, maybe you can utilize alpha channel in the... Yes, that's right.
+How many physical textures? Three.
+Yeah. Formats, what are the formats?
+Format.
+Diffuse is a DXT1.
+Normal map is BC5.
+BC5, yes.
+And another one is GXT1, I think.
+For the normal map, I have to use BC5.
+Otherwise, the compression will be really bad.
+But BC5 is really great.
+Other questions?
+OK, thank you very much.

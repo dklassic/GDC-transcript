@@ -1,0 +1,581 @@
+Good morning and welcome to Marvel's Spider-Man and AI Postmortem.
+My name is Adam Newnchester, and I'm one of the lead gameplay programmers at Insomniac Games.
+Over the past 11 years, I've been fortunate to work on eight great games at Insomniac.
+And for the majority of these, I've been an AI programmer.
+On Marvel's Spider-Man, I led the team of gameplay programmers that developed combat.
+Let's take a quick look.
+My team worked on both stealth and melee combat.
+We helped create Spider-Man's combat moves and all of his gadgets.
+We also worked on the enemies and bosses, and I'd like to take this opportunity to tell you about some of the biggest changes and challenges that we encountered on the AI side developing this game.
+So let me give you a quick preview of the topics I'm going to discuss today.
+I'll start with some high-level trends related to how we author behaviors and build AI characters.
+Then I'll move into how we use synced animations to get a Marvel feel in a game.
+From there, I'll give an overview of a few core problems and how we iterated on them with our combat.
+After that, we'll look at some procedural animation techniques that we developed specifically for Spider-Man.
+And then finally, time permitting, I'll briefly discuss a few of the places where I feel we fell short.
+So let's begin with a high-level trend that occurred over the course of development that I expect to continue, and that is less use of complex behavior trees and more use of data-driven hierarchical finite state machines.
+This happened for several reasons, but the largest was simply that Marvel's Spider-Man was the largest game that Insomniac Games has made to date.
+Spider-Man has five major factions and a few minor ones.
+We've also got eight archetypes that are common to all the factions, and the majority of these archetypes have variations per faction.
+There are also several faction-exclusive types and 11 boss fights.
+This all meant that we had to create 64 AI classes, and the majority of these had to have some unique attacks, reactions, or other behaviors.
+We also had to do this with a slightly smaller gameplay team than our last big game, Sunset Overdrive, in which we only made 19 classes.
+Let me begin by briefly describing how we organize our AI behavior at Insomniac.
+We have our own proprietary engine and the vast majority of our code is written in C++.
+This is the general architecture that's been in use since about 2012.
+From here on, I'm going to also use the term AI and bots interchangeably.
+At the top level, we have a behavior tree, and that decides on a behavior to run.
+Behaviors can have an arbitrary number of sub-behaviors, but eventually a behavior will instantiate a state.
+These are our leaf nodes and they control animation, motion, and perform other player-facing actions.
+When we first implemented behavior trees into our Engine, a lot of them tended to have a structure like this.
+This is one corner of the behavior tree that drove the behavior of ranged enemies in Sunset Overdrive.
+This simple subtree uses 34 discrete nodes, and many of them just map to a simple AI state, such as playing an animation, shuffling around, meleeing, or aiming.
+The parameters for the state were largely configured by the behavior tree and passed through a behavior that only instantiated a single state.
+In order for our AI to function as desired, things tended to get really complicated.
+Nodes often had to utilize numerous kinds of callback functions.
+For example, let's look at a simple node that is trying to use a state to aim at a target over a railing.
+That node will need to be able to decide if it has to run, so we have a callback for that.
+The bot state that we're using doesn't ever end, so the tree needs to decide if that state should continue to run, so we add another callback.
+The state we're using also doesn't, or the behavior tree nodes shouldn't change state until they are entered, so since we need to notify another system when we start aiming over a railing, we add a callback.
+The state that we're using doesn't do any weapon management, so we have a callback to do all of that from the tree, and we need to notify that same system when we're done using the railing, so we add a fifth callback.
+Furthermore, in order to get the correct node to activate at the correct time, we often needed to consider how a node's parents selected which of its children to run.
+We call that the group policy, and there are three types.
+The order of the children could be a priority ranking, or the order could be a sequence with each node running one after the other, or the node whose decider callback returns the highest value would be the one to run.
+And if your behavior tree implementation is anything like ours, you have plenty of decorators and flags and other confusing options.
+All of this led to trees that worked, but were complicated and difficult to debug when they broke.
+Furthermore, one of the advantages to behavior trees is that the trees are supposed to be composable and nodes should be reusable.
+We found the opposite to be true when the tree is complicated.
+We often needed to think about how both a node's siblings and its ancestors functioned.
+For Marvel's Spider-Man, we recognized that we could not have unique behavior trees or even sub-trees for each of the 50-plus bot classes.
+We gradually started moving towards trees that were smaller and more straightforward, with behaviors that contained a lot of the complexity and logic that was previously entangled in the callback functions.
+This meant that we could share structure and behaviors.
+Nearly all of our standard enemies use exactly the same behavior tree and set of behaviors.
+As a quick example, we have a single node in our behavior tree that handles all of melee combat.
+And while the previous subtree that I showed you still exists, the most complicated chunk of transition logic was moved into a behavior.
+So what do we do instead?
+As our behaviors became more robust, we began to data drive more of them.
+I want to discuss two of these examples.
+The first is a simple behavior that is used when designers need explicit control over bots.
+The second is more complicated and is used for the majority of our combat.
+Both of these behaviors take a piece of polymorphic data configured in our editor and transform it into a state or sub behavior.
+They do this while encapsulating a large portion of the complicated logic inherent to action game AI.
+So rather than have a bunch of behavior tree nodes that respond to designer scripting, we made a more data-driven solution.
+Let's take a look at the high-level architecture.
+Script will begin by creating what we call a bot command, and these commands go into a bot command queue.
+When the queue exists, the behavior tree has a node which instantiates behavior scripted.
+This behavior pulls commands one at a time out of the queue and uses them to create sub-behaviors or states.
+Let's take a look at the individual components starting with our command queue.
+All it really does is provide storage for designer commands that a bot is going to execute, and a simple interface for accessing them.
+Next, I want to touch on the bot commands themselves.
+The base command itself is really just an interface.
+An actual command will use this method to start whatever behavior or state it needs to and attach it to the provided parent behavior.
+And here's an implementation of that method in a PlayAnim command.
+It sets up some data for a PlayAnim state and then requests that state to be added to the provided behavior.
+All bot commands follow this format.
+They're created by script and added to the bot command queue.
+Finally, let's take a quick look at behavior scripted itself.
+If a bot command queue exists and has any commands in it, the behavior tree will instantiate this behavior.
+It has an update function, a consume next command function, and a handle to access the command queue.
+The behavior update is simple.
+If the current command is done, we pop it from the queue and try to consume the next one.
+The consumeNextCommand function is also straightforward.
+It gets the command queue, checks to see if it has a command.
+If there is no command, we're done.
+But if there is one, then we tell that command to start and attach ourselves as the parent behavior.
+When the command is done, the previous update function will just call this function again and will continue executing commands.
+Here's what issuing commands looks like from script.
+We first request control of a bot and tell them to go to a position, face their target, and play an animation.
+And here's what things look like in game.
+You can see the bot command queue here.
+You can see the bot move to a position, then face the player, and then finally play the provided action.
+Some of you may be wondering, why don't we data drive more?
+And this is an example of why.
+There are many times when an AI should not immediately respond to requests for script control.
+They could be jumping through the air.
+They could be in a cinematic, playing a hit react animation, or any number of other things.
+Our goal is to data drive the interesting, player-facing problems, but also handle the difficult, squirrely, and bug-prone parts reliably in code.
+So let me talk about a place where things can get squirrely.
+Melee combat in Marvel's Spider-Man is data-driven, and I want to first give you another overview of the architecture of this system before we dive into some of the details.
+Let's look at the data first.
+At the top level, each bot has a combo config.
+That combo config contains a list of combo entries.
+Each combo entry contains one or more combo move containers, and each of these contains a single combo move base, and this is the polymorphic data.
+All of this data is owned by a component called bot combos.
+On the behavior side, we have our behavior tree, which can instantiate, for example, behavior melee.
+When it is time to attack, this behavior will pass data from bot combos into a behavior use combo, which will then use that data to start a sub-behavior or state.
+Let's start looking at the bottom of the data.
+For the next several slides, I will be showing examples of structs written in a proprietary C++-like data definition language.
+I'll mark any usage of it with DDL.
+All attack actions in combat will ultimately derive from a bot combo move base.
+These structs can represent all of the static data needed to execute, for example, a melee attack.
+This combo move has an animation to play, as well as some data describing the timing for the attack.
+It could also represent throwing a projectile.
+This struct has data for the projectile asset to throw, what animation to use, where on the bot the shot should spawn, and some additional timing data.
+The point is that each of these derived types contain all of the static data needed to start either a behavior or a state to perform the desired attack.
+That is to say that these contain the static data to make these.
+Let's move one level up the data hierarchy and talk about the move container.
+Here's the definition for bot combo move container.
+You can see the combo move here at the bottom, but this struct contains other data.
+That data is parameters for defining how to prepare to execute the move.
+These are things like, does the bot need line of sight with their target to perform the attack?
+Does the bot need to be on screen?
+Or how close does the bot need to be?
+In other words, this, the combo move container, contains not only the combo move, but also has data that drives the behavior of this behavior use combo.
+So let's briefly look at it.
+It's really just a state machine.
+It can choose to wait to perform an attack, it can go to its target, it can perform a combo move, and at some point it will end.
+It has its own functions for determining what state it should be in based on the data in the move container.
+And it also does things for us like setting hit react immunities while the attack is active or starting cool downs at the correct time.
+However, the relevant code happens once behavior use combo has determined that it is in position and ready to execute an attack.
+It calls a transition combo function.
+This function takes the move container and then retrieves some metadata in the container about the type of combo move that it contains.
+If it's a melee move, we prep some state data and start a melee attack.
+Or if it's a throw projectile move, we prep some different state data and start a throw projectile state.
+In the full version of this function, this if else cascades for the other 37 combo move types that we have.
+There might be a little bit of cleanup work for us to do here.
+So we've discussed the bottom half of this diagram, so next we're going to look at the actual combo entries themselves.
+Because behavior use combo may want to perform more than one move in a sequence, the combo entry contains a list of them.
+to execute one after the other.
+It also contains all of the data for determining when a combo is valid.
+For example, a cool down for how often it can be used, a waiting value to be used when selecting between valid combos, a pair of distances that define the range at which a combo is valid, as well as a list of other arbitrary data-driven conditions.
+The final piece of the data is the combo config.
+And this is just a simple struct that contains a list of combos.
+Every single one of our AI classes has a unique one of these.
+I want to briefly touch on the owner of all of this data, bot combos.
+It is responsible for not only owning the combo config, but also for selecting the best combo to use from that config versus a provided target.
+It will use all of the data contained in the combo entries to make a list of valid combos and return one based on their weights.
+Finally, we'll briefly take a look at an example user of behavior use combo, behavior melee.
+It's a fairly standard state machine that has a bunch of states that it handles transitioning between in code.
+One of them is using a combo.
+If it's the bots turn to attack and bot combos has a valid combo entry, this behavior will just start using, this behavior will start behavior use combo.
+Here's a brief look at combos in action.
+There's some debug display up here.
+This character has five combos and active will be drawn next to each of the combos that he is currently using.
+Each of these uses different states whose static parameters are configured entirely in data.
+So that's a high level review of how we data drove two large sections of our AI, melee combat and script control.
+We had two other significant behaviors that were data driven, one for handling hit reacts and another for responding to incoming attacks by blocking, dodging, counterattacking, etc.
+We felt we got a lot of mileage out of working in this paradigm for three main reasons.
+The first is that new moves are easy to add, since you didn't need to change complex transition logic.
+The second is that we were able to loosely couple our states with data.
+That is a single bot combo move could potentially map to multiple states, or multiple moves could map to the same state if it was appropriate.
+And third, this allowed us to pick and choose what data was presented to the designer and then handle the messy logic and code.
+Working this way allowed us to make a large number of classes who only differed in data.
+That said, there are some definite disadvantages with our current approach.
+Most of these behaviors organically grew into this pattern, so parts of them can be a little bit of a mess.
+You saw an example of this with the giant list of if-elses in our melee example.
+But the real big problem we had for us was that our tools only allowed us to express the data in a properties panel, and let me briefly show you why this is such a problem.
+Here's the data definition for the heavy enemies three-hit combo.
+First, we have all of the data for how he can select to use the move.
+Then we have all of the data for how BehaviorUseCombo will prepare to execute the move.
+Then we have a bunch of data that every single attack needs so that it can properly register with SpiderSense.
+Then we have the actual data for the melee attack itself.
+However, remember that I said this was a three hit combo?
+All of this data is repeated twice more.
+And it eventually looks like this.
+This character also has four more combos, a shockwave, a grapple, a throw, and another multi-hit combo.
+So yeah, the amount of data needed to be configured made the system intimidating and difficult to understand.
+Improving on this is one of our next big goals.
+So let's move on to a section where I can finally start showing a bunch of screenshots and videos.
+Synced animations.
+Our creative director gave the team a goal that he wanted Spider-Man to have a comic book movie feel.
+Early on in development, we decided that we wanted a high degree of fidelity in our combat animations and reactions.
+In order to do this, we determined that we would need to have a system that allowed us to play back those animations of Spider-Man and his foes interacting.
+Our system at its root has the concept of a host, usually Spider-Man, the attacker, and a guest, usually his victim.
+The whole thing hinges on something we call a sync joint.
+It's shown as the white debug sphere in this video.
+The sync joint is a joint on the host which has a position and orientation that will match that of the guests when the animations are played back in sync.
+We use joint on the attacker because this allows Spider-Man to perform a synced attack versus a character that hasn't yet played a synced react.
+In this video, you can see both the current position of the sink joint drawn in front of Spider-Man, as well as the sink joint's target position drawn on the enemy.
+As the time of impact draws near, you can see Spider-Man blend into position to hit his target.
+Spider-Man doesn't know if his victim will play the corresponding sink reaction, or if he will block, dodge, or play some non-sink reaction.
+We actually support several different options for how Spider-Man accomplishes this blending.
+These can be selected independently for rotation and translation.
+The most common case for lining up orientation is called host to guest or center line.
+In this case, both the host and the guest rotate to face each other along a line drawn between them.
+We also have support for only using the host orientation or only using the guests.
+Neither of these modes are actually used in the shipping game.
+The other kind of rotation alignment we use is what we call an external anchor.
+This is when another piece of code sets the target orientation for the system.
+In this video, when you see debug draw on screen, both characters are rotating towards the external actor orientation.
+We use this here because the player is able to push in any direction on the movement stick while executing this kick throw and the enemy will be thrown in that direction.
+So that is, the direction is set as the sync animation system's rotational alignment target.
+For translation alignment, we have two common options.
+The first is when the guest moves into position.
+This is called host as anchor, and it is used in situations like this where Spider-Man is unable to move.
+You'll be able to see the sync joint here on Spider-Man, and then you can notice the enemy move to it.
+The other kind of alignment is when Spider-Man performs all of the translation himself.
+This is called guest as anchor and is the translation alignment technique for the vast majority of attacks since Spider-Man is the one moving into position.
+There is an external anchor option for translational alignment similar to rotation, however, it isn't actually used in the shipping game.
+A problem that frequently came up for us was that the attacker and the victim could be at heights different from how they were animated or mocapped.
+We have a few strategies for how we handle this.
+All synced attacks have an annotated sync point and a release point.
+For stealth takedowns and combat finishers that use animated cameras, we can hide floating characters by pulling the camera in before we reach the sync point and waiting until after the release point to push it back out.
+In other cases, we can make use of webbing to handle the fact that the characters aren't at matching heights.
+In this case, the webs are animated and then we procedurally alter them joint by joint so that they match where their final transforms would be if our sync joint was properly aligned.
+Another thing that helps with certain situations is that our character movement system remains active.
+If one member of the synced animation begins to collide with something, they can pass the translation they failed to move over to the other participant.
+In this case, Spider-Man begins to hit the step, is unable to fully align with his target, and when this happens, the enemy then applies the reverse of that and slides backwards, and the two manage to sync up.
+However, we can't always fix things up, and in many cases, we just deal with things being off.
+This is what happens for most regular melee attacks as well as a few finishers.
+Enemies can use the system to play synced attack animations versus Spider-Man as well.
+However, we found that the synced alignment options usually felt unfair.
+The more common use of synced attacks was for an enemy to use a non-synced attack and then if it connected to immediately start a synced reaction animation.
+There are two big drawbacks to our synced animation system.
+The first is that it only supports two characters, a host and a guest.
+One of the most requested features towards the end of development was finishers that allowed Spider-Man to take down multiple foes at the same time.
+I do want to point out a more general drawback to using synced animations is that it quickly becomes very time consuming to add new attacks or skeletons to your game.
+You usually have to make an attack animation and a react animation for every victim skeleton.
+How we make use of the sync joint allows us to mitigate this if we want to, but fidelity will suffer.
+We had a goal of combat for Spider-Man that was fast, fluid, and dynamic.
+On the combat team, we frequently talked about play style, flow, and improvisation as being very important things to us.
+Having enemies that felt dangerous but gave the player opportunities to flow was going to be the linchpin to our combat.
+The topics I'm going to discuss today are probably very familiar to many of you.
+However, as programmers, we often want to create a system, verify that it's working as designed, and then move on.
+And this is not how you make good games.
+I want to share with you some examples of the iterations we went through to get our combat fundamentals right.
+We needed to manage attacks and mitigate cheap hits, or else the game was gonna turn into this.
+We have two combat managers that control when ranged and melee enemies are able to attack, and they occasionally coordinate with each other, but they mostly operate independently.
+You'll hear me say the word job a lot in this section.
+In this case, the job is just a token that allows a bot to attack Spider-Man.
+Our manager for Melee started out simple.
+We wanted there to be one attack job unless the player had recently dodged and then we wanted to give him a quick break to fight back.
+We had a simple scheme, deciding which bot received the attack job.
+We calculated a priority that was the sum of the time the bot had spent waiting for a job, plus how close that bot was to his ideal attack range, plus a bonus value for high-priority mini-boss-style enemies.
+Here's what that system looks like in action.
+There's a blue line drawn from the enemy who has the attack job to Spider-Man.
+In the top left corner, you can see an idle timer.
+When I dodge, that timer becomes non-zero.
+This gives me a momentary chance to attack.
+This works all right, but there are still a number of issues.
+The first is that I don't get attacked nearly as aggressively as the timer says I should.
+Here's why.
+The enemy that has been given the attack job is too far away to quickly execute it.
+Now I do want to emphasize that players weren't actually doing this, but due to Spider-Man's agility, this kind of situation could arise naturally as they bounced back and forth between enemies.
+we implemented two solutions.
+The first was that if there was a bot that could immediately start an attack and a bot who had been chasing their target for too long, we'd allow the job to be stolen by the bot who was ready to attack.
+The second thing we added was the ability for the manager to occasionally create an attack job if the player stood too close to a bot for more than a split second.
+Here's what it looks like with those features enabled.
+You'll see that as I run past enemies, the blue line shifts to me.
+shifts to a nearby enemy and they quickly try to attack me.
+The two concepts of job stealing and proximity attacks were critical for addressing times when our combat would suddenly feel dead.
+Then we noticed that things started to feel too predictable in protracted encounters.
+So we added an intensity meter.
+This meter fills as the enemies attack and is spent by the manager to either simultaneously give out a few attack jobs or rapidly give them out in sequence.
+Here's what that looks like in action.
+You can see the current intensity value here, and below that you can see how much we need to accrue in order to perform the next special attack.
+You can see up here what the next special attack type is, and then you can see the jobs as they are given out down here.
+So let's talk about ranged combat.
+It also started out simple.
+There was going to be a cool down window where no shooters could receive attack jobs, followed by an attack window where shooters could receive attack jobs.
+During the attack window, we had a maximum number of simultaneous attack jobs, and there was a delay that prevented the manager from giving out jobs too rapidly.
+Here's what that looks like.
+Up at the top, you can see the manager switch back and forth between cool down and active.
+And then you can see the status of the jobs here.
+For this case, I've restricted the manager from giving out more than one job.
+This kept things from being completely crazy, but there are still a lot of places where things felt unfair.
+And the biggest was being shot from off screen.
+So we started by saying we're gonna prioritize giving jobs only to on-screen bots as we can.
+You can see that in action here.
+You'll notice that as enemies leave the edge of the screen, that they stop being selected as attackers.
+However, there were still times when all valid shooters were off-screen.
+So we made enemies take longer to fire when they are off-screen.
+This gives the player more time to notice the spider sense warning.
+In this video, you can see that when enemies are off screen, it lasts for 1.5 seconds.
+When they are on screen, the warning only lasts for 0.75 seconds.
+By now, things were starting to feel decent when fighting only shooter enemies, but things could still be overwhelming when enemies that used melee were present.
+So, we allowed design to specify an entirely new set of values if melee enemies were present.
+If you look here, you can see that not only is the active time slightly shorter, but the cool down period is nearly doubled.
+This felt pretty good, until the players started using air combat.
+Then with the slower timing values, it felt like enemies became unresponsive for nearly five seconds at a time.
+We tried disabling the second set of values when the player was in the air, but players then felt like they were being punished for using air combat, which was not what we wanted.
+So we added something that we called air aggression.
+Here it is in action.
+Once the player performs enough actions in the air, you can see the air aggression chance change from 0 to 0.5.
+This means that for each additional action the player performs while in the air, there is a 50% chance that the manager will immediately exit cooldown.
+When that happens, you'll see air aggression active here.
+Even after all of this iteration, players still felt that there were times when being attacked was cheap.
+So we made a list.
+Performing any action from this list would cause the managers to cancel all attack jobs that hadn't actually started the attack.
+Web throwing an environmental interactable.
+Web striking a new target.
+Using an air launcher on a target.
+Dodging an attack.
+Perfect dodging an attack.
+Using a finisher.
+Jumping off an enemy.
+Jumping.
+Landing.
+Being hit.
+And so in all of these cases, we cancel incoming attacks.
+Unless you abuse the action repeatedly, and then we'd allow the attack jobs to persist.
+unless that action was a dodge, in which case we'd still cancel the jobs, unless it was a boss fight, and then the jobs wouldn't be canceled.
+And that still wasn't enough.
+Players still felt that there were times that enemies would knock Spider-Man out of an attack in a way that felt cheap.
+This is the specific case that was causing a lot of frustration.
+Players would properly identify an attacking enemy, and then they'd try to attack that enemy to interrupt them.
+But because of animation timing, they'd get hit.
+We created a system we called Beat to the Punch, which guarantees that Spider-Man will win these interactions.
+When the red sphere is visible, the system is active.
+Beat to the Punch activates as Spider-Man's attacks get close to the impact frame.
+While active, we examine each incoming attack and see if Spider-Man's attack would force a reaction.
+If it would, then Spider-Man is granted immunity from that enemy's attack until he's past his own impact frame.
+You can see it in action here.
+And as you can see, the system will ensure that in cases where Spider-Man and an enemy are attacking each other at the same time, Spider-Man beats the enemy to the punch.
+This simple system was the last thing that we needed to clear up the vast majority of our remaining complaints about cheap hits.
+So let's move on to every AI programmer's other favorite problem, positioning.
+We've made a lot of shooters at Insomniac and how our AI decided where they would move to was based on the needs of that genre.
+We annotated positions for bots to fight from using fire points and we marked large pieces of occlusion by wrapping them in volumes.
+This allowed our ranged enemies to take up positions in cover or at places that are interesting.
+Furthermore, melee enemies in a shooter typically just try to get close to the player and attack as often as possible, and managing the horde and the space is part of the gameplay.
+In Spider-Man, we wanted the player to fight a large crowd of enemies, but we didn't want them to feel like they were continuously being mobbed.
+Nor did we want to limit our combat just to large arenas.
+We also wanted the more interesting AI classes to be in position to attack more.
+And we needed to do all of this while looking good.
+We started by using a fight circle like this.
+We divide the area around the player into wedges, and then we'd repeat with more wedges for additional rings as needed.
+We'd do some nav tests to see that each wedge is on nav, and then we'd assign each enemy to the wedge he was closest to.
+This didn't work for two main reasons.
+The first is easily visible in this video.
+Simply moving around the space could easily cause the wedges to become invalid.
+This led to enemies frequently repositioning when there wasn't a clear reason to the player why they should do so.
+The other reason why this failed was because it tended to look very robotic and choreographed.
+We tried adding in some random variation, but we were never able to get it to feel good.
+I'm gonna quickly diagram our solution.
+Let's say we have an enemy standing here, who is engaged with Spider-Man standing here.
+Then suppose there are some enemies here, and let's pretend like each bot and Spider-Man have kind of a little circle around them that is their personal space.
+We call these bot reservations.
+Finally, the edges of navmesh are here.
+Our goal is to find the best position for our bot to stand that is outside of all this red.
+We did this with a simple algorithm for finding local minima, a gradient descent hill climber.
+This algorithm will iteratively follow the gradient of steepest descent in order to minimize an energy function.
+In our case, energy will increase as we move towards the center of the circle and as we move off of navmesh.
+It will be zero everywhere else.
+Another way to look at this is that we will iteratively push points that lie in one of the circles radially out of the circles, like so, and those points that are off nav will be pushed back towards nav, like so.
+In our game, each of our bots will actually feed five positions through the hill climber.
+His current position, and then based on a line from the bot to his target and an ideal distance we can compute a position in front and a position behind the target.
+Then a line segment perpendicular to the first segment is used to select a position to the left and a position to the right.
+Here's how the hill climber would modify these positions.
+For the one at the bot's current position, it will do nothing but already outside of the circles and inside NavMesh.
+For the two lower points, they each lay in a circle, so we'll just push them radially out of the circle.
+For the point on the far right, we'll push it back towards NavMesh, like so.
+The last point lies between two circles. We'll try to simultaneously push it out of both by adding these two vectors together to get this. However, because that won't work, we'll need to iterate a couple times and get to our final position.
+So at the end we wind up with five potential positions for an enemy to choose between.
+And here's what that looks like in game.
+This video is showing the results of this enemy's hill climber.
+Our bot reservations are shown in red, and the results of the hill climber are shown as trails of little blue spheres.
+We capped the number of iterations the hill climber can perform at 30.
+We did try using more complicated algorithms like simulated annealing, but we didn't find them to be of any qualitative benefit.
+Once we've generated those five positions, the hill climber creates a score for each based on the distance to our current position and the distance to our target.
+We then apply additional penalties if that point is too close to the target, too far from the target, or if moving there from our current position would likely cause us to cross too close to our target.
+We then pick the position with the smallest score.
+This worked pretty well for small to medium sized encounters.
+However, in large encounters, we noticed that standard melee enemies could prevent the more interesting classes from being able to get close to the player.
+This was particularly evident if those classes appeared in a backup wave.
+So we partially resurrected the concept of a fight circle.
+However, this time, instead of giving out positions, we handed out distances.
+These distances are used to compute the initial positions that were fed into the hill climber.
+This lets us bias those more important enemies without blowing up the algorithm.
+In our game, there's just two rings.
+An inner, high-priority ring in which about six guys can stand, and an outer, low-priority ring where everyone else gets assigned.
+In frantic combat though, we still had issues with enemies repositioning when it felt unnatural.
+So we added a final check at the behavior level.
+First, we'd check that we aren't already too close to our new position.
+If that check succeeded, we'd compute the distance to our ideal attack position, then compute the distance between the new position and the attack position.
+Subtracting these values tells us how much repositioning will improve our current situation.
+Based on if we would be moving forward or backwards, we compare that value with different thresholds to determine if we should move.
+Those threshold values change over time so that a character who has been stationary for a long time is more likely to move.
+We also have a similar scheme for deciding if an AI should update their weight position while in motion.
+We compute the distance to our current position.
+We compute the distance to our new position.
+We then compute the distance from our current to our new.
+And all of these must be larger than a threshold value in order for us to update the destination.
+Let's move on to a few uses of procedural animation in Marvel's Spider-Man.
+We wanted Spider-Man to be able to use his webs to stick guys to surfaces.
+Unfortunately, we have a lot of uneven and weird surfaces, and the AI may be in an unexpected pose because of Ragdoll.
+We couldn't just naively spawn a model or a decal.
+Everything starts with the game generating an ideal world space orientation, and then passing that into something we call a web blanket.
+The blanket itself is a model of a web with a six by six lattice of joints.
+You can see it here fully extended and locked in place.
+When spawned, the blanket will project rays from a position above the initial position through the position of each joint on the model if the model was naively placed at the initial position.
+Where that ray hits is where the joint will be attached.
+In this video, the raycasts are shown in orange.
+If you look closely, you can see that the blanket is compact when it's first spawned, and then each of the joints interpolates into the position found by its corresponding raycast.
+If a raycast doesn't hit anything, we rotate that ray towards the blanket's initial point.
+This will usually cause the blanket to wrap around whatever it is attaching to.
+Additionally, joints are allowed to re-scan for a period of time before they lock in place.
+This allows the blanket to adapt to a settling ragdoll or animating character without bunching up on itself.
+We have another case where we allow joints to rescan, and that is if the thing they are attached to moves too far from the blanket's initial position.
+This prevents the blanket from being stretched across the entire level as the door is torn off here.
+We planned to have several enemies able to use whip style weapons versus Spider-Man.
+Unfortunately, we found that a regular cloth sim didn't give us the results we wanted.
+We also couldn't just animate the whips because we needed to be able to reuse animations from other classes.
+This was especially important for locomotion and hit react animations because they're so numerous.
+We needed a procedural solution that could be fully animation controlled when necessary.
+The whips are part of the base model and they look like this in any animation in which they haven't actually been animated.
+When the sim is fully engaged, things look like this.
+For each joint in the chain, we will track its position from frame to frame and then we'll naively apply the host motion to each of those joints.
+Then we begin to apply constraints.
+We apply a distance constraint to correct for this.
+The constraint uses a 0 to 1 stiffness parameter and is performed in two passes, forwards down the chain and then backwards up it.
+We perform half of the error correction on each pass.
+Without a curvature constraint, the chain falls through Tombstone's hand, even though the chain's root is oriented horizontally.
+The first pass keeps each child joint aligned with its parent.
+The second curvature pass constrains each joint to both its parent and its child.
+This prevents kinks in the chain.
+The curvature pass was extremely important for making sure that the simmed joints blended smoothly out of the animated ones.
+Here you can see Tombstone walking normally.
+We apply a gravity constraint to keep the chain from floating, and we apply a ground constraint to keep it from sinking through the floor like it is here.
+This character, or this constraint, uses the normal of the ground that the character is standing on, which we assume just defines a flat plane.
+The final constraint ensures that each of the joints is outside of the character's move capsule.
+Without it, you can see the whip clipping through his legs.
+But with it, you can see that the chain will move around his body.
+The actual order that we apply constraints is gravity, then curvature, then movePill, then distance, then ground.
+Then we iterate over all of those up to eight times depending on how close the character is to the camera.
+For controlling if the chain is driven by animation or the sim, we start by assuming that it is always simulated.
+Then we place events on animation clips when the chain is supposed to transition to being animated and then again when it transitions back to being simmed.
+These events just contain a blend speed.
+That speed is used to change a 0 to 1 value that represents what percent of the chain is simmed.
+No joint is ever driven by both sim and animation.
+We had planned to give a lot more control to animation, but we found that we got very good results with just this, and that more wasn't necessary.
+One of our main goals for this enemy class was to either hold Spider-Man in place or pull him out of the air.
+Therefore, we needed to be able to blend the whip during his attack animations to arbitrary world space positions and have them look good.
+For each joint in the whip, we compute where it would be if the enemy was perfectly aligned with their target.
+The difference between these two positions is the error.
+We then apply a portion of that error to take the animated joint to its procedurally aligned position.
+The portion of that error we apply increases linearly as we move down the chain.
+And here's what that looks like in action.
+This procedural alignment is controlled with four events.
+We start blending on, finish blending on, we start blending off, and we finish blending off.
+For the last section, I'd like to briefly talk about some of the things that gave us a lot of trouble.
+We didn't have a lot of time to spend on developing tech for flying enemies, and this really hurt us when it came time to develop the Sable Jetpack Troopers and our two flying bosses, Electro and Vulture.
+We wound up having the jetpack troopers just hover over nav.
+We then gave them the ability to go off nav if they could see their destination.
+While off nav, they kept a list of points that would allow them to breadcrumb their way back.
+However, even with both of these, there are still times when you can see them steering around stuff at ground level.
+And here's an example of how that happened.
+This jetpacker wants to go to Spider-Man.
+The red capsule indicates the physics query he performed to see if he could fly directly to him.
+However, because it clips the wall, he's gonna have to follow this path, this blue path along the ground until he, around the fence until he can actually see Spider-Man.
+Oops.
+For our flying boss enemies, Electro and Vulture, they used a collection of volumes that were linked by splines.
+Inside the volumes, the characters could move freely and they could use the splines to transfer between the volumes.
+However, all of these had to be hand-authored so it was not a usable solution for the whole game.
+Both of these solutions got our game shipped, but I hope you can see why they're far from ideal.
+We had one mission that had a lot of combat on top of a moving truck, and it was a never-ending source of pain.
+Our nav mesh currently can't move, and so we had to make the space as simple as possible so that Botch could reliably straight line to Spider-Man.
+Additionally, many states and components did their calculations in world space, and this would cause bugs when positions wouldn't line up from frame to frame.
+Furthermore, our engine does not support attachment as well as something like Unity or Unreal, and so we had to use specific components to manually update all of the attached entities.
+The final problem we had was with enemies or the player that got thrown off the truck being shoved through geometry by the truck if they were standing next to it.
+We solved this by placing kill volumes along the side of the truck as it moves.
+NavMesh was another challenge that we underestimated.
+We did get some new features for this project, such as the ability to perform dynamic cutouts from Nav, and this was instrumental in getting part cards and many crimes functional.
+However, there was a creative push to change Manhattan with the story.
+As things got worse for Spider-Man, we wanted to reflect that in the world.
+Sable International would set up checkpoints, prisoners, escaped prisoners would erect bases across the island, and garbage and debris would begin to pile up as things went from bad to worse.
+Our nav mesh is built and loaded on a per tile basis.
+We did not have the time to rework this because we would have needed the ability to load different meshes based on various game state, and we'd need the ability to express all of that state at build time.
+We evaluated generating navmesh at runtime, but we found the CPU performance to be a non-starter.
+Our solution was to generate nav in its most complicated state and then try and just disable parts of it from script.
+Here's an example space.
+This is what it looks like during Act 1 when things are normal.
+You can see patches of navmesh floating in the air.
+And the yellow patches you can see are places where the designer is going to try and toggle the mesh on and off from script.
+You'll also be able to see holes cut in the mesh by objects that will be present in Act 3, but are not currently present now.
+And here's what it looks like in Act 3 once the base is actually active.
+While this scheme worked well enough for us to make the base, it was oftentimes buggy enough that we had to remove crimes or other open world activities from happening in a space like this during Act 1 and 2.
+I'm sure it's a big surprise to most of you, but we actually had performance problems running all of our complex AI in an open world.
+We ultimately had a limit of around 30 enemies active and engaged once you factored in Spider-Man traffic and all the pedestrians.
+We typically saw two large reasons for this.
+The first is physics.
+Here's a typical frame where things have gotten bad.
+And I'm gonna highlight the parts of the frame where physics creeps up as the bot count rises.
+Here it is on the main thread, and then here it is on two of our four worker threads.
+It's many, many milliseconds spread out over all the cores.
+And while it isn't all directly resulting from bots, it does grow proportionally as the bot count rises.
+The other thing is that a lot of our core AI logic still runs on the main thread.
+Here's a capture of our main thread during a normal frame.
+The highlighted sections are bot-specific logic, and they are consuming well over 4 milliseconds of time.
+There's even more time when you consider that neither the character move system nor the animation system are included here.
+All right, I hope that you've learned a few things today and I'd like to leave you with a few high-level thoughts.
+The first is that iteration is king.
+I hope it's obvious, but it took quite a few tries to get the things that you've seen in this presentation to where they are now.
+We almost never got things right on the first try and that was okay because we kept pushing.
+With Marvel's Spider-Man, we had to pivot from making shooters to making character action games.
+When your problem fundamentally changes like that, you need a fundamental change in your solutions.
+I know it sounds obvious when I say it like that, but it's actually harder than it sounds.
+In just this talk, we've seen how this affected behavior authoring, positioning, and combat management.
+And there were many, many others.
+Finally, focus on your game's core.
+I believe that Marvel's Spider-Man was a success because everybody mentions how the game makes you feel like Spider-Man.
+And this wasn't an accident.
+This happened because we took the time to get our fundamentals right.
+Be these player controls, attack pacing, enemy hit reacts, or just the feel of using your web shooters.
+You'll get the best game when you focus on your core first.
+Real quick, I'd like to thank a few people that helped me put this presentation together, Alicia Lidecker, Andrew Richter, Brad Fitzgerald, David Kim, Ilan Ruskin, Seth England, Sean McCabe, as well as a very big thank you to everyone at Insomniac Games, Marvel, and Sony.
+I'd like to remind you all to please fill out your speaker evaluations and thank you for listening.
+And if there are any questions, I think we've got two mics set up here.
+Hi, this game was ridiculously awesome, so good work on that.
+Thank you very much.
+And so one thing I'm struggling with a lot in my game, and I'm one of the people who like to torture myself and played it on hard mode the first time.
+So what sort of parameters do you have to change the difficulty level in hard and normal mode?
+So if you remember, I pointed, we had the whole section on timings, that all of those timings can be changed per difficulty level, per faction, and per act of the story.
+So the rate at which enemies attack, the amount of time that the game gives you in between successful dodges, all of that changes.
+Additionally, we would usually go through on a per enemy to enemy...
+basis and identify one or two parameters that we could tune to make things much more difficult.
+An example of this would be ranged enemies tend to fire in like a five to seven round burst.
+And on easy, they will deliberately miss with like the first six of those.
+And then on hard, they'll only deliberately miss with the first two or three.
+So it kind of further requires the player to react a little bit faster.
+Cool, thanks.
+You're welcome.
+Hi, great presentation.
+Thank you.
+So, during when you're playing the game, there are different factions that come across each other.
+So, how is the AI set up for that?
+And how do different factions react when Spiderman jumps into play?
+So...
+We have a kind of aggro-based targeting solution for how enemies choose which targets to attack.
+Like, usually in a multi-faction fight, one set of enemies is aware of the other set of enemies as potential targets and Spider-Man.
+And then there are rules based on how close Spider-Man is to the target versus how close other targets are that cause what we call a proximity aggro amount to increase.
+And then every time...
+those enemies take damage from another target, that also adds additional aggro on top of that.
+And whoever has the highest aggro is a bot's target.
+Thanks.
+You're welcome.
+Hi.
+Hello.
+So what exactly was the moment when you guys realized that the system you had for Sunset Overdrive and Ratcheting Flank and such wasn't going to work?
+It was probably about a year and a half into production as we were finishing pre-production and looked at how many enemy classes we had made and how many enemy classes we still needed to make.
+We were like, well, we've made about four.
+We've got somewhere in the realm of 60 to go.
+We need to pick up the pace.
+Thank you.
+You're welcome.
+Hi.
+Similar to her question, how do you know when you need to design a more complex system?
+You were talking a lot about the model and data architecture that you guys had created.
+And how do you know that you needed to iterate from the previous one and get to there?
+And then how do you know when you got there that that would be good enough to not need to iterate further to even potentially better architecture?
+Honestly, trial and error.
+It kind of happened because we would be getting feedback from our design team about, hey, we want to be able to do x, y, and z.
+And they would constantly come back to us wanting to say things like, hey, can you move this attack from this character to this other character?
+Or can we have them play this animation instead?
+Or can they select between all of these things?
+And just looking at, OK, the kind of requests that we're getting are this.
+Therefore, we could figure out a way to do all of that in data so it's as quick as possible to do the iteration that they're asking us to do.
+And when we got to the point that, OK, we're actually able to handle 75%, 80% of the stuff that design is asking us for, that's around where we stopped.
+Thank you.
+How are we on time?
+Hi, really awesome talk, thank you.
+Thank you.
+I'm wondering what would you say is the difference between like those systemic enemies in the world and between them and the boss fights that you guys made?
+It's like, are the boss fights are mainly like heavily scripted, authored, or like a mix?
+The boss fights still use the kind of combo systems that we have.
+They typically have, so we had 39 combo moves and probably about half of those are for regular combat and the other half are boss-specific attacks.
+And bosses usually had their own engaged behaviors.
+So we talked about behavior melee, which is what the normal enemies use.
+Most of the bosses would have their own engaged behavior, like Rhino had his own and Scorpion had his own, which kind of described how they would move about the environment, but then whenever they got into position to use an attack, they would reuse the kind of combo stuff that was driven by a designer to say, you know, do a charge or throw something or jump to another position. Thank you. You're welcome.
+How do you divide the work between your designers and your programmers?
+Do the designers work in behavior trees or in the finite state machines or just in data?
+They just work with data.
+Our designers don't work with behavior trees or finite state machines.

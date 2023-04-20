@@ -1,0 +1,339 @@
+My name is Matt Del Bosque.
+I'm a team lead programmer at Ubisoft Toronto.
+And today I'm going to talk to you about some of the stuff we did for vehicle replication in Watch Dogs 2.
+The best place to start is for me to explain the chaos part of the talk.
+So let me show you chaos.
+Here we go.
+So Watch Dogs 2's bounty mode is a multiplayer game mode where three human players team up together to take down a fourth player.
+And they do that alongside a whole bunch of AI-controlled cops.
+And basically, everyone gets into their cars, you get these crazy high-speed chases, everyone's crashing into each other.
+It's an insane lot of fun to play, but getting all of that to replicate nicely was a bit of a challenge.
+So I'm going to talk to you about some of the solutions we came up with today.
+So first of all, a little bit about our network architecture.
+So...
+It's only four players, completely peer-to-peer, so there's no server in the middle that's kind of the master of everything.
+And although we're only supporting four players, there's actually a lot of entities to replicate.
+So all of those cops driving alongside you, pedestrians on foot, all these things do add up to a lot of entities.
+And those entities...
+their authority is completely distributed.
+So all those police, they're actually owned by different players, which adds some extra complication.
+So when I first started working on this, I'd done a lot of character replication in my background.
+And I figured all the techniques that I knew and loved, I'd just apply them to vehicles, and it was going to be super easy.
+Well, it didn't quite turn out to be the case.
+So what's harder about vehicles?
+First of all, vehicles drive fast.
+So even if you have a little bit of lag, say 100 milliseconds, that's two to three meters difference in their position, which is like half a car length to a full car length.
+And say you're working on a race, well, that's the difference between winning and losing.
+Now we don't have races in Watch Dogs 2, but the same principles apply, and I'm gonna talk about some of that later on.
+The other things that cars do that people don't is they collide with each other.
+So there's a lot of rigid body physics that come into play that cause them to interfere and react with each other.
+And on top of that, we're not just dealing with players versus players colliding, but there's a lot of traffic in the open world in Watch Dogs 2.
+So there's actually a lot of things that you're going to be crashing with.
+And the other interesting thing I discovered while working on this is that when you're looking at vehicles driving around, the human eye is really, really sensitive to irregular velocities.
+So if your dead reckoning algorithm has got a few little inconsistencies, and even a car going in the straight line, and it's not going perfectly at the same velocity, it's actually really noticeable for the player.
+And that adds more complications.
+So what I'm going to talk about today, first of all, how we go about debugging trajectories.
+I'll talk about the technique that we use for dead reckoning, which is called projective velocity blending with a little bit of a twist for vehicles.
+I'll talk about how we use snapshot buffers to interpolate and extrapolate our positions.
+I'll talk about how we deal with collisions.
+And finally, I'll cover some of our unsolved problems and future research directions.
+So the most important thing you can do when working on Dead Reckoning is debugging your trajectories.
+So this is the color scheme I'm going to be using for the rest of the talk.
+I'll explain it quickly.
+The red dots are the authoritative snapshots that you've received from the master.
+The kind of blue dotted lines, they're the extrapolations from those dots.
+So it's a prediction of where we think the master is going to go.
+And finally, the green path is the actual path.
+that you've calculated from your dead reckoning than that the car has taken.
+And really the goal is to get the green line matching up to the red dots as closely as possible because then you've replicated exactly what happened on the other end.
+The algorithm that we use for dead reckoning is called projective velocity blending.
+It's very well known.
+I've used it a lot for character dead reckoning in the past and it still works pretty well for vehicles.
+I won't explain the maths, but I will explain how it works.
+Basically, let's say we have a replica of this position p0 going with a certain velocity.
+And we receive a snapshot from the master, the blue one, that says, hey, actually, you're meant to be over here traveling with this velocity.
+So what we have to do is correct for that.
+And what we do is we interpolate from the current local velocity to the predicted master velocity.
+over a short period of time, which gives us this blended orange trajectory.
+And then we interpolate between the two over that same period of time.
+So the final trajectory that you take is that light green path, which basically takes you from where you were to where you should have been, and it's pretty smooth and pretty nice.
+I'll show you a video of what this looks like.
+So this is a car driving around in circles.
+I've reduced the snapshot send rate here for effects so you can sort of see the artifacts a bit better.
+And you'll notice that circle that it's taking, it's not very smooth, right?
+And one of the reasons for that, if you look at the blue lines, the extrapolated predictions, well, it's always in a straight line, right? It doesn't know that this car is actually driving around a corner, so your dead reckoning is trying to match to this very irregular polygon, and you get this little jerky results.
+So what can we do to improve that? Well, ideally, we don't use a straight line for our prediction. We predict that our car is turning around a circle. That's going to be the...
+best way to get a better result.
+Now, interestingly, how do we work that out?
+So we already transmit the steering angle of the car's wheels, which in theory should be enough.
+But actually, it's not.
+And the reason is that a vehicle simulation is actually really complex.
+In real life and in our simulation, if you have the turning angle of the car's wheels to actually predict where it's going to go, it's a factor of a whole lot of things.
+So the vehicle's current velocity, the tyre temperature, the friction with the road surface.
+You actually have to take all of that into account to work it out properly.
+And so this was a bit too much and it would have been a challenge with our engine to do that.
+Having said that, the other information we have, we have the position, the velocity, the angular velocity that we already transmit anyway.
+And what we ended up using is just the yaw component of the angular velocity, which we can then use that to do a very simple kind of 2D integration to predict where the car's going to go.
+Now you might notice there's something wrong with that, because if your car's kind of turning in a nice circle, then that's really easy.
+But if you're sliding and turning, then your prediction would be wrong.
+But for our game, actually this wasn't an issue, because the cars in Watch Dogs 2, they're not tuned to drift.
+It's not a game about drifting.
+So for all of us, for our game, this simple solution was actually the best.
+And then the result looks something like this.
+So what you can see now are extrapolation, the blue lines, they're going nicely around the corner, and our dead reckon trajectory, well, it's nice, now it's a perfect circle.
+So that's super nice.
+And we can move on to the next technique.
+So the next technique we used is called snapshot buffers.
+Theory there is that instead of just extrapolating from the snapshots that we've received, we wait a little while, we buffer the snapshots that we've received, and we interpolate between the last two.
+So what's good about that is that by interpolating between two known snapshots, we're representing a much more accurate trajectory.
+So we're actually representing something that really genuinely happened because we have all the information.
+What's bad about that is that we're now rendering something further back in time.
+And I'm going to talk about why that's an issue.
+First an example. So we have a car driving in a straight line, sends a snapshot to another machine, takes a while to arrive, we keep driving, we keep driving.
+We finally send another snapshot, and now we have enough information to start our interpolation.
+So in this example, our replica is five frames behind the master.
+Now, why is that an issue?
+I'll give you an example.
+This is a picture I've taken on two machines.
+There's two cars driving at high speed through an intersection at 90 degrees to each other.
+And so the same picture at the exact same moment in time.
+And what you're going to notice is on the left-hand side.
+they've crashed into each other, and on the right-hand side, well, they're nowhere near each other.
+And if we superimpose the two, you kind of see this effect that I was talking about with the half to a full cutoff differences.
+In this case, it's actually a big difference, because one player thought he crashed into the other guy, and the other player didn't see anything at all.
+So that's the sort of problems that we get when we're interpolating too much.
+Having said that, just because we're buffering all these snapshots, well, we don't have to interpolate between them.
+There's nothing stopping us from actually extrapolating from the last received one.
+And what this gives us is we introduced this really simple concept, which is basically a time offset.
+And what that really means, it's really easy to understand, it's how far back in time do we want to render this car?
+And then we, so if we take the time offset...
+you know, subtract it from the current time.
+If that lands between two received snapshots, then we can use the interpolated trajectory.
+If that time offset is ahead of the last received snapshot, then we go back to extrapolation.
+I'll, uh...
+And for us, this is really easy because we're time stamping our snapshots anyway, so we can do those calculations pretty easily.
+I'll show you an example.
+So again...
+We have a car traveling at a bit of an angle now.
+It sent a snapshot to the other pier.
+And now we've decided to extrapolate.
+Now, because we don't have as much information, we're kind of extrapolating the wrong way in this example.
+Now we've received another snapshot that's basically ahead of us in time.
+And we can switch back to an interpolator trajectory.
+And so the end result in this case is that our replica is only three frames behind the master, which is a little bit closer and reduces those effects of missed collisions that I was talking about.
+Obviously, you can see the trajectory, right?
+It's not perfect.
+It's a mix of interpolation and extrapolation, but it's still a better result because we're kind of getting the best of both worlds to some extent.
+The challenge here really is tuning the time offset and there's no real magic formula here.
+We spend a lot of time playing the game under different scenarios, adjusting until we got something we were happy with.
+And it's really a balancing act between too much interpolation and you're going to miss collisions and too much extrapolations which is going to cause more discontinuous trajectories, potential desyncs and that sort of stuff.
+The formula we ended up coming up with in Watch Dogs 2 is basically this.
+It's kind of a factor of the measured lag to that peer plus a bit of a constant value.
+And we calculate that every frame, but it's highly damp.
+We clamp it to something sane.
+And although I said constant value, the constant value is actually variable because it's proportional to the speed of the vehicle.
+And basically, if you're traveling slowly, then missed collisions is less of an issue, so you can interpolate a bit more, which means we increase the time offset so you can go a bit further back in time, and it's still going to work pretty well.
+Now, with all of that in place, we were pretty happy with our dead reckoning cars driving around.
+We're looking very good.
+But then our testers started to try and break the game, and they were.
+crashing cars into each other and starting to report issues.
+They were saying, hey, dark collisions, they don't really play out the same in multiplayer as they do in single player.
+Let me show you a video.
+You have to pay attention because it's a bit subtle the first time.
+So this is two cars, two players crashing into each other, a master versus a replica.
+I'm going to show you this again.
+Okay, so something's not quite right about that.
+If you play the game in single player and you have two cars crashing into each other, with the collision they kind of stop, right?
+Or they might push each other out of the way a little bit, but what you're seeing here in multiplayer is that they crash and they go shooting out far away from each other at high speed.
+That's not right. This is not what we want.
+So what happened?
+How do we figure that out?
+So as we know, this shouldn't be happening.
+They should be kind of stopping.
+The way we ended up tracking this down is we have a tool on the engine that lets us record the states of every entity and kind of play it back and look at everything frame by frame and kind of really analyze it and figure out what's going on.
+So I'm now going to show you a frame by frame analysis.
+So what we have is two cars about to crash into each other.
+There's the replica on the left, the master on the right.
+So far, so good.
+Again, so far, so good.
+Now they've collided into each other.
+That's still fine.
+Now this is where it gets interesting.
+What you can see there, the replica, it's still continuing in a straight line.
+You can see the extrapolation there, which is basically, it's based on the snapshot that's before the collision.
+So the extrapolation is basically saying, well, keep driving, I don't know that you've crashed into anything.
+So the only thing I can predict is that you're going to keep driving straight.
+And again, we continue.
+We continue.
+And finally, we receive a snapshot from the master that says, hey, you crashed into something, you're meant to be further back from where you currently are.
+So then our dead reckoning corrects for that, then starts pulling the car backwards.
+But basically, while this is going on, what's really happened is, you kind of have these bunch of frames where the replica is pushing, pushing, pushing.
+And that rigid body is imparting a huge velocity to that car, and that's what's sending him shooting backwards.
+And basically, the other thing's happening on the other machine, where this car's getting pushed, and he goes flying backwards.
+And the end result, what everybody sees, is this kind of massive, high-speed ejection.
+So we don't want that.
+How do we go about solving this?
+Well...
+Like I said, we not receive the packet that tells us about the collision.
+So we don't have that information on the replica side.
+And really, this is an unsolvable problem in our case.
+Because we fully peer-to-peer, no one has authority about the collision.
+There's no one true picture of what that collision should actually look like.
+And this is when I really wish I had a server, because a server could be authoritative and make all those decisions for us.
+But we don't, so we have to live with that.
+So what can we do? We know that the collision is going to happen.
+Those rigid bodies, they're going to be crashing into each other, they're going to be applying forces to each other, whether we like it or not.
+So why don't we try and live with it instead?
+And basically, what we really want to do is give the local physics a chance to simulate the collision.
+And basically, after a short period of time, we then blend back into the correct dead reckon trajectory.
+And really, what we ended up putting together was a tunable blend factor that blends between two velocities.
+So one is the velocity that's imparted by the rigid body simulation, and the other is the velocity that takes you to the dead reckon position.
+And we basically have to blend between those two and decide what we want.
+And the goal is really to let something believable happen locally.
+and then give time for a snapshot to arrive that takes the collision into account and then we can blend back into it.
+What's hard there is tuning the blend factor.
+Again, there's no real magic formula.
+We played the game a lot, we spent a long time crashing cars into each other under different scenarios and came up with stuff that looked good.
+And really there's two...
+parts that you need to tune.
+One is, while there is a collision, what's your blend factor?
+How much of the local physics velocity do you take versus the dead reckon velocity?
+And when the collision finishes, how quickly do you go back to full dead reckoning?
+And what we ended up shipping with is a graph that looks a bit something like this.
+So before you have a collision, you're fully in dead reckoning.
+As soon as you collide with something, there's a short period of time where we switch to full local physics.
+So dead reckoning is ignored completely and we just simulate the rigid bodies locally.
+And then we kind of go to this halfway stage where we're taking a little bit of the dead reckoned trajectory, but still mostly local physics.
+And then when we come out of the collision, we ramp back up to full dead reckoning.
+The other interesting thing here is that we ramp back up a lot quicker for bikes versus cars.
+This is because bikes, they're smaller, they're lightweight, so they kind of go in and out of collisions a lot quicker, so we want to go back to dead reckoning a lot quicker.
+And this is a video of what you might get afterwards.
+So, I mean, it's still not perfect, and it's really hard to show this in a video, but what you notice there is the car didn't go shooting all the way down the street.
+It kind of got pushed out of the way a little bit, but that was it.
+So this was a much better result.
+Now, one interesting side effect that arises is because we now, we have now a short period where we fully in local physics, um...
+we have no guarantees that for that period of time the collision is going to play out the same on both peers.
+For example, if your two cars crash into each other, and on one machine it's kind of pushed this way, and on the other machine it's pushed that way, then when you blend back to Dead Reckoning you kind of have this weird, you're going to have this weird sliding kind of effect, which is very jarring, so we we want to avoid that.
+There's no magic way of doing that.
+There's no silver bullet.
+But what we can do to try and help this a little bit is before the collision's about to start, if our vehicles were theoretically closer to their master positions, then the collision is more likely to play out the same on both machines, which should reduce those kinds of issues.
+How can we do that?
+What we ended up doing is putting in an algorithm that predicted that there was a collision that was imminent and increased the extrapolation in those cases.
+The theory behind that is if you're about to crash into something, you're very unlikely to steer out of the way.
+So for AI-controlled vehicles, we can guarantee that because we have control over that.
+But even for player vehicles, there's only a short time window.
+So it's very unlikely that they're going to.
+avoid the collision completely and so by extrapolating a bit more we bring things a little bit closer together and it makes the problems just a little bit less likely and every little bit helps.
+And actually we already had an algorithm for predicting collisions from our AI system so we basically hooked that up to the to the dead reckoning logic.
+And it gave us a heuristic about how likely you are to collide with something, and we used that to modify the time offset.
+So basically, if you're likely to crash into something, we kind of reduced the time offset, which basically causes the vehicle to be extrapolated more.
+And what I've just described there, this is more or less what we ship with Watch Dogs 2.
+But this is the end of the story.
+There's a lot of many problems that are still outstanding.
+I'm going to cover some of them today, but there's many others.
+I'll talk about collisions with static geometry, differences in time offsets, and what I'm dubbing the uncanny valley.
+So, when you're...
+If you have a car that's kind of crashed into something and you're actually meant to be over here, it's not too bad because you can sort of push this car out of the way and get to where you're meant to be.
+But if you're colliding with static geometry like a brick wall, well, the brick wall's not going to give way, so you're kind of stuck.
+And worse than that is trees, because trees in our game are not destructible, and they're tall and skinny, so it's actually easier to end up on the wrong side of the tree.
+And then you get things that look like this.
+So this is exaggerated for effect.
+You're not actually going to see this in the game, unless you're really, really unlucky.
+But it kind of gives you an idea of what happens when things go wrong.
+And there are sort of ways to improve that.
+One of the possibilities is to just stay out of the position.
+Maybe if you're on the wrong side of the tree, maybe it's not so bad.
+You can get away with that in some cases.
+The other one that we could try is kind of soft body physics, so maybe just disable the collision on the tree and slide your way through the tree or allow for a little bit of penetration, something like that.
+And of course with a dead reckoning there's always the fallback scenario of just teleporting to where you're going to go. That's all something that you have to do at some point.
+But really the goal is to reduce the jittering effects because that's what the player is going to notice.
+Generally in Watch Dogs 2, what we ended up doing is more the first option, kind of leaving cars a little bit out of position. If we detect this, you're colliding with too many things and you're not getting to where you want to be, well we'll just let it sit there and kind of hope for the best.
+The other interesting problem is that...
+I've talked about what we do with time offsets for vehicles, but that doesn't apply for pedestrians.
+Pedestrians much prefer to be interpolated.
+And that's because they don't have to worry about missed collisions or any of that.
+They...
+and they travel a lot slower.
+So using interpolation gives you much better looking trajectories for pedestrians.
+And generally it's not much of an issue because if your player is on foot, you're interacting with other characters on foot and your time offsets, they're pretty similar.
+And if your player's in a car, you're interacting with other characters in cars, and again your time offsets are pretty similar.
+Where all of this falls apart is when the two intersect.
+And then you get things like this, where one pedestrian's just been missed, and on the other machine, he's been run over and he's flying through the air and ragdolling.
+Now, this is important because, keep in mind, the goal of bounty mode is to take down another player.
+And running someone over with your car is a really good way of taking someone down.
+And so then you get these cases where, you know, I think I killed you.
+No, you didn't.
+Yes, I did.
+Blah, blah, blah.
+Which is very frustrating.
+I think the way we can improve this is the same collision prediction algorithm that I talked about could be applied for cars versus pedestrians, where if you're about to run over someone, we extrapolate both a bit more and we get a bit closer on each end.
+The difference is that pedestrians are much more maneuverable, so they could jump out of the way at the last minute, so it doesn't fully help.
+And the other thing is, we do have a similar issue for breakables, but there's no real gameplay impact.
+If one player drives through a bus stop and destroys it, but it didn't happen on the other machine, it's not a big deal.
+It's just debris that doesn't really interfere with anything.
+The other interesting thing I want to talk about is something that I've dubbed the uncanny valley.
+With everything we've done so far, our dead reckon trajectories, they were looking very good, right?
+Our trajectories were matching up very closely to the master snapshots, the percentage of error was very low, but actually playing the game, it still didn't feel quite right.
+You could still sort of tell that you were looking at a replicated card rather than a master.
+And there's lots of little things that really add up.
+So, for example...
+minor weight shifts kind of get lost in replication.
+The other one is that cars actually don't rotate around their center of mass.
+So dead reckoning algorithms usually deal with just a point with angular velocity around it, and we map that to the car's center of mass.
+But actually it's a lot more complex than that.
+And then there's the other issue that I mentioned earlier with the sensitivity to even slightly inconsistent velocities, and that became noticeable as well.
+One of the things we did do here was apply a bunch of post-process smoothing to our dead reckon trajectories Just to at least even out smooth out those inconsistent velocities What's a bit awkward there is that post-process smoothing kind of has to coexist with projective velocity blending So dead reckoning is meant to give you a nice smooth trajectory, but in practice it didn't so we put this thing on top of it which kind of cancelled out the results a little bit so felt awkward and dirty but hey, the result looked good so whatever.
+Moving on, there's a few areas I'd like to research a lot more in the future.
+Number one, I'm very interested in machine learning kind of things because I think that reckoning is very applicable to machine learning.
+It's kind of this thing where...
+we're going to have an error.
+We can compare the result of algorithm to what it should have been and make it adapt itself to reduce that percentage of error.
+And basically, the holy grail for me is all the stuff I talked about when I had to do this manual tuning of variables and really play the game a lot, I don't want to do that.
+I want a robot to do that for me.
+And the other one that interests me is smoothing algorithms.
+What we did for the post-process smoothing was very simplistic.
+I'm specifically interested in Kalman filters because I think they bring many of those concepts together.
+They're a lot harder to deal with and put in place and tune, but I think there's something there I want to try.
+And so finally, if you remember anything from this talk, number one, if you're working on dead reckoning, debug your trajectories.
+get your testers to record everything, to turn on all of your debug rendering and all of your debug info.
+So when you get a bug about a desync, you get everything that's laid up to that desync, so you can try and figure it out.
+And finally for me, I found that even though we're dealing with very mathematical algorithms and all these equations, there's still a lot of art to this science.
+We still end up tuning variables to make something feel good, which is...
+completely opposite to all my scientific instincts.
+Anyway, that's it for me.
+I've got time for maybe one question, or you can catch me in the wrap-up lounge afterwards.
+And I'm talking at the Ubisoft lounge.
+I've got a whole bunch of extra problems to talk about if you're interested in that, that I didn't get a chance to cover today.
+Thanks, everyone.
+AUDIENCE APPLAUDING One question, go.
+Yes, so you guys were talking about how authority is distributed between different clients.
+I imagine that as one client goes away, you kind of have to transfer authority and usually that introduces kind of like a time hop for somebody observing.
+Were you guys able to do anything about that?
+We did a bit, yes.
+Especially with cars traveling in a straight line, when you switch over, it's exactly that.
+It's going backwards.
+And basically what we did there was kind of slow it down.
+We know we've transferred authority, we know it's driving in a straight line, so instead of going backwards, we just slow down a bit to kind of let it catch up again.
+And do you guys clamp the extrapolation along a plane so that if some cars are bouncing up and down, you don't over-extrapolate like up or?
+Yeah, we had to do... I mean, yes, that was an issue for sure. Some of that stuff...
+Part of the solution there is to let physics simulate the Z axis basically.
+So don't extrapolate upwards.
+If you're kind of close to the ground, you let physics kind of keep you close, right?
+But there's where this goes wrong if you're jumping over, you know, jumping over a hill or whatever, which we do because there's a lot of hills in our game.
+Then you do let dead reckoning kind of kick in and predict the vertical part of it, if that makes sense.
+Unless someone else has a different question, I have one more.
+So usually, like, vehicle replication in games like Halo and other places use the information about that, hey, this is a car, so we know we can limit interactions in a certain way.
+But it seems like you guys were generally replicating as if it was a generic physics object.
+So what do you think about using some of these methods on replicating generic physics objects and not specifically just cars and multiplayer scenarios?
+Yeah, I'm in you.
+You're right, a lot of it was treating it as a general physics object.
+We did have a lot of sort of car specific awareness.
+The example that I'm thinking of now is knowing that you're a bike versus a car for example where we put different clamps on certain things and adjust the numbers differently.
+Does that make sense? Does that answer your question?
+Yeah, yeah, yeah. I figured you guys, like the collision prediction also takes into account...
+Yeah, all that stuff does change, right?
+Although it is rigid bodies, there's still a bit more than that.
+But the general basics sounded like you could easily apply it to just general physics replication.
+For sure, yes, yes.
+Thank you.
+Thanks everyone.

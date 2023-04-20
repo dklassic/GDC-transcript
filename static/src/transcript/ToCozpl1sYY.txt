@@ -1,0 +1,612 @@
+Hi everybody, my name is Jaap van Muijden and I'm a senior tech programmer at Guerrilla Games.
+And I've been working on the procedural placement, the rendering, and the simulation of the natural world of Horizon Zero Dawn.
+So today, I'm here to talk about the procedural system we've built for Horizon, its result, and the GPU pipeline.
+So the talk is basically split up into three parts.
+The first part, I'll talk about the motivation and the reason why we chose to have a real-time placement system.
+The second part will show the artist workflow.
+And the third part, I'll tell you a little bit about the algorithm and the shaders that we use in our GPU pipeline.
+Before we made Horizon, Guerrilla was known for their Killzone franchise.
+In our Killzone games, each square meter of a level was hand-polished manually.
+Guerrilla Games has always had a high-quality standard when it comes to our environment art.
+And environment artists are experts in dressing up environments to look interesting and believable using light, composition, and color.
+Well, the open world of Horizon Zero Dawn led us to investigate how we can create and dress a large open world using procedural systems while still staying true to that quality standard.
+Well, historically, procedural systems often look, you know, a bit monotonous, bland, robotic, but they do allow for quick iterations.
+They do a lot of quick iterations.
+And at the end of the day, a reduced time investment per square kilometer just makes larger world scales feasible.
+So our goal was to create a system in which an artist can describe a large variety of interesting and believable environments, which can then be applied anywhere in the world.
+But we had some restrictions.
+Both the system and the resulting content had to be highly art directable and seamlessly integrate with any manually placed art.
+And on top of this, our art director wanted to be able to freely move mountains, rivers, move gameplay around without having to constantly update and retweak our world dressing.
+So this means that the system that we had to create had to be fully data driven, deterministic, and locally stable.
+We started off with a more traditional procedural workflow of using procedural definitions and offline bakes to kind of roll out those definitions across the world.
+We had already experimented a bit with this idea during Shadowfall, but the bake times were a big problem.
+And we kind of realized that scaling it up to Horizon Zero Dawn would not be painless.
+So looking for a solution, we tried moving over the system to GPU.
+in an effort to reduce the bake times.
+And what we saw, and we were looking at the first prototype and we were like, wow, this is the way to go.
+This is, you know, we can do this.
+So we made the jump to a fully real-time system.
+And this would not only improve our bake times, well, it would remove our bake times, but it would always help us remove some data from disk and save us a lot of bandwidth if we would have to stream that back from the disk during gameplay.
+So this would mean, this procedural placement would mean that we would be actively generating the world around the player from procedural logic instead of from a disk, and update the world while the player walks through it.
+So it's kind of more like a streaming system.
+It would behave like a streaming system.
+In order to accomplish this on GPU, while still being deterministic and locally stable, we choose not to do direct placement, but to use something we call the density-based system.
+which means that our procedural logic that the artists can set up will not directly place items, but it would create a density map that will then be discretized into these individual objects.
+So, our prototype started small, and we kept getting requests about expanding the systems from sound, effects, and even gameplay themes.
+Everybody's very enthusiastic about it.
+Everybody's keep asking, like, can we use this?
+Can we use placement for this?
+Can we use placement for that?
+So it grew out to be quite a versatile system.
+And you can see the game running here.
+And you can really see the difference between the placement system, what the placement system make to the game.
+And the biggest way you can see the difference is if you just turn it off.
+So this is the world with the procedural placement turned off.
+As you can see, almost the entirety of the vegetation of Horizon Zero Dawn is procedurally placed.
+We ended up with the procedural placement managing over 500 different types of objects at any given time.
+The dedicated rendering backend that we wrote for it is managing around 100,000 to 200,000 Meshes at any time.
+All this while the player is freely moving through the world.
+It is a lot more than we scoped for when we started out this project.
+We ended up placing not only vegetation and rock meshes, but effects, gameplay elements, like pickups, even wildlife.
+And we keep tinkering the GPU pipeline to keep up and keep it into budget.
+So we ended up having around 250 microseconds average busy load on GPU, which I think is pretty good.
+And so now you can see the result.
+We're now going to look at how artists would actually build these environments.
+So as I said earlier, one of our goals was to have a large amount of variety in the world of Horizon.
+And to accomplish this, we broke the world down into different unique environment types so that we can build and design all these things independently.
+In the real world, you would classify those environments as ecotopes.
+So that's kind of what we used. We adopted that concept.
+We started out by defining our own kind of definition of what an ecotope is.
+Well, in our game, an ecotope defines which assets are being placed.
+how they're being placed and how they're distributed, colorization of rocks and plants, weather systems, effects, sounds, wildlife.
+So it's like a whole, kind of the full package to create a complete kind of solid system, solid environment in the game.
+And it also follows that each of these ecotopes would have its own unique procedural definition.
+And that's why the ecotopes are basically seen as our like base starting point for our procedural authoring.
+Our goal was to populate the world in a believable and interesting manner, just like a good environment artist would manually accomplish.
+Of course, this is impossible, but we tried to get as close as possible.
+And to do that, we created a system that could kind of capture the artist's logic, expertise, and skill.
+So what we tried to do is create a system which artists have full control over not only the input data, so like what you put into the procedural system, but also the procedural logic itself.
+And of course we were still using their own handcrafted assets.
+So let's go into this pipeline.
+So starting with the inputs, what kind of inputs would you need to create these kind of lush environments?
+Well, in the beginning we had no idea. We just started building stuff.
+And we were baking out data as we went, trying to figure out what we would need to make these, like, the things that we thought were possible.
+So we ended up with a whole bunch of data.
+And we call this our world data, which is a collection of 2D maps that we can access all across our game, not only for procedural systems, but also for gameplay systems.
+And these maps are streamed in around the player in sections.
+And they're initially seeded by baked systems, like World Machine, Houdini, whatever we had to generate these kind of data sets.
+But on top of that, we have additional paintable layers where artists could go into the game, and if they didn't like a certain part, they could just paint in the real data, and the real-time system would update accordingly.
+So the procedural system uses about 4 megabytes per square kilometer.
+So if you would look at it as like this kind of compression, it's about 32 bits per square meter.
+OK, let's look at these world data maps that we have.
+So here we've got the placement tree map.
+It was originally baked from World Machine, but it's so extensively painted by art that it's basically, there's nothing left of the original bake.
+It's all hand painted.
+Artists always want to pack as much data into these kind of maps as possible.
+This particular map acts as our main tree placement map.
+And it can be used as a density map directly, but ecotopes often encode additional meaning to it.
+So, for instance, what they do is they have this gradient, and they set up like, okay, you know, we've got only one, it's a grayscale map, we only have zero to one, but let's try to encode something smart into it.
+And they can use the placement logic to decode that at run time.
+So in this case, they put sparse trees at the lower values.
+It goes over in a forest edge.
+And then when the values get very high, it turns into a inner forest, which has different types of trees, like long, thin, branchless trees.
+So they just map these curves onto it, which is done in a logic.
+And then they can link in different types of trees to different ranges of the data.
+And this way, they kind of implicitly define areas in the game.
+So we've got lots of world data.
+We've got like tens of them.
+Most of them are BC7 compressed, resolution about one to four meters per square meter.
+And let's look at a few more before we move on.
+So we've got generated world data.
+These are basically generated by our level editors, stuff like that.
+These are the maps that the placement system can read back to kind of know more about the world around it.
+As you can imagine, an artist designs procedural logic for an ecotope, and he has to set it up in such a way that the ecotope reacts naturally to its environment.
+And a big part of this revolves around reading these kind of maps and then defining areas, such as side of the road.
+Where's side of the road?
+Hey, where's next to a rock?
+What does it mean?
+And what does edge of a forest mean?
+All these kind of areas are defined in logic and can then be reused across all ecotopes.
+So these structures get rather complex, because you're reading lots of different data, you're mapping them through curves, you've got to combine them all together.
+But you can make these things once, and then just share them across ecotopes.
+You can even have a separate, like very technical artist make those graphs, and then have other artists create ecotopes that use them.
+OK, we also have a lot of height maps.
+We got three of them, so we can place different layers on top of things, on top of the ground, on top of the water.
+And finally, these baked maps.
+And these baked maps come out of World Machine.
+We don't really paint them.
+We could, but we just don't.
+And these have stuff about erosion patterns and stuff like that.
+And we use those to create.
+and natural variations within our ecotopes to create just that little bit of extra that makes it really a believable system.
+But I think, you know, this is, I think you get the idea, so let's move on.
+So I hope this gives you an idea about what kind of input data artists can use and can paint.
+And we have seen how they can set it up and manipulate the world data.
+Or we're going to see how they now use it in the logic side of things.
+So what kind of logic do we give them?
+What can they build?
+Well, in short, we're using logic networks just like what you see in Nuke or Substance or any shader builder that you have.
+So it's basically you create a network of nodes that manipulate 2D maps.
+And the purpose of these logic networks is to generate a single density map, and you link that graph network into an asset, and the asset will then be placed according to that map.
+Just to make it more clear, let's go into an example of these graphs.
+So let's say you want to place a tree in the world.
+So we start with a placement tree map again.
+But if you just place trees according to this map, you know, you'll get trees in the water, trees on the roads, trees on rocks, because the map might be baked and then an artist would come along and actually paint a road through it, but the artist is not going to paint out the trees.
+That's not how it works.
+So we will have to make the system smart enough to figure out how to react to each of these different inputs.
+So for instance, we take out all the rocks by loading in our object map.
+We take out all the water.
+So we take out our river map.
+And we take out the roads.
+And you end up with something like this as a final density map.
+So what this means is that the trees that are linked into this will be placed everywhere that the tree map has been painted, and not on rocks, not on roads, not in rivers, which is kind of what you want.
+And this can be used not only by a single tree, you can actually put this in a library, and whenever you want to place something that's not on roads or rocks or water, you can just grab this system and link it in.
+OK, let's try to make an ecotope.
+That's one step further.
+So this is basically how you set up your assets within an ecotope.
+It's a graph again.
+You can see it's a forest.
+And we've got some bushes.
+We've got some trees.
+We've got some plants.
+And they're set up in this kind of grouped system.
+And now we have to add the footprint to these assets.
+A footprint is basically how big is an object for the procedural system.
+Like how far apart are these objects being placed.
+This is used by the discretization pass to kind of place objects the good amount of space apart and also to make sure that things don't collide with each other.
+You can see that the trees have a footprint of six meters, so they will be placed six meters apart.
+And the plants have a footprint of one meter, but we placed one meter apart.
+So, you know, we can just load it into the game.
+Oh, sorry.
+First of all, first, there's no density logic hooked up to it yet.
+So all the density maps are effectively just full white.
+That means everything gets placed everywhere.
+So, before I capture this movie, let's wait for it to load.
+Yep, there it is.
+So that's our ecotope.
+Before capturing this movie, I had to lower the bush density a bit, otherwise you would have bushes everywhere and you wouldn't see anything anymore.
+But other than that, this is directly that thing that we just built, just put into the system.
+And it just works.
+But that's a good starting point, but let's play a little bit with a little bit of logic.
+So again, back to our Iketope.
+And let's say, OK, let's grab that tree map that we had.
+Let's link that in.
+So you can see we put the tree map in the forest root node, and the density map basically trickles down.
+It propagates through the graph, and all the objects now basically listen to this map.
+Let's do a little bit more.
+Let's say, OK, we want to make a clearing.
+We want to be able to paint a clearing into our forest.
+So we add a WorldDataClearingMap, a very natural density map there, a blob and a gradient.
+So when you create a clearing, you basically want to take things out, usually, not put stuff back.
+So all the artists might disagree.
+So I put an inverse logical node into the output of that map.
+And then I hook it up to the trees and the bushes.
+So this means that whenever I paint in my clearing map, the trees and bushes will disappear.
+And you can see also that the density map now has been updated in this example.
+And let's load this into the game, see what happens.
+So first off, I need to paint stuff in because we need to paint that forest map in.
+So there it goes.
+Okay, so that's nice.
+So, there is no actual tools code doing this, it's just changing the data maps, and the game just reacts to it, the placement system reacts to it, because it's runtime, it's pretty snappy.
+So yeah, this is painting in the clearing.
+As you can see, that works pretty well.
+So this is all very basic, but it shows you how an artist can set up a little piece of procedural logic.
+In production, the Ecotopes are much, much more complex.
+Because artists can create these crazy deep systems of layers of logics and grouped assets.
+And it's a multi-layer asset graph that they build.
+So just to give you an example, this is that one Ecotope we just made in that slide.
+So this is what an artist sees when he opens our editor.
+And this is basically what a density graph looks like for our shared, this is the big shared area filter node.
+So this is basically where, this is very hard to make, but if you have a technical artist, they can make it once, set it up correctly, and then you can just use it across all your ecotopes.
+And that's what we did. So this has stuff like, you know, like where is, I want to place something on the side of the road.
+You just grab the side of the road node, link it into your assets, and you're done.
+OK, let's now go and grab a fully production ecotope, put it in the game, and then see what happens if we start painting the world data.
+So there's an ecotope set up now.
+And we're just painting world data.
+So I'm painting here.
+It's me painting.
+I'm horrible at this.
+So here we are.
+We're painting in some.
+ground cover, make a nice big brush.
+You can see already, it doesn't paint on the road.
+It doesn't paint in the water.
+That's all set up already.
+And you can see that even the grass reacts to the rock laying there, just slightly changing the composition.
+And it's exactly this kind of stuff that an environment artist knows that it looks good.
+And he can then put it into the logic and really put his expertise into the system.
+So here I'm painting that forest map again, that tree placement map.
+You can see it's starting to place trees if there's room.
+And I'm very sloppy with painting.
+I'm just painting everywhere.
+But the system knows, OK, I can't paint on roads.
+Or I can't place on roads.
+I can't place in the water.
+So now I'm starting to paint in gameplay elements.
+These are stealth bushes that the player uses to hide from robots.
+You can see, again, it's not being placed in water.
+It's placed around rocks.
+And other systems react with the ground cover around it changes a little bit.
+So now we're here painting in some blocking bushes, which are basically things the player cannot push through.
+So you can block stuff off.
+And here.
+We're just changing the entire type of the forest.
+It was like a broadleaf forest or something like that.
+And now it's a pine forest.
+And now we're back again.
+So there's stuff like variance maps that they can paint.
+Also, each ecotope can have its own logic, so they can do whatever they want.
+So here we have the last thing where we can actually move the roads around.
+And because the roads also write to the world data, the system picks it up and automatically adjusts.
+So I think the cool thing about this is that there's no tools code that is like placing these trees or whatever.
+It's just a game.
+You just leave the game running.
+You just have a little tool that can update world data maps, and it just works.
+OK, now we go to the other effect, where you would keep the real data the same and just apply different ecotopes to the same area.
+So we are placing different ecotopes on the same area and see how each ecotope handles the environment differently.
+So we start out with this jungle ecotope.
+Looks really nice.
+So I think this is a production ecotope.
+This is just whatever is now on disk.
+But it's not actually there in the world right now.
+If you go here in the game, there's a completely different iketope here.
+So take the iketope out.
+And we placed back this pine forest.
+So this is exactly the same place in the world, just linking in a single link, changing a single link.
+We're working really hard in making this hot loadable.
+So you could just press a button in the editor, and it will swap this out in the game.
+We had it working, and then it breaks.
+And we're still figuring that out.
+There's also different weather systems that are hooked up to ecotopes.
+And this is the final one.
+It's like a desert ecotope.
+And again, it looks completely different.
+And it's basically.
+Exactly the same data, just a different type of logic applied to the area.
+And you can imagine that it's really nice that you can just paint in.
+You can literally paint in an environment.
+You can say, OK, I want this to be jungle.
+I want this to be like an icy tundra.
+You can just, it's a single click away.
+And it's very handy if you're iterating mad over the game world like we did.
+OK, so let's get into the technical details.
+We've seen how artists set up the logic.
+We've seen what the outputs are.
+But let's look into our data that we work with on the GPU.
+So before we do anything, we have those graphs, right?
+The graphs don't really work well on GPU.
+So we have to bake it down into something that's manageable.
+Those are called layers.
+Basically what we do, we go over those placement graphs.
+We grab all the leaf nodes.
+And we collect them together in a list of layers.
+And each of these layers has all the information it needs to place that associated type in the world, including an intermediate form of the graph.
+So we compile a graph into this intermediate form.
+I won't go into detail what exactly that is, but it's some kind of intermediate instruction language.
+And we can now just bake this to a compute shader, and that compute shader does nothing else but make that density logic inside the GPU and just bakes out that one density map.
+Or you can actually feed it directly into a GPU-based interpreter shader that we have, which is basically running a virtual stack machine.
+You can push that intermediate form directly into the system and you can step through it on the GPU.
+You can hold, you can inspect.
+It's really nice.
+We use it all the time to debug stuff.
+OK, so the one thing that intermediate form does is basically allow merging of different subgraphs.
+So what usually happens is you have certain assets that are placed a million different ways.
+There's millions of different layers that use at one little piece of graphs, or use at one tree.
+That's really common.
+And because everything is in this intermediate form, you can merge this all together to a single layer.
+And an artist can actually exactly define how he wants that merging to occur.
+And it takes down the amount of layers that comes out of an ecotope from several thousands to several hundreds, which is still a lot, but we can do that.
+We can handle that.
+OK.
+Let's start out with grabbing one of those layers.
+And let's set one of those layers, and let's see what happens if we push it through our GPU pipeline, which is still the same.
+We try to first make a density map, and then we discretize that into these objects.
+OK, so the step one is called just density map.
+It's a density map shader.
+It's a shader name.
+Our first part of the runtime pipeline evaluates the density graph for a single layer.
+Within a given area of the world, it's all localized.
+And under normal conditions, this is done by the pre-compiled compute shader.
+But we can also use that intermediate form.
+Our entire placement pipeline scales up in granularity depending on the footprint of the asset.
+So if we're placing trees, we place a big area at once so that we can really cover lots of huge forests at once.
+And if it's something small, like near your feet, like little grass bits, we do that in smaller chunks.
+So we're kind of trying to balance the amount of work we do versus how fast we can do it.
+But independent of the actual size of the thing we're going to place, like the area we're placing, we're always generating a 64 by 64 pixel density map, a local density map.
+And because that is stretched more or less over the world in world space, the larger blocks use lower MIPS from our world data.
+So you automatically get this kind of MIPing of your data.
+So the big trees use more average data to determine their placement than very small, high frequency things like grass.
+Again, something that solves a lot of problems and it's very fast.
+OK.
+So yeah, Mimit World Data.
+So this is in-game again, kind of.
+And this shows a debugger.
+We know where an artist can, you know, you see there's something really weirdly placed on the road, and you want to know why.
+So they load up that layer, and they can load it into that interpreter and just step through it.
+So they can just step through it like this.
+And they can see how it kind of composes everything and moves it through the pipeline.
+And then the final step, they can even see the discretization step, where it's like changing to objects.
+So this is extremely useful because a lot of times an artist would come like, hey, there's this weird plant coming here that I didn't place there.
+Why is that?
+And then they can look into here and say like, oh, wait, I forgot to set up a logic node or I forgot to put an inverter there.
+It's really helped us out a lot during the development.
+All right, so the second step, we've got the density map.
+Now we're doing the discretization step, which I think I'm pronouncing wrong.
+So I'll just call it the generate step, which is the name of the shader.
+And the method we use to do this step is called order dithering, which is probably very familiar to a lot of you.
+So order dithering is basically like it's a graphical effect.
+Like if you take our beautiful density map again, And you throw it in Photoshop, and you click the order dither function, you get something like this, which is like a very common retro effect.
+But now if you imagine that each white pixel is one object that we're going to place in our game.
+You can kind of see that it actually does what we want.
+On the black pixels, there's nothing there.
+And on the gray pixels, more and more dense stuff gets placed.
+And on the white pixels, you get full density where the objects are as close together as possible.
+So the cool thing about this is it's super fast.
+It's independent.
+You can evaluate it independently per pixel.
+And it's just perfect for GPUs.
+There's no dependencies in a small data set.
+So the process behind this is simple.
+Each pixel is evaluated independently against a small repeated pattern of threshold values.
+And the result colors the pixels black or white.
+So the threshold values that usually are used, like by Photoshop and that kind of stuff, is the Bayer matrix here.
+This is a 4x4 version of it.
+And you can kind of see below it, you can kind of see the pattern it usually generates.
+It's also kind of a familiar pattern that you usually see in all kinds of old games.
+And Let's be honest, it's a bit obvious if you use this pattern.
+It doesn't look that good.
+It's very, very regular.
+But we're on a GPU.
+We've got linear interpolation.
+We've got all these fancy tools.
+We get a few Vs.
+We don't have to use these pixel boundaries.
+So what we do, we create our own threshold map, but not a grid, but we create our freestyle points on a square.
+It's a nicely ordered set of explicit positions with each its own implicit threshold value.
+This is an old screenshot from our pattern generator from like years ago.
+We built, I built it once, we used it and it kind of, it kept working, it's fine.
+So it's not a coincidence that everybody's using this Bayer matrix you just saw for their retro gaming, dithering patterns, because it's very mathematically constructed.
+And there's some nice properties that we also want to have in our freestyle version over there.
+So those properties are basically the thresholds themselves, so the threshold values on each of these sample points, are evenly spread between 0 and 1.
+And kind of the most important one is that the points are ordered to have maximum distance between two consecutive threshold values.
+So that's what this generator does.
+The color coding is kind of weird, but basically blue is like very low, and then it turns to purple when it goes up in threshold value.
+And now the.
+The final trick, basically, is to scale this pattern in world space, just so that the distance between all these sample points becomes exactly equal to the footprint of the object that you want to place.
+Because if we now discretize using this pattern, the resulting point cloud we get out of it will be exactly spaced one footprint apart.
+So this is how we do that.
+So this is basically how we discretize our density maps.
+So trees in the forest are a good example of a very large footprint combined with very full density coverage.
+Because we want trees that are always like six meters apart, but we still want as much trees as possible.
+And the problem is you start to see patterns.
+It's kind of hard to see.
+Even with a proper Bayer pattern, you see patterns like you can kind of see it's, no, yeah, you're trying to see.
+You can see with the white triangle, those trees behind it are kind of lined up exactly.
+And it took a long time before people start seeing these patterns.
+But when they saw it, they will never unsee it.
+So we had to fix it.
+And the thing we did at the end was just add a little bit of jitter to the pattern, a little bit of randomization.
+But artists can set up how much they want.
+So again, it's fully art.
+The artists have full control over it.
+So when you add a little jitter, this ends up being like this.
+And the pattern is gone.
+We had plans for multiple stencils, wang tiling.
+It was all not necessary.
+OK, so let's have a small overview of our generate compute shader.
+I wanted to do shader code.
+I was like, well, that's not really clear.
+So I'll just go through it step by step.
+So you can see here that we've got an area we want to fill with these sample points.
+And we're just stenciling the same pattern across it, just like what we do with the old graphical dithering.
+And each stencil pattern is one thread group on our ComputeShader, and each stencil point is one thread in our ComputeShader.
+So that maps really nicely to the whole ComputeShader thing, because it's all independent of each other.
+OK, so let's step through a single thread and see what it does.
+First, we have an early out test.
+If one of those sample points fall outside the area, just kill them right away.
+But then if it doesn't feel there, we go on and we do the threshold test.
+So this is actually like the dithering test.
+And when that succeeds, we want to emit that point into our point cloud.
+But wait, we only have two coordinates because this is like all 2D stuff and we need a 3D point in our world of course.
+So, we load in the height map data to complete our XYZ coordinate.
+And while we're there, you know, we're reading the height map.
+Let's use our height map, our texture cache and let's just read out some more samples to get a normal.
+Because we're there anyway, right?
+So we generate the normal that goes with the position.
+So we have the position of the object and the normal of the ground or height map at that object.
+Now we've got an, what do you call it, ordered point cloud.
+And yeah, it's not a full matrix yet.
+We haven't applied any per object logic yet, like rotation and jittering and tilting and stuff like that.
+But we'll get at that later.
+The first thing you do, the last thing you do is actually, we don't emit our point cloud directly to a buffer because the problem is then it's an atomic operation and you get a lot of pressure on your buffer, on your atomics.
+So what we do, we stage it through a thread, thread local memory block on the PS4.
+It's a nice trick to get some more performance out of it.
+Okay, let's look at the debug fuse again.
+So here you can see the result of these generate discretization steps.
+So this is like a... I think it's a particle effect that spawns a little bit of smoke or something.
+A little bit of... Oh, no, it's pollen. So it spawns a little bit of pollen around in the world.
+And basically, this is a very simple layer that sets up, just fill it, just fill the entire, flood fill the area around the player.
+And you can see you get this very densely packed object being next to each other.
+And then we've got another one, which is a tree in a forest.
+It's a Douglas fir.
+And you can see this is much more like random.
+So you can see that they put a little bit of jitter in here, I think.
+But there's also probably other types of trees placed in between.
+So there's two layers kind of placing between each other.
+And you're only seeing one layer here.
+And how that works we'll come to later.
+So yeah, it's pretty cool.
+So we said we have this point cloud, but we don't have full matrices yet to instantiate those stuff into our game.
+So there's a third separate shader that we made called the placement shader.
+And that one grabs the point cloud and just one by one applies all kinds of tweak values and additional locally.
+defined placement rules like how much you want the trees to like bend with the with the ground it's standing on or how much Do you want to rotate the rocks randomly around its angle?
+We put in stuff like that certain assets that are like kind of slanted can be placed always facing Downhill stuff like that that it's done in this shader And because it's all very local to the objects, it's a single thread just runs a single oriented point and outputs one single world matrix.
+But the thing is, everything thus far was completely deterministic, except for the part we just saw where we were emitting everything to a buffer.
+Different threads, different thread groups, all emitting to a buffer.
+That'll become non-deterministic.
+So what we have to do.
+is add an additional stencil ID and stencil point ID with each of these oriented points.
+And we use that then as the RNG seed for this shader.
+And then we actually output the RNG seed along with the world matrix to use it for CPU side randomization and UUID generation.
+Okay, so we have now completed our journey from the graphs all the way to the world matrices.
+And this is our shader pipeline.
+So we start with an init shader, which is not really important.
+It's overhead.
+And then we have the density map shader that reads the real data, of course, then outputs the density map.
+Then it goes into the generate shader to generate the point cloud.
+And that point cloud goes into the final placement shader that then outputs the actual matrices.
+And that is then copied to the CPU.
+And there it's embedded into the scene graph or your physics world, whatever systems you have in your game.
+OK, so you can see how this probably, you know, you can run this over multiple of these layers at once on your GPU, you know, all parallel, nice and quick.
+And then we're done.
+But no, wait, we're not done, because if we're doing this over all these different objects with all these different layers, you'll just get stuff thrown on top of each other.
+There's no notion of collision or anything.
+And that we have to fix first.
+Luckily, there's a very interesting solution to this problem.
+OK, so the general solution for collision is to just do readbacks, which means you just look at your list of already placed objects.
+You see if you're colliding with them.
+And if you are, you just discard or reiterate your point in your point cloud.
+But this creates really complex dependencies, and a GPU doesn't like those.
+You still want to have your local stability, which you also lose.
+And you want deterministic behavior, which means you have to do lots of additional bookkeeping.
+GPUs don't like any of that.
+And you're going to get flushes everywhere.
+But there's another really interesting kind of special case where if you have two objects with the same footprints, you can actually get really quick collision resolving.
+And the readback, so the first entry is actually never used in the game.
+We only use the fast path.
+So, oh, sorry.
+So that means that we can only collide objects with the same footprint.
+That's kind of weird.
+But artists, they kind of liked it.
+They were starting to make all these cool things.
+But OK, we're going to use these objects.
+We want these to collide.
+So I'll put them in the same footprint.
+And we'll make categories of footprints and all that kind of stuff.
+So that actually worked out very well for us.
+But let's go on to the algorithm.
+OK, so first, this algorithm is better explained in 1D, and dithering can work in 1D, 2D, 3D.
+So I'm going to first map down to 1D.
+So I'll grab a density map.
+I'll take a slice out of it.
+And we'll use that as our data.
+It's very nice.
+Yeah, there it goes.
+So in normal dithering, you only have one density map.
+And then you sample that with that sampling pattern.
+And we'll do the same here.
+We have the same starting position.
+We just have a single map.
+We add the dithering pattern.
+You can actually now visualize it better.
+So each of these sticks is a sample point in your dither pattern.
+And when the point, the little knob is like the threshold.
+So if it's below the density, you actually emit a point.
+Okay, so that's fine.
+But what happens if you now place two layers with the same footprint in the same area?
+You get this.
+So the blue is another layer with a different layer logic.
+It's a different density map, but it's placing stuff exactly on top of the other one.
+And we can't have that.
+So now we do something really simple.
+Just add them together.
+So, now you're layering them on top of each other and suddenly you don't have any collision because the point of the threshold, so the threshold value can only lay in one of these regions never in both.
+And they're nicely, you know, mixed up together.
+You can now actually see the, like, the values along the threshold line, along the sample point.
+You can actually see that there's a probability distribution.
+And the threshold of the sample point, it basically evenly distributed stochastic value.
+So it becomes like a stochastic sampling thing.
+It's really cool.
+And this whole thing is then extendable to the 2D system that we're using.
+Okay.
+So we solved collision, but we still have some dependencies.
+Because as you saw, we're layering on top of each other.
+So if you want to place the second layer, you first have to generate the first layer.
+So what we do there is, well, there's nothing really we can do about it.
+What we do know is we only have these dependencies on the density map phase.
+And we can tweak our share in such a way that even though we need to execute them all, we can execute them all independently, which means we don't have any GPU flushes in between, which is very nice.
+So at the end, we have the headache, but we get at least performance out of it.
+OK, so I'm running a bit out of time, so I'm going to skip a little bit of this.
+But yeah, it basically solved the issue, but only for objects with the same footprint, which is exactly how artists are setting it up and using it.
+OK, so to make it fast enough, because one layer per frame is not going to work.
+That's going to be way too slow.
+So we're just instantiating that pipeline like 64 times and running it all.
+And they all emit to the GPU command queue.
+The problem is that all this is very like, it's kind of a silly way to do it, because you get still all these dependencies from like density map to generate to compute. Those are still all dependent on each other, so you get flushes everywhere. You get, you have to wait for them to be completely finished before you can move on to the next shader. So what we actually did, we finally like, I went on and like, I kind of looked at how we can optimize that.
+And this is the final GPU pipeline that we have at this moment on disk.
+So we have all these multiple pipelines, they're all running the density map, we're running the density maps basically in a loop until one of the pipelines hits the layer that it actually wants to place inside that stack.
+Then it moves on to the generate shader.
+Then it moves, then it syncs again, then it moves on to an allocation shader which is used to allocate memory on the GPU.
+And then at the end, the entire thing can be repeated multiple times until we got the entire pipeline, the entire layer stack basically placed.
+And at the end, it just copies all the data in one go.
+So yeah, the details are not that important, but it's more about that you really have to think about how you set up your GPU compute dispatches, because that will eat you alive, because the compute shaders are so small and so fast that stuff like flushes or doing something very small, like not optimally, it will tank your performance.
+Okay, well that's basically it.
+This is the game running with the debug mode turned on, where you can actually see that those dependency stacks, those layered layers, are being resolved while the game is running.
+I had to push down the amount of pipelines that it can run in parallel, because you can see it can actually emit a lot of pipelines.
+So yeah, it actually works, it's actually in-game.
+Now, the conclusion.
+So there you have it.
+That's the entire system.
+It was quite a success.
+We use it everywhere in our game.
+We use it for meshes, effects, and gameplay elements.
+The visual quality is very good.
+It was very suitable for art direction.
+And I think that's why it looks so good.
+I think artists could really take it and do exactly what they wanted with it.
+And even the unpolished areas, so areas where artists never really got to, never really painted anything into the real data maps, were already shippable quality.
+Yeah, we were running about 250 microseconds busy load, which was within budget.
+And it's a very powerful tool in making these open worlds, because all our nature assets were only made by three people in the entire company, and all the ecotopes, all the logic, all the procedural stuff was done by one guy.
+So before I close, I want to show you some cool pictures.
+So these are cool pictures of our procedurally generated landscapes.
+And these are actually made by users.
+They posted them online because they thought it looked so good.
+And I think that really shows that we got where we wanted to be.
+I mean, the users are really enjoying the generated content.
+Any questions?
+Hi, you showed off some really cool brushes that was like, you had your tree brush and then you had your other things.
+And you mentioned that you bundled in like effects and sound and stuff like that too.
+Did you have like an effects?
+brush or did you kind of bundle those assets together?
+Like only certain woods would get that butterfly or something?
+Yeah, so the idea is that all the brushes are very kind of high level, I guess.
+And everything else just rolls out of the logic.
+So what happens is one artist is setting up the logic for an asset, it's somewhere in the graph, in another file, and they're all independently working on the Ecotope.
+So there's no, the editor doesn't know anything, it just paints in these world data maps.
+Awesome, thank you.
+So since it's all 2D maps, basically, how do you deal with caves and overhangs?
+Yeah, so basically, the system can handle that kind of stuff pretty well.
+I mean, the dithering is very much extendable to 3D if you want to.
+But we didn't have world data that's like full metric.
+And so that kind of blocked that.
+So basically, whenever it gets too crazy, we just went back to hand placed.
+And those are integrated into the same rendering back end in the same instantiation logic.
+So you don't have any overhead GPU performance wise.
+But the artists got away with really crazy stuff.
+Like sometimes they did things, and I was like, that's not even possible.
+They had stuff like on overhangs, and they did all this very creative stuff by making the height maps kind of cross together and stuff like that.
+So yeah, there's definitely things you cannot do with it.
+And I hope for the next game, we'll be able to get either a volumetric approach or some kind of UV unwrap in a 3D space.
+Thank you.
+Hi, nice talk.
+I was wondering if you have considered to use what you use to place every data, every object, vegetation, and everything to help the lighting system.
+For example, to make occlusion around the trees, and particularly of what is very far, it's very hard to lit, because with the cascaded shadows, you can't have the precision on everything.
+Most of the time, it look like very flat, and maybe it can help to the lighting too.
+Well, so I think, basically we can place anything we want with the placement system.
+So we also place like annotations and stuff like that.
+So you could also place lights, it would not be a problem.
+I think we might be doing that because we can place full entities.
+It's more to place shadows than lights.
+Oh, to place shadows. Yeah, you could do that.
+Yeah, it's because, you know, it's not making the cast shadows because it's very precise, but something that is more low frequency like ambient occlusion or something like this.
+Definitely, definitely.
+Yeah, basically anything that you can throw into some kind of structure you can place.
+So I spent a lot of time on the placement stuff.
+But actually, almost half my time went into the actual rendering back end, which has to render like thousands, hundreds of thousands of objects.
+And yeah, so there you can see that those things kind of working together, it's very powerful.
+You can create really interesting things.
+And you can also help rendering out by being smart about automatically placing stuff.
+Definitely.
+OK, thanks.
+OK, I think that's it.
+Thank you very much.

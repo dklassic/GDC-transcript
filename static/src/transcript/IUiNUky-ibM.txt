@@ -1,0 +1,615 @@
+Hello, everyone.
+Thank you for joining me this afternoon for this dive in Halo Infinite.
+Before we begin, I just want to remind you everyone to silence your phones or turn them off so that we can have a smooth ride.
+I'm going to go pretty fast, so try and hang on until the end.
+It's going to be worth it, hopefully.
+And who knows?
+There might even be cake.
+My name is Daniele Giannetti.
+My pronouns are he and him, and I'm a principal architect at 343 Industries.
+What I mean practically is that I help on a lot of topics related to simulation in Halo games, mainly performance, threading, game and engine architecture, physics, navigation, some streaming, some other stuff.
+Probably a bit too many things.
+3x3 Industries is the house of Halo, and over there we deal with all things related to the franchise.
+And the shooter team at 3x3 Industries is the team that delivered Halo Infinite, the biggest title from the company yet.
+And previous titles from the team include Halo 4 and Halo 5 Guardians.
+Before we jump in, I just wanted to show a quick video of the game so that we understand what we're talking about.
+Enjoy.
+It's enough.
+So yeah, Halo Infinite is a first-person online multiplayer shooter.
+And it's a competitive game with some casual-friendly modes as well.
+And at the same time, the Halo Infinite campaign is a narrative-driven experience that brings players into the largest open environment that we ever built.
+Today we're going to be focusing on some of the changes that we did on the Halo engine going from Halo 5 to Halo Infinite, and specifically how we transformed the engine from a single platform fixed frame rate engine tightly optimized for Xbox One at 60 FPS to a multi-platform viable frame rate engine.
+The Halo Infinite was always shipping on Xbox One.
+We knew that from the beginning.
+But this time we were also targeting Series X, Series S, and Windows PC.
+Obviously there is a large variability of hardware power on the right of the slide there.
+And we wanted to make sure that the game scaled naturally and consistently across all their hardware.
+And for PC players, we wanted to make sure that they could really tune their experience the way they wanted and play at the frame rate that they wanted, depending on their V-Sync and other things like that.
+So our agenda is gonna start with a deep dive in Halo 5 tech, our legacy, and specifically we're gonna be dissecting the two big challenges with that approach to execution.
+Specifically, what aspects of it made it a fixed framework engine, and what concerns we had scaling that execution to CPUs of different size.
+This is not a graphics talk.
+and I'm mainly going to be focusing on simulation workloads on the CPU.
+However, I'm going to be touching on some of the changes that we did to our renderer, specifically on the CPU side of our renderer, because they're crucial to understand the scalability solutions that we implemented.
+After all that and dissecting our solutions to those problems, we're going to walk together through one frame in the Engine across a variety of hardware targets.
+And then we're going to move on to some Q&A.
+Okay, let's start with our legacy, Halo 5 engine.
+So the Halo 5 engine being so tightly optimized for Xbox One, I'm showing an approximate high-level frame on the Xbox One CPU.
+Xbox One has eight physical cores, however only seven of them are accessible to the title, with the seventh core, CPU six, being half-shared with the system.
+So only roughly 50% of its bandwidth is guaranteed to the game.
+The Halo 5 engine had two principal threads, the main thread and the render thread that were responsible respectively for moving forward simulation and rendering work on the CPU.
+And they were affinitized to CPU zero and one.
+And we also had a set of four worker threads that were affinitized to CPU two through five, and they were mostly helping out on simulation work, and they were specialized in the sense that they were only picking up specific kinds of work, depending on the thread.
+On CPU 6, we relegated all of our latency-tolerant workloads like streaming, I-O, and things like that.
+And in classic two-threaded engine fashion, we are pipelining execution so that we are simulating frame N at the same time as we render frame N minus 1.
+The simulation frame starts with input sampling right there.
+And after a few more things, we move on to the core of the simulation, which we called Game Tick.
+The Game Tick includes a bunch of stuff like design scripting updates, the object update, which updates the logical state of all of our objects, physics stepping, animation updates, and transform updates for all the objects.
+After the simulation is done, we publish the results to the renderer, and in our case, this was a large mem copy of Game State to the renderer, so the renderer can operate on it and render it at the same time as we simulate the next frame.
+OK, but what made the Halo 5 engine a fixed frame rate engine then?
+Well, the game tick, just like I showed it, it always consumed a fixed amount of time.
+16.6 is how many seconds of time precisely.
+So the engine was hardwired to run at 60 FPS.
+So this ran reasonably well for Halo 5, where that was our only target on Xbox One.
+And this is how execution at a high level could have been on the console.
+Here in red, I have drawn the real world time split in 60 plus 60 second chunks.
+And in blue here, we have the simulation executing on the CPU.
+As you can see, if the simulation runs fast enough and we're able to publish the results to the renderer in our allotted amount of time for the frame, and the renderer is able to complete the rendering work on the CPU in that same amount of time, or 60 plus 60 seconds, and the GPU frame can finish in that exact amount of time, then we're able to maintain our throughput of 60 FPS.
+So this was most of the time the case in Halo 5, and also let's keep an eye on that green box that shows up at the beginning of the simulation frame.
+This is how I'm gonna represent input sampling from now on, and it's important for future discussions down in the slide, so keep an eye on it.
+Okay, so this is what happened when execution was working as intended.
+But what happened in Halo 5 if we had an execution delay?
+Maybe a big explosion or some unexpected workload coming into the simulation, since our sandbox is very physics-driven.
+Well, we had a strategy in Halo 5 to catch up on the lost time.
+We called it multi-ticking.
+And it's important to understand how this works, because we pretty much built our valuable framework model on top of this.
+The idea is, let's accumulate enough delay so that we're able to consume that time that we have accumulated and we have to catch up on in an entire additional game tick, like an additional 16.67 milliseconds of delay.
+And.
+when that happens, then we're able to perform multiple game ticks in a single frame.
+So for instance, here's a long frame. This frame lasts longer than 60.67 milliseconds of time, and assuming that we have a community enough delay, then here's a multi-tick frame. In this case, a double-tick frame, we are doing two game ticks and consuming 60.67 milliseconds of time times two, 33.33 milliseconds. Great. So there was no clear It wasn't a guarantee that we were able to catch up on the lost time using this strategy.
+There was an assumption that the simulation was fast enough most of the time, and therefore, with the occasional spike, we were able to recover on the lost time using additional game ticks.
+But obviously, if the game tick itself, it takes longer to run on the CPU than the time is able to consume, say, 16.6 million seconds, then we would have accumulated even more delay.
+But this assumption held through most of the time, so this works well enough for Halo 5.
+But what is the effect of this approach to catching up on lost time?
+Well, if you focus on those black lines towards the bottom, that's the time that elapses from input sampling for a frame to the end of the GPU work for that frame, which is when we do our present.
+While this is not exactly the same as our input to image on screen latency, it's representative of that quantity.
+So as you can see, when we have a spike, like the first frame, a longer frame, and when we also do multiple ticks, like in the second frame on this slide, the total input to image on screen time is longer.
+So effectively, the result on players and player experience was a small g-thread in input latency.
+But if If our delays were seldom and we were able to quickly catch up and recover, then this was fine.
+It wasn't easy to detect for the players, even professional players, and we were happy with this for Halo 5.
+So here's an x-ray of what happens in the case of a game double tick frame.
+As you can see, we are doing two game ticks.
+And it's approximate, but as you can see, we're duplicating most of our core workloads.
+We are doing the design scripting update twice.
+We are updating the logical state for all of our objects twice.
+We are updating physics twice.
+We are updating the transforms for all of our objects twice.
+And obviously, this is expensive.
+But obviously, we weren't doing everything twice.
+We were simply input once, where also some other workloads were only done once, and also we were publishing the simulation only once to the renderer, of course.
+Okay, so great.
+So we understand we have game ticks, we can double tick, but we still have the same core problem.
+We are simulating in discrete, since input is in the same millisecond intervals.
+And for Halo Infinite, this was just not good enough.
+Yes, we were shipping at 60 FPS on Series X, at least by default.
+But we also wanted to enable 120 FPS performance mode on the console.
+And for PC, we wanted to be able to scale naturally to the player rigs.
+And if they had a massive machine, then we wanted to scale up to 144 plus FPS with arbitrarily configurable frame rate.
+And we really wanted to show smooth motion at all those rates.
+We didn't want to be constrained by this stuttery 60 FPS simulation upgrade.
+On top of that, we also had another requirement, which was a design requirement that the physics-driven Halo sandbox had to feel the same across all of our targets.
+And not only that, it was a design requirement.
+It was actually a technical requirement.
+Because our...
+Gameplay networking model for Halo Infinite actually relies on near determinism for all of our physics driven sandbox the core of our simulation This is in order to do something that we call deterministic Reprediction and I'm not gonna get into details of how that that gameplay networking model works, but trust me. This was a requirement for us Okay, so we're gonna look at how we how we solve those challenges.
+But before we go there, let's talk about the second big challenge of Halo 5 tech, which we named Tetris Scheduling.
+So this is the same picture that I showed at the beginning of the presentation, the approximate Halo 5 frame on the Xbox One CPU.
+If we focus on that box there, we see some workloads running on the worker threads.
+We have audio simulation, the AI pre-update, a few other things.
+So the AI pre-update specifically was scheduled early on by the main thread, by the main loop.
+It would say, OK, let's do the AI pre-update now on this worker, let's say worker 2.
+And then it would do some more stuff, and sometime later, it would synchronize with the end of that work and continue AI execution on the main thread with the AI update.
+This was scheduled this way because we knew that early on in the simulation frame, in that specific spot on the Xbox One CPU, we would have had idle time.
+That core would have been able to execute that workload, at least in an average frame.
+And this was not the only case.
+A lot of workloads were scheduled this way, where we handcrafted this manual schedule of game systems to try and maximize the utilization of the Xbox One CPU.
+But obviously, this solution does not scale well at all to CPUs of different sizes.
+If you consider the scenario where we have a PC CPU with 20 logical cores, then we can either change the number of threads, but then we also have to change this handcrafted schedule of game systems on the various threads.
+Or we cannot change the number of threads and leave this Xbox One configuration only, which means that we're going to dramatically underutilize the hardware.
+Similarly, if you have a small PC CPU with only four logical cores, then either we have to change the number of threads and reschedule everything again, or we can leave this same number of threads, but there's an assumption here that we can run all these threads simultaneously, and that's just not true if you only have four logical cores, so you're gonna interfere with your own workloads.
+So this didn't scale well at all for us.
+But it was also an additional problem, which was a maintenance problem with this solution.
+So let's get into that.
+So this is pseudocode that shows what I just described.
+Early on in the main loop, we will schedule the AI pre-update.
+Then we do some more stuff.
+At some point, we wait for it.
+And then we perform the AI update on the main loop.
+Great.
+So for Halo Infinite, let's say that there's a new engineer.
+They're writing a system.
+This system is updating the player aim vector.
+I'm just making things up here.
+And they need to take this system every frame.
+So they find a spot in the main loop.
+They stick it right there.
+Everything works great.
+Now, someone else comes along, and they're looking at the system.
+And it turns out that the player aim update system is pretty long.
+And because it's sitting on the main loop, it's making our simulation long pole longer.
+So we want to move it to a thread and parallelize it with the rest of the stuff that is happening on the main loop.
+So I'm looking at this code, and I'm like, OK, does the player aim update system have to finish or have to start after the pre-update is done?
+Does it have to finish before the AI update on the main thread can execute?
+It's really impossible to tell just looking at this code.
+And there were a lot of implicit dependencies that were just implicit in the way the code was written or the code was scheduled.
+And in order for me to do this operation safely of moving that workload on a thread, I need to do a deep inspection of all the systems involved or have that tribal knowledge somehow.
+But this is obviously extremely simplified.
+Our situation was much more complicated than this, but this is more representative.
+Multiple systems were being added to Halo Infinite, or rewritten to implement new gameplay functionality.
+And we also had branching code paths that were scheduling workloads differently depending on the game mode.
+So this was quickly becoming a maintenance nightmare for us.
+It was very hard to maintain this code efficient as systems were being added or rewritten, and new engineers writing new systems were very hard to onboard.
+on how to write efficient code.
+So they will default to doing the simplest thing possible, which was just adding the systems to the main loop long pole.
+Because they were also completely thrown off by all the overhead of this threaded, this scheduling works in a threaded manner.
+And by this implicit dependencies, they just didn't have that knowledge required.
+So this led to a massive bowl of spaghetti nightmare maintenance.
+I wanted to bring, for this slide, I wanted to bring a really ugly bowl of spaghetti to carry the message.
+But you should know that I'm Italian, and I grew up in Italy, so I would never disrespect spaghetti.
+So here's a very inviting plate of pasta for you instead.
+But believe me, this was actually a really big problem for us.
+OK, so now we can finally move on to Halo Infinite.
+We're gonna start discussing how we solve the problem of achieving viable frame rate.
+Remember, we only had the game tick.
+The game tick was consuming 16.67 millisecond intervals of time every time.
+And we didn't want to be stuck with this stuttery simulation of 16.67 millisecond intervals.
+So what did we do?
+We split the time consumed by the engine in two different kinds of time.
+we kept the concept of fixed update time that is still consumed in 60.67 millisecond intervals inside the game tick, just like it happened in Halo 5.
+Now, systems that require a fixed update rate to maintain their behavior consistent, or that are part of our deterministic network simulation framework and sandbox, they are then called fixed update systems, and they consume fixed update time, and they're still updated inside the game tick, just like it happened in Halo 5.
+This includes, for instance, our physics simulation, which is the core of the Halo sandbox.
+But we also introduced the concept of valuable update time.
+This is the actual time delta since the beginning of the previous frame.
+And for systems that are able to maintain their behavior more or less consistent when consuming a different amount of time, and this time could change every frame potentially, and systems that are pretty much eye candy and not really affecting the deterministic sandbox simulation of Halo.
+then we can convert them to consuming this kind of time, and we call them valuable frame rate systems.
+These systems are still updated as part of the simulation loop, but they're updated outside of the GameTick.
+Also note, in Hello Infinite terminology, I'm gonna use GameTick and FixedUpdates interchangeably, since they're synonyms for us, so I'm gonna use them interchangeably for the rest of the presentation.
+Okay, so let's look at an example.
+If the engine is configured in the contrived way to run at 40 FPS, which I know nobody would ever do this, but just as an example, then every frame, if we don't have any performance issues, is 25 milliseconds.
+That is going to be the amount of valuable update time that valuable frame rate systems will consume every frame.
+But for fixed update systems that they have to keep on par with the valuable update timeline, they are going to have to update three times in two frames, because three times 16.7 milliseconds is 50 milliseconds.
+And so we end up with this really interesting execution pattern of one or two game ticks in alternating frames.
+So, this is all well and good, and we understand now that variable frame rate systems, because they're updating every frame, and they're consuming the right amount of time, are regardless of the frame rate, they're gonna be able to show smooth progress.
+But what about fixed update systems?
+Those are still some of the systems that we care the most about, like our physical simulation.
+Well, what we did is we introduced an additional system that we call Twinning, and it's an interpolation system whose job is to project the result of fixed update systems from the fixed update timeline into the variable update timeline.
+And this is in order to give the player the illusion of smooth motion, even though the simulation is not actually advancing at that rate.
+Let's look at an example.
+So here's the game configured to run at 120 FPS.
+So this could be Xbox Series X, for instance, in performance mode.
+And assuming that we don't have any performance issue, just for simplicity, then each frame is 8.33 milliseconds of time.
+And that's the amount of time the variable update systems are going to consume every frame.
+So because fixed update systems only consume time in discrete intervals of 16.67 milliseconds of time, then we only need one fixed update every two frames, which makes 16.67 milliseconds.
+And so we end up with this pattern of one or zero fixed updates in alternating frames at 120 FPS.
+And so, after our simulation is complete, before we publish the results to the renderer, what we're gonna do is we're gonna interpolate in memory the results of the two most recent fixed updates that we have completed.
+And this is in order to project on the variable update timeline at the right time.
+So here's an example frame.
+Just let's focus on that for a second.
+So this frame doesn't actually have any fixed updates, or even, we're not even stepping physics this frame at all.
+But we still have in memory the results for Fix Update 1 and Fix Update 2.
+So we can use them.
+And we're going to interpolate at the right time before producing the results that we're going to send to the renderer.
+So in this slide, I have used dark blue and light blue as a blend to show the blending going into the renderer CPU frame.
+Okay, great, so we understand this strategy, but let's focus on that input for a second.
+This is the input for this frame.
+So this input is consumed normally by variable frame rate systems updating this frame, but because we're not updating any fixed update systems, they can't consume this input.
+And the fixed update system results that we're using to draw this frame are actually coming from previous frames, so we definitely didn't consume this input for those fixed update.
+So effectively, what this approach interpolation does is it adds an additional latency to any input that is affecting fixed update system results.
+And that latency has the minimum of the simplest assembly seconds of time, which is our update rate for fixed update systems.
+Another interesting thing is, notice how some frames have a fixed update and some frames do not on the simulation.
+This means that we have every frame, we have a variable amount of CPU work to do in the simulation, which could be a performance concern.
+Now in practice, this wasn't an issue for us because in all the platforms where we were aiming for more than 60 FPS, we were not CPU bound typically, so this slight oscillation of workload was not a big problem for us in practice.
+Okay, so going back to that contrived example of 40 FPS, then the situation is identical.
+We are still going to interpolate between the results of the two most recent fixed updates that we have in memory.
+So focusing on that frame there, for instance, we're gonna interpolate between the results of fixed to the two and fixed to the three before publishing the results to the renderer.
+And it just so happens that this frame, these two fixed updates are within the simulation frame that we are in, but that's just because the engine is running slower, because we're at 40 FPS instead of 120 FPS.
+but the strategy is exactly the same.
+Okay, so we chose to interpolate, but we could have extrapolated instead.
+So with extrapolation, basically what that means is we start from the fixed update system results of the latest game tick, and then we project them forward in time instead of interpolating between past results.
+So if we do that, then we're able to recover some of that additional input latency that I talked about for fix of the system results.
+However, we can produce incorrect results, and so we need to have a strategy to recover on the incorrect extrapolation.
+So it is a choice, but we chose to interpolate and never extrapolate.
+Also, what is that we interpolate?
+Well, we interpolate all object transforms and the transforms of all their nodes, which are basically the limbs of character and things that represent poses of characters.
+And we always do linear interpolation, even for rotations, because we know that the two samples that we're interpolating between are always exactly 16.6 milliseconds apart.
+And so it turns out that we didn't actually need that additional accuracy of SLURP for rotations.
+Also, we only process objects that are actually actively moving in a simulation.
+And so objects that are asleep on the ground, that are not really moving, we don't process at all.
+So there's some optimizations in place.
+Okay, so focus on Xbox One then.
+Because Xbox One was a 30 FPS platform, or target platform, then we have to do two fixed updates every frame in the simulation.
+But Xbox One was also one of our hardest CPU targets for optimization because it's a very slow CPU nowadays.
+So what we did in our optimization efforts is we focused on converting into variable frame rate as many heavy-hitting CPU systems as possible that were previously inside the Game Tick.
+And we successfully converted a bunch of them, and there's an incomplete list on the slide, but mainly we brought out of the Game Tick design scripting updates, AI logic updates, a bunch of player updates, audio lights, effects, and more.
+And for the systems that had to remain inside the game tick because they were part of the dissemination network simulation of the game, then we focused on shrinking that workloads as much as possible until they fit into, until we were able to fit two fixed updates inside the Xbox One frame in our worst case scenarios.
+OK, so we understand our variable frame rate model a little bit now.
+We're going to get to look at it in practice when we dissect together one frame towards the end in Halo Infinite.
+But before we go there, let's look at our solutions around achieving maintainable scalability across CPUs of different size.
+Okay, so you remember we had our Tetris scheduling problem where we had specialized worker threads, we were trying to handcraft the schedule of game systems to try and fill up the Xbox One CPU, and it was just not scaling for us, it was giving a lot of maintenance grief.
+So what did we do?
+Well, what we did is instead of explicitly scheduling the work and creating these implicit dependencies that we talked about, Let's declare the work up front, the work items up front, and call them jobs, and declare their dependencies up front, which are job dependencies.
+And then let the system implicitly schedule it.
+And so we wrote a new job system for this, and here's a small pseudocode example for it.
+The job system's a singleton.
+We can create a job graph within the job system, and I'm adding two jobs to it, job A and job B.
+And then I can create a dependency between these two jobs, specifying that job A has to complete before job B can start.
+and an SMA for execution.
+The job system's role is to take this job graph and run it, execute it, on the available execution resources according to the dependencies.
+So looking at a quick example, here's a simple job graph.
+If the job system is given this job graph to execute, it's going to be able to start job one immediately, because there's no dependencies on it.
+And then when job one is complete, job two and job four will be able to start and run potentially simultaneously if there is enough execution resources, and so on and so forth.
+But because we were adding these systems to an existing code base, and we still had a lot of legacy thread-driven work, specifically from the main thread, the rendered thread, we didn't want to have to rewrite all that.
+We didn't have the time.
+So what we did is we added a mechanism to synchronize legacy thread-driven work with new style jobified work.
+And we call this mechanism SyncPoints.
+The idea is you can add SyncPoints to a job graph, and jobs can take predecessor or successor dependencies on SyncPoints just like they do with other jobs.
+And effectively what happens when I'm executing this job graph here is main thread is executing happily, and then main thread hits the sync point one on its execution path.
+Main thread is not gonna be able to move beyond that sync point until job two is also completed.
+And similarly, job six will not be able to start until main thread's execution has moved beyond sync point one.
+We can look at a quick code example for that.
+So we still have the job graph here, and this time I'm adding a sync point, call it sync point X.
+And as you can see from the box on the bottom right, that sync point is triggered as part of the main threads execution.
+So it's effectively splitting the main threads execution loop into two logical workloads, workload one and workload two.
+And on top of that, I'm then adding two jobs, job A and job B, and I'm creating dependencies like this.
+Job A to sync point X, and sync point X to job B.
+So what I've done with this job graph is I've created a dependency chain where workload one has to complete before job B can start, and similarly, job A has to complete before workload two can start.
+So we're able to take this mixed legacy and new style dependencies with this system.
+Okay, so armed with this.
+with these new tools, then for the simulation, we introduced two kinds of job graph.
+The frame job graph is responsible for updating all valuable frame rate systems.
+So it gets created and submitted for execution at the beginning of every frame, and it updates all the valuable frame rate systems.
+And on top of that, that job graph is also responsible for building and submitting for execution a number of fixed update job graphs, depending on how many fixed updates we want to do this frame.
+So for instance, in the case of a frame with two game ticks, we're going to have the frame job graph doing variable update systems work.
+And then that's going to construct and submit two fixed update job graphs to perform the two game ticks.
+Okay, so job graph systems adoption for us was very good.
+It was indeed used as intended to re-implement a lot of our Tetris schedule systems.
+This included all of our AI systems, our design scripting systems, physics systems, effects and light simulation, and more.
+But even better, it was consistently adopted for new systems that were being added to Halo Infinite.
+An iceberg of the system is because engineers had to write, had to add all the items of work and the dependencies up front, then.
+they would often end up adding all these jobs and dependencies for a very high level system inside a single file.
+For instance, we had this AI job schedule.cpp that contained all of our high level AI workloads and their dependencies.
+So an engineer was able to crack open this file and understand at a high level how execution of this overarching system worked.
+So this was a nice perk for us.
+But an even better result of introducing this system is that it was actually used to implement our new multi-threaded renderer.
+So Halo 5 had a mostly single-threaded renderer and used a lot of console-specific tricks to achieve extremely high execution efficiency with very low CPU bandwidth.
+But for Halo Infinite, we were moving away from console only and Direct3D for PC has a lot more overhead.
+And on top of that, we also wanted to reintroduce split-screen in the franchise, which obviously means a lot more CPU work in the renderer.
+And we were also adding a whole slew of new rendering techniques.
+So we realized early on that we had to lean heavily on multi-threaded rendering for Halo Infinite to work and be performant.
+So we used the job system to implement this and Halo Infinite now has no render thread at all.
+It's just jobs.
+Here's an in-game visualization.
+It's a debug tool that shows job graphs and here's showing the render job graph.
+It's kind of hard to see, but each box here is a job and the lines between them are dependencies between jobs for the render job graph.
+Even though you probably can't read anything in here, you can note that there is quite a lot of potential parallelism between these jobs in the render job graph.
+So, you know, this multi-threaded renderer, it can go pretty parallel, depending on how much availability there is on the CPU.
+And the blue boxes here in the picture are part of the render job graph critical path.
+So, those are the jobs that you may want to focus on if you're trying to optimize end-to-end time.
+So yeah, in this jobified world, then our optimization effort became optimizing jobs that are along the critical path.
+Or, if we have available execution resources because we're not using the CPU as efficiently as we could, then we can also focus on either achieving better parallelism by either reshuffling these jobs or relaxing their dependencies, if we're able to.
+And another thing to note is that other than online inspection tools in-game, we also had offline inspection tools that allowed us to dump out a job graph and then look at its topology on our own time without running the game.
+Okay, so I mentioned that the job system's role was to schedule jobs on the available execution resources.
+But what are those execution resources in practice?
+So, Halo 5, as I showed before, had a set of worker threads and they were specialized so they were able to pick up specific kinds of work depending on the worker thread.
+For Halo Infinite, we don't have specialized worker threads anymore, we only have generic worker threads.
+And the real, we call, we have a pool of these worker threads that run a high priority and we call them real-time worker threads.
+And these threads are the ones responsible for picking up and executing all simulation and rendering jobs in the engine.
+So together with the main thread that is still doing simulation work for us, then these jobs are, sorry, these threads are the ones that are responsible for upkeeping the frame rate of the game.
+And these are mainly the execution resources that the job system targets for its dispatch of jobs.
+Other than these threads, we also have a set of background workers that are on a lower priority, and we use them for more latency tolerant work like disk IONs and some streaming stuff.
+And beyond this, we also have a set of third-party and legacy threads that we like to call Spurious.
+We call them Spurious because we wish they didn't exist.
+In practice, when you use a lot of third-party software, there's a lot of third-party software that likes to create their own threads.
+But unfortunately for us, because we are running these real-time workers at high priority, and they need to continue executing in order for us to keep our frame rate stable, then we really have to be careful about interference on these real-time workers, like content switch and other threads coming and stealing our cores.
+because they are responsible for executing all of our simulation rendering works cooperatively, like the jobs that run cooperatively scheduling.
+So what we do for these spurious threads is we configure them very carefully, one by one, to try and maximize their disruption with on real-time workers, depending on the case.
+Some of them need some real-time constraints, some of them can wait a long time, so we can be more aggressive on those.
+Okay, so we're gonna now look at this threading model and how it adapts to various platforms.
+So we're gonna start with Xbox One.
+So again, Xbox One, eight physical cores, seven accessible to the game, with CPU six, the last core, or seventh core, being half-shared with the system.
+So we still have the main thread up until CPU zero, and in Halo Infinite, we have now five real-time workers, generic real-time workers that help out on simulation and rendering work.
+They are affinitized to their own core, CPU one through CPU five, and they're on a high priority, as I said.
+On top of that, they also, when they run out of jobs to execute immediately, we actually don't immediately yield the core.
+We spin for a few microseconds, around 200 microseconds, just in case there's other jobs that are about to be scheduled because the dependencies are satisfied.
+We do this because it turns out that the cost of putting one of these threads to sleep and then re-wake it when additional jobs come along is higher than just most of the time, spin for a little bit and wait for jobs to come in.
+So we use this trick on console because we know that the hardware is dedicated to us, so we don't have to worry about interference.
+Then we have a set of background worker threads.
+These are actually able to roam across CPUs, but they're on a lower priority, so they're never gonna interrupt real-time workers.
+And often they're gonna find space to run on CPU6, which is our half-share core.
+And then we have our set of spurious worker threads that are configured on a case-by-case basis.
+SiriusX is similar but interestingly different.
+So first of all, SiriusX also exposes eight physical cores.
+But this time, CPU 6, the seventh core, is exclusive to the title, so that's good.
+On top of that, the console, CSX NS, offer a optional mode of execution called simultaneous multithreading, which allows the game to run two threads simultaneously on each physical cores, effectively leveraging two logical cores for each physical core.
+The price you pay then is that the clock rate slows down a little bit from 3.8 to 3.6 gigahertz, but it's quite common to get a performance boost using SMT.
+So we tested both, and we ended up deciding not to use it, at least for now, so here Infinite runs without SMT enabled.
+But we still create an additional real-time worker thread on CPU6, because this time the CPU is dedicated to us, so we can, or exclusive to us, so we can actually use it as a regular dedicated core.
+And just like on Xbox One, we, even on Series X, spin for a little bit after we run out of jobs to execute.
+And this allows us to avoid needless context switch, or needless and frequent context switches, and allows us to achieve very high execution efficiency on the console.
+On Windows PC, the situation is very different.
+So Windows PC is not a dedicated platform.
+It's a shared platform.
+And there's other programs running on it.
+And the OS may decide at any point to shrink our available execution resources.
+So what that means is that for our CPU execution, we try to be as flexible as possible.
+And in practice, that means that we never authenticize.
+We allow any thread to run on any core.
+We still prioritize the threads relative to one another.
+And we also try and avoid spinning as much as possible and yield the CPUs as quickly as we can.
+And we do this because if we are in that scenario where the operating system is reducing our available execution resources and we have fewer CPU, fewer cores available for executing, then we really want to make sure that any work that we get in and executing on the CPUs is useful work.
+So we don't want to burn that time spinning and potentially shooting ourselves in the foot.
+Other than that, we obviously still have the main thread and a set of real-time workers, and we create one real-time worker for each logical core available on the machine, minus one for the main thread, and up to nine.
+That number nine was chosen empirically by just scaling up the number of worker threads that we were creating, and simply noticing that when we scaled execution beyond that, then we started seeing negative returns on overall performance because of overhead intrinsic to our scheduling systems.
+So we settled for nine.
+Okay, so now, finally, we have all the tools that we need to dissect together one frame in Halo Infinite.
+We're gonna start with Xbox One.
+Okay.
+So, this is a tool called Pix.
+And Pix come with the Xbox GDK for any Xbox One or Xbox Series X developers.
+There's also a version for Windows.
+It's called Pix for Windows, and I'm just showing a screenshot of the GDK version here.
+It's very similar.
+And we use it for all of our profiling on the CPU side, consoles of course, but also Windows PCs, and even dedicated servers, which run on Windows VMs for us, with the machines on the Azure cloud.
+So Xbox One being a 30 FPS target, I'm showing that 33.33 milliseconds at the top of the slide there.
+And then we have one lane for each of our main threads.
+So we have the main thread at the top.
+We have our five real-time workers just below it, the big lanes.
+And then at the bottom of the slide, I'm showing a lane for CPU six, which shows some lower priority threads executing.
+Okay, let's start from the beginning of the simulation then.
+In this phase, this is where we construct and submit for execution our frame job graph.
+And that green narrow workload inside the circle is our input sampling, just as promised at the beginning of the simulation.
+Right after that, jobs start up for the simulation and we have, here's an example of a streaming job.
+This is called simulation controller.
+It's basically a streaming system, a system that is part of our streaming systems that is responsible for It's responsible for evaluating and computing relevancy for a bunch of game objects.
+And in this scenario, it happens to run on CPU two and four just because those worker threads were the ones available for execution.
+But any frame, it could be different.
+These real-time workers are generic, so they can pick up any work as they become available.
+Here's some additional jobs to check out.
+In pink here, this is part of our AI update work.
+And this is all jobified, of course, but in this scenario specifically, the main thread is trying to get through a sync point, but it can't because the dependencies are not satisfied.
+So what it does instead is it joins execution and it starts picking up some AI jobs to continue moving forward the simulation.
+These green workloads here are part of our UI update.
+This is where we update the logical state of our UI and construct some of our command lists necessary for UI rendering.
+Okay, so we're still in the viable frame rate part of the frame, and now we move on to the core game simulation, which is our fixed updates.
+Because we run at 30 FPS on Xbox One, we have to do two fixed updates per frame, which should not be a surprise at this point.
+And the main workloads inside the game ticks are object updates, where we update the logical state of all of our active objects in the simulation.
+This includes stuff like vehicle simulation and whatnot.
+Then we have our physics update that in the Halo engine happens simultaneously as the animation sample and blend, which is the green workload that you can see there.
+Not too much this frame.
+And then we have our object move phase where we effectively update all the transforms for all of our objects and all their poses.
+After we are done with the core simulation and the two game ticks, we move on to an additional variable update phase of the frame where we update additional systems.
+And there's a lot of systems inside these circles, but I'm just going to call out a few.
+You can see some additional pink work there, which are additional AI jobs.
+And the light blue system on worker three is doing our time of day update.
+And then in gray on the main thread towards the end of that circle is our design scripting update, which.
+As promised, it's a valuable frame rate system now.
+Then we do a publish to the renderer.
+Our publish operation, as I said, is a big copy of game state to the renderer.
+On Xbox One and Xbox Series X and S, on all our consoles, we use efficient DMA hardware to try and maximize memory utilization for this operation and complete the copy as quickly as we can.
+Xbox offers a nice API to do this, so we leverage it.
+And this gets the copy done as quickly as we could.
+And then we wait a little bit.
+We wait because in this scenario, in this specific frame that I took a picture of, we are actually a little under budget.
+We're not using all of the 33.33 milliseconds that we have at our disposal for the simulation.
+So in order for us to keep consistent input sampling, we have to wait a little bit before we start the next frame and input sample again.
+And we do this through a software timer that we call Metronome.
+It's a high-precision software timer.
+And so this is where we wait for it for the next frame, bit.
+As we were doing all that, we also had all these red workloads running on the same threads and at the same time.
+These are part of the render job graph coming down from last frame.
+So this is the last frame render job graph completing execution.
+Also, at the same time as we were doing all that simulation, we also had this hot pink workload, which is our audio rendering.
+Audio rendering is actually a pretty interesting workload on slow CPUs, because it's actually pretty CPU hungry.
+depending on the case, and for us, it was crucial to schedule this cooperatively, just like we do with any other job.
+So here it is running on a worker that runs any other job as well.
+We don't take any context switch for audio rendering either.
+And after we publish our simulation to the renderer, we see here the render job graph starting up for this frame that we just finished publishing.
+And even though the simulation is not running at the same time, you can see that there is quite a lot of potential parallelism in our renderer alone.
+But overall, when the hardware is soaked, we run pretty much like the left side of the slide, which, as you can see, we achieve a pretty decent utilization of the Xbox One CPU, so we're pretty happy about it.
+Okay, Xbox Series X, it's similar, but I'm gonna call out some of the differences.
+So first of all, it has two modes.
+You can run the game in performance mode or quality mode.
+The default is quality mode at 60 FPS.
+So this is what I'm gonna show here.
+And you can see there's 16.7 milliseconds of time at the top of the slide.
+There's, calling out some differences, we have an additional worker thread because that CPU is now dedicated on this console.
+So we create it and we use it just like any other real-time worker.
+Also, because we're running at 60, we only had to do one game tick every frame, and here it is.
+Should not be a surprise now.
+And also note that our wait for the next frame is actually very long, in this frame at least.
+And effectively, we're done with the simulation stuff in just a handful of milliseconds.
+So...
+First of all, I should point out that we do scale up a lot of our CPU workloads on Series X when compared to the lower-end platforms like Xbox One.
+And you can probably notice that there's a lot more relative green here.
+We animate a lot more. We do a lot more rendering, of course.
+We spawn a bunch of critters through the environments that don't exist on Xbox One, and so on and so forth.
+But even then, we are usually under budget on Xbox Series X at 60 FPS.
+But this slack is not all bad because it allows us to ingest smaller spikes without dropping a frame, so that's good, but also it's crucial for us to obtain our 120 FPS performance mode.
+So we're happy about having all this time available to us.
+On PC, the topology of how a frame looks in Pix is going to be completely different depending on how the player configures it.
+Players can configure arbitrary target frame rates.
+And usually they're going to want to align with their monitor v-sync rate.
+But they can also configure unlocked frame rate.
+And what unlocked frame rate means is that we're going to simulate.
+And then as soon as we finish the simulation frame, we're going to carry on and do the next simulation frame, even if the renderer is not ready to receive the data.
+So we never wait for a metronome.
+And even though most of the time that's not how you're going to want to configure the game, we're looking at it as an example here to understand how it works.
+So in this scenario, I have an eight logical core machine.
+And I can tell because I have the main thread at the top and then seven lanes for seven real time workers.
+So that's eight logical cores total.
+focusing on some interesting differences.
+Here's inside the circle, we can see that the line on top of the work is changing color.
+And that is because the thread is indeed migrating from CPU to CPU because it's not affinitized, like I mentioned before.
+And also, this slide contains three different frames.
+The first two frames are shorter, and here they are.
+And they actually don't contain a game tick.
+And this is because we are, in this scenario, running at much higher than 60 FPS.
+So not every frame is going to contain a game tick.
+However, these frames are still going to run our tweening systems, our interpolation systems, to show a smooth result on screen, using the two most recent game ticks that they have stored the results in memory for.
+And here's a frame that does contain a game tick, where we recognize all of our usual workloads.
+Another important difference on PC versus console is the way we publish the simulation to the renderer.
+It's still a large copy of Game State, but this time we do not have access to high efficiency DMA hardware, so instead we perform a parallel mem copy using multiple threads to make this copy as fast as possible.
+This is in an attempt to maximize our memory bandwidth utilization, and it works reasonably well.
+Halo Infinite Dedicated Servers, as I said before, they're Windows virtual machines hosted on the Azure cloud, and they run slightly differently depending on the game mode.
+Arena 4v4 servers run at 60 hertz, which is our more competitive mode, and Big Team Battle servers, which is our more casual modes, run at 30 hertz.
+And this is a screenshot from PIX on a dedicated server, and as you can see, the workloads look very similar.
+And this specifically, it's a big team battle server because I'm showing the 33.33 target at the top.
+So it's running at 30 hertz.
+But some differences with.
+with a normal client is that obviously we have no rendering to do, so there's no renderer.
+There is no audio work at all, or most of the work is disabled.
+There's no UI work to do.
+And there's also no publish.
+We don't publish the simulation because nobody is consuming the published data.
+So all those workloads are gone, but the core of the simulation, the game fix are still there, and they look exactly the same.
+There is some additional networking stuff to do on dedicated servers, so you can probably spot some additional networking jobs here.
+Okay, so we concluded our tour through one frame in Halo Infinite, and let's draw some conclusions.
+So overall, we're pretty happy with how our viable frame rate model worked, and how it scaled, sorry, how it allowed us to achieve smooth motion of any frame rate that we could configure, while keeping the core deterministic Halo sandbox consistent.
+And at the same time, we're very happy with how the job system allowed us to scale to CPUs of different sizes without having to weave a massive ball of spaghetti code.
+If I wasn't happy about it, I wouldn't be here talking about it.
+But it's not all good.
+There's some bad too.
+So first of all, for the variable frame rate migration that we did, we should have done a better job teaching engineers across the studio.
+And this is because there was a lot of confusion early on as we were migrating systems from fixed updates to variable frame rate.
+And in terms of what the job system, where the job system fell short, we were able to define dependencies between jobs and their execution dependencies, but we were not able to define data dependencies for jobs.
+Which, what that means is that we're not able to define that two jobs are using the same piece of data in a way that could interfere with one another.
+And in practice, that meant that during development we have to track down a fair amount of race conditions between jobs.
+And once we figured them out, we solved them by introducing additional execution dependencies.
+So in future, we definitely want to introduce data dependencies in the job system.
+We want to treat them as a native concept that works together with execution dependencies to schedule the work in a safe manner always.
+And the idea here is to reduce bugs and simplify onboarding for new engineers.
+On top of that, we also want to continue to work on converting systems to valuable frame rate that could be converted to valuable frame rate.
+And it's not always that simple because some systems have portions of themselves that could be converted to valuable frame rate, so we have to decouple them first.
+But there's still quite a few things inside the GameTable that we could convert.
+And moreover, we want to fully jobify our main thread and get rid of it just like we did with the render thread.
+And also at that point, we could also get rid of sync points altogether because we wouldn't need them anymore.
+Okay, so I want to thank all of 343 for allowing me to be here today.
+And specifically the people on this slide.
+They were either massive parts of implementing these changes or they had to deal with me chasing them around to optimization work so they deserve a special thank you.
+Thank you.
+We are hiring, so if you are interested in joining us and be part of whatever is next in Halo Infinite, please check out our website.
+And also, we have a couple more sessions on Halo Infinite going on this year at GDC.
+The first one there was actually yesterday, but the other two are going to be tomorrow.
+So if you're interested, be sure not to miss them.
+And we can now do some Q&A.
+So I have, while people walk up to the mic, I have this video.
+I'm going to have this video playing.
+This is a video of bloopers from our internal database, so it should be pretty fun, hopefully.
+I mean, yes, what's up?
+When designing the job system, what made you go towards bidirectional synchronization points instead of a model like using fences to signal one side or the other?
+Well, um...
+I mean, a sync point is just a nomenclature.
+It's not that different from a regular fencer barrier in other threading systems.
+But we call the sync points, and basically we implement it to work just the way we want it to.
+We didn't look at other third-party packages to figure out, do they have the constructs that we need exactly?
+Because our job system was all in-house anyway, so we couldn't really easily adapt it.
+And it needed to be efficient for all these reasons.
+Thanks. Yeah.
+Cool system. I've seen things like this before.
+The thing which we hit was priority necessary between the jobs on the AI side, which is like the fixed update, because they're basically a real-time system, and your rendering, which is kind of not as much.
+Did you have any priority systems on yours?
+Yeah, so I left this out of the presentation, but our jobs have priorities.
+Okay.
+Basically, we had various levels of priorities for simulation work and various levels of priority for rendering work.
+And we also, our threads were generic, so they were able to pick up any work on any thread, but some threads preferred rendering work versus some other preferred simulation work.
+So they were able to nicely spread on the available execution resources.
+Thank you very much.
+That's totally what I thought you'd.
+Thanks for the presentation, that was great.
+This is more of a curiosity, I guess, than a question.
+I remember there was an issue with animations that has been solved since.
+Animations would play at a different frame rate than the rest of the things going on in the scene.
+I was curious what that had to do with the interpolation that you were describing.
+So you're talking about the Halo 5 animation jitteriness issue?
+No, in my head I'm thinking of the Halo Infinite, the clamber.
+The first person animations?
+Yeah, the first person.
+So that was actually completely independent from anything I talked about in the presentation.
+And it's an interpolation system that is within a built inside animation framework.
+And it was, yeah, there was a bug in there and we didn't notice until it was too late and we fixed it.
+But it took a while to get it out.
+I was just curious, thank you.
+Hello, you mentioned that a part of your optimization process was moving as much as possible out of the fixed tick and into the variable tick.
+And it seems like it would be easy to move things into the variable tick that still need fixed tick and you only discover that later.
+And I'm wondering...
+how hard it was to debug that kind of thing or if new features got added to variable tick that should have been added to fixed tick and things like that.
+So, it's a good question.
+So, I'm trying to think and I don't think I remember any scenario where we basically ended up implementing a system at variable frame rate and realized that, oh, geez, this needed to be an actual fixed-update system because it's part of the deterministic simulation.
+Now, it probably happened during development.
+But I think the crux of the situation here is because our game ticks are supporting the deterministic network simulation for the game.
+So if there is a system that is part of that update that is not part of the game ticks, it's going to cause really bad desyncs for us.
+So it would have been easy for us to detect that case, unless it was a very subtle system.
+But for instance, AI is an example where.
+AI is an example of systems that, it doesn't have to be part of the deterministic network simulation for the game, because it runs, most of the stuff runs server side.
+So as long as it's able to maintain more or less the same behavior, then we can keep it viable for a minute.
+But.
+but portions of that had to be fixed update and we were able to immediately tell that because those were directly changing the unit properties and the unit is part of our core sandbox concepts.
+So overall it was pretty clear.
+It was, I guess it was the other opposite side was less clear for us.
+How to take this system that definitely has some stuff that doesn't have to be fixed update but some parts of it are fixed update and how to bring it out safely.
+Gotcha, we're currently struggling with trying to move a variable tick system into fixed, and so it's kind of the same problem in the opposite direction.
+Yeah.
+Thank you.
+Yeah, you're welcome.
+Why did you not set thread affinity on Windows?
+So as I mentioned before, on Windows PC, our main goal is to be as flexible as possible.
+And so with thread affinity, if you restrict in any way what...
+threads, or what CPU threads want to run on, then you're intrinsically less flexible.
+And so what that means is that if the operating system decides that, you know what, this core that you really like and you want it to be authenticized to, I'm gonna use it for some other programs, then you lose one of your assumed resources.
+So, non-authentication is just in order for us to try and be as flexible as possible, in the case of the operating system reducing our execution resources on the CPU.
+still gonna have variable amounts of compute, even if, like, you know, if you have thread affinity, it's better, actually, right?
+Because if you don't have thread affinity, you're gonna end up with two things on the same, like, you're gonna have two logical cores.
+Right, so if you have.
+With the same worker thread, or two workers.
+Yeah, so if you're, yeah, so if you're trying to run multiple threads on a smaller number of CPUs, is that what you're saying?
+Yeah, so we still have priority between threads.
+So we could still decide which things have to come first, even in the scenario where Windows had taken away some of our CPUs, so.
+Yeah.
+And then, how did your gameplay scripting not cause desync?
+You moved that to variable frame rate.
+Yeah, so our gameplay scripting is, it doesn't touch any state that is directly part of the fixed update.
+It's doing instructions and changing stuff that is gonna influence fixed updates, but at the end of the story, most of our scripting is either server side, and the server is doing, I don't know, like a progress of the multiplayer match and things like that.
+Or if it is client side, it's.
+And so for the server side, we basically, that script is just changing some variables and then the server is replicating them to the client inside our Guard.MES network simulation.
+From the client side, we're only doing visual things in the scripting side, so yeah.
+I have a, something about me is that I have a past at Havoc and so I really lean towards physics bugs.
+Also, yes, the cake was a lie, sorry about that.
+So with the introduction of the variable frame rates on the clients, is the server able to account for that for hit detection?
+Yeah, so hit detection would probably deserve a presentation on its own.
+But yeah, so.
+So on the server side, so hit registration is a very interesting topic.
+But yes, the server is doing game ticks just like the clients are.
+So the game ticks are the basic way in which we advance our network simulation.
+And when the client shoots at someone and we want to do hit validation or hit registration on the server side, the server side is able to emulate the client view at the time where the shot happened through that registration and confirm the hit.
+And we do that throughout, basically we rewind time on the server for the systems that are required to do the shot registration so that it matches the timeline at the time the client actually shot.
+So does that mean that each client has to also send what, like their frame rate as well, so that the server knows how far into each frame the client is?
+Yeah, so we do, so the clients don't send their frame rate directly, but we do keep track of the, of the round trip time per client.
+So we're able to bring them to the right time when doing shot registration.
+Okay, thank you.
+Yeah.
+For monitors with variable refresh rate, and if you have a fixed update that takes very long time, maybe compared to the variable updates, does that create some jank where you might have very fast frames and then a long one that's visible in the monitor?
+Yeah, so this is what would happen if you configure the PC in unlocked frame rate.
+But that's why I said that most of the time you're not going to want to do it that way.
+You're going to want to specify, OK, I want to play at, I don't know, 80 FPS or 110 FPS or whatever, depending on your range of VRR.
+And And yeah, so as long as the game is able to maintain that, and then if you have a really long fixed update, or game take, or even a long viable frame rate update, you're eventually gonna burst through that.
+But as long as you're able to fall within the ranges, then that should be totally fine.
+And the metronome, which is the thing that is keeping your intended frame rate, is gonna be the thing that slows us down the most.
+Okay, that's it.
+Thank you everyone.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.

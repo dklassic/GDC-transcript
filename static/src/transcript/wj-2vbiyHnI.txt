@@ -1,0 +1,462 @@
+morning everybody. Thank you for being here very early this Thursday morning. I hope everybody's kind of recovered from that party. Um, we up here? We're all up here? Uh, if you guys could make sure you turn off your cell phones or put them on silent or whatever. Um, don't want the mics to pick them up. Um, I'm Will Armstrong, this is Patrick. I'm Patrick.
+I was the lead programmer over on Firewatch.
+I was a tools and gameplay programmer on Firewatch.
+And we're here to tell you about the tools and systems that we wrote for all of the dialogue in Firewatch and localization and just how we built tools for a pretty ambitious game with a very small team.
+So in a previous life, I was at 2K Marin, worked on Bioshock 2 in the Bureau.
+These days I'm over at Unity.
+I was an early engineer at Twitter and an engineering manager, mostly focusing on the web team.
+And Firewatch was my first game.
+So everything that we're gonna tell you about here is built off of previous work that we've learned about at other GDCs.
+So kind of going all the way back to GDC 2012, Ilan Ruskin gave a very good talk about how Valve used this sort of bark system to do all of their dialogue in Left 4 Dead 2.
+and our work is very heavily based off of that.
+In, what was it, 2016, the Valve guy, 2016, yeah, 2014, the Valve guys gave a talk on how they used dynamic dialogue system to turn that sort of back and forth bark systems into big long conversations in, is it there, is that a?
+The zombie one or the Nathan Drake one?
+The Nathan Drake one, I think.
+Yes, definitely Nathan Drake.
+And then we took a lot of our design cues for the radio from the 2008 Prince of Persia reboot.
+That game featured a dedicated button for narrative.
+There was just a button that you could hit at any time and have your AI companions start to sort of chat with you about what had happened in the game or what you were looking at or where you were.
+And that informed a lot of our early work on the radio.
+So this is all built on sort of the shoulders of giants here.
+The initial prototype we were making was a little different than the game we shipped.
+The way we first started thinking about Firewatch was that Henry was going to be driving all of the conversations.
+Everything was going to be...
+started by Henry, interruptible at any time by Henry, he could stop any conversation he had started, just switch topics, you could always talk about everything. Every conversation was started by him. And that sounded to us a lot like barks, combat barks. They could start at any time, stop at any time, come from anywhere. Very, very reactive, very, very dynamic. So that's sort of how we landed on, uh, Valve's bark system as sort of the, the way to start.
+For those of you who aren't familiar with Firewatch, it's sort of a game about wandering around the woods as a sort of sad middle-aged man having long conversations with your boss Delilah over a radio. And the whole game is sort of built around these big conversations that you have while going on a hike through the woods. So what we actually built when we were still, you know, having Henry be able to interrupt at any time.
+talk about anything, was a generic event system.
+And generic event system meant that any system in the game could fire events, and then we would have blackboards to store gameplay state, and we would figure out how to respond to every event by that.
+So what that really looked like was we have a bunch of events, a bunch of requirements, and a bunch of responses.
+You can think of this as like, when something happens, interrogate the current state of the game with the requirements and then use the responses to alter to a new game state. Um, relatively straightforward, thing happens at some time, change the game in some way. Um, what that really looked like for us was event name and then a bunch of Boolean tests and then a whole bunch of responses. Um, ideally this would be just of, you know, your Boolean test could be anything and you could interrogate any kind of game state. We were a small team, we had to make some special cases. Uh, we didn't bring strings into our blackboard system, we kept it very simple and very, very lean. So we added a couple of special cases for what, who triggered the event and then who was the target of the event, the sort of context of the event. And we let designer use string for those and everything else was just little Boolean tests on floating points.
+So for a very concrete example, if I say, you know, toss the beer can, then you would get the event on tossed. Who tossed it? The player. What was tossed? The beer can. If the context of the world is, I haven't said this line, then say the line, fuck it, I'm not the maid. When I talk about an event, I'm not the maid. I'm not the maid. I'm not the maid. I'm not the maid. I'm not What that is is just a string. Um, it's uh, set by the designers and it can be very systemic, like on tossed. It can be extremely special case like, you know, quest 7 day 3 step 2 finished. Uh, it really just is up to the designer to sort of decide what that concept is that they're trying to do and what sort of moment in the game they're trying to capture. It's very open ended and allows for a lot of flexibility.
+when I talk about a target or a sender, the target is context of the event.
+So what did I throw?
+What am I looking at?
+Who am I talking to?
+And the sender is what triggered the event in the first place.
+So often the player, sometimes Delilah, and then a lot of times in level objects.
+So you would have like on opened on a lock box or a door.
+And then when I talk about facts, facts are sort of arbitrarily designer created strings. Uh, they end up being, uh, stored in blackboards. Blackboards are just dictionaries. We use a bunch of different dictionaries to kind of scope, uh, the number of facts that we have at any one time down to a reasonable number. Uh, this is for both designer sanity and performance. Um, you know, as dictionaries get big, they do get slow.
+uh, specifically we'd have blackboards for every individual game object so that you could track how many times I threw this specific beer can without having to have a different fact name for every beer can in the game. We would have a blackboard for the player, uh, which was going to be used to scope things that we only cared about in context of Henry. Uh, we ended up not actually using this because performance ended up being a problem.
+uh we would have day specific blackboards and this ended up being extremely useful for designers. We could track things like have you left the tower today without uh having to worry about leaving the tower on day one automatically triggering logic that should only happen outside on day two. And then we had the global blackboard which is where almost everything in the game actually went. The global blackboard was used for you know like I said, very, very designer specific things. Anything that we needed to remember from day to day to day over the course of the game. What you named your dog. And uh, systemic things like how long it has been since the last time you decided to have a conversation. Um, so I'm going to walk through our workflow and our tool chain. So these are all of the tools we built. These are real screenshots taken just from, right from our editor. Um, and so this is definitely going to be a little bit of sausage being made here. The example I'm going to use is the first time you sort of run into the turtle in the game. I don't know how many of you actually managed to find him. He's kind of hidden. Whoa, I found a turtle. Maybe it's a tortoise. It's a thing with a shell. It's actually pretty cute. So I'm going to Well, Henry, if you decide you want it to keep you company, nobody will mind.
+Now what do I call it? Looks like a, uh, hmm.
+So you'll see the third choice is named after your dog.
+Bucket Junior.
+That is peculiar.
+It has sentimental value.
+And then we change the pickup text once that choice has been made.
+So...
+The first thing to know about how we did the turtle is, it's a little bit of a lie, there's actually six, six turtles in the game? There's six turds sprinkled around the world of fire watch. And whichever one you see first, that's the canonical turd. That's your turd for the game play. Ummm, we did this using, uh, kind of a big ugly playmaker. Um, we used playmaker in firewatch, it's a unity plugin for visual scripting. Uh, we used it for any sort of level design-y thing that we need to do one-off content. Um, while this is a little bit ugly, it was also made very late in the game.
+It was a brand new feature. It was a kind of a workaround for the problem of nobody never finding one perfect spot to put turt. And we wired it up, Nels wired it up, uh, without really any help from the rest of the team. So it was, it was a pretty big win in the flexibility of the tools we had built to that point.
+How this actually functions is we have the event system hooked into our various gameplay systems.
+In this case, it's the targetable component.
+Anything you can target, anything that will display targeting text, will have the ability to, when you first start seeing it or when you stop seeing it, to fire events to the event system.
+We then have the playmaker listen for that event.
+So not only was our event system talking to all the responses that.
+I've already shown you, the dialogue system.
+It was also completely wired into all of our level scripting.
+So you could tell a playmaker to listen for events, and then any event that got fired through the event system would be forwarded to playmaker as though it were a playmaker global event.
+And that meant that any level designer, any content producer in the entire game could hook up any one-off custom content they needed to any other system that was triggering events, whether it be the dialogue system, or targetables, or opening a door, or the quest system, or anything.
+Once that state got entered, it would then interact with our blackboard, so same thing. We exposed all of our level designer tools to the event system, to the blackboard system. We had created special actions to read and write facts from any blackboard that you wanted. This is a screenshot of our actual event editor tool. This was all made in MGUI, the sort of built in Unity UI system.
+and was plugged right into the runtime.
+You can see we've got a big list of event lists.
+An event list is kind of grouped by conversation or category, concept, topic of the game.
+Then there's a sort of top middle.
+There's the big list of events inside of that list.
+Every event shows the event name, the number of requirements it has, the number of types of responses it's got.
+And then underneath that is where we actually do all of the hard work of editing.
+You've got a list of requirements and then a list of responses.
+All of that's done with custom drawers.
+This is all just a reflect, basically just a one to one reflection of the actual public variables inside all of this data. The, we could have done this with the default unity inspector but because of the amount of data that we're trying to show here, we needed it much more condensed. So this is an example of a dialogue response. All dialogue in our game.
+is an event that triggers a sound, has a caption attached to it, it pulls that uh information from a database and then fires an unfinished event that starts the next line. It's all just chains of events. Event, dialogue, dialogue fires event, event fires dialogue, dialogue fires event until you're done talking.
+uh, dialog tree works almost the same way. A dialog tree is actually just three, you know, two to five different event responses that the user can choose. We have a different system that knows, you know, how to display a dialog choice and listen to input. All the response does is store what are the possible events it could fire. When we bring up the event, uh, when we bring up the dialog, we go take each event and basically fire it.
+But don't trigger the responses, just interrogate them, and use that to figure out what response is going to be triggered, and what line is going to be played, and thus what caption to show as your choice.
+If we go to the previous slide, you can see one of the response types there is dialogue caption.
+That's where we store that information.
+no dialogue choice tree was compiled ahead of time. It's all on demand. When you bring it up, that's when we figure out what your choices are and what each of those choices is going to be. So for example, if you chose to name your dog Mayhem in the beginning of the game, there would be a requirement that says dog is Mayhem, a response type that brings up the caption.
+name the turtle after your dog mayhem. If we don't meet that requirement, we didn't name your dog mayhem, we don't find that response. We find the second response there that says name your dog bucket junior or name the turtle after your dog bucket. Responses, we use responses for a lot of different things in this game. We use them to trigger achievements, sound effects, particle effects, all of the playmaker stuff that I've already mentioned.
+changing the icon on your saves file and... Yeah. Uh firing off photos. Uh so we knew we were going to be able to make a lot of these and we were going to be able to make them quickly. If you're making sort of this event response system you need to make your responses as light as possible. This is all of the code for displaying uh triggering a dialogue tree from the event system. And this is all of the code that actually does any real work.
+All, any response type does is grab information from the event system and pass it off to some other manager. The event system knows about events, the event system knows about senders and receivers and that sort of context around where the event was fired and nothing else.
+Uh in this case it calls the dialog tree manager, passes off the dialog definition and who sent, who sent the event, who, who we're sending it to and uh where it can find any localized data it needs. That all lives on the event system.
+The rest of this code here is debugging. We're a small team. We were constantly building and changing this game as we went. That meant lots of things were broken all the time.
+For example, we at one point changed the UI entirely. We went from the old ingui system to the new ugui system. So for a while we couldn't display like subtitles. We can't let the level designers and the narrative designers stop working when that happens. So you have to keep your systems usable even if nothing else is working. So a big part of any event system is going to be logging everything that the event system does. Every event that fires.
+every response that matches, every requirement that matches, and why that all worked. You should be able to go into your log and scroll back through it and see an exact play through of your game. Uh, even if nothing is showing up on screen other than the debug output. Uh, by building all of these tools on top of Unity in our game engine, integrated tightly with our runtime, we got a lot of big benefits for a small team. Um, these tools were very cheap to make. We didn't have to worry about, you know, setting up new input handlers or grabbing Windows context. Unity was handling that all for us. We were, you know, sort of already...
+showing pixels on screen immediately. Um, it was extremely flexible. We had access to every system we had written. We didn't have to write wrapper layers or, you know, transport functions to move data from our big managers out to our tools. And it was all just sort of automatically integrated with the run time. All of the narrative designers could sit there and tune out, uh, dialogue timing as the game was playing without having to stop, restart, save, anything like that. You could just go into the event data, make changes, add new requirements, add new responses.
+and then play through the segment again and again and again until it worked. Um, the downside of building all of your big sort of dialogue heavy data driven tools in your editor is those tools were ugly. I don't know if you noticed that. Um, they're extremely complex.
+Like that was not easy to go over. It was a huge screen full of information. The event editor took over the entire editor. Uh, most people just had it on an entire second monitor blown out full size. Uh, and they're ever changing. Like I said, we're constantly building new systems, constantly adding new response types. And that means every time you go look at the event editor, it's gonna be a little different. So if your narrative designers are not, you know, sort of okay with the challenge of managing that, you know, maybe this isn't the right way to go.
+So what Will just laid out was the system we had for the entirety of Firewatch, and he built it basically in that form that you saw very early on.
+But this was just the beginning, right?
+We had a working proof of concept for our game, for our vertical slice, but we needed to fill this game with four to six hours of content, like massively branching content.
+And we also had a creative process at Campo Santo where we were constantly revving, constantly doing rewrites, cutting dialogue, rewriting it.
+So...
+We needed a content pipeline for that, and that's what I want to talk about.
+So, first we want to look at the teens.
+This is one of the earliest scenes we wrote, or I mean fully implemented in the game.
+And it's also one that never stopped growing.
+We kept changing it, we kept adding things to it.
+Every time we did a play test, someone would want to interact with the teens in a new way.
+And we always wanted to support that.
+Basically anything that people tried to do, we tried to make work.
+So, complexity balloon as you can imagine.
+Let's take a look at one play through.
+Uh, there are, uh...
+panties?
+There are what?
+I don't want to say that word again.
+Why? Cause you're 12?
+There's, uh...
+Yes?
+There are two naked ladies out here.
+Can you handle that?
+Come on. I like naked ladies, same as anyone, but there's... you know.
+Two?
+Yeah.
+I know this will be tough for you, but try to pick your tongue up off the ground and do your job.
+Okay.
+Hey! Hey, you fucking kids!
+Hey, you fucking fatso! Leave us alone!
+Leave us alone!
+I know you guys are setting up bottle rockets out here, okay?
+How? Because you're hiding in the bushes spying on us?
+Give him a break, Lily. He probably hasn't seen boobs in 20 years.
+Ha ha! He's probably still a virgin.
+Why do guys think it's alright to just stare at girls?
+And now he's over there with his mouth hanging out.
+You don't know a damn thing about me!
+We know you're a peeping tom!
+How long are you even standing over there?
+Oh my god, is that- Whoa, hey! Put that down!
+Seriously, it was expensive!
+Fucking cool it with the fireworks!
+Please just put it down! We won't light anymore!
+This guy's on really chill, see?
+Fuck you! You asshole!
+Light another firework and it won't be your stereo I wreck!
+Oh, fuck you, psycho!
+Yeah, fuck you!
+You'll fucking pay for this.
+You can't just harass girls in the woods.
+Let's get out of here.
+Okay, so that was only one of literally thousands of playthroughs you could see through here.
+And I just wanna highlight how crazy this was from an event-driven standpoint, right?
+When I approached those teens, I was already talking to Delilah.
+They overheard me talking to Delilah.
+They engaged with me.
+Delilah hears them.
+She engages with me.
+Then I'm going through dialogue trees.
+The whole time I'm doing that, they keep going.
+They keep talking while I'm deciding what I'm gonna say next.
+Or if I'm not gonna say anything, and I'm just gonna go throw their crap in the lake.
+I could withdraw from this scene.
+I could try to sneak past them.
+This was a scene that kept growing, and it really drove out all of our tools as we had to support this.
+really, really complex, like ever-growing graph of events and to make the teen sort of react to whatever the player could possibly do.
+This is only like a tiny set of what our event data looks like.
+I didn't actually want to show the teens here because it looks like a bowl of spaghetti.
+It gets really crazy really fast.
+Now, there are benefits to this, right?
+The system that Will described is so flexible that we really didn't have to write any new code.
+when we needed to add anything to the teen scene.
+The cons though were that things were really brittle.
+All those chains where you see a red box, that's a node you have to hit for the game to essentially continue playing.
+And if you interrupt any one of those chains, if you fire an event that prevents the next one from firing, game over.
+You're sort of broken at this point.
+So we needed to find a way to manage this, basically this creative content pipeline, so that writers could reason about what they were writing, feel confident doing rewrites.
+Like, this game is massively branching.
+It's non-linear, right?
+This is not a script.
+Everything, every line is independent.
+It can be fired from anywhere, it can trigger any other line based on context in the game.
+You know, are the teens aware of me yet?
+Have I been nice to them?
+Have I thrown their boombox into the water yet?
+All of these things change the entire shape of the conversation.
+Interruptions make this even more complicated.
+And the dirty secret with a lot of this sort of branching dialogue in the industry is that Excel is the tool that people are using.
+I mean, I've seen talks at GDC this year where people have shown their massive Excel databases.
+And I get it. You know, this is a way to give lines a unique...
+ID and to sort of track content in a programistic way, but it's not a creative tool.
+It's very, very hard to think like a writer using that.
+To that end, I built a tool called Magpie.
+This was our dialog CMS.
+It's a web-based tool, which meant that basically all writing would flow into this system where it could be tagged, edited.
+It could drive our voice recording pipeline.
+And then the event system in Unity would pull from a JSON API.
+and keep the data there fresh and local.
+So Magpie's goals were that the writers could use whatever creative tools they wanted to, that it would be bulk imported into this database.
+We could have checks on the validity of data, basically no incorrect lines, and that changes could be made non-destructively, so we would never lose work.
+And basically, eventually we hope this would grow into a localization tool, which I'm gonna talk about in a little bit.
+I want to speak to how great web-based tools are for something like this.
+Like, this is a content management system, and when it lives on the web, that means any team member can access it from any place in the world.
+They can access it on their phone, read through data, make edits.
+You can hand logins to other team members who aren't necessarily on Unity.
+Maybe they're in another country.
+And plus you can build these great dashboards.
+So this let us track our recording progress on the left, our progress towards wiring the game in on the right.
+Each of those event lists that you see in purple down below has a localization tracker on it.
+So it let us kind of reason about the progress we were making towards a complete game.
+We also use this tool called Status Board that Panic, Panic is like the god daddy of Firewatch.
+They publish the game with us.
+And they make this great tool for iPads, which gives you all these great widgets.
+And I just wanted to show that we have the bus times, the San Francisco and Muni bus times on the left, in the upper left.
+In the lower left, we have the number of times every Firewatch team member has been fired for making bad puns.
+Yeah, William's at zero there.
+I guess he was actually doing work the whole time while we were making bad puns in Slack.
+But if you enhance the photo, you can see that we're also tracking our line data.
+So basically, every time you come in the morning, you could see, OK, are we recording?
+Are we wiring?
+Did we just write a whole bunch of new content that made our lines move in the wrong direction?
+We definitely saw that a few times.
+Okay, so this is the process for getting written content into Magpie.
+First, a writer delivers a plain text document.
+Sean Vanneman, the head writer on Firewatch, uses Scrivener, but this could be any tool you choose.
+And basically, it's a lightweight syntax for denoting, like, what's the name of this conversation?
+What's a dialogue choice?
+Who's the speaker, et cetera?
+So they deliver that.
+Magpie has an import form.
+It parses all those lines into individual, basically, rows in a MySQL database that lives in the cloud.
+It's like a Heroku-based app.
+And And it adds the notes, it adds the speaker, and it puts them all into an organized list.
+And most importantly, it gives every line a unique ID.
+Like this is what really is required for managing a pipeline, is a single identifier that you can track a line from start to finish.
+Once it's in the system, we've got full text search.
+uh... through lines and sections you can just go right in and edit a caption in line uh... we also had a free form tagging system so you could say this is a line that could happen on day two or day three uh... you can also add uh... you know a separate tag for this is about brian goodwin or this is about relationships uh... basically any ways that you could uh...
+organize this content in a not like it didn't all have to be in a single list is basically what I'm trying to say Then for recording, you have one button on the upper right that downloads, gives you a, a CSV export of your lines that could then be brought into Google Sheets. Uh, if anyone's doing voiceover on their games, I cannot speak to how amazing this tool ended up being. Um, just because...
+We'd have our two, well basically you can see the line IDs on the left there, right?
+And then the session takes and chosen reads.
+What that basically means is Rich, Summer, and Sissy Jones, our lead actors, would be in their home studios all recording in their own voice setup, right?
+Me, Sean, Rich, Sissy would all be on a Skype call together.
+And they would be recording, but you can't use Skype.
+You can't use Skype for obvious quality reasons, right?
+So what we need instead is all of us to be on our own setups.
+But Rich and Sissy's little icons are, sorry, they're little colored boxes are moving around, and we're all on the same shooting script.
+They're recording.
+They're keying off of each other's vocal performances.
+They're reacting to each other's emotions.
+And.
+and then they're delivering separate wave files. A uh intern is chopping those wave files up into using the chosen reads that Sean has identified. You know he's like oh okay take 3 was great on line 2100. Uh take 4 was great on 2200. And then um they're just delivering these wave files that could be imported into into magpie and into the system. Uh.
+Hello? Henry are you there? Once you're there. Hello Henry. Having a nice afternoon?
+You can easily listen to the lines as recorded, updating the captions, because this is a very common occurrence where the voice actor does their own interpretation, changes the phrasing to make it read better.
+So you need to go back in and collect the captions.
+And this is something you could do from anywhere, thanks to MagPi.
+You didn't have to have source control access.
+You didn't have to have a Unity install running.
+Um, so I want to speak a little bit before I move on to, uh, what we originally wanted to do with this system and where it landed.
+Originally, we wanted to have one unified content pipeline that would do all the event data that Will showed with, you know, what triggers what.
+every event response possible in the game, along with all of the written content.
+We ended up focusing on two tools, one for content generation and recording and localization, which is Magpie, and one for wiring.
+this really did help us focus, um, although ultimately I think that's, that's the dream.
+Ultimately, I think, uh, a CMS that could manage all, all of your data in one searchable place would be, uh, uh, would be the way to go, it would just have taken the entirety of our development cycle, so that wasn't going to happen.
+So this uh next case study is the Julia conversations. This happens on day two. This is Henry and Delilah starting to talk about relationships. Why is Henry out here? Uh is he married? Why isn't his wife here? Etcetera. Um this is when we had this system more in place. We had Magpie, we had done several revs on the event system uh and we had all the tools we needed to uh.
+to create this. So I want to show one quick example of one possible playthrough of this four-part, very context-dependent conversation.
+Trust me, I know how it is. So, did you break any hearts back in Colorado when you took this job? I myself have chosen to never get attached to anyone who would miss me, but I know I'm a bit of an outlier.
+Wait, I don't mean that the way it sounds.
+I mean, I care about people and I like companionship as much as the next person.
+But why does it have to come from the same person for your whole life?
+We don't really need to talk about this stuff, right?
+Well, what would you prefer?
+Uh, literally anything.
+Do you want to know about the homeopathic remedy for yeast infections I came up with last summer?
+Okay, never mind.
+Your loss, pal.
+So this is an example of Henry kind of shutting Delilah down.
+He doesn't want to talk about relationships.
+He just wants to do his job and wander out in the woods.
+Let's compare that to how differently it can be if you've shared more earlier in the game and earlier in the day.
+Same conversation, same game mode.
+You know, if it makes you feel any better, you're a member of a diverse club of lookouts that have come to the thoroughfare after a breakup.
+There was Vernon, whose wife got put away for running cocaine.
+Becca, who was widowed after her husband, a jockey, was trampled by his horse.
+And Sharon, whose boyfriend had his own boyfriend.
+Maybe you boned the neighbor. Maybe she boned the neighbor. Maybe you both did.
+I don't judge. And if you ever want to talk breakups, I'm your gal.
+It wasn't anyone's fault. You know, neither of us boned the neighbor.
+So you just grew apart?
+We just couldn't be together anymore.
+How does that make you feel?
+Not very good.
+Sorry.
+Yeah, what are you gonna do?
+So this moment has so much going on.
+Again, it's a four-part conversation.
+It's triggered by many areas in the world that you sort of walk through, but each one of those doesn't necessarily trigger the same conversation.
+It's dependent on how long has it been since the last time you spoke.
+We wanted to space these out.
+What have you shared with Delilah so far?
+Have you kind of indicated to her that you like talking about this stuff, or does Delilah sort of need to wheedle in on you?
+This was also the conversation where we introduced the idea of a crit path conversation or a non-interruptible conversation. There's some of these chains which once they're started, we just can't let them break because the game state depends on it. We need Delilah to know the full truth about your wife once you've decided to change it. We can't have Henry just going and saying, oh hey, a bird, and interrupting that in these moments, even though generally that was the case. That was always possible in the game.
+this is not a lot like two, you know, goons yelling at each other about needing more ammo while hiding behind crates anymore. Like, we've kind of drifted pretty far away from the origins of the system. The, you know, this is more like an independent film or romantic comedy or something going on. And the complexity started to balloon pretty quickly here.
+This is, all of those are, Delilah's calling you on day two. That's the only event that's triggered there.
+those are all different variants for that. Um, and this was one of them, you know, the, the big things we've, uh, learned from Valve is that you can handle this complexity pretty simply by sorting your event lists. Uh, if you just have your event list sorted by number of requirements, you're going to go through them in order until you find one that matches every, every requirement and that's going to be your best match. That's going to be the most specific thing you could be talking about. The, you know...
+the best choice at that exact moment.
+So, you know, here's an example of like, of the requirement list for a conversation where Delilah doesn't know much.
+She doesn't know you've had a breakup.
+She doesn't know about Julia.
+She doesn't know that you had a wife.
+She doesn't know that your wife is sick.
+She knows almost nothing, but you're still friendly and chit-chatting.
+And so she's trying to still pull information out of you.
+The absence of facts being said.
+that is still, you know, context, that's still a valid match, that's still something that you care about. And Delilah will...
+assume things about you.
+She'll just start making things up.
+You haven't ever talked about having a breakup, and here she is talking about you having a great plan to get back together with your ex, because she's like, why else would you have decided to come out here in the wilderness for a summer?
+You've gotta be lonely or sad or something.
+She's projecting.
+It makes her seem like a very real person, and really the player hasn't done anything to earn that.
+It's just a clever use of the lack of context being context in and of itself.
+The flip side of this is if Delilah knows almost everything about Julia.
+She knows who Julia is, knows that she's sick, knows that you had a breakup, the whole nine yards.
+Now she can ask very targeted questions.
+What does she have?
+She's trying to pull information from the player.
+She's trying to get you as the player to engage and kind of respond to this.
+So that first requirement up there, knows your partner has Alzheimer's, that's like the most specific information you could have. If that's set to true, we know she knows everything else because you've already gone through all of this conversation. We know that she knows you have a partner, that your partner is sick, that her name is Julia. The designer knows all of that. So if we were to make one of these that said, that required...
+her to know that Delilah is sick, then we would need that to be the most precise match, even though it only had one requirement. So that's what that pad up there is for. The nice, easy, clean, oh just sort by the number of requirements and you'll always get the most specific is only true as long as your blackboard facts are not dependent on each other once you get that. You need to let your designers be able to cheat the priority of things.
+Because if you've got this bomb of a line...
+you want that to hit in the right, if it's valid at all.
+This long multi-part cross day conversation also sort of taught us that we had a major problem in the system we had built.
+Kind of, you know, the conversation problem.
+Conversations are linear.
+you know, they seem linear, they sound linear to the player, but under the hood they're branching like crazy. But if we want you to not be able to interrupt, if we want to like pull in black bars or bring up a musical cue or have any other sort of like modal game state go on, we need to make sure that every possible way that you leave that conversation undoes all of that modal state. Um, this, you know...
+is fine when you only have a linear conversation. The second you introduce branching though, you can come in, find content that was perfectly working, add a nice little choice to it and you can no longer radio about anything ever again in the rest of the game until you load from a safe. So, it's not really ideal. The, uh, yeah. At the end of the day, um, I think flexible tools are fragile. If you can do anything, you kind of have to do everything right. So when you build these really, really flexible, really expressive tools for your designers, you also need to make sure that you're supporting them with all of the debugging they could possibly need.
+You need to make sure that they can continue to experiment, even when things have gone horribly wrong.
+Like, it took me way too long to add a debug option to just turn back on the radio, no matter what the hell had happened, or bring down the black bars, no matter what the hell had happened.
+If you're going to give designers and narrative designers and writers the power to break your game, you have to give them the power to fix it in editor while playing with minimal, minimal, minimal friction.
+and then as you're doing that you'll sort of learn best practices. You'll figure out, oh, these are the tools I need to keep people working. I should automate those tools. So, we had everything more or less working. We had events going off. We had conversations happening. Big long complicated ones. And then about a week before we shipped the game we decided that we should probably localize it. Um. It's a big world out there.
+So if you. This is actually the first screenshot. The screenshot I took of my desktop of the first time that our Russian localization was not obviously broken. We shipped February 9th. The clock at the top, February 8th, 8pm. So this was coming in hot to say the least.
+Yeah, so here's our quick advice for how to do a, like, turn on a dime localization.
+First, before you ever start localizing your text or approach a localization house, use a pseudo-language.
+So we had a script that would run through all our dialogue and make these two pseudo-languages.
+Metal is English, but more metal.
+which tests UTF support, Unicode, and Wide is a wider version of English that tests languages like German, which tend to be much longer and to awkwardly break your slide in a weird spot.
+So we had done that luckily, so we knew pretty well that our UI could support other languages.
+And then we needed to get the content.
+So this is where Magpie came in handy again.
+We quickly added a new field and a new interface to let, so basically we could give a login to Slava, our amazing Russian translator.
+and he delivered a full Russian localization of Firewatch within a week, which was just so awesome. And then the benefit of that is for later loaks, translators could go through and see other translators work, right? So it kind of became this Rosetta stone where if you weren't quite sure about the meaning of something, you could look at the work of others.
+So this is, all localization tools were sort of built with the same mindset we built our event tools on, uh, which is be flexible early, build as fast as possible, uh, get things up and running as quickly as you possibly can. Um, we didn't have a ton of programmers, we did, you know, we had two programmers for most of the project actually in the editor, so it needed to be really, really trivial to add, uh, to, to localize any strings in the game.
+We used C sharp reflection to just add a little string tag, a little tag to any string in the game. We dump it out to a JSON file in a little dictionary. Very, very, very simple. We just used, dumped everything to English key, English value dictionary and then localized the English values. This, if you've ever localized a game you can probably figure out why this didn't go super well. Um, so, um, so, um, so, um, so, um, so, um, so, um, so, um, so, um, so, um, so, um, Every time you fix a typo in your English, you break every translation that has already been made. Um, we've handled this just by, you know, going in and doing local dumps frequently. Um, every time that you built the game, it actually dumped all of your localization out and then you could just pull for magpie and it would fix it. So it really wasn't too bad, it just required, you know, kind of dotting your eyes. Um, the right way to do this is to do what's called a local lock. Uh, I highly recommend the sort of English English key value pair translation scheme. It's very simple. It lets you hand it off to other people very quickly. Originally we were actually going to do only fan loc. So the idea was that we would generate these English English dictionaries, put them, make them available on the internet. People could translate, you know, the value side of it and upload it back up and it would all work. Uh, once we were doing professional localization of course, this...
+became a little bit more of a problem. We were getting dumps as we were still fixing bugs in our English. Um, the way that you handle that problem is you do a loc lock. At some point you say, nope, English is a translated language too. Just like everything else. We're translating from programmer English to actual English. And that's fine. We were originally going to do that and then turned it off during a PAX demo because of performance problems.
+And we never turned it back on. So...
+Don't be like us.
+Yeah, do the right thing.
+If you want to do the really, really right thing, every string in your game should get a unique ID.
+Those unique IDs should be persistent for forever. They should handle copy and pasting.
+You should never have a duplicate key. You should not be able to break them with prefabs.
+That's really hard. You have to build that into your editor in a really fundamental way.
+We didn't have that engineering support, so we went with the English English Dictionary.
+If you find yourself with, you know, unlimited time or money, locked string IDs are the way to go.
+So...
+Yeah, clearly we had a localization success and with just about a one week to go, more or less.
+So again, loc-lock, really, really important.
+We're really proud that we managed to ship Russian.
+But yeah, there's a lot of stuff you can do early on to save yourself that pain.
+Oh, so yeah, just some closing thoughts, just so we'll have some time for questions.
+What did we learn?
+We learned that a small team, by investing in tools that are flexible and also writer-friendly, can deliver a AAA production with an indie scope.
+We were between eight and 12 people most of the time on the project, is that about right?
+We learned that an iterative design process can deliver a game that feels much more cinematic and human, not like a bunch of lines in a spreadsheet, like actual two people talking back and forth, and that a super flexible system can be very change tolerant and can support this growing organic complexity as the project goes along.
+make your tools general early, you don't know the game you're making. I mean unless, you know, you, maybe you're awesome and you do. Um, but in general, you, you're gonna be exploring and finding out what game it is that you're really making as you're starting. So, make your tools general, make them flexible, make, make them, you know, survive the sort of birthing pangs of, of, of early, uh, production. The biggest win for our event system is Every single system in the game that triggers a new event immediately gets the power to fire any response in the game, whether it's something that was wired up in Playmaker or any of those response types, any dialogue, anything.
+And vice versa, every time we add a new response type, every single system that fires events then gets access to that power as well. It's multiplicative but in a good way. Normally you have that problem in design where, oh, we need everything to work with everything so we've got to write a special case for everything in that grid. This is the opposite. You have no special cases. You don't make any assumptions. Every one of your response types can happen at any time from anywhere. Any event can trigger from any system.
+and any event can trigger any response type. So you just get all that matrix for free. However, as you start to finalize your game, you're going to figure out what specific problems you are trying to solve. You can make tools for those specific problems. You should customize your tools for the exact problem you're trying to solve.
+The tricky bit is scheduling time for that work up front.
+Like, we knew about the conversation problem, you know, halfway through development, and we just didn't ever have the time to bring me, Patrick, Sean, Jake, Nels, all in the room, all sit down and all figure out what the right solution for the problem we had right in front of us really looked like.
+We were all too busy making the game as fast as humanly possible.
+Yeah, so just briefly to one more piece of further work if you were to pick up this system and keep going with something like it is we should structure, we should have structured our data around conversations, making them a first class citizen. We talked about the crit path conversation problem where we need to make dialogue non-interruptible. Well that's a modal state that was turned on at the beginning of a conversation.
+and had to be turned off at the end of the conversation.
+Problem being, conversations have multiple exit points, multiple entry points.
+And so for every one of those, you had to be absolutely sure that you were reaching a place where the, right, where the conversation was turned off.
+This was just the kind of thing that, we didn't need to change the event system in order to accommodate this.
+All we really needed was a bubble, a box around that long chain of conversations where we could say, oh, very nice, well.
+where we could say that guarantee lives on the conversation and is not dependent on any single line or single exit point of that chain.
+So that's our talk.
+We'd love to take some questions.
+Yeah, thank you guys very much.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+Thank you.
+evaluation. The web evaluation. And here's our contact information if you ever need to send either us an email or find us on Twitter. Questions? Alon.
+Hi. First of all, really enjoyed your talk. Thank you. I'm thinking about the graph that you had of the conversation with the multiple red boxes of which you had to hit at least one for the game to not break. How did you make sure that you ended up hitting at least one of them?
+uh, we had a tool for visualizing them, which is what that screenshot came from. So we could check it against that. But other than that we had no like programmatic guarantees. We had to playtest, right? I mean... Well, we eventually uh, put in a few safeties to get out of jail free card. If you just wanted to like, once you started any of the teen conversations, uh, we spawned a volume around where we knew you had triggered. Like a larger volume.
+that would trigger the, oh, you've walked away, you have chosen not to have this conversation, we're going to yell at you as you flee, as sort of a, yeah, get out of jail.
+Yeah, in that case, we used smart editor hacks to work around that fact, right, where you could create these guarantees.
+Yeah.
+All right, thank you.
+Hi, my question's about the voice acting, and again, thank you so much for having this, this has been really amazing.
+How did you manage to, or how were the designers able to pull together maybe different takes or readings of the voice acting so that it didn't sound like two AIs talking to each other or something?
+Yeah, it's all about recording.
+Oh sure, sorry.
+The question was how do you record voice actors so it doesn't sound like two AIs and how do you pull them together?
+The best, it's all about getting two actors in real time who can play off of each other.
+and then basically hand tuning the timings of them, right?
+So you, like, Sean would pick the takes that sounded best, but then after we sort of dehydrated those wave files, rehydrated them back into Unity, we had to like specifically hand edit, okay, 200 milliseconds after this one, 600 milliseconds after that one.
+Yeah.
+Thank you.
+I'm curious, it seemed like a lot of your tools were kind of a linear list of, uh, events, but you also had some sort of tree views. How often when people were editing dialogue did they work in a tree view and how often did they work in a flat state?
+The question was how often did people use the list view or the tree previewer that we had shown? The tree previewer was actually just read only data. So it would take the sort of full conversation system and parse it and figure out what the nodes looked like. Because our event system was all interrupt driven, you could interrupt it anytime, heavily branching, very, you know, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, uh, context aware. The tree graph ends up not being a very good visualization for it because it's not how the system works under the hood. Uh it really is sort of a linear list and anything can interrupt and it just goes through the search and finds a match so it ended up working better to look at it, look at the data in the format that it was, that was closer to the metaphor it was actually using. Um, the event editor there, uh, uh, uh, uh, uh, uh, uh, had full text search inside of any field.
+You could search by a lot of different things so that you could scope down what you were looking for.
+It let you do multi-select and let you had buttons to automatically follow up to what the next event was going to be.
+So for conversations where it was like, play line, wait, play next line, you could just jump to that follow up and follow those chains manually very, very quickly.
+And that ended up being sort of more usable than a giant web.
+Thank you.
+So, if I understand the ways you're editing data, you've got narrative designers or writers writing stuff in a, like, essentially a text document. There's no, none of the tagging information is present there, and then you have the, you add the tagging in the editor.
+Did you have any friction between these sources of information where maybe the writer goes back and changes something in the text document, and maybe now it doesn't fit the context that's been prescribed by the tags that have been added in the editor, and now all of a sudden, you know, this dialogue, this plane doesn't seem to fit right.
+So the question is, do we have a problem with writers changing content in its original text document before, or basically it no longer matching the way it had been tagged and built in editor?
+So the text document is sort of a throwaway.
+As soon as...
+We import it into Magpie.
+The text document is considered just history.
+Then we also had a tool where we could consider a line locked.
+So basically, you could freely edit content until we recorded it, or until we recorded it and updated the caption.
+And then there was a little lock icon.
+You'd click and say, this is done.
+Because after that point, if a writer were to change something, they should be aware that they're causing a lot of new work to be created.
+That was our solution around it, is just having a pipeline where we just say, after this point, it's done.
+We did also have some real serious issues with this when we did things like major level redesigns or major rewrites.
+So at one point we changed the map around, and we had a bunch of lines that were like, go north, where north was no longer north.
+So when you do major changes to your game, you also have to make major changes to your...
+text content and vice versa. So we just provided good tools for tracking these things down.
+You could, as you edited a line in magpie, you could find the, take the ID, search for it in the event system and find every line that referenced that very, very quickly. Thanks.
+Hi, can you talk a little bit about your QA system? Was that mostly, when you were making changes, was that designer internal playtests, external playtests or automated testing?
+The question was about our QA and whether we used internal, external or automated testing.
+We used internal testing until very, very late in the project. We would get people to come in and play the game. We would record their playthroughs. We had some analytics data as well like heat maps and stuff like that. Though we didn't make the best use of that.
+And then as we got towards shipping, we switched over to using Research Centaur.
+And they would give us log files, like the editor and standalone player would both dump out the log files to a place that they could track them down and then they would send those along with any bug that we got.
+So we could just go through the event system and be like, oh, okay, that's, nope, that needs to play event 6, not event 7.
+And rewind things pretty easily from that.
+We, oh, another thing I would, I'd love to explore more in another game is we briefly had debug data where the game would actually shoot lines that were played to Magpie.
+And so then it could keep track of lines that had never been played.
+So when we're in early Steam beta, we could actually see like, oh crap, there's like 20 lines that are unreachable.
+And so we could track that down.
+So that was helpful.
+But yeah, really it was all about Research Centaur and internal testing.
+Thanks.
+Hey guys, great talk.
+I was just thinking about the event system and how it's all string-based, and I was wondering if you did anything to kind of prevent misspellings or fat fingering or things like that, because it seemed like it could break things.
+We complained about it a lot.
+Oh, sorry, the question was, did we do anything to prevent fat fingering or misspellings, given how many strings were used in our game?
+Again, honestly, the answer to that question is mostly the search function.
+by putting in quick string search into the tool from the get go. Um, if you were worried that you were misspelling something, just start typing it in the search field and if it matches, you spelled it right and if it doesn't, you didn't. Um...
+We did have a fact browser so every blackboard fact that ever got created by any system that, you know, at data time. So there were a few facts that were created at run time. But any, any fact that got created at data time was in a big list, also searchable so you could go find the one you meant. Um, so we, we, we, we, we, we, we, we, we, we, we, we, we, we, we, we, We pretty quickly established some naming conventions about what facts and event names should be to try and minimize this problem and then we changed those I think three times during the course of development. So yeah, we mostly complained about it a lot. Um, we wanted auto complete and...
+it ended up just being out of scope for the time we had.
+But it was something, it was, you know, okay, well if I have a week free, I'll do that.
+Okay, I'll have a week free, and yeah, two years later, we didn't have it.
+Also, since it's all JSON, you can always have a tools programmer, you know, basically write a big tree search function that says, are there any requirements that are not found anywhere in the fact setting tables?
+Which we did a couple times.
+Basically, that would feed like a bug burndown list.
+Yeah, and that's actually a really good tip. Always make sure your data formats are human readable. Always. For everything, ideally. Being able to go and just, and search them and use regular expressions on them is, it gets you out of jams like that very, very quickly.
+Cool, thank you. Alright, um, I think we are just about out of time for questions. Uh, we're gonna go to, we'll be at the, uh, breakout room just around the corner here, down in the other hallway if anybody has any other questions they want to ask us. We'll be there in 2 minutes.

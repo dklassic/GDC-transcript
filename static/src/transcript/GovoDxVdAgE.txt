@@ -1,0 +1,685 @@
+you guys for coming to enthuse about retracing along the way. Ponder the problems that we've attempted to tackle and problems that the industry as a whole will attempt to continue to tackle.
+My name is Ntale Titarcuk and I lead Unity's graphics group.
+Now this presentation is focused on the lessons that we've learned throughout the process of doing a production-oriented approach for integrating ray tracing into our rasterization pipeline, and I'll talk about that from the perspective of the engine lessons that we've learned, as well as some of the things that are related to content creation.
+We'll talk a little bit about the pitfalls that we've explored, questions that we did encounter and may not have solved that I want you guys to help, and also some of the thinking about where we go from there.
+There are two major contributors along me to the presentation, Sebastian Lagarde and Anis Binoub from Unity Technologies.
+They will be here for questions at the end.
+However, everything I'm presenting here today has been a real team effort, and a lot of people contributed to the algorithms and systems that I'll be covering.
+I'm here to represent.
+But before we dive into the details of the technical presentation, I want to briefly share the project we've actually used to drive it.
+Pun intended.
+Invent yourself and then reinvent yourself.
+Don't swim in the same slough.
+Invent yourself and then reinvent yourself and stay out of the clutches of mediocrity invent yourself and then reinvent yourself change your tone and shape so often that they can never categorize you reinvigorate yourself and accept what is but only on the terms that you have invented me self-taught and reinvent your life because you must.
+It is your life.
+And its history and the present belong only to you.
+So what did you just see?
+This is actually the demo that we're going to dive here throughout all of the presentation, and I've lost the control of the screen, always exciting.
+Drivers will solve ray tracing, will solve all sorts of complex problems about cloud gaming and so forth, but presentation screens and driver control will remain to be a challenge.
+Okay, so the demo actually is at the heart of the outline of what we'll be covering.
+We'll talk about the rasterization pipeline, we'll talk about integrating the ray tracing into our high definition rendering pipeline.
+Some of the effects that we used for this particular demo, we'll talk about performance and some of the sort of thoughts about where DXR may want to go.
+But what did you just see?
+What we've done in this particular project is we filmed a real world car on location and recreated the scene.
+We captured the lighting environment, the scene itself, using the exact camera and lighting conditions, and then using the official product design model with all its crazy geometry, we then recreated the CG vehicle to match the film.
+And then we transitioned the shots in the video from real world car.
+like what you see on the left here, to the ray traced car seamlessly.
+And in the film we rendered this car at interactive rates on RTX 2018, sorry, 2080 Ti, with a lot of different ray tracing effects, refraction, area lights, shadows, ambient occlusion and so forth.
+And that's what we'll be covering.
+And here is an example of some of the more complex visuals going on in a demo with a complex transparency and refraction, and you're seeing a comparison against the real world filmed version.
+The car was quite complex, it was very dense geometry, and of course it's actually the vehicle that's used for production, but the reason we actually use this aside from, well, rendering pretty cars is always a good looking result, is its density is actually quite representative of a lot of real world scenes.
+There's a ton of silly meshes, very dense geometry, lots of draw calls, lots of different materials.
+While it's not identical to, let's say, an open world forest scene, it still has quite a lot of moving parts.
+And there are moving parts.
+So first, let's take a brief look at our high definition render pipeline because that's the basis for our approach.
+It is a physically based rendering pipeline.
+We use unified lighting.
+What that means is the same lighting features apply to opaque, transparent, volumetric elements in all of the content in the frame.
+We use coherent lighting throughout.
+All of the light types have to work with all of the materials, as well as with all of the options of global illumination, light maps, light probes, and so forth.
+This is super important for content creation.
+And as you see throughout this presentation, we strived to maintain the same principle for our ray tracing approach as well.
+And while certainly, you know, we think of ray tracing as a panacea that will solve all of our rendering problems.
+There's some really interesting challenges with maintaining this unified approach.
+And in HD in particular, we also worked hard to avoid double lighting and double occlusion.
+Now, one of the important properties for our implementation, which may not be true for a specific game, is we need to be able to do either forward for VR applications, for example, or deferred approach.
+And again, when we were looking at ray tracing, we needed to think about how that's going to affect the particular set of choices.
+With our HD pipeline, we have classification of materials.
+They get output to GBuffer, so standard opaque, subsurface scattering, clear coat, iridescence, anisotropic, they're all stored in the GBuffer with a bit.
+Now, some materials in our deferred path are so complex or need additional information.
+For example, we want to store specular tin that we need to still render them as forward.
+Of course, our favorite, transparence.
+But then beyond that, we have a number of organic materials, skin, hair, fabric, sorry, not skin, eyes, that still need to be rendered with forward.
+And again, that has some interesting implications for being able to do that in a rasterization pipeline.
+The ray tracing pipeline that we built for HDRP is actually built directly on top of that pipeline.
+We plugged all the low-level layers, and in this presentation, I'm actually not gonna talk about how we integrated DXR to the low-level renderer.
+That's kind of a topic of a separate presentation.
+We did the layer that we exposed to C-sharp, so in Unity, you can actually access much of the rendering pipeline control through C-sharp.
+and shaders.
+And so after that, majority of the work on array tracing effect happened on that level, which of course meant that we can iterate really quickly on the effects once the architecture was established.
+And just a quick thing, I'll constantly be saying ray trace effect.
+Really, it just means, you know, a bucket of container for anything that goes on to render a particular ray trace algorithm, be it ambient occlusion or shadows and so forth. So in our case, again, I mentioned that we need to be really flexible with regards to forward and deferred support because we want ray tracing to be used regardless.
+of the particular directionality.
+And so for ray tracing, we start by shooting secondary rays from depth buffer and normal buffer.
+For a peak, of course, this is straightforward.
+We can use G-buffer as a starting point.
+Now with forward objects, we use a pre-pass, and we use that already for screen space reflection, to output depth normal during the pre-pass, and that's the information we can start secondary rays from. So in some ways, since we already have a good implementation of SSR, it actually needs the same data as ray tracing for a lot of the materials as you'll see.
+Of course, the next thing that we know is we'll never be able to shoot thousands and tens of thousands of rays that you'll see in a Weta digital Manuka or similar offline, you know, renders in order to maintain performance.
+And this theme is repeated throughout anybody who's talking about real time ray tracing, reducing noise through denoising and temporal accumulation is key to achieve frame rate.
+So, we mentioned we're going to start from, for ray trace, from primary rays from camera, shoot it in screen space.
+This is basically to obtain visibility, and I'll discuss where we use it.
+And for secondary rays, we start from the first intersection with the primary rays, and that's the G-buffer or pre-pass approach.
+In reality, every ray has to be thought about quite thoroughly.
+It's quite expensive to implement it, especially as we get to ray tracing.
+Now, of course, as we shoot more rays, the resulting quality is higher.
+The simple truth is if you don't shoot a sufficient number of rays, you'll end up with a terrible looking, huge degradation of quality, terrible looking effect.
+Now we supplement that with denoiser to keep the frays fast.
+However one important thing about denoising is we need to denoise every single effect because they actually have different qualities and we need to make sure that we account that.
+And so we're kind of in this sweet spot of trade-off between the quality of the actual denoiser, the cost it will take to run it, versus the cost that it will take to run more rays, evaluation of rays being the expensive part.
+Now we could choose to go to a high quality denoiser.
+NVIDIA has a very sophisticated denoiser available that uses light positions, specular roughness.
+It needs more information.
+So one, you'll pay the cost to output this information.
+two, you'll store it, three, you'll sample it, four, the actual algorithm of the denoiser is heavier.
+And of course, that might, in our case, when we evaluated, it dominated the cost of rate execution.
+So all of the savings we did by not shooting more rains were gone.
+And so that ended up not being a win for us.
+So our approach is launch minimal amount of rays, then reduce variance with good sampling, and we'll talk about some of the techniques there, accumulate temporally because that allows us to get more contributions of rays, and then the end result of that goes through the denoiser.
+It's very straightforward to understand the cost of rays.
+It varies linearly with length.
+We actually did a number of performance profiling to determine that.
+And for the live demo that you will see in a few minutes here, we actually use one ray, for example, for regular effects.
+For some of the more expensive effects, like reflection, we use quarter resolution.
+And then for AO and shadows, we end up using four rays.
+Now, of course, this is a sweet swat of perf versus quality.
+And so with respect to denoising, like I mentioned, we have to do it per effect.
+So we went with a very inexpensive approach that gives us good quality.
+Now, I want to say, so the way that we are approaching that is we do it in temporal, and then we use a joint bilateral filtering.
+With regards to temporal, just to clarify, it's not a TAA filter, very similar to the approach that Tomas Takovies described in last year's Digital Dragons presentation.
+It's only inspired by TAA.
+And so what we do is we run one sample per effect, which is accumulated over frames, and then we run eight sample TAAs.
+So we accumulate eight frames history's worth, and that's actually what we are doing to kind of supplement the temporal.
+We're not trying with this element to remove aliasing.
+We're simply trying to accumulate pixels to match history in the material properties.
+And at the end of the frame, like I said, we have the property.
+For each effect, we need to run essentially the custom history per effect.
+So this is where.
+the specificity about each effect comes into place.
+We actually store a history buffer per effect, one set per area shadow lights.
+It gives us better stability.
+Of course that comes at the cost of additional memory as we need to add memory for the history for accumulation.
+But that memory really allows us to reduce number of rays, thus increasing performance, so it's kind of a trade off.
+We use joint bilateral filter throughout.
+And in this case, it's using normal and depth as opposed to luminance that you'd see with a bilateral filter.
+It's a nice and inexpensive filter implemented as a separal computiator filter.
+And normals and depth allow us to sort out the discontinuity issues.
+And as I said, we output them either through G-buffer or pre-pass.
+And so that allows us to take advantage of opaque and forward materials.
+Now, the fun part is, well, that permutation of materials that we've mentioned early on, transparence have been a pain and suffering for people who are doing rasterizations for decades, right?
+Well, I'm sorry to say, but that doesn't quite go away with ray tracing, of course, if you care about performance.
+In this case, since we don't have depth, we actually can't really use anything for that in this particular case because we're not outputting.
+We'll talk about how we sorted transparency in a subsequent path.
+With regards to denoiser, we provide artists the ability to control the filter.
+For example, the video that you saw of the demo that we rendered for the matching of the real car, they were using quite large filters.
+Of course, that means that the cost is higher.
+And the content creators can basically control the cost of quality versus trade-off.
+And we intend to make it scalable based on essentially platform configurations.
+And that allows us to really amp up the quality on a per effect level, aside from just per platform level.
+So if you wanted to really spend more time samples in a particular algorithm, you can.
+Now, with simple bilateral denoiser, stability of results is very highly dependent on the actual qualities of the samples that feed into the denoiser.
+which is why sampling is crucial in order to generate a good frame.
+When you have good samples, your denoiser result will be much more stable.
+And Matt Farr in last year's 2018 advances talk gave a really wonderful presentation on the intuition of some of the approaches that you need to think about to achieve low variance.
+This is important to do before you apply the denoiser.
+So next we're gonna touch on sampling.
+How do we approach reduction of variance?
+So ultimately, everything is related.
+Everything that you're in the limit surface, essentially, we take infinite number of samples without any denoiser.
+The signal converges, and our result is unbiased.
+That's, of course, the Holy Grail.
+But as we imagine, it's quite not real time.
+That's the, you know.
+hours of frames in the offline renderer.
+So we applied denoiser, congratulations, well that introduces bias.
+And so the better we actually stratify our sampling, the better the end result will be with regards to reducing bias.
+And so even though we actually might pay more cost in the way that we're doing selection of rays, it's more than offset by the resulting quality improvement for the rays.
+And it's the same principle as multiple important samplings, where you have essentially a lobe and you bias the sampling direction toward that lobe, converting the texture to probability distribution for that lobe representation.
+And we sample from that sequence and then convert it to PDF.
+We actually execute similar approach for all of our ray launches per effect.
+So to hedge our bets, pun intended, we use the following sampling strategy.
+We rely on Owen's scrambled sequence, which was actually described in SIGGRAPH 2003 talk on Monte Carlo techniques.
+And essentially, Sobel's sequence is a really widely used low discrepancy sequence for numerical solving of multiple integrals, which is why, of course, it's relevant to Monte Carlo.
+And a lot of the quasi-Monte Carlo computations rely on using this sequence and then scrambling it through permutation that allowed us to him originally to maintain the low discrepancy. Now each extra sample increases the coverage in an optimal way and thus allows sampling to be temporally coherent. And next frame continues to build a sequence and this is actually the sequence that you see that we do in time.
+Each pixel uses identical sequence, which is stored in a texture, and we use a screen space blue noise to break up the pattern.
+It ends up being coherent in screen space, and here is the example.
+Kind of the pseudocode, we generate a ray direction using X sample in one direction, that's the first row that you see, to get one sample, and then we use the second row in Y direction for the second sample.
+And this allows us to use two dimensions everywhere, except with a special case of area light where we use actually three dimensions.
+We accumulate up to eight frames, and inside OneEffect we can actually go up to 32 samples because of our current implementation stores a 256 by 256 squares texture.
+But we also can play with changing the dimensions to basically go with a lot more samples by doing a two by 10 to 24.
+so that you can actually end up with 128 samples if you wanted to, so kind of your value will matter.
+And like I mentioned, scrambling happens with blue noise.
+We begin by grabbing the blue noise with the current texel position from a pre-computed texture.
+It gives us the XY noise.
+Then for each coordinate, we sample the own scrambled dimension texture, like I've described, scrambling the resulting blue noise.
+And then the scramble of the blue noise analysis to reduce the pattern repetition.
+Then, the blue noise is essentially allowing us to ease the filtering of the denoiser, since it provides a very common filter for denoising.
+And so this allows us to yield a temporally coherent sequence with a number of samples, and so it accumulates in a stable manner.
+So if we look at, now we've covered kind of like, we do noise, we figure out good sampling, and then we reduce the resulting bias.
+Now how do we approach ray trace effects?
+The general architecture is quite straightforward.
+So if we look at DXR, we have a number of different shaders, ray generation, closest hit, any hit, miss, and so forth.
+And then there's a surface shader.
+In a surface shader, there's a couple of options.
+Of course, people get really hyped up about ray tracing and I implemented my own PoV ray tracing, I'll age myself, you know, every one of you implemented it probably too.
+It was awesome, we got transparency, reflections, textures, we felt really good.
+And yeah, sure, it solves everything.
+Real production content is a tad different from them spheres.
+You have immensely varied material types and accounting for surface shader that I was just showing you is a must.
+However, we now need to deal with the vast permutations of material types.
+Opaque, opaque alpha tested, so you see lots of that here.
+Transparent, eyes and so forth, double-sided and many more.
+As we go through our effects and retracing, keep these in mind because we're actually trying to solve it for a production that, you know, isn't limited to opaque spheres.
+So a good way to think about ray tracing effects is ambient occlusion.
+It's kind of like the hello world of ray tracing, so to say, which is why everybody starts it.
+And when we say hello world, we really mean ambient occlusion for opaque, non-alpha tested objects, right?
+We trace the ray from G-buffer position in the direction of the normal for opaque, on alpha tested objects from the, you know, very straightforward.
+And then secondary rays used to compute the ambient occlusion.
+We pick the number of samples, that's just a parameter in a shader.
+Sample the hemispherical sine, this is the standard approach, and I forgot to include the proper reference for Matt Farr's amazing book.
+Simply requires a random number provided to, again, to feed the denoiser and we use the own sequence.
+So in terms of the hit, it's actually very straightforward.
+We know if we hit something for opaque surfaces, this means we actually don't need to continue.
+It's already occluded.
+It's purely a visibility computation.
+And so we can just use any hit to evaluate this visibility.
+Simple path.
+And shaders are just for you for reference for later.
+We actually don't need to spend time on them.
+Now for AO, we need to choose distance.
+If you choose infinite, that's your sky occlusion computation, right?
+Small distance is more like the regular AO, in some ways approaching the sort of SSAO-ish type of hemisphere distance.
+Now the distance drives the past performance, ultimately, and so that's your optimization.
+Longer A is far more expensive, as you need to traverse more BVH.
+The cost of ray, like I mentioned, was linear.
+And so...
+We need to think really, you know, thoroughly about the distance that we provide.
+And then the denoiser actually correlates to cost as well, because it's dependent on the size of the kernel.
+Cost is linear based on the size of the kernel.
+So why do we even bother with AO?
+Because I thought you said, you know, I said earlier, we're going to do shadows, right?
+That should technically take care of all of the occlusion issues.
+If we have strong environment lighting, and that's the example of HDRI skies, right?
+Either HDRI skies or light probes, global shadows will show you the sort of.
+crease details and of course the major movements, but you'll lose a lot of the information from far away.
+Because guess what, we didn't pick the infinite distance, right?
+Like we already constrained it to some particular area of the scene.
+And that theme gets repeated throughout because as we optimize performance, we walk away from ground truth and then we need to make up for the lack of ground truth.
+And this is the example.
+So AO can really be a good supplement for the areas where you miss the occlusion for the larger elements of the scene.
+For comparison, this is screen space ambient occlusion in HDRP on the car asset.
+And here you see the ray traced occlusion.
+Now, note some of the over-darkening in the images.
+That's our friends, the transparence.
+And we'll touch on that in a second.
+But of course, you can see as I kind of switch back and forth, how much more accurate occlusion results in terms of ambient occlusion.
+So, yes, transparence.
+What if we want to have more than just opaques?
+Okay, double-sided material is actually not too bad.
+We pass the flag to the API, and that basically disabled calling in the acceleration structure on the DXR side, and we're good.
+Okay, that was kind of easy.
+Transparency, right?
+Like, we thought it was gonna be totally doable.
+The problem is in ray tracing path, it's still quite a bit of a pain.
+There's not really actually an easy way to do this that's performant quite yet in real time because we need to account for accumulation of light and we need to account for rough refraction effects.
+If the object is 50% transparent, we need, for example, for AO, we need to accumulate 50% of AO and then continue to keep accumulating because some of the light propagates through the media.
+And if the object is rough, we have to actually then account for the ray distribution for, you know, this is the example of the spread here.
+And of course, perf head for doing this many rays is actually not, we're not quite there in terms of hardware to be able to do this at real time.
+So we need to special case transparence.
+As I mentioned, alpha testing is crucial for real-time production.
+Now artists actually author AlphaTested as just a sub-graph and a shader graph.
+We don't know what they're going to evaluate, what crazy surface elements they're going to pull in.
+And so we need to add support for AlphaTested objects in a generic way that allows us to sample this material model that is not in any manner of hard-coded.
+At Raytrace, what we do is we evaluate the subgraph from the alpha-tested evaluation, that's what you see here, and that evaluation increases the cost of the effects, because we now need to add it to the AnyHit surface shader.
+And all of the effects, like shadows, AO, et cetera, need to support it in order to render it correctly.
+So the hit processing needs to account for alpha's threshold.
+And what this means is all of the effects need to actually plan to account alpha testing holistically, which of course increases the complexity of the effects.
+And here's the example, you can kind of see that little foliage element and it's doing proper alpha testing for reflections in the mirror, as well as shadows and so forth.
+Now, this is the example of double-sided geometry.
+So we handled ambient occlusion examples, so we handled visibility, good.
+We handled some surface property, alpha tested, double sided.
+So let's kind of think about the next build of the effects, the opaque, the shadows.
+and reflection. So if we think about reflection, this is the contribution of indirect specular.
+The effect starts bringing a lot of the complexity for production pipelines. We typically want to bring them to replace screen space reflections because there's a lot of artifacts and it's a very challenging effect to do. But then we need to think about all the material permutation.
+There's another thing that we need to think about from perspective of engine architecture, which is, well, we're really, really accustomed to doing visibility on our frustums, right?
+Like, it's fantastic.
+My view, I declare it, I run the visibility, be it occlusion, calling, or whatever, I'm really proud of myself.
+Yeah, that doesn't work anymore, because now the object that I'm going to be reflected may be outside of my visibility, and that visibility is actually not accurate for the particular...
+situation. So that actually brings some of the complexity and we need to think about essentially using a cluster of volume around the camera for calling. What we also need to think about is store the data in the voxel around that camera because we need to bring the lighting data, the reflection probes, the planar reflections, decals, all of the payloads that we typically associate with a given view into the new structure because our visibility representation and results of that change.
+And in terms of lighting, we also have to consider the same thing, right?
+Like when we're computing reflection, we need to compute the lighting of the reflected object, which means we need to account for the light that's outside.
+And so.
+We need to ensure that we also evaluate the same identical light loop, and I'll touch on that in a second, regardless of whether we're doing the primary, this is our material lighting evaluation, or we're doing secondary, this is our reflection accumulation, for example.
+And so for indirect specular, what do we do?
+For every bounce, we evaluate lighting and we reuse the same code as the actual regular light loop, except for reflection hierarchy.
+Now, ideally, depending on LOD, you actually may want to use a simplified material for reflection for improved performance because evaluating the full stack of the material for multiple bounce can get really costly.
+Or you also may need to account for reflecting complex materials.
+So an isotropy subsurface scattering.
+This is the light loop evaluation from HDRP that we use in rasterization.
+And so we start from the sun kind of like top down.
+We evaluate all directional lights at the top, then we evaluate all the punctual lights, spotlight, point light, and all of the area lights, so lamps and so forth.
+We add sunlight, sky cloud, the reflection probes, AGRI, and then we finalize the sky evaluation.
+We do a very similar evaluation in ray tracing.
+The only thing that's different is now we'll replace the reflection probe with the actual ray traced reflections.
+And so if I kind of go back and forth, you can see that that sphere disappeared.
+And for performance reasons, we actually evaluate sky in the same manner as we do with rasterization, by using pre-integrated cube maps.
+So this is pre-integrated HDRI, and there's some.
+snags on that one.
+For game-oriented ray tracing scenarios, when we render out the full frame pass tracer, we'd actually do the proper computation of the HDRI in order to do this in a much more accurate manner.
+So, as I touched on that, we need to worry about visibility with regards to ray tracing.
+So, primary ray, we're still good.
+We're still in the view frustum, so visibility is good there.
+Secondary and beyond, we really are in a free fall.
+Like, this is where we start getting into production-specific solutions, right?
+Camera orientation, because your cost will basically, will vary both with regards of how big your acceleration structure needs to be and how long it's going to take to traverse it.
+And we need to account this on the engine front.
+With ray tracing, it's in global space, so we define a region around the camera.
+And evaluate the lighting environment globally for all of the elements that are outside.
+So we've talked about the fact that you actually have to change the low level architecture on that front.
+And there's some flexibility that you need to think about how you're going to structure again.
+That can be an artist specific effect or it can be a level of detail controlled.
+Right. Like it because depending on the complexity of the situation.
+you may want to scale down the region where you're going to be evaluating your global effects as it all affects the performance.
+And this is the rough outline of what you would actually need to be considering when you're building the Voxel around your camera with all of the payloads.
+So this is an example of evaluating the lights representation.
+It's basically accumulation of lights hitting a particular area.
+And in terms of parallel to the rasterization, this is kind of like we have the probe as the same parallel concept.
+Interesting bit about decals with ray tracing, because we're again, we're doing a production focused system and while artists love using decals, they allow them a really quick and customization to material properties of the surface.
+And decals is a really interesting case for reflections.
+How do we enable the contribution of decals in the correct manner?
+When do we determine, are they visible, are they not visible, do they still reflect?
+And how would they actually work with ray tracing?
+So what we did with rasterization, so if you look at Sebastian's SIGGRAPH 2018 presentation from last year's advances course, he defines that we basically maintain a frock cell around the camera where we keep the payload for decals.
+And so we can kind of think of the thing that we kept in the froxel for rasterization becomes the voxel representation for ray tracing world.
+In the rasterization world, we store our decals in a spatial structure around the froxel.
+Now, in ray tracing, we now put it in that camera aligned voxel.
+It's still used for partitioning, right?
+So we still can do cluster decal implementation for acceleration.
+But it's not centered around the camera, it's a spatial representation.
+And that essentially allows us to then find the appropriate decal, and now we need to think about how to evaluate it.
+And of course, artists evaluate properties from the shader graph.
+In HDRP, we apply decals if they're opaque by just rendering them as the debuffer decals.
+And for transparent decals, we do cluster approach.
+This actually modifies the appearance of the objects directly in the Gbuffer for deferred or opaqued.
+And alternatively, of course, in our forward pass, it will modify it as part of the shader evaluation.
+With ray tracing, we basically can follow the same route.
+Everything goes through the cluster decals and ray tracing, so the debuffer decals are gone.
+We evaluate the material properties, again, evoking the shader graph functions.
+We applied the resulting decal to the material by modifying it, store it in a similar manner, and then evaluate the light loop to make sure that we're computing the proper lighting.
+Again, the only changes were operating on Voxel.
+The only tricky thing is we cannot support extrusion decals in this route, and it's not even clear what do you do with regards to acceleration structure intersections in the ray tracing. So this is something that we need to be mindful when building content that's designed for ray tracing and rasterization because they're not interchangeable. The other thing that we want to think about is anisotropy, right? And in general, just thinking about reflection with different BRDFs.
+So at each intersection, we need to consider in the reflection paths, the direction of the ray needs to account for, needs to be actually be driven by important sampling.
+And the reason we want to do this again is to reduce the variance.
+So we have to make sure that it follows the distribution of material.
+Now, this is an example of an isotropic, right?
+And you see its reflection in the subsequent object.
+And we need to know the actual BRDF of the material in order to create the distribution direction.
+Thus, we need to know the material properties.
+And the same time, if we want to know the BRDF, well, that means two things.
+In a fun bit of current API design, you either need to have some sort of uber shader because, well, we don't have subroutines, Or we need to figure out some alternative way to get at the material information for the underlying system.
+And like I mentioned, we did store a lot of the material IDs in gbuffer, so congratulations to us.
+But forward materials, we don't really have a way to classify.
+This is an example of a lot of the, you know, fabric, hair, and so forth.
+So what we do is we important sample with an approximation of the BRDF by using GGX.
+And this is the example here that actually gets you pretty far.
+You can represent a reasonable approximation of an isotropy because we're really only picking the sampling direction.
+Right. And it's a reasonable approximation of the NDF.
+However, with clear coat, we need to account for it by using roughness in the clear.
+And this is the example here.
+And so this is the result kind of of the clear code and its reflection.
+And similarly for specular color.
+So we need to ensure that we're evaluating the light loop like we were saying for the specular.
+And what we do is during the trace ray, we evaluate the material, we apply our decal, you know, as we were discussing.
+And then we do the full light loop for the decal as well in order to get the accurate quality of the final lighting for that particular object.
+And what this means is allows us to have the surface shader at the appropriate point for faster performance.
+And you'll have all of this stuff for reference later on.
+Now, you have to be careful about another aspect, which comes along with real production-centric worlds.
+You need to mind your cascade shadows.
+Because remember that we're not gonna evaluate everything in the infinite distance, well, we can't afford it.
+So if you have a giant view, you might still wanna rely on cascade shadows.
+And they will encompass a region around the camera.
+And so now you have to deal with the merge of the cascade shadows around your camera.
+and your glorious perfect ray trace shadows.
+With cascade shadows, a view dependent, and so if you reflect outside the boundary of cascades, you actually won't even be picking up the right shadows from that super giant object that is coming in outside.
+And so you really need to be kind of paying attention to that.
+So what also happens if you have a metallic object inside a room full of mirrors?
+Multiple bounds are very expensive to evaluate, and how do you account for more than second bounds in the performant way?
+In our case, we ensure that you, obviously if you have something like a reflection of a knob that needs to reflect another metallic object, you'll want to blend multiple times.
+In general, we want to evaluate a reflection for one bounce because of the cost of the reflection shader.
+But in some cases, we can actually think about falling back to rasterization.
+And how did we approach in rasterization?
+For metallic object, we can use specular term as diffuse, right?
+So we basically use Fresnel zero in our implementation as essentially diffuse for metal objects.
+For second bounces, we fall back to Fresnel zero, right?
+Which gives you the sort of the color of the object.
+And if you don't do that, you actually will over darken the object, it gives you the black.
+And this is the example, maybe hard to see, but that knob that you see on the panel actually is the example of bringing in that tint for the metallic object to blend appropriate darkening.
+So as we mentioned, reflection is a very expensive path.
+We need to optimize it.
+So we default to using quarter resolution for speed.
+This is very similar to what EAC has done.
+And what we do is we select one of the four samples per frame, evaluate the lighting, store the resulting index, sample direction, do the probability distribution function, and then I'm sampled with all of the BRDF information for filtering.
+So this is accounting for variance, roughness, and so forth.
+Then it follows the same temporal accumulation and bilateral disjoint based on the radius of the filter that we specified.
+And so here is the example of roughness, normal.
+We use the full resolution results and I'll do a little back and forth so you can kind of see what happens with quarter res.
+In reality, if you're moving reasonably fast, it's not too bad.
+And performance is pretty good in terms of gaining the benefits for that.
+Okay, great, done with indirect specular.
+Let's talk about shadows.
+Rasterization, of course, is a really well-known and fast approach for it.
+When we evaluate shadows, we just do a simple shadow map.
+With ray trace, we actually can do a lot of these approaches as well.
+And evaluate rasterized shadow maps during reflections, because that's faster, it's an optimization for that particular pass.
+Because you may not need the actual precise, glorious ray trace shadows.
+The recursion can murder your performance.
+So for shadows, we have the full screen buffer for the shadow if you want high resolution.
+Or if your light is very soft, you actually can get away with less.
+And that's kind of like experiment based on your particular production screen.
+It is required to be full screen for area lights and for sunlight.
+We use ray-trained screen space shadow map for sun.
+This is the disk light.
+And note that this, again, breaks for transparence because if you go through the transparency, you need to handle the opacity correctly.
+The object is tinted in the color shader, which is, of course, expensive to evaluate in that pass.
+And in general, I mean, it's extremely expensive to evaluate to begin with if you consider, again, the rough refraction.
+So even in offline, it's not really to support it.
+And for reflection, we use a combination of screen space shadow maps, so that's the sun area lights, as well as shadow map for punctuals and area lights.
+Next, area light shadows.
+Of course, they're quite intensive to evaluate.
+We can switch between rasterized implementation of area lights or between ray trace per light.
+We also can do this dynamically, so we allow a lot of control based on LOD or based on artist preference.
+In future, we'll also experiment with importance-driven techniques to kind of see if we can do this in a more automatic manner.
+When selecting rasterization, we use Eric Heitz's linear transform cosine approach plus exponential shadow maps for area lights.
+And you want to make sure that you use a combination like I've described before to combine it in a safe manner.
+So ray traced aerial lights are actually correct.
+It's the glorious ground truth.
+But quite expensive, because you need to launch a lot of rays to cover the area, especially for those giant aerial lights.
+In the video, you probably saw this enormous textured screen, which is one enormous aerial light.
+And so as an optimization, we can evaluate visibility independently, which is essentially a shadow map, separately from direct lighting.
+And what we do, it's a very similar principle to rasterization.
+We render visibility to shadow map using exponential shadow maps, and then apply lighting.
+And of course, the regular shadow maps are incorrect in this case because they're not accounting for BRDF for the material.
+But again, you're thinking about performance and limitation, so it is a reasonable compromise.
+In our case, we fall back to the approach described in Eric Heitz's, well, Morgan, Eric, and Stephen Hill's presentation from last year's SIGGRAPH, which allows for better representation for separate visibility that actually takes into account material, and is a great reference with a lot of code and detail.
+And then, as I mentioned, we value Derek Lighting with LTC.
+So this is the example of a naive implementation for computing area light shadow without the approach LTC approach that we've just mentioned. And notice that it's you know it's not really representative of the complexity of the vehicle. I'll go back and forth between the approach from Eric's LTC implementation. Pretty close to ground truth so that complexity and evaluation actually really matters in regards to quality.
+For textural area light shadow, we require a full screen space buffer.
+We pack it for efficiency.
+Now, we actually need to have access to full material properties in order to evaluate BRDF.
+So in our case, we restricted to the G-buffer renderer.
+We approximate the standard materials for performance, so of course, you know, all of the special effects of anisotropy, et cetera, fell out, but it's okay for the current, for performance reason.
+and essentially along with a direct light evaluation.
+So what we do, we need to then look at optimization for area light shadows.
+We launch rate and evaluate every samples.
+So the shadow that we're doing is denoised, so we can't actually approximate the BRDF.
+And like I said, if we choose the standard material, we end up with a fairly reasonable approximation that gives a good quality without sacrifice to the final shadow experience.
+How we pack this texture is we use an RGBA FP16 screen space buffer, and we packed three components.
+Essentially, the first component, and this is described in more depth in Eric's representation, we packed the luminance of direct lighting.
+So we launch, in our case, a sample directly, not using linear transfer cosine.
+Then we combine the Luminance with testing visibility.
+So this essentially brings in the shadow term.
+And then the final term we packed is the full evaluation of LTC.
+Invite you to read the paper as it's really, really great.
+We need to for textured area lights in order to get good quality and stability, denoise each term separately.
+And so this is required in order to get stability, but of course it means that you have to separate the signal and run two passes.
+We for efficiency of implementation did it in a single pass in compute for performance, which was much better.
+And we also used the U, the combined LTC evaluation result, as a parameter for guiding the denoiser in a similar manner that we would use depth and normal in the other set of effects to be able to deal with discontinuities.
+And then we divide the luminance by the SN in order to update the final shadow result.
+Now, one of the issues with area lights, of course, is they're quite large and the samples can go in a wide range of directions.
+So we need to think about coherency of rays in order to obtain good performance.
+And it really is one of the biggest costs for this particular effect.
+As you can imagine, the caches get quite trashed in the process.
+So the biggest win for area light evaluation is to think about how we can improve coherency of evaluation.
+In our case, what we do is, well actually let's look at the naive approach, right?
+So we want to do four samples for the area light and we shoot them in basically four uncorrelated directions. No guarantees of coherency whatsoever. God knows what point in the cache you will hit. As you can imagine, it gets quite poor performance.
+The alternative is to split the evaluation into four passes, and each rate per pass will use an approximately similar direction, which allows us to get much better coherency for the execution of that pass, resulting in much better performance, despite the non-obvious fact that we're going for four passes.
+And this is actually example of the result in PIX, evaluated in our RTX 2080 Ti at 1080p.
+And so the shadow for area light, this is that giant, you know, two thirds of the screen area light, executes at about 4.8 milliseconds.
+But if we do the non-obvious four pass, you know, separation, you actually save almost two milliseconds, which is quite significant.
+Transparency and ray tracing.
+Damn transparency are always problematic.
+Not possible to do noise, no gbuffer.
+I thought it was supposed to be a glorious promise.
+We also need to render from primary array, so it's expensive to evaluate.
+With regards to handling them correctly, what we need to think about is we need to handle transmission and we need to handle rough refraction.
+Of course, this is expensive even in offline world.
+First thing we're thinking about is when you're hitting a transparent object, you need to launch a ray.
+So we need to render primary visibility with ray tracing because we don't have a G-buffer.
+We don't have the starting point of information.
+So the very first you've just realized is YayPath Tracer.
+And what about performance?
+When hitting that object, we need to think about how we're gonna manage path tracer primary evaluation versus rasterization, because we also said we don't wanna do primary array for all of the opaque objects, right?
+So what we do is we allow essentially switching per object per effect of sending the primary array either through rasterization, so defer, gbuffer, whatever flavor of the day forward, et cetera, or send it through ray tracing.
+And so here is the example of a scene where that's actually really needed because you'll see a lot of complex transparency happening on the gear shift.
+Primary ray objects are rendered in a depth prepass.
+We output a mask for every element of the transparent object that we use in order to discard rays that shouldn't be actually used for primary ray rendering.
+This is our optimization, right?
+And furthermore, we also provide a parameter for primary visibility rate to the artist to control max recursion.
+And this is related to the refraction effects.
+And what we do then is we launch rays and screen space from near plane in the direction of the far plane, right, like for the visibility computation.
+And so illustrating kind of like the approach for max depth, what we do is we retrieve the index of refraction and calculate the refraction vector.
+We calculate the refraction, we launch ray, store the results of that refraction, continue onward, calculate the reflection, launch ray, store the results of that reflection, and in each point we evaluate light loops, so reflection value, refraction value, and so forth, and then we accumulate the final result and return.
+And the light loop has to take all of this into account, the results of reflection, so every ray that I've sent through, results of the two refracted passes, until we essentially reach the max depth.
+So quite a lot of complexity.
+So these, of course, you know, should be used with wisdom and sense.
+So That is actually what allows us to support multiple reflection and refraction for transparent objects.
+As I've mentioned, we only support smooth refraction and infraction, that whole scattering of the rough refraction, good, next year's GDC.
+Quite expensive, and there is a really good analysis from Colin's presentation on the subject from last year's SIGGRAPH intro to ray tracing course.
+So here's an example of, I think, nine level passes.
+So we're kind of going through multiple bounds as accumulating result for the final refracted and reflected.
+Now, note that this doesn't support total internal reflection.
+On Fresnel, so when we evaluate light loop, we actually fall back to a lot of the rasterization evaluation.
+So we evaluate Schlicht-Fresnel.
+And Fresnel is evaluated at every bounce pass.
+The reason this doesn't account for total internal reflection is because, well, Schlick-Fresnel is just an approximation.
+And it's only really good when IR is between 1.4 and 1.7.
+So, you know, quite limited in its representation.
+True Fresnel is something that we use for the full, you know, expensive, glorious frame path tracer.
+But for our pipeline with a more game-oriented rendering for the live.
+we actually can't represent it in the PBR.
+So we pre-integrate the cubemap, based on the fact, you remember the HDRI cubemap that I mentioned in the light evaluation, we pre-integrated based on the fact that it's slick.
+And that's the reason I mentioned earlier that if we're doing the full path tracer, we need to do proper evaluation because that's where we need to actually go back to the Fresnel.
+in order to handle the total internal reflection.
+Of course, that will come with significantly more performance cost, and when quality is more important than performance, fantastic.
+Go wild, use the true Fresnel.
+And when you're in a more performant route and you really need to think about dynamic elements of the scene, we actually, one of the benefits is we get performance, but the other benefits is you also match more of the look to your...
+evaluation from the rasterization path.
+So one set of assets is also something that's worth thinking about.
+So this is the example of the total internal reflection effect that, you know, we're basically saying we're punting for this.
+So in our case, you know, actually, sorry, it's a little bit repeated.
+So we mentioned that we want to have ray tracing or rasterization.
+What we've enabled is we allow actually switch between full ray trace, so primary visibility or rasterization, either placed on camera.
+It can be used for rendering that specific view entirely, you know, AO with ray tracing, etc.
+Or you can actually have a view that's defaulting to SSAO, so a lot of flexibility in that regard.
+The area light is something that's switchable back and forth based on either the object or distance.
+And similarly, you can also mix primary ray objects, be it opaque or transparent.
+It actually doesn't really quite matter with regular, you know, deferred and more standard pipeline objects.
+Of course, ray tracing path, you know, for anything that you've selected is more performance intensive.
+And so you need to think about how are you going to fall back on rasterization when outside the region of the camera.
+And we talked about how we actually need to rethink about how we're approaching camera and visibility.
+What we do is we fall back to ray trace reflection in our reflection hierarchy.
+So here's the example.
+Basically this is your frustum view and the areas where you define rasterization fallbacks, you can kind of see we fall back to SSR further away and we define the area where we're still computing global reflections around kind of like proximity of the camera, again driven by your quality and performance needs.
+And then further away you start falling back to more and more and more LOD approaches for ... ... ... ... ... ... ... ...
+SSR and similar approaches or even drop out that if you need to.
+So when we use primary visibility ray rendering, it's very similar to opaque objects.
+They're rendered in depth prepass output and mask, like I said.
+If the transparent object is not registered in the acceleration structure, it actually doesn't have ability to appear in our reflection.
+And so what we do is we treat the primary visibility object as an opaque object for the intents and purposes of that.
+And what that means is the primary ray transparent can see other object and you actually don't need to require any compositing.
+But that means we're back to sorting issues.
+Because we don't intend to render, for example, particles into a giant acceleration structure in full glory, we're not gonna have to deal, well, where is this opaque primary ray, sorry, primary ray transparent object with respect to everything else in the scene when we're actually rendering the transparent part.
+So there's some things that we need to think about for transparency going forward in order to make sure that it's really robust.
+The next thing I wanted to hit is indirect diffuse.
+And I realize I'm a little bit short on time, so we might go through this a little faster.
+The very simple thing that we've decided to do with indirect diffuse is replace sampling of essentially pre-computed lighting illumination such as light probe or light map with either a brute force approach where we do a ground truth approximation, basically do the full cosine integration of the scene and denoise.
+That allows us to compute really high quality but really expensive indirect diffuse.
+And this is the example of light map that's been beaked and the resulted ray trace indirect diffuse, which is actually fully dynamic.
+Now the approach, you know, brute force approach is very close to ground truth, so it's fantastic for more expensive frames.
+And in fact, the video of the car that I showed you was using that approach.
+But we can also look for the cheaper alternative.
+And what we do there is we generate light probes on the fly, actually in a similar manner as we do offline when we bake light probes.
+We store them in a 3D texture, and this can be of course amortized over multiple frames.
+And then we combine the resulting indirect diffuse with ambient occlusion.
+And so a light probe group, and this is the example of a light probe group that's set up in a car, it's super easy to set up, right?
+And it's just used solely for the purposes of rendering into that information for indirect diffuse.
+You can also ensure to put more of them in regions where you want more fidelity.
+Now, you can use a different acceleration structure for the light probes in order to have a faster computation.
+So we actually use proxy geometry in order to speed up the indirect computation.
+And we encode the light probes by using a stage second order coefficients.
+It allows us to capture low frequency diffuse, so fantastic.
+And we can get away with this, you know, proxy LOD crude geometry because it is really just, you know, low frequency diffuse.
+And in our case, we trace about 1,000 rays for each light probes.
+Each ray traverses the acceleration structure that's using that generated proxy geometry.
+And when the triangle is hit, we evaluate lighting in that point and then convolve the resulting color into the corresponding stage coefficients.
+And so again, this is actually the same approach that we used to generate offline beacon, just less probes and slightly different geometry.
+And we use a compute shader to resample the sage probes coefficients into the volume texture.
+And the closest four probes for each voxel in the volume texture ends up being rendered and interpolated around a particular voxel.
+Now the final volume texture is set on an LPBE component, right, in the custom value texture, and then every single object can actually sample from that particular element, evaluating the SH coefficients, and then computing the final GI value.
+So this is the example of how the SH coefficient texture looks when we go through all the layers.
+And as you know, it consists of nine coefficients for each RGB channel, but we also can pack them a little bit more efficient into the seven RGBA channels to an atlas of a 3D texture.
+So of course there is a ton of performance consideration.
+For the sake of time, I'm going to skip them.
+The main thing that we want to say is around 27 probes accumulation is about three millisecond on 2080 TI evaluation.
+And there's a bunch of optimizations for, you know, a brute force approach of optimizing all of them.
+However.
+If we use essentially more SIMD evaluation for compute cores, we can split the evaluation of a single probe into series of samples so that a single re-invocation can do a subset of all of, you know, we said that 100, 1,024 samples.
+And so we actually parallelize execution within a probe for every single ray.
+And when we do that, with the resulting parallelization, we were able to cut down the GPU cost to 0.5 milliseconds for about 40 probes, and that's what we use in a live demo.
+So, one node and acceleration structure.
+I already mentioned that we're using cheaper geometry.
+Now, there's some fun bits about the API with regards to LOD, but to work around those fun bits, we essentially allow an acceleration structure unique per effect.
+And so you can use it to drive completely different geometry.
+So for GI, we're using proxies.
+For reflection, you might want to use a higher fidelity pass.
+It allows us to separate LODs.
+It allows us to separate scene representation.
+And we give this flexibility both on the effect and on the specific.
+I have a point to touch on for the designers of the APIs on that, but this is kind of a workaround on that.
+And we also allow artists to flag objects to say whether they go to a particular acceleration structure or not.
+It essentially is done with just a bit fill for each ray trace effect per volume.
+And we can have unique configurations per effect.
+And what it does is it actually can allow us to create an acceleration structure that's dedicated to a particular effect.
+What that means is, like for example, for these headlights, we have a really complex effect, lots of bounds and refraction and so forth.
+So we've made an acceleration structure that only encompasses this particular headlamp by again that exclusion route. And so yay, they're fantastically really high quality, we can do more balances, whereas if we were to encompass the entirety of the world, well, we know how that's going to end.
+Similarly, we also support light layers, which is something that our artists feel really keenly fond of, for any type of light with ray tracing.
+And it's actually the same way that we support it for rasterization.
+Same light representation means same content, and then they can go to appropriate evaluation.
+Let's keep a little bit on evaluation of light layers.
+One important thing that we were focused on is how do you represent the shaders for ray tracing with a shader graph, because of course, we want to enable artists for maximum freedom.
+And you can kind of think about ray trace shaders as a flavor of a subgraph that's encompassed for a specific LOD.
+In each effects we then have a separate shader table because of course you need to ensure you're actually compiling and linking and able to evaluate that.
+And with shader graph we can bring a separate shader sub graph per effect.
+This is also going to be used to be able to switch based on distance as well as effect.
+So a couple of things about the demo I'll show in a second.
+On 2080 Ti, it was running at about 60 FPS.
+I'll run it on my laptop.
+We'll see how it does with running for an hour.
+Apparently, I live on the edge.
+This car is about 28 million polygons with tons of effects.
+We did do a pass, and this is something that you need to mind with ray tracing for sure.
+As there are a lot more parameters set, you need to think about optimizing meshes to avoid.
+to basically do merging and so forth of smart things for the draw calls.
+It was a little bit of an insane geometry, right?
+And this is sort of the level of silliness because this was a product design car.
+They modeled the actual numbers for the text in the panel, sub, you know, this is like the radio part.
+Silly, but it has representation for some of the complexities that we'll see in a good level.
+I think 28 mil with a ton of details is actually a fairly decent workload representing this or next-gen games.
+And so this is just the example of the density of the geometry.
+And the performance numbers, so I'll let you kind of peruse them later on, capture it in 28 Ti for this wide shot that you've just seen.
+You know, as you can see, the reflections is actually, you know, about five milliseconds is where we spend our being quite extensively.
+And then the ray tracing itself is only 14 milliseconds.
+So it's actually not bad, despite the fact that it's a heavy polygonal model and an enormous textured light.
+So let's live on the edge and see how this will work.
+And of course, if we're gonna get kicked out of the room, you can come over and check it out on the live laptop.
+And so this is that wide area light that you were seeing and sort of thing I can show you the comparison to the ray traced effects versus the screen space reflections.
+And you can start seeing some of the fidelity that comes in with that effect.
+The primary visibility ray is actually a lot better noticeable in the interior.
+So if we go to this region, the gear shift box, and pardon my car terminology knowledge, because I'll probably name something incorrectly.
+has a really complex transparent and refractive object.
+If I turn the visibility array, you can kind of start seeing, and in fact if I go a little bit sideways, you can start seeing the loss of quality of being able to get the internal effects within that object from the bounces that are happening.
+And if we look at reflections, again, that's something that we can kind of start seeing all of the dynamic elements of them.
+Okay, I'm being hurried on.
+That's okay.
+Thank you guys for not displaying extreme impatience.
+I'll beat the conference, it's less tolerant.
+Okay.
+All right, so a couple of small performance observations.
+I have about maybe five minutes, and then I'll finish my rant.
+We noticed that, surprisingly, payload had really small impact.
+We did a lot of tests, varying 256 versus 1024 payload changes.
+It was negligible in terms of performance, and we actually found the same feedback from Microsoft and NVIDIA when discussing.
+Cost was roughly linear with the numbers of rays, and of course, as I mentioned earlier, ray coherency was king, right?
+It's also super important to get rid of as much work as possible from the raytrace shader, splitting work between compute and raytrace, so doing prepass is a good thing to do for performance reasons.
+On our side, what are we doing next?
+We're going to support particles, and it's going to be fun.
+We're going to discover a lot of interesting challenges.
+We're also going to support more sophisticated GPU animations.
+You saw some of the animations in the car, but the really fun bits exist when artists do vertex animations in the shader graph.
+Lots of interesting challenges there with regards to BVHs and updated acceleration structures.
+And of course, even more optimizations.
+So, for the five minute rant, this is sort of, if there are any IHVs people, or people who talk to IHVs and or APIs, I wanted to mention a couple of things that are worth thinking about with regards to current API and or state of algorithms.
+So with regards to denoising, we said we're going to denoising per effect.
+We chose a cheap denoiser, more of them per area light, et cetera.
+Congratulations, profit, runs fast, we're good.
+It's still not super well understood what is the actual intuition of when you want to choose, let's say, a denoiser per frame versus a denoiser per effect. I would love to see more, you know, deeper research in that domain of understanding of how the final denoiser...
+Okay, matches, maybe I'll rent outside of the door.
+So, a couple of things, I'll just mention them.
+We have global acceleration structures and global reflection tables.
+How will this work with streaming?
+How will this work with LODs?
+How will this work with shaders that need to be compiled iteratively?
+How will this work with all the dynamic objects that we want to procedurally create?
+Lots of challenges there.
+How will they work with GPU updates?
+I can't update the BVH structure on the GPU.
+So there's a lot of deep thinking that needs to occur on that front before we can really start thinking about truly integrating this in a proper way.
+Then of course we need to think about ray tracing and texture cache coherency.
+The main thing I want to mention there is we think we understood texture streaming, right?
+Like we can predict when the object needs to stream in pretty well.
+With ray tracing, guess what?
+You're out of luck.
+You don't know when the texture needs to be streamed in.
+It's not inside of your camera view.
+So there's some really good thinking that I think is going to happen in the next three to five years on how we combine the generality of our dynamic worlds, open world streaming and so forth, with the lockdown of the black box.
+always loaded and compiled at runtime BVHs that are not in our control.
+So in general, that's a pretty big challenge.
+And mesh shaders and ray tracing, and anything that does GPU generation and compute shaders or GPU-driven pipeline, how do we do BVH updates in that case?
+This remains a really fascinating field.
+I'm sorry, one little thing.
+DDX, DDYs, they were our friends.
+We knew them so well.
+Well, with ray tracing, this is a problem.
+We kind of worked around it.
+There's an NVIDIA paper.
+I advise you to look it up on MIP, MAP, LOD.
+You can always fall back on MIP zero.
+That's okay.
+And then of course, support for beams.
+So I told you we're doing a bunch of stuff through primary arrays.
+Congratulations to us.
+How do we accelerate it?
+We want to do beams through the acceleration structure.
+We know their coherency, not supported through the API.
+End of rant.
+So there were a lot of people who contributed to this demo.
+Couple more minutes, they need to be named.
+They were fantastic.
+They did really hard work and the results are amazing.
+And this is both artists, engineers, and so forth.
+Once more plug, we're hiring.
+If you wanna solve all the hard problems I just mentioned, come join us.
+We're across the world, probably where you are.
+We are at too, so.
+and the rent.
+Thank you for your patience.
+And if there are questions, I'll be at the end of the talk.

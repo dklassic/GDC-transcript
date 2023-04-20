@@ -1,0 +1,752 @@
+My name is Sean Feely.
+I'm a senior staff environment tech artist at Sony Santa Monica Studio.
+If you join our team and you want rosy cheeks in your studio portrait, just spend all weekend at the beach before your first day like I did.
+God of War is my first game, which is crazy to me, and for about eight years prior, I worked in film across the bay at Pixar.
+So if I over-explained some obvious game dev thing, it's probably something that I learned in my transition.
+Or if I under explain and you have questions, comments, or a warning that there's something in my teeth on camera, fire away at the real big feel on Twitter.
+So I hope you wanna learn about our interactive win system in God of War, because that's what we're gonna talk about today a lot.
+We're gonna go deep enough that you could go home and start implementing this, but in case you're just getting into tech art, I've tried to make this widely accessible.
+So let's dive in.
+This talk has several chapters.
+We will go over our goals for the system, wind simulation, wind motors, wind receivers, data and shader implementation, tricks we learned along the way, and some extra goodies like new approaches for vegetation levels of detail and interactions.
+Each of these chapters tries to answer a simple question.
+Why are we doing this?
+Where is the wind?
+What makes it?
+What reacts to it?
+How does that work?
+And how can we be better?
+And after doing all of this work, how can we reuse it to get further value?
+First, let's get our bearings and talk about the current state of the art.
+In a basic wind system, you have wind direction and speed.
+Maybe it changes if you maintain state and accumulate texture movement.
+You have a noise texture or a procedural function that scrolls with the wind.
+And then you move mesh vertices as the noise scrolls past.
+And you're done.
+You've got yourself a wind system.
+Go ahead and ship it.
+This is what most games seem to use today and when we were in development.
+And if it does everything that you want, it's really all that you need.
+But I personally have been excited to see some recent games pushing for more.
+In this talk, we are going to revisit this system a few times as a foundational point of reference and then extend its concepts.
+Here's that simple wind system in one of our wind test scenes.
+Now this looks fine, it's certainly shippable, but it's lacking a level of interactivity and dynamism.
+Okay, so what did we set out to do and why?
+What could a richer system get us?
+Our player is powerful.
+How can we extend that to our environment?
+We have three goals for the shape of the wind.
+The player should be able to observe if their action's affected wind.
+And it probably should, they're playing as a god.
+The player should be able to observe which way the wind is blowing.
+But at the same time, the player should be able to observe spatial variety of speed or direction.
+Now a reminder that able to observe and must observe are two different goals.
+We aimed for subtlety in an effort to avoid being distracting.
+If we cannot achieve these three goals in most conditions, I would say that the complexity increase of our system is not worth it.
+When developing our assets and workflows, we need to respect those goals plus a few more.
+At a bare minimum, I think we can do better than if wind, then wiggle.
+Let's not just improve functionality, but aim for better results, even in conditions that don't require a fully dynamic system.
+An isolated model should look good when wind is blowing across it, for all wind speeds, and a group of models should look good together, when wind is blowing across them.
+In other words, neighboring models should appear cohesive in their behavior.
+Now that's a lot of constraints, so given our fantasy setting and style, we didn't constrain ourselves to realistic behavior, but believable behavior.
+Now, I kind of made up that last one for this presentation, but it does reflect my mindset during development.
+This was never PBR for wind.
+I like to think that what we shipped achieves these goals.
+Let's jump back to our test level and see what it adds.
+We can generate environmental effects, like the wind from that fan.
+Attacks can affect their surroundings.
+And you can throw the axe at or near anything and watch as it reacts.
+So let's get into how we built it.
+First, we need a place for the wind description to live.
+We're gonna use what we already know as a launch pad and modify it to achieve our established goals.
+With that simple system, we have a single wind vector for the environment.
+And everything uses that value.
+So the wind is the same everywhere, no matter where we are interested.
+We need wind to vary in space and time.
+Alone, this could be procedurally modeled with just a bunch of noise.
+And if you can afford it, more layers of noise almost always looks better.
+But to highlight local effects and player actions, we need more control.
+We do this by storing and updating lots of wind values within a volume of space.
+Now, here's an in-game close-up of player attacks generating wind within this volume.
+Here, wind strength is in XYZ and is visualized as RGB, viewed as horizontal slices of the volume texture.
+Now, you could theoretically use any kind of fluid simulation to update each frame, 2D or 3D.
+For our game, it's a simple advection diffusion simulation in three dimensions.
+We render in the wind vectors, we blur them, and then we sample backwards to advance the wind forwards.
+Now, if you saw Rupert's talk earlier in the week on implementation and optimization, you know how much I'm lying when I say that it's simple.
+If you missed it and are interested in a purely technical deep dive of our fluid sim, check it out when it gets posted on the GDC Vault.
+Rupert was a great collaborator and made it easy to treat the sim volume as a black box that just works.
+Our wind simulation volume covers a pretty large area.
+Its footprint is 32 by 32 meters, and it's 16 meters tall.
+You can see Kratos there for scale reference.
+Our 3D texture is at a one meter resolution.
+We aren't limited to cube voxels, but tests with flattened or tall voxels didn't yield any strong winds for our use cases.
+To get more out of our interactive area, we center it on a point in front of the camera.
+Now we still need to simulate something behind the player, so we only push forward about 25%.
+To be clear, we also do this looking on the vertical axis as well, so the portion of interactive volume on screen is something like 24 by 24 by 12 meters.
+The goal in tuning these numbers is feature resolution and covering the distances that the player can throw the axe, whether it's as far or as high as possible.
+So now that we have a system that lets us control wind across space and time, how do we actually manipulate that?
+How do we make something like that fan?
+Our wind primitive is called a wind motor.
+And there are a couple different behaviors.
+We have three basic shapes.
+We have spheres, cylinders, and cones.
+A cone is just a cylinder with one of its radii set to zero.
+We can animate these shapes' strengths, positions, orientations, and scales, and their wind output is rendered into the simulation volume.
+So what is their output?
+Well, we have three simple distributions.
+Directional motors emit wind along their primary axis.
+Omni motors emit wind outwards from a central point.
+And vortex motors emit wind around the primary axis.
+We also have a special fourth type of motor, the wake motor.
+This outputs wind in the direction that it travels proportional to its speed.
+I'm going to pause here for a second.
+These arrows are showing the pure direction of travel.
+What we found works better is to have the directions fan out a little bit.
+So we combined a direction away from the motor center, and we do this with equal weight before scaling by speed.
+This gives us a sort of pine cone shape for the wake motor.
+And here's the output in motion.
+This will be clear in a moment with an in-game example using the full simulation.
+And one last thing, we use a two frame average for the motion input.
+Now this gives us a little more outward angle on tight curved paths, like an ax swing.
+Now you might not need this, and honestly, we might not need this either.
+It was not intentional.
+Late in the project, we found that we were doing this accidentally by computing the distance between the current frame position and the previous frame's previous position.
+I fixed the bug, and well, it looked better before when we'd authored most of our things, so I undid the fix, renamed the variable names to be more honest.
+Game of the year.
+So let's take a look at some in-game examples.
+We get a lot of mileage out of wake motors.
+It's easily our most used wind primitive.
+We put them in effects that spawn on weapons, so we get a free ride from animation.
+We create libraries of motors with animations to spawn, like this large burst instance.
+Here's a better look at that fan from our test level.
+Now we didn't use directional motors quite as much as I thought we would.
+I expected, for example, the dragon boss fight to use them a lot, but that battle was in a dead, rocky area, so there was nothing there to really blow around.
+And I love this special attack.
+This is textbook vortex motor.
+So cool.
+As the player levels up their gear, we increase the wind strength of their attacks.
+It's a subtle effect, but you can feel it.
+And here's my best windy attack combo with late game items in total isolation.
+You can see how lots of moving wake motors can begin to craft any of the other primitive shapes based on what the animation is doing.
+You can also make a huge directional motor larger than the volume itself and use that to shape wind for your level.
+At least, that's what we thought, and it was our initial approach.
+E3 2016 used it.
+But there's a problem with it.
+It tends to produce uneven results.
+When you look in the direction wind is going, it's very strong.
+But when you look back where it's coming from, it's pretty weak.
+Tuning this is a series of painful compromises.
+It just doesn't work.
+So in that example, you may have noticed that the simulation debug view shows a gradient that matches the behavior that we saw.
+Why do we see this gradient?
+Well, the fluid is accelerating as expected, but there's nothing outside the box to push in from the edges.
+So wind is slower on that side.
+This was something that we needed to fix.
+So far, we've been trying to use the simulation to replace the simple wind system that I described in the intro.
+But we can solve this gradient issue by using the simple system to define our ambient wind baseline.
+We use this instead of comically large motors, and this lets wind exist outside the box and keeps the dynamic systems tidy.
+Plus, we can use it to add an extra layer of noise at the system level, creating localized pockets of gust and calm.
+Here's the same scene with the level wind altered using the ambient wind component of our system.
+With ambient wind handling the large, far-reaching wind features, combined with dynamic wind handling the closer interactive wind features, we have a full and rich description of the movement of air within our game world.
+So we know where the wind is.
+What reacts to it?
+Wind receivers.
+There are four receiver types that respond to wind, and I've listed these in order of how excited I am to talk to you about them.
+Audio, this is going to be quick, because I don't know what I'm talking about.
+Sometimes audio wants to know the wind speed.
+So we use a custom Wwise attribute so that they can use this value to mix.
+Told you it'd be quick.
+Cloth, not really thrilled to talk about this one, because it didn't work for us.
+But I'll tell you what we tried.
+Each cloth object would sample the wind system once at its transform center.
+That force would be applied to each simulation point on the mesh.
+scaled down by the dot product of the force direction and cloth normal.
+This is intended to give us variety of motion as cloth rotates and sways.
+And as always, we scroll some noise.
+Now, why did this not ship?
+Well, we overhauled a lot of things for the new God of War, you might have noticed.
+And we have to make compromises.
+I think that we made a lot of the right ones, but the cloth system is one component that did not get an upgrade.
+Adding wind exposed a lot of problems with it.
+and we'd like to revisit wind on cloth and the cloth system as a whole going forwards.
+But that was a lower priority for this game because we're still able to have cloth moving in game.
+Some of those are non-interactive pre-simmed elements.
+These are mostly in cinematics.
+Or objects that serve a design function like the flag for this boat dock.
+We are also able to get interactivity by skipping the cloth system completely and using mesh receivers.
+I'll talk about those shortly.
+These objects don't collide, but they do respond to wind and therefore to player action.
+Particles.
+Each particle samples the wind speed and direction at its location.
+Artists can control how much a particle reacts to this information.
+Conceptually, particles respond in the same way that they do to drag, but in a moving fluid.
+So a slow or stationary particle will speed up to match the fluid around it, while a fast-moving particle will slow down.
+Each frame, we compute the impulse each particle would need to match the wind, and we apply that, scaled by the particle's wind influence value.
+You could also think of this as a mass.
+The wind speed that it targets is the full combination of both the ambient and the dynamic wind values.
+And this showed a lot of promise in tests early on.
+This was an exciting test.
+It's a pretty old one, before particles moved to the GPU and before the sun grew hair.
+There's a lot of interesting movement driven by interactions.
+But I have to be honest about it.
+Everything here is tuned precisely to look good in this scene.
+And there's no level wind present to disrupt things.
+We still ship this functionality, but the wind motors and the settings that we used on axe attacks and within levels, they struck a balance that, for particles, well it works, but it's missing some of the excitement of that early particle test scene.
+Now, this is not a knock on the effects team.
+They were very engaged and enthusiastic towards getting everything that they could out of the system.
+But if the effect looks better without responding to wind, well, you know, I've got to agree, ignoring the force is the right decision.
+On the tech art side, we had oversimplified and we'd lost some crucial control.
+And this was my mistake.
+So what do I wish that I had done differently?
+How can we improve going forward?
+Well, I want to explore two things.
+First, I think that if we had separate controls for the ambient wind and dynamic wind influences, we could have let particle systems ignore the level wind and only respond to the dynamic effects.
+Now, this seems like a hack and a bad idea.
+It's why we didn't do it in the first place.
+But in practice, effects artists tend to bake in some ambient scale shaping for their effects anyway.
+And level wind isn't always finalized before effects work is done.
+Also, strong ambient wind speeds tended to push particles off screen before they could even fade in sometimes.
+Second, our particle system already used noise fields before wind was added.
+The thinking was we could keep those components isolated.
+But I think going forward that blending between different turbulent settings for calm and windy scenarios could prevent some of that scrolling particles look that we shipped under strong wind conditions.
+Meshes.
+A lot of refinement went into this one.
+It's used widely across the game.
+Characters, props, fake cloth.
+There are five components to this system, two of which are new for dynamic wind.
+How do those five components relate to each other?
+Well, ART authors two of them for each asset, per vertex data, defining which parts of the model move and which parts don't.
+Tools can help with authoring this.
+And model parameters, which describe how the moving parts behave.
+It's good to build up a library of these settings.
+These are both used by the vertex shader on the text side.
+And this is all that you need for a static wind system.
+For dynamics, we add state for each model instance.
+The vertex shader uses this.
+And we have a compute shader that grabs all of the states each frame and updates them.
+This mostly involves scrolling noise and smoothing the raw wind signal.
+Some of the model parameters are used to adjust this update behavior.
+Now we'll go over each of these.
+First, let's start with the vertex data.
+We use four floats to store two data values.
+One float is for the wind mask.
+This attenuates the movement due to wind.
+It's usually a gradient from zero to one, representing the normalized distance from the root vertices, the verts that don't move.
+The other stores three floats, the other three floats store the relative location of that root vertex.
+This is shown here as XYZ as RGB.
+We store this as a delta rather than an absolute position.
+This allows for translation of the art without re-computing colors, and it means smaller numbers, which helps with precision.
+Next, we will look at the object level parameters.
+We have three categories of these.
+We have leaf parameters, which control model shaping and posing, settle parameters, which directly control some broader movement over multiple frames, and tree parameters.
+For models that activate these tree controls, we get a second hierarchy level to our shaping, centered at the object root, so we don't need additional vertex data or skinning support from character tech art.
+Now, this is a lot of control, and it can be overwhelming, so we took extra care to make sure the defaults were good.
+A new model should only need to change two or three of these settings, but honestly, learning which ones is still kind of a challenge for the artists.
+Building up a library so that artists can use a similar model settings as a starting point has been very helpful.
+Now let's go over how each of those behave within the vertex shader.
+Movement scale is the total distance that the freest verts can move from the rest position.
+Higher values mean more movement, and we scale this value by the wind mask within the vertex shader.
+Verts move by the average of the wind vector and the noise vector.
+The wind vector gives us the lean, and the noise vector gives us some wiggle.
+Density controls the scale of those noise features.
+We actually allow this parameter to have two values, one for low speeds and one for high speeds.
+And we blend between those settings as wind speeds increase up to about 20 to 30 meters per second.
+Most models use the same value for both, but some models really benefit from having the separate controls.
+Bend controls how straight the elements are when they lean.
+A higher value isolates movement to just the tip vertices.
+This is implemented as the exponent that we raise the wind mask to.
+It's basically a gamma ramp on that grayscale wind mask.
+For example, a value of 1 gives us a straight piece, while a value of 2 can give us a parabolic bend.
+Now, in the vertex shader, we get movement by translating verts.
+We do not rotate them like I've seen some games do.
+This avoids slow trigonometric functions in the shader, but it can introduce some stretching, so we need to preserve lengths.
+We do this by checking the distance to the root before movement, and scaling back towards or away from the root to match the length.
+This helps prevent ground penetration, and it gives us the appearance of a resisted rotation under extreme forces.
+Now, we don't have to scale all the way back.
+We can use linear interpolation to correct the stretching by just a fractional amount.
+And that's what our stretchiness parameter controls.
+Some stretch usually looks better than a rigid full correction.
+Our default is a 20% stretch.
+Now, I goofed on this slide, and I flipped the low and high videos.
+The labels are correct.
+Sorry about that.
+Stiffness.
+We can create the appearance of stiff elements by scaling the vertex texture coordinates towards the element root.
+This is a lot like adjusting noise density, but it keeps the effect centered on the root.
+Stiffer values can give low variation across an individual element and high variation between elements.
+Now with these parameters, I'm jumping ahead a little bit.
+We have two sway parameters that adjust spring properties of the object.
+These are stateful, so the computation is done once in the compute shader, and the result is passed to the vertex shader.
+When I said earlier that we lean verts by the wind vector, I lied.
+It started out that way, but we actually lean verts by a third sway vector, which is just pushed around by the wind vector and pulled back to center by a spring force.
+This lets us smooth out that wind signal.
+The strength of that spring is this sway spring parameter.
+The other sway parameter controls the dampening of that spring, which affects the settling time of the model.
+Okay, back to the vertex shader.
+If we activate tree mode, we get that extra layer of motion.
+Trees pivot around the object root, and we do an additional stretch fix for the tree movements, just like we do for leaf movements.
+Trees also have an additional bend parameter.
+It behaves in the same way that the leaf bend does.
+It's a power function on the normalized distance, a gamma curve.
+The straight trunk here makes it really easy to see the differences between a 1.0 linear bend and a 3.0 cubic bend.
+Tree movement scale is just like leaf movement scale.
+It's the distance that the tip verts can move due to tree lean at the highest wind speeds.
+And lastly, tree leaf lag is pretty interesting.
+Without it, on the left, you can see that when the tree settles, the leaves return straight to their rest pose as well.
+But we can add a delayed secondary motion for free by using the sway momentum as though it's the sway position for the leaves.
+Now we already have this momentum computed because of the dampened spring model.
+And using momentum in this way works because it's the derivative of the position.
+And since the derivative of a sinusoidal motion is the same curve delayed by a quarter phase, we can lerp towards it to dial in some delay.
+Now we only do this when the wind speed is decreasing because that's when the branches are the ones leading the motion.
+Okay, it's time to get noisy.
+What is our noise function?
+Our noise base is a three-dimensional texture computed at game startup filled with random XYZ vectors that are bound within the unit sphere.
+You can use any noise base you like, and the techniques we're about to discuss should still apply.
+So we extend that base function by using fractal noise.
+Fractal noise is usually a weighted sum of multiple noise samples at various scales.
+These scaled samples are called octaves.
+The most common method is to reduce the scale by a power of two for each octave.
+And since the features are scaled down, we scale down their contribution weights as well.
+Here's a crude visualization of the contribution curve.
+It's an exponential fall off.
+This combination of noise gives us a rich signal with features at a wide range of scales.
+Now, usually scaling a noise is pretty straightforward.
+You just scale the input coordinates.
+But there's a problem with that if the scale is animated, and ours is, because we blend scales based on wind speed, which is often changing.
+On the left, you can see naive scaling causes noise features to move.
+This effect is worse the farther you are from the scale center.
+We do not want this unintended motion.
+On the right is our solution.
+We lock noise samples to powers of two scales using a technique called logarithmic binning.
+and we blend and fade between them to produce our complete noise result.
+Put another way, instead of scaling the samples and keeping their contributions fixed, we keep the scales fixed and adjust their contributions.
+Let's look at that in a little more detail.
+Here, we are viewing the continuum of all noise octaves that have a power of two scale.
+Let's say the artist chooses a density scale of something like 1.3.
+The nearest power of two, in this case 1.0, will be the noise scale with the most significant contribution.
+Instead of an exponential falloff, we use a triangle falloff centered at the input scale.
+And we use four octaves for our fractal noise weighted by that triangle.
+Applying those weights and summing the samples will give us our final result.
+Animated scales will smoothly fade octaves in and out to generate fractal noise that does not move.
+A bonus to using these fixed logarithmic scales is that neighboring models with similar but not equal scales will still share some noise features that can scroll across them both.
+Now those are some of the ways we've tried to improve the look of individual objects.
+Next, we're going to look at how we can improve the visual cohesion of multiple objects.
+For that, we will focus on how the compute shader moves noise around.
+To make some of these subtleties more easily identifiable for this discussion, I'm going to demo with some outrageous settings.
+I am out of water.
+like some really outrageous settings.
+We're zoomed out a bit here.
+You can see Kratos in the center.
+He's very small.
+Wind is blowing in a steady direction at a steady speed.
+Each object has a world space coordinate.
+It's probably obvious.
+It's where its center is located in the world.
+But it also has a texture space coordinate where its center is located in the wind noise texture.
+To create the effect of noise moving across the object, we offset its texture coordinates.
+And we do this in the opposite direction that wind is going.
+If you track the circle with your eyes, you will see that the noise features inside it appear to move down and to the left relative to the circle's center.
+Each object that receives wind keeps track of its texture offset.
+The compute shader moves this coordinate each frame based on the wind speed and direction that the object is experiencing.
+Now, this works great for coherent wind, where wind is the same speed and direction everywhere.
+It also looks great for more complex weather patterns, but only for a short time.
+Slowly, things seem to get more and more random until the notion of directionality is lost.
+And when we switch back to a more uniform wind pattern, we don't recover from this damage.
+Why could this be?
+Let's look at two neighboring objects.
+They're neighbors in world space and they're neighbors in texture space.
+Where they overlap, they share some noise features.
+And they continue to share these features, even as they move through the texture together.
+But if their directions differ, they spread apart in the texture.
+Now, they're still neighbors in the world.
+This creates a disconnect, though.
+It's distorting the noise texture.
+They shared features at first, but become isolated as time passes.
+The same problem occurs for objects at different speeds.
+One solution to this could be to reset their texture position periodically.
+And this already exists.
+We've basically rediscovered flow maps.
+We use them all the time on surface materials and sky domes.
+This Vista flow was done by the amazing Timo Pilihamaki, one of our environment art leads on the project.
+You can see more of this kind of stuff on our team's art station drop.
+So the gist of how it works is this.
+At some rate, we rewind to fix our texture distortion.
+Unfortunately, that naive approach can cause pops, but you can fix that by doing it twice, half out of phase.
+Fade back and forth between those two samples, and you can hide the pop by resetting the sample that's fully faded out.
+Now, we're going to build on this concept.
+So from now on, I'll refer to this reset as the flow flip event.
+So let's try that in 3D by tracking two texture coordinates for each object, sampling the texture with both of them, and fading between those samples so we can reset one coordinate at our flow flip event.
+You can see we no longer have distortion accumulating.
+but now there's a pretty noticeable loop.
+Loop, loop, loop, loop, loop.
+If you didn't see it before, you definitely do now.
+We can improve on this.
+So our white noise texture has the same spectral properties everywhere, which means we don't need to reset the coordinates to their starting value.
+We can go anywhere.
+And we still need neighbors to stay neighbors, so this randomization is computed once on each flow flip frame and shared for all objects.
+Back to that looping fade.
+Loop, loop, loop.
+In a moment, we will randomize the global offset whenever we flip flow.
+And there it is.
+You can see that the loop has gone away, which helps the fade from being noticeable.
+In a way, this is almost creating a four-dimensional noise texture, but with only three dimensions of data.
+Thanks, man.
+So let's look at all of this under that hurricane wind shape.
+At this speed, it looks good for a flip rate to be about half of a second.
+But when we slow the wind down, that flip rate is too fast.
+All the motion we're seeing here is coming from the blend, not from the scroll.
+At this speed, it's slower for a single texture box to scroll by than it is for the textures to fade between each other.
+So we could just increase the time it takes to flip.
+Now we're at about five seconds, and it's working pretty well.
+Let's test again at a faster speed.
+We're really just back to where we started.
+We need a better solution for this.
+Adjusting timings doesn't seem to be working for variable speeds.
+So let's rethink this.
+What does the flow map technique try to achieve?
+Well, we author some rate and time for the effect to loop.
+But is time really our core concept here?
+How do we know that we need to adjust it, for example?
+Well, we tweak it when there's too little movement or when there's too much distortion.
+So that's what we should try to tune for.
+That's the parameter we should expose, maximum distortion.
+And we can define that as the distance traveled in texture space since our last flow flip.
+Now there's still a problem here.
+If neighbors are drifting apart because of speed, their flip timings will drift apart too.
+It's kind of like when your car's windshield wipers are in sync with the car in front of you, until it's not.
+So we need a way to bundle similar speeds together and schedule their flip to happen on the same frame.
+if only we knew of a way to group numbers together across all scales.
+Hey, do you guys remember Longworth-McBinning?
+I sure hope you do, because it was like five minutes ago.
+We will only consider the flow flip rate for wind speeds that are exactly a power of two, and for every other wind speed, we will make their behavior identical to the nearest power of two's behavior.
+Fast speeds reset more often.
+You can see that speeds in the same bin, like .8 and 1.3 in this example, they flow flip at the exact same time and rate.
+.8 and 1.3 flipped, now they flip again, and now they flip together.
+What's nice about power of two logarithmic binning is that neighboring bins will flow flip exactly twice or half as often.
+This means that for half of their flips, they're perfectly in sync.
+This is important for speeds that are close to each other, but not close to the powers of two themselves, like .7 and .8 here.
+Here they both flip, and now just .8 flips.
+Here they both flip, and now just .8.
+Smack my laptop.
+If the wind speeds are varied, but mostly unchanging, all objects will stay in their same speed group.
+But that's rare.
+If an object's wind speed changes, it may find itself closer to a different power of two, changing groups, and therefore out of sync with its new group.
+To correct for this, we adjust our fade rate for the object so that it will be in sync with its group by the time the flow flip occurs.
+So objects that are behind schedule briefly speed up, while those that are ahead of schedule briefly slow down.
+Now there is an exception to this.
+If an object enters a group that it's about to flip, but the object itself is very behind schedule, we identify this as the group having completed more than 75% of its fade, while the object has completed less than 25% of its own.
+For these, we just target the next flow flip time.
+Essentially, it's running late for the bus, so we tell it to catch the next one.
+This prevents sudden rapid fades, which are perceived as animation pops.
+So with all of that implemented, now our noise features will stay consistent for coherent flows, and they'll stay consistent for divergent flows.
+This works across all speeds, whether we go slow or whether we go fast.
+And any accumulated distortion will recover gracefully when we return to coherent flows, where that distortion would be most noticeable.
+Here's an old debug clip that may give you an idea of what the flow flip rate looks like for that hurricane shape of wind.
+Now these objects are hacked to bounce their flip rate.
+You can see the faster flip rate of objects on the perimeter and the slower rate of those in the center, where there are lower wind speeds.
+You can also see at the group boundaries that members of adjacent logarithmic bins will flip at exactly half or double the rate of their neighbors.
+And you may also notice that they are in phase with each other so that they can reset on the same frame.
+So that's our wind system.
+Up next is the grab bag section of the talk.
+What tricks have we learned over a full development cycle with this system?
+Artist education.
+As artists and managers and producers come to understand the system and its limitations, we can borrow from existing intuitions by using lighting analogies.
+The wind volume, for example, is like shadow cascades.
+If your motor is not in the box, it's not going to blow wind.
+Just like if a model is outside the shadow map, it won't cast any shadows.
+Wind motors are like point and spotlights.
+They inject light and wind into the scene in a targeted way.
+Ambient wind nodes are kind of like directional or ambient lights.
+Doesn't matter where you put them, they affect everything all the same.
+Also be careful about leaving stray ones laying around in scene files.
+And wind receivers are to the wind system what materials are to the lighting system.
+The system tells you how much of it's coming in and the model material properties describe how the models respond to that.
+We've landed on a workflow for authoring vertex data that works really well for 90% of our models.
+We choose the mesh that we want to run.
+We tag the vertices that we want to anchor.
+And our vertex color tool will compute the wind mask as the normalized distance from the closest connected route.
+We normalize separately for each connected piece across the entire model.
+Artists can merge unconnected pieces just for this computation in case they have some floating elements that they want to combine.
+Sometimes we don't even need to manually select these root verts.
+We can guess them for each piece.
+For example, these implicit verts can be the vertex with the largest or smallest coordinate along the X, Y, or Z axis, or even the U and V texture axes for any connected piece.
+Or they can be the closest vertex to a specified surface or point in space.
+We can also mix implicit and explicit roots.
+If the implicit guess is good for nine out of 10 pieces, the artist can just tag the roots on the pieces that need correction and run again.
+Travis Slagle is a senior tools tech artist that did an amazing job taking this workflow that I described and creating a tool that realized it.
+So for a long time, I got the same question over and over.
+Sean, what's a good win speed for authoring my model?
+And my unhelpful answer was all of them.
+We need to look good at all speeds, guys.
+So to get everyone on the same page, we are inspired by something that Rupert discovered, the Buford scale.
+This was developed for sailors, or by sailors, in the early 19th century, and it describes 12 distinct categories of wind speeds and the land and sea behaviors that identify them.
+It's a great reference, and you should check it out on Wikipedia.
+Now, 12 is more granularity than we need.
+So we reduced this to five agreeable named speeds.
+We would use these to direct wind intensity in our levels and keep models looking like they exist in the same space.
+Our speed categories are still, this is my favorite video, calm, breezy, strong, and violent.
+Because it wouldn't be a God of War game without a little violence.
+We add named buttons to our wind speed override tool so that everyone can test their models under the same conditions and sanity check level settings.
+You just click the named button and it pushes the slider to the respective value.
+After establishing this language, the wind speed questions disappeared.
+And these are our speeds for those, but a reminder that the numbers here don't matter because it's technically the texture scroll speed, not the speed of the wind that it's supposed to look like.
+Again, this is not PBR wind.
+OK.
+Here's my weird tip of the day.
+When you're tuning model parameters and testing under different speeds, blow on your screen.
+Try to match the energy of the wind speed name.
+Calm.
+Breezy.
+Violent.
+And then maybe wipe your screen afterwards.
+It's a pretty dumb idea.
+You're going to feel silly at first, but I promise you that it works.
+Once the model feels like it's responding to you, it just clicks, and you know you've got some good settings.
+It's time to check in.
+So some trees in our game are very large.
+They wouldn't really sway too much.
+We found that for these, we got a better look by putting wind on the branches individually and activating the tree behavior on those branches.
+This meant that each one could sample the wind separately, and this was important because an axe throw would otherwise make the whole tree shake if they had shared a single sample.
+Here's a look at one of those branches with three different settings.
+On the top, we've not activated the tree settings.
+Vertex paint is just a gradient from the branch root to the leaf tips.
+On the bottom, we tuned with tree settings activated.
+The left model is using the same gradient as the top, while the one on the right uses a gradient that radiates away from the branch core.
+The bottom right model is the one that we shipped after I fixed that one wiggly branch vert.
+When modeling branches to use this extra layer of tree movement.
+It's helpful to align your vertices with the branch's flow in the texture.
+After all, if there's no vertex there, you cannot pin it as a pivot.
+Using this technique creates this radiant gradient away from the branch core, whose behavior looks a little less rubbery than a linear gradient.
+But sometimes I like to blend the mask of both while keeping the pivots from the one on the left.
+Here are those kinds of gradients on the same model.
+We can see the different plausible looks we can get just from playing with how we generate vertex colors.
+The one on the left is that radiant gradient.
+It's fun to say.
+The one on the right is linear, and the middle one is a blend.
+For this model, I believe that we shipped the blend, but the settings on the left look good too.
+Leaning further into if it's stupid but works, it's not that stupid.
+Hanging banners and ropes are upside down trees.
+We stubbed in a setting for pendulum movement specifically for this purpose, but we didn't complete the functionality because springs looked good enough.
+For hair, especially flyaways, it works well to have the pivot of every hair vertex use the closest point on the scalp as its root.
+To be clear, this is different from the workflow we've been describing.
+The pivot is not a vertex on the hair mesh.
+We set the wind vertex mask value to the distance between the vertex and the scalp.
+Then we normalize the mask for the entire hair mesh.
+In this video, the left model uses this technique, while the right model uses the hair origin as a pivot.
+And the one in the middle is a blend of the two.
+For this character, we ship the one on the left.
+Fur can be tricky.
+It's usually made of single quad cards or triangles, and this means that the bend parameter doesn't do anything because both one and zero don't change no matter the exponent you raise them to.
+Fur is usually laying flat against the skin, which means that it's easy for even small movements to cause penetration with the skin, and we don't have bend to mitigate that.
+So for these, we compute pivots with the usual method, but we set the wind mask value for the tips to be the distance to the skin.
+just like we do for hair, and we renormalize for the whole fur mesh, not for each individual card.
+Before normalizing, we take the maximum value, and we use about 90% of that for our model's wind movement parameter.
+Just a reminder that if you do this, remember to set the bend to 1.0 for these.
+Otherwise, you'll mute the effect on short hairs since we're baking in their absolute lengths.
+Beards are a lot like fur.
+But we have a few more spans to work with, at least our models do, and I'm glad that they did, because it lets us use that bend parameter.
+And we go pretty high with the exponent.
+Kratos's beard uses 3.0, and the fur on his pelt has multiple spans, and we use 3.3 for that.
+These high values keep the interior of the beard stiff, but it lets the tips convey motion.
+To let the beard shape the silhouette on the far cheek side, it's OK to use large enough movement values that just the tips penetrate on the side of the face getting hit by wind.
+Now, it's possible that this could poke into the mouth interior, but we never saw this happening.
+And some of our bearded characters have beard shells underneath the cards.
+Some of them don't.
+For wind, my preference is for shells to be rigid and fairly tight to the skin, or not exist at all if it looks better.
+And this prevents them from being exposed as cards move around.
+Okay, so for the rest of the talk, we're gonna talk about some adjacent vegetation work that we did.
+For some of our vegetation levels of detail and shadow proxies, we use an imposter grade solution that works well with wind.
+This technique is known as billboard clouds.
+Now what's the first thing that you think of when you hear that name?
+Is it fluffy textured quads that face the camera?
+Yeah, me too.
+Everybody does.
+But that's not what this is.
+These.
+These are essentially billboard clouds.
+We started calling them card clusters and the confusion disappeared.
+I suggest the industry do the same, but it's really up to you guys.
+So this technique is a bit more advanced than just a couple world-axis aligned cards.
+We referenced two papers in our implementation.
+I'll post a slide again later so you can read up on it.
+This approach builds on the state of the art of the mid-1990s by asking two questions.
+Hey, what if we use more cards?
+And what if those were the best cards?
+For volume filling geometry like leafy vegetation, the results are pretty good.
+One of these five models is the source mesh.
+Can you guys guess which one?
+How about now?
+So there's definitely a quality versus performance sweet spot, you don't want to get yourself carried away.
+For an input model, we are going to make a cluster of cards one at a time, starting with the best one.
+How do we find that?
+Easy.
+We test all card planes in the known universe, and we give a score to each one.
+High score wins.
+A potential card considers a thick slice of the model.
+It will flatten model triangles that are close to the card plane within some error metric.
+The other triangles would be left for other cards.
+Cards are scored by how much of the model they are able to capture and how little those triangles distort.
+Mathematically, this is defined as the sum of their areas after projecting to the plane.
+That's their world space area times the dot product of the triangle and plane normals.
+Or you can think of this as the total card texture coverage by those flattened triangles.
+So the best card claims its faces.
+This is a greedy algorithm.
+We then repeat the process on the remaining portion of the model until there's nothing left.
+So that's a lot of computation.
+How can this be faster?
+Well, the space of all possible cards is the six-dimensional planoptic function, but we can reduce that down to two dimensions, the direction the card faces, and how far it is from the center of the object.
+All the other planes are redundant.
+We can also space the candidate planes out, and the spacing interval can be proportional to that error metric.
+So if you're okay with more distortion, you can compute fewer card candidates.
+For directions, we use the normals of a geodesic sphere.
+We only need half of the sphere, since negative directions are redundant, and it's easy to subdivide if we want more candidates.
+The geodesic distribution also works well to prevent over-sampling at the poles.
+A Fibonacci spiral would work well here too.
+The projected area of a face doesn't change if the plane orientation doesn't change, so we pre-compute individual face areas for each orientation batch, and then it's just a simple summation.
+And of course we ignore cards that are far away, miles away.
+They have to intersect the model bounding box.
+Once you have the cards, then as you would with impostors, we render the material channels from orthographic cameras.
+For each card, we match the camera position, orientation, and bounds to the card and its contents.
+Now this can include clipping planes.
+The distance between near and far can match the closest parameter, the error metric.
+We use Python image library and Maya UV auto layout to generate our final textures.
+And lastly, sometimes a face is close to a card that scored highly, but it's not a good pair for that face.
+This face is a victim of the greedy algorithm.
+After we know which cards we will use, it's fast to retest if a face would score better with a different close card.
+If we find a better card, we just switch it over before rendering the textures.
+This helps prevent a large gap from appearing around the first card we find, and it preserves the visual density of the model better than compensating by rendering faces into multiple cards.
+So here in our test level, we're looking at the card cluster versions of these trees.
+As we approach, we'll fade into the full models.
+For shadow proxies, we are always using the card cluster version, even at close range.
+We're looking at card cluster shadows right now.
+We use card clusters instead of impostors so that we can get wind movement and parallax because we have a few more verts to work with.
+This is done with a vertex attribute transfer from the base model to the card cluster model.
+It's nothing too complex.
+It's not an exact match, but it gives us some good movement, especially in the shadows.
+Now as the card cluster model got far away, we noticed some matte edge inaccuracy.
+So we need to flood our textures.
+This is often done by dilating or blurring the image and putting the original on top and repeating until you've flooded enough.
+Now this looks nice, but your users and players are never gonna see it.
+And it's pretty slow, especially for large images.
+It's also biased towards the edge color.
+Probably not noticeable except in contrived situations, but it could be better.
+I wanted something that would resolve faster, so I developed something I call MIP flooding, which assumes power of two sized images.
+So for an image, we use unpre-multiplied color.
+At each step, we scale it down to half of its size, weighting the samples by their alpha coverage.
+And we repeat until we get to one pixel wide or tall.
+We remember these textures.
+and then we walk back up the MIP chain using nearest neighbor to upscale.
+We composite the higher res MIP on top, and we repeat all the way back up the stack.
+Now, this is fast to generate, and it scales well with image size because of the logarithmic component to the algorithmic time complexity.
+And on disk, this will compress better because of those large areas of constant color.
+You could also use this for a fast, smooth hole filling if you use bilinear sampling in the upres chain, but the image result is gonna be a little different depending on your alignment.
+Okay, guys, so I came here today for two reasons.
+To chew bubblegum and kick grass.
+And bubblegum is beyond the scope of this presentation.
+So let's talk about ground vegetation interaction.
+How does it move when physical objects collide with it?
+Physical objects like characters just chilling in the grass, we want their presence to affect nearby vegetation by moving it out of the way.
+This is commonly done with a top-down projected render texture.
+Each collider can render into the texture a simple representation of itself, like a sprite of some directional vectors.
+rendered with an additive blend so multiple shapes can mix in any order.
+A vegetation model that wants to respond to collision would read this world space texture and move its vertices in the direction sampled.
+Andrew Maximov did this for Uncharted 4.
+Another method is to render collider shapes into a height field instead of rendering explicit directions.
+To blend these in any order, a minimum blend mode preserves the deepest disturbances.
+This could push verts down proportional to the displacement and use that stretching fix that we described earlier to make it look like rotation.
+Or we could compute the gradient of the field and use that to push away from the collider.
+Now this is not the Photoshop gradient, this is the Calculus gradient.
+It's the direction of greatest slope.
+So after whipping up something simple, you can see the grass here parting near the player's feet.
+It looks pretty good with this camera, but this is not our game's camera.
+This is our game's camera.
+You rarely see his feet, so you will rarely see this movement.
+And that's disappointing, at least to me.
+We need something more.
+My goal was to figure out a way to extend this settling so that the player could see a trail.
+Our first pass at the trail was to use two channels for XZ direction offsets and extend it with an extra channel for effect age.
+we use a ribbon particle system to create some trail geometry.
+This extends the trailing edge of the sphere and fades out all channels over its lifespan.
+The extra age channel, shown here in the blue channel, would let us seek into a procedural settling animation.
+This technique showed some promise, and we used it for E3 2017.
+But it did have some problems.
+It could only use sphere colliders.
+Multiple colliders could z-fight in the render texture, so the grass between a troll's two feet would pop back and forth and vibrate.
+And also, since it was a top-down projection, it would move vegetation no matter the height of the effect.
+This meant that elevated colliders, like leaping wolves, lifted objects, and tall, high-stepping trolls, would look like a ghost was moving through the grass beneath them.
+So maybe we could use our footstep system to splat fading sprites into the render texture.
+This would only happen when feet touch the ground.
+Now this could work, but it would also greatly increase the altering burden on our effects team, who already had a lot of things scheduled.
+This would require a lot of extra tagging of materials and animations in our pipeline.
+Because of this extra workload, I suggested we not pursue this approach.
+My gut told me there had to be a better solution out there.
+So it only took about seven months of thinking in the background about it, before landing on a solution that would meet the visual target and fit into the performance and memory budgets.
+I did work on other things.
+We used approximate shapes like rag dolls and we rendered the height of their bottom side into two channels.
+One channel is held every frame and the other fades upwards.
+How much that channel is faded can tell us how much time has passed since the collision was rendered.
+And when verts lean out of the way, we use the slope of the unfading height field to determine the direction and magnitude of that lean.
+Here's another video with a more detailed player collider.
+You can see his feet there.
+Now, this render texture is double buffered so that we can construct accurate motion vectors for our vertex movements.
+And that's been true for all the techniques we described.
+We use a read, modify, write to blend the minimum into the fading channel, and we replace the unfading channel only if that blend pushed the height field down.
+Except I couldn't use read, modify, write.
+It's slower and was not in my budget.
+But we can take advantage of the double buffering to read from the previous frame, letting us do the compositing in the render texture pixel shader.
+Now, this does mean that in some rare cases, draw orders would lead to negative height differences for one frame before correcting.
+But we fixed this in the vegetation vertex shader just by clamping the age to zero.
+And lastly, this works best for stationary or high movement colliders.
+An idling player animation can cause vegetation to pop frequently from its settling animation back into its trampled pose.
+We mitigate this by reducing the fade rate to zero where the player is standing, which is always the center of the texture, because that follows the player around.
+This slows the settling animation to zero underneath their feet.
+Here's some work in progress testbed video.
+You can definitely see how, as I got further and further down this rabbit hole, I started using more and more debug visualization.
+Forgive the z-fighting there.
+Okay, so we're gonna go through it one more time because, again, debug visuals, they help.
+On the left, we're gonna look at the dual height field texture.
+And on the right, we're gonna see the world view from its side.
+First, we'll render in a sphere.
+In the world view, I'm gonna add a slice of the height field so that we can see it in space.
+If we take away the sphere, you can see that one channel of the height field fades up at a constant rate while the other is held firm.
+Adding the sphere back, let's move it and pause.
+So the differences in the height field channels divided by the fade rate tells us how much time has passed since the collider moved away from that position.
+We use a procedural animation for total lean.
+It's a cosine times a fall off.
+and it goes negative to give us overshooting as vegetation settles.
+We use that time passed to seek a pose from that animation curve.
+Now as we watch the sphere continue to move, you can see how it overwrites the held channel only when it's deeper than the faded channel.
+This means that shallower collisions need to wait for the vegetation to settle somewhat before they can affect it, but deeper collisions can affect it right away.
+Let's watch that one more time, but with some simple grass geometry reacting to it.
+And one last look at the ship technique in action.
+For small characters, like that poor guy there, we use a simple mesh sphere as a collider shape.
+Now I'm turning off the spheres on Draugr so we can see the effect a bit better.
+For our larger and hero characters, we try to get more faithful collision representation by attaching shapes to multiple joints.
+And we're not limited to primitive shapes.
+The troll totem has a custom collider shape, and this works really well.
+We can also see here the importance of separate foot colliders for large characters.
+And lastly, the boat is another case where we use a custom mesh collider.
+Okay guys, we made it through.
+That was a lot to go over.
+I hope everything was clear and you were able to take something away from it, even if you don't plan to implement a system with all of these features.
+We're not gonna really have time for questions, but I'll be hanging around, so if you wanna join me later, we can talk about it, or you can reach out to me on Twitter, at TheRealBigFeel, and I'll post a references slide there as well.
+Now I've gotta do a shout out, because I really could not have built this without the teamwork of some amazing people.
+By now you may know Rupert Renard.
+Again, he's one of our graphics programmers and was instrumental in co-developing the system with me.
+Florian Strauss, our technical director, developed the snow system that I was able to borrow a lot of tooling from when building the ground vegetation collisions.
+Paolo Siricchio, one of our graphics programmers responsible for effects and rendering, did a great job integrating and evolving wind influence in our particle workflow to my specifications.
+Travis Slagle, a tools tech artist, built the tools that we use to alter 90% of our vertex data on our wind meshes.
+And Max Ankar, our effects lead for this project, he set up wind on the vast majority of tacks and was by far the wind system's biggest fan from day one.
+And really, I've got to thank the entire team at Sony Santa Monica.
+I see some of them in the audience, so don't look at me, guys, because I'm going to gush.
+I could not have done my best work without them.
+Every single one of these people is so dialed into what they do.
+It's an incredible place to be a part of.
+I love this crew and I'm grateful for them.
+My point is this, if you ever get a chance to work with any one of them, present or former, you should absolutely jump on the opportunity.
+And what do you know, the easiest way to do this may well be to reach out to us.
+We're hiring for a lot of positions, including senior and lead tech art roles.
+Art of all disciplines, programming of all disciplines, design of all disciplines, animation, you're seeing a pattern here.
+If you don't see an open role for your talents, but think you can make a strong contribution, I suggest you go for it anyway.
+We can be flexible and we might have a place for you in the future.
+Thanks for joining me today, guys.

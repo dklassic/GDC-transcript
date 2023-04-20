@@ -1,0 +1,287 @@
+All right.
+Hello.
+Welcome to Bringing Hell to Life, AI and Full Body Animation in Doom.
+I want to thank you all for coming today.
+I really appreciate it.
+My name is Jake Campbell.
+I'm an AI developer at id Software.
+And for those of you that don't know, Doom was released last year, and it's our reimagining and modernization of the series.
+And since release, it has gone on to receive a number of awards and nominations.
+The underlying theme of this talk is how we have given our AI more direct control over their animations.
+The AI does not drive the character with stick input and button presses.
+In our system, there's not really a clear distinction between AI code and character code.
+And along with that, we rely heavily on full body animation rather than a partial body or layered approach.
+This presentation is split into three segments.
+First, I'm going to explain some of the reasons that we went with a direct control approach.
+Then I'm going to provide four examples of how our AI makes use of this extra control.
+And finally, I'm going to conclude with an example of how it all works together to influence the ways we implement certain behaviors.
+Now, our most defining feature, which is a diverse cast of enemies, was the source of two primary factors that influenced how much control we gave our AI.
+Our game contains 19 AI types, each with many custom behaviors that imply custom animation solutions.
+Along with that, the game fiction and genre dictate that animation style is of utmost importance.
+So, the goal of minimizing constraints that inhibit animator creativity was one of the significant factors over the duration of the project.
+If the AI requires things like shorter animations, multiple layers, pose matching, etc.
+those can quickly add up to have a net impact on a final result.
+Animators can typically deliver the most stylish and impressive results when they can focus on the animation itself rather than technicalities.
+Now nothing looks as good as a well-made full-body animation full of style and personality.
+A great example of how successful and unconstrained, straightforward approach can be is the response of RAI to damage.
+Now there are four general categories of damage response, each being more severe than the previous.
+And there are also different severities within each category.
+This ends up being a lot of animations.
+Twitches are additive animations that are played in layers over whatever the AI is currently doing.
+Now, they are not full body, but I'm including them here for completeness and to illustrate that we do use partial body solutions at times.
+But anything more severe than twitches, like a standard pain, is just a straightforward, full-bloody animation.
+Now, our pain animations often move the characters, and animators find great enjoyment in authoring this kind of content.
+A special category of full body, a special category of pain animation is what we call a stagger, and the player can execute synchronized glory kills against staggered enemies.
+Standard deaths start out as full body animations, but they blend into ragdoll physics as the model is falling.
+And classic deaths include multiple separate skeletal meshes all animated in sequence.
+For example, a Hell Knight's limb being severed and animating along with the rest of his body.
+Now, many classic deaths involve animated jibs because we wanted to give the animators control over every facet of the presentation.
+All of this content was manageable and successful across more than 10 unique character skeletons because we just let the animators have at it.
+The other significant factor in forming our approach was the goal of adding sophisticated polish to characters in order to make them feel as alive as possible.
+This is kind of obvious, right?
+But we wanted the ability to easily add or modify behaviors in ways that increase responsiveness while maintaining the style and cadence of full-body animation.
+An example is our imp performing the conceptually simple behavior of throwing a fireball, which ends up being quite sophisticated.
+The projectile throws follow parabolic arcs, and the imps lead their targets.
+So validating these potential trajectory paths entails a non-trivial set of tests that requires timing and pose information from the animations themselves.
+Furthermore, to improve presentation, our imps try to release their fireball not on a fixed frame, But when the tangent of the arc that their hand joint follows matches the desired launch angle, just like throwing a baseball.
+And since a target is typically moving throughout a windup, this essentially couples the animation with the AI targeting systems.
+Then we wanted to give the imp the ability to throw during stop transitions and evasion hops, which is coupling attack behavior and locomotion animation selection.
+On top of all this, we added stronger fastball throws that require a looping charge animation shown there.
+that can be aborted when the angle to the target exceeds the threshold.
+So why give the AI more animation control though?
+To sum up the two goals, or keep the animators from being unnecessarily constrained, the thing that they do best is animate straightforward full-body animations that play out the way they see them in their tools.
+And second, make it easier for the AI to do more sophisticated things without needing to constantly refactor non-AI code in ways that only the AI ultimately benefits from.
+Now both goals are reached by shifting animation control to the AI, because then using full body animations to construct and improve behaviors is a straightforward and thus a known quantity.
+They become the ideal building block for whatever we want to do.
+Now the AI code can do extra work on its end to make better use of full body animations.
+Today I'm gonna talk about four examples.
+Our AI modify animation translation and rotation using a technique we call delta correction.
+Their focus tracking involves modifying animation pose.
+Our foot phase synchronization requires being able to modify playback rate and position.
+And the way our AI perform bad zone avoidance is somewhat counterintuitive way of modifying blend weights.
+So the first way I try to make the animations more useful is by influencing the origin bone or root bone, depending on the engine use translation and or rotation. The primary use of this in our code is what we call Delta correction and the basic idea is scaling or lurping the translation and or rotation of a non blended full body animation. We take a single animation here and imp jumping forward and we make it usable in an infinite number of scenarios within reason.
+And effectively, this allows the AI to use far fewer animations, yet retain the ability to move where it wants when playing those animations.
+Now in the following slides, I focus mostly on translation, but the system is equally powerful and is used just as much with rotation.
+So here we have an imp playing a gap jump animation, but the animation doesn't automatically place in where we want in the world, which is at the red star.
+So how do we fix that?
+Well, if the model is at point X at time T sub C, First, we want to define a reference point in the animation.
+This is what you want to align with the target position by the time that time in the animation is reached.
+And here, the time at the reference point is T sub n.
+We already know what the target point is, just label it z.
+The delta between those defines the remaining error that's going to need to be applied before the animation finishes.
+But how much of this error should be applied on the next time slice of the animation?
+Well, find the next time, t sub c plus one, and then the ratio of the next time slice to the remaining time in the animation to the reference point defines the fraction to apply on the next game frame.
+So we do that.
+and it moves the model a little bit towards the target point.
+Now, applying the same equation each game frame will ensure that animation point Y coincides with world point Z under a wide variety of conditions.
+In particular, if the conditions change such that the reference point is prior to the window of correction, the target point is before the animation or behind the model, and even if the window of correction ends before the animation, the math stays exactly the same.
+Applying the same equation gets a different result.
+In this case, correction is backwards.
+And the math aligns the model as if the animation has hit the target point, essentially correcting to a point in the past rather than the future.
+Now given an animation like this traversal, where the imp is leaping up to grab hold of an overhang, climbing over it and jumping off, we can more effectively use delta correction if we restrict the application to discrete windows of the animation.
+For example, to prevent sliding and or clipping, we can apply the error correction only when the model is completely free of world contacts, in this case, in the air.
+Defining windows like this, where the correction will not cause foot sliding, is absolutely essential in most cases.
+You can even use multiple windows if you want.
+For example, maybe you want to separate translation correction from rotation correction.
+Now the power of using windows is that the AI is able to treat a single animation as a sequence of multiple parts without the animators needing to do the work of cutting it up.
+Some more subtleties in our approach.
+If you really want to minimize the perception of error correction, you can scale the fractional amount of correction each frame by the relative velocity of the model in that frame.
+In other words, you hide the correction behind a faster moving model.
+And most importantly, because the math is repeated each game frame rather than just once at the beginning of the animation, a target point moving through the world is automatically accounted for.
+In this case, assume that our target point is moving upwards like that during the animation.
+Well, the system simply plays catch up and increasingly applies more error correction each frame.
+Some examples of where we use Delta Correction extensively are traversals and attacks.
+Now in all these videos, the blue lines correspond to windows of Delta Correction.
+We have a library of traversal animations that is orders of magnitude smaller than the use cases and levels.
+Scaling the traversals lets the animators deliver highly stylized and unique animations for them, while also allowing designers nearly unlimited use of those animations in their levels.
+And we also Delta correct melee attacks, such as the rotational yaw of swipes, the forward translation of lunges, the arc of leaps.
+All of this helps the AI feel more engaged.
+They can relentlessly pursue the target with less requirements to reposition and orient themselves properly prior to the next attack.
+And scaling leaps in particular allows the AI to attack across a wider variety of level conditions.
+In this case, the Hell Knight is able to leap up and down the stairs by Delta correcting the same animations that he uses on flat ground.
+A second example of the control area I have over animation is changing their pose to track a target with their torso, head, or weapons.
+Now the canonical name we use for this is focus tracking.
+We use a hybrid inverse kinematic and forward kinematic solution, but hereafter I'm gonna refer to it as IK.
+Take a drink.
+The basics of focus tracking is straightforward.
+First, you find an effector transform in a reference pose.
+Now when I say effector, I'm speaking of the end effector in an IK joint chain.
+And I'm gonna explain this in a few slides, but how the reference pose is composed is extremely important.
+Next step is finding the desired transform for the effector.
+In this case, it looks like the Helmite wants to look to the right.
+Using IK, calculate the rotation that bring the effector into the desired transform.
+Then, spread those rotations across the desired joints in the IK chain underneath the effector.
+Now, since the spreading like this will introduce inaccuracy, if you desire perfect alignment, you can recalculate error at each joint as you go up the chain, or just the final joint in the chain.
+Then we add the joint rotations to the current animation pose.
+Now notice that this is identical to an additive animation.
+Conceptually, we're just making an additive animation on the fly.
+I mentioned that calculating error once and naively spreading it across multiple joints introduces inaccuracy.
+But that's exactly what our AI do, and yet they are accurate even at range.
+So in practice, the error isn't much, on smaller characters especially.
+The way we calculate angular error in our IK is what we call the circle trick.
+Given an IK chain, or a joint chain, rooted at P, and a target T that you want to align with, first create a sphere around P that intersects T.
+Then, simply extend a ray from the effector and find where it intersects the sphere.
+In this case, I've labeled it E.
+Those two intersections on the sphere define an angle, here labeled A.
+and rotating the root by A is going to align the effector, like that.
+Now often, we want to preserve animation content on a skeleton while tracking a target.
+To do this, we limit the rotations visible to the IK, and it calculates error from a single pose of the animation that stays constant.
+Here I have included a very embellished taunt from the Hell Knight, and an even more flavorful reaction from the Revenant.
+In both cases, notice how animation rotations in the head and torso are fully preserved as the characters track the target circling around them.
+Preserving animation content is just as useful for subtle embellishment.
+In this case, notice how the Mancubus appears to be glancing back and forth a little as he is looking at us.
+That's actually part of the animation, that is not focus tracking.
+And being able to preserve animation like this also makes it simple to implement behaviors like sweeps.
+In this case, the Hellraiser's focus tracking is merely adding some pitch to his lower back.
+It is the animation itself that sweeps the beam back and forth.
+IK is not even aware that this guy's arm is moving.
+So when we talk about what rotations are visible to an effector when it generates a reference pose, We're speaking of what information the joints in an IK chain inherit from their parents.
+For example, the head effectors chain in this Hell Knight inherits only the IK rotations from the torso joints underneath it.
+The debug arrows shown in the video display the joint transforms visible to the IK system as it builds a reference pose for the head to calculate air.
+Now observe how those transforms maintain a constant position and orientation despite the wildly changing animation on the upper body.
+In other words, the reference pose is constant throughout the animation.
+Now this implies that the rotations IK generates to aim the head are going to be constant as well.
+The animation rotations are not counteracted.
+In contrast, if an effector's chain inherits the animation rotations that change from frame to frame, it will calculate counter rotations and the animation will be counteracted.
+For example, look at the reference poses calculated for the shoulder cannon effectors of the Revenant.
+They're moving like crazy with the animation.
+They inherit the actual animation rotations, the IK counteracts those rotations, and the guns are conceptually locked on target with almost all animation rotation being removed.
+Because proper usage of a system like this requires reference poses that are fairly representative of the current animation behavior, swapping effector data sets is common.
+For example, in a forward aiming animation, the Mancubus uses an effector that is conceptually forward, while in another animation it might use an aim right.
+Now since the system generates a set of rotations that are essentially an additive pose, swapping is easy.
+Simply generate the rotations for each effector independently and then blend from one set to another just like you would blend any other set of additive animations.
+This system also easily handles multiple effectors in a tree topology, as long as they are evaluated in order of inheritance, such that each child inherits the rotations of its parent, the math just works.
+In this case, the torso focus inherits nothing.
+It's parented to the origin.
+This is similar to the hybrid joint that the previous talk mentioned.
+The head focus is a child of the torso focus in terms of IK, so it inherits the IK rotations.
+But for animation purposes, it is a child of the origin, so it inherits no animation.
+But we want the shoulder guns to aim directly at you, so they inherit both the IK rotations from the torso focus and the current pose from the animation.
+The third control mechanism available to the AI is access to the playback rate and time in the animations themselves.
+An example is the way that our AI use foot phase tracking to synchronize the animations.
+Now this is important to us because we remove the need to match both footstep counts and poses amongst locomotion cycles and animations that blend into such cycles.
+For example, this zombie's walk animation blend space shown in the video on the left, is composed of animations with different footstep counts, yet we are able to seamlessly synchronize their playback.
+Forward is at least four cycles, while left, right, and backward are two cycles each, shown in the videos on the right.
+Now, we use four markers to keep track of foot phase.
+Why four and not two?
+Because directionality is encoded in a sequence of four, but not in two.
+In other words, the sequence one, two, three, four, one clearly defines a forward direction while the sequence one, two, one, two, one does not.
+The four markers we use are left foot plant, right knee cross left leg, right foot plant, and left knee cross right leg.
+Now suppose we have two animations that we want to play in sync, animation A and animation B.
+Further suppose that animation A has twice as many footsteps as animation B, yet the time between footsteps in animation B is longer.
+First, get the current frame of each animation.
+Then advance each animation as if they are not synchronized.
+Just assuming they have the same playback rate, we'll come up with the contrived number 1.3 animation frames.
+then you want to convert those frame deltas to phase deltas.
+Now note, since animation B is a longer span between footsteps, it's going to have a smaller fraction of the phase.
+Then we want to find the weighted average, weighted by blend contribution.
+I apologize that the number in the math does not match the number in the picture.
+The essential thing is that we're finding a single average phase amongst all the animations weighted by their blend values.
+In this case, because animation B is 66% of the blend, the end result, 0.19, is closer to its original value of 0.17.
+and then we take that single average phase and convert it back to animation frame deltas, which are gonna be different for each animation, and then advance each animation with the new numbers.
+Now they are synchronized.
+Now observe how in this example, animation B will be cycling from start to finish much faster than animation A.
+That's okay, that's what it's supposed to be doing.
+A fourth control the AI makes use of is manipulating blend values through a number of means.
+Now one example is bad zone avoidance.
+Here we have some hypothetical edges in a walking Revenant's 360 degree blend space.
+Now a bad zone is an area of this blend space where the animations don't work well together when played simultaneously.
+Perhaps the blend here colored in red.
+Now what do these bad blends look like?
+Well, Doom AI does not suffer from bunny hopping in bad zones because our foot fade synchronization prevents this.
+Instead, we get foot mangling.
+which is where the legs interpenetrate during crossover events in the animation and the hips just look awkward.
+So in trying to find a decent solution to this, we asked, well, what do humans do?
+Well, we...
+our legs physically cannot mangle.
+Instead, our bodies over or under rotate our hips relative to our desired facing and relative to our desired movement heading.
+And then we simply walk a little differently to maintain those.
+Now the AI used the same approach.
+This is based on the fact that the blend space is conceptually parented to the model's hips, meaning if you rotate the hips, you will rotate the blend space underneath them.
+Given blend inputs in model space, which is the desired facing of the hips and the desired movement direction, we simply rotate the hips and thus the blend space, like that, until the move direction is out of the bad zone.
+Now unfortunately, this implies that the hips are no longer gonna align with the target.
+The usual reason we want hips to align with the target is just because the character wants to aim in that direction.
+So, we just let the aim focus system fix the difference.
+Now one additional item to note is that you should always over-rotate or under-rotate the hips by the minimum amount.
+In other words, find the nearest edge of the bad zone and always rotate with that edge in mind.
+In this first case, since the desired movement direction was closer to the top of the bad zone, we rotate clockwise.
+But if the desired movement direction is closer to the bottom edge, we do the opposite.
+Some subtleties about our particular implementation.
+If the system dithers back and forth across a bad zone rapidly, it defeats the purpose of avoiding them.
+To solve this, we treat the system as a simple state machine and simply prevent it from re-entering states too quickly.
+And then to refine the system even more, we use foot phase data to delay the switch across the zone until the ideal foot phase has been reached in the animation.
+Now if used correctly, this kind of approach can help prevent the brief foot mangling that would be inevitable if the bad zone was crossed at any arbitrary time in the animation.
+So I've covered four examples of the ways that AI can improve the viability of a full-body solution and I want to conclude by going a bit higher level and providing an example of how this can influence the behavior implementation and presentation.
+As AI developers, we have two goals that we try to satisfy simultaneously.
+We want the AI to feel as alive and responsive as possible, but at the same time we also want the player to enjoy their experience.
+And the combat in Doom is critically acclaimed in large part because of how powerful it makes players feel.
+They really enjoy beating up on the enemies.
+And we found that the cadence of the AI behavior is essential to this power fantasy.
+If the player understands enemy cadence, they're able to avoid attacks and exploit openings.
+Having so many of our behaviors be structured as sequences of discrete full body animations means that the player is able to more easily read and understand this cadence.
+Now, you can really approach our enemies and sort of dance with them, even the strongest demons, because of how clearly the animations define their attacks.
+Now, behaviors like this always work best in wide open areas where the player stays in front of the enemies.
+These are ideal conditions.
+But Doom has a very dynamic player and all sorts of combat spaces.
+One approach we used to preserve as much of the rhythm of combat as we could, in less than ideal conditions, is that of driving behavior with animation sampling.
+Now conceptually, this is the practice of sampling animations against a target and or world to see which will work best.
+The desired benefit is the ability to quickly transition to another attack without upsetting the cadence for longer than necessary.
+Now as the debug output in these videos shows, at times we like to go one step further and also sample multiple instances of the same animation against the world, differing from each other only in slight rotation and translation offsets.
+The AI then uses delta correction to ensure that the animation playback mirrors those offsets.
+In this way, even if there's only a single attack animation that might reach the target, our daemons have a number of options to choose amongst.
+And there's almost always at least one instance that will fit on the navigation graph and within world geometry.
+Driving AI decisions with sampling like this can really bring a behavior to life.
+It feels extremely responsive.
+But in all honesty, being alive as an enemy in a game like Doom has a lot to do with death.
+And so coming full circle, we return to damage response.
+You know, we perceive enemies as the most alive when they react directly to our actions in the game world.
+and no player action is more deserving of a reaction than causing damage.
+So in an ironic twist, I think it can be argued that the best example of how we bring hell to life is the way our heavy use of pain and death animations makes hurting and killing the enemies so satisfying.
+So giving all this control to our AI and building our behaviors with full-body animations worked out very well. The animators really got to focus on their craft and the animations in the game are just fantastic. And the way those animations are used helps the enemies feel like they are really living in this game world. An added bonus is that it was really fun to develop these units.
+Being able to easily and reliably get the AI to deal with animation content and having that amount of control on our end made it super satisfying to author the AI.
+That concludes the presentation.
+I'd like to thank everyone again for coming here today.
+GDC wants me to remind you, do not forget to fill out the electronic evaluation for this talk.
+If you have any questions, I can answer a few right now.
+Otherwise, I will be in the wrap up rooms afterwards to talk about whatever you guys want to chat about.
+Thank you.
+Yes, go ahead.
+Great presentation, by the way.
+One of the questions I had is when you have a lot of AIs who do a lunge melee at you, and during those times, do you commit to the animations?
+Or especially for reactions, have you considered, or did you consider having additive paints during the melee lunges to be able to continue to have reactions if the player shoots the AI?
+Yes, so, sorry.
+So the question is, do we consider having like a more additive pain approach so that the AI could continue their attacks while taking pain?
+Yes and no.
+That's kind of what the Twitch pains ended up being.
+And we did experiment with sort of The idea of pains being only a visual thing and not interrupting the AI, but it ended up being that the feedback that we got during play testing and iteration really suggested that people like being able to stop the AI in their tracks.
+And in fact, when we embrace that decision to sort of make the pain this.
+discreet thing that you can put them in it and then do whatever you want to them that changed our gameplay from being you know from kind of not knowing which direction we wanted to go to this is absolutely what players are going to enjoy and The game was made, you know much much better because of it now that's not going to work in everybody's situation but again because the power fantasy of Controlling the demons with your gun is kind of what makes the game so satisfying it really worked for us in our instance Just a quick question on the other part where you do the IK correction for the upper body to be able to track the player.
+Do you give control to the animators to control how much rotation based on the variations within the animations?
+especially because in some cases the hip looks good and hands look good, but in some other cases the hands do not look as good.
+So do you give control, very similar to the footsteps, do you give controls for the windows or amount of angles or how much you are allowed to rotate procedurally?
+Yes, so the question is, do we...
+What level of control do we expose for like the parameters that go into the IK so that the animators could say in this animation maybe constrain the angles a little more or switch or whatever.
+And yes, we have full level of control.
+That's what I was talking about in the slide about swapping effectors.
+Our effector comes with a dataset that defines all those attributes.
+The clamp values, the rotation speeds, which bones it's parented to.
+Although we actually use like a hybrid bone solution, like I said, where we have an even an extra layer of abstraction that we can specify in the tool.
+and we can put an offset from a bone for where the effector is.
+And so all that kind of stuff is encapsulated in the data set for a single effector.
+And we just swap back and forth depending on which animation we're playing or even multiple times in the same animation depending on what the needs are.
+All right, well thank you very much.
+You're welcome.
+Hello. Hi, so first of all I would like to thank you very much for providing this incredibly insightful talk. Given all the details that you provided about the nuances and subtleties with regards to effectors and also the use of planes in order to dictate enemy movement.
+and taking into account the diverse cast of enemies that's kind of a hallmark of the Doom franchise, I'm curious as to what exactly Intel did in terms of giving each monster their unique traits and personalities when it comes to, you know, animating all of those different body parts and making them feel unique from a presentational standpoint in addition to serving the gameplay through their manifold combat functions.
+I'm sorry, what was the actual, what question?
+Like, basically, in terms of, because each enemy has their own combat routine, such as him throwing the fireballs, and you mentioned nuanced insults, like, in terms of, like, how did you essentially try to make them, you know, that much more distinguishable, like, from both a presentational and gameplay standpoint, given their diversity, and also the fact that they add variety to the combat?
+All right, so the question is basically what do we do to really embrace the diversity of the enemies and the simple answer is we gave a lot of that control to our animators, you know, we have previous videos where they sort of come up with ideas of what attacks might look like.
+There are they are allowed to basically make a character look animation wise, however, they think it should look and I mean there's you know there's.
+feedback and iteration and meetings where things are rejected and things are embraced but at the end of the day it was mostly driven by giving a lot of control to our animators and the awesome thing about giving control to the animators is that as an AI developer or as anyone else on the team, you can come back the next day and maybe you'll not even look at what an animation looks like before the animator plugs it in to replace a previous one, and you'll play the game and all of a sudden this thing will look amazing and have so much style and personality and it will surprise you.
+And that's like, you know, that's the moment when it's really cool to be a game developer, when like you're surprised by playing your own game just a day after you played it.
+because some content creator has put something in that's just totally awesome.
+And so I guess the short answer is we let the animators drive a lot of that.
+All right.
+Well, thank you very much.
+Again, congrats on the talk.
+Thank you.

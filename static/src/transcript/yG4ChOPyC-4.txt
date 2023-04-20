@@ -1,0 +1,341 @@
+Welcome to Beyond Emitters Shader and Surface Driven GPU Particle Effects Techniques. This is a talk about particle effects. This talk is not just aimed at graphics programmers but also technical artists and VFX artists. It's very much a hybrid talk. So a quick intro about myself. I've been working in the game industry since 1994.
+Mainly as a optimization and rendering programmer for a lot of triple-A games, with some technical artist work on several of them.
+These days I do many roles because I'm independent, and I focus a lot more now on art, VFX.
+even animation and rigging, because for me, I feel like there's some kind of special stuff that sort of lies between disciplines.
+And so I really like doing a little bit of everything these days.
+So the agenda for this talk is, first of all, I'm gonna just go over quickly what the target platform and the design goals were.
+Basically what motivated me to focus just on particle related emission and effects.
+And I'll talk about some inspiration, and also some experimentations that I initially started with that worked out pretty well, but they have limitations.
+And then I'll eventually get to my sort of, what I call my favorite technique, that I feel is very robust and creates some pretty cool stuff.
+If you follow me on Twitter, you may have seen some of that.
+I'll also touch a bit on workflow and optimization, and at the end there'll be a question and answer.
+So the development platform in Target, this was decided by me a few years ago.
+DirectX 11, Shader Model 5, and it works with forward and deferred rendering.
+I've been using Unity for several years now, and so I started with way back, like Unity 4, and pretty much up to the current version right now.
+So a lot of this material I'm covering requires you to have some amount of access or connection to compute instance.
+and procedural drawing methods to draw a lot of this stuff efficiently.
+But it's adaptable to any engine and a lot of platforms.
+So design goals.
+There's many commonly supported particle emission primitives and many engines already.
+Points, lines, spheres, cones, and so on and so forth.
+And even meshes these days, skin meshes.
+But my frustration with particle emission from meshes that it's still in many engines limited to just vertices, edges, and random points just on top of triangles.
+So we don't really get much sort of interesting, finer sort of coloring or extra control.
+And if you want particles to just emit from, say, part of a mesh, you usually have to sort of chip that off into its own sub-object.
+And it's not sort of the greatest workflow, in my opinion.
+So a lot of my own shader work and personal style involves mixing animated and procedural effects.
+Things are intended to be more surreal or abstract looking instead of looking realistic, but all of this stuff I'm covering today could work for realistic as well.
+But personally, I really wanted these dynamic and usually animating shaders, because I like things moving around, to give birth to particles in interesting ways.
+So even if they were simply mapped on a wall or a simple mesh, I wanted particles to sort of come off of those surfaces that made it actually look like it was fragments of that surface chipping away and dissolving.
+So, to elaborate further, my ambitious goal is to have particles emit from literally everything in the world.
+That was kind of one of the core pillars I was working towards for my own game.
+So, for the last couple years, I've chased this goal to make environments, characters, pretty much anything you can think of or render on the screen emit particles.
+So how do we do that?
+I also wanted much finer detail in that expression.
+Specifically, I wanted particles to come off of objects, inherit the surface properties of those objects that spawn them.
+I wanted to paint and meshes and work in a very visual way and workflow.
+Make things very artist-friendly, instead of lots of numbers and sliders and a property panel.
+So.
+In our industry, there's a general avoidance to discuss failure or even talk about the small steps that we take as we move towards our super big huge dream goals. Not everything is an explosive breakthrough. We usually present a lot of material. At talks and conferences, sort of like, hey, this is all done, this works, like, go and use it, it's awesome. But I think there's a lot of material that sort of, you know, works 90% of the time or it's If you're aware of the special cases, this stuff is actually very valuable to other developers.
+I really wish we would sort of share more of that stuff.
+So in this presentation, I'm gonna cover some of those things that are, don't really work for my game, but depending on your game and your camera view and performance and other things like that, you may find some inspiration or ideas to chase yourself.
+So looking back, I would say this is the original seed of the idea of wanting to spawn particles from everything.
+This is a really old demo from Unity when they started supporting DirectX 11.
+But it basically just renders an image and looks at the bright parts and draws little sprite flares.
+And I thought, well, that'd be cool if it spawned particles instead.
+And they sort of flew off instead of it just being like.
+draw stars on the shiny parts of objects.
+So a number of view-dependent experiments I'll cover now.
+So these experiments only work within the view of the camera.
+But they create some interesting effects that may be of use for certain games or have specific use cases that work within those constraints.
+So the first one I made after looking at the original sample that was the seed of the idea was the particle collector.
+It was to just take your Z-prepass and render the mesh interception objects against that depth and just mark them into a render target.
+And I like this because there's actually sort of an upper bound on how many particles you can potentially emit.
+Because for any given XY coordinate, you're a render target.
+you're only emitting one place there.
+So if you had, say, a wall and a bunch of decals or something covering it, you're not going to just draw tons and tons of them.
+So to discuss more in this one, so there's basically a full screen pass at the end.
+And we just look at the parts that we marked of interest and write out in the fragment shader at this.
+at this point to in a PEM buffer those particle positions because we reconstruct the world space position from the copy of the depth and the marked pixels in the render target.
+And then this feeds into the particle, our GPU particle engine.
+So here's a demo of one of my first experiments.
+So this is a depth intersection.
+There's the top left, the debug view of the render target.
+So where the intersection of those mesh objects and the depth happens, I just had to spawn particles there.
+So this is pretty fun.
+And I had tons and tons of ideas with this.
+You can have a water plane intersect geometry or all kinds of things.
+And I played around with this quite a lot and had a lot of fun.
+But this creates some pretty interesting effects, but we're dealing with a view-dependent approach here.
+So as faces become thin and edge-on to the view, we have fewer and fewer samples.
+And eventually, it becomes fully edge-on or back-facing.
+We get nothing.
+So, here in the highlighted red areas, there's a difference in actual volume of the particles.
+So, we have some problems with things sort of flattening out or entirely disappearing.
+So, one way to think of this is that every single pixel is a particle emitter.
+It doesn't have to emit just one, it could emit as many as we want.
+It's just we have to write that in the fragment shader.
+So less visible pixels equals less spawned particles.
+So with the limited depth information for the surfaces perpendicular to the camera view, it's causing the effect to break down.
+So large gaps appear if we swing the camera around to the side in a scene view or something detached from the normal rendered view.
+So on the left, we see these sort of scraped out or sort of gaps.
+Kind of reminds me of shadow mapping acne or something because we're out of samples here.
+So we don't have much to work with, so how do we fix this?
+So I'm quite a fan of workarounds or gentle hacks. So we can patch this with some extra things such as extra particle emission actually if it starts to go edge on. And then also add some world space jitter on top of the samples that we actually have that are valid. So this is kind of a way to sort of fill in the gaps.
+And the way we can detect this is obviously for a given sample, we know what the surface normal is relative to the eye view direction.
+Now if we're doing faster or burst particle effects or layering this with other effects that aren't view dependent, a lot of these shortcomings we can kind of ignore.
+It's just then, like this is just a little extra VFX frosting on the cake.
+So although the single collector path can create some small particles based on depth intersection between a mesh and scene depth, we're explicitly marking pixels with shaders.
+I still needed GPU particle emission from mesh data that wouldn't require a Z-prepass, and I didn't want to require some strict draw ordering rules.
+So on the left image here, there's several mesh objects rendered into the scene.
+Each object has extra code in its fragment shader program to write out particle emission positions in world space into the append buffer that feeds the GPU particle system.
+The image on the right side is an editor view, again, of the same scene where I've swung the camera around to see what's going on on the faces we can't see.
+So we have, in this case, back face and edge on still not emitting, which is problematic.
+Now we can do some tricks here with turning off backface calling and manually discarding in the fragment shader those backfaces and get at least front and backface admission. But we're not handling the case of things being edge on still.
+And although I was really happy with this effect, I was really frustrated because it wasn't quite robust enough for my needs. So I wasn't quite done exploring this view-dependent stuff in spite of its limitations.
+And so my next experiment was to combine screen space deferred decals with a fragment shader driving particle emission.
+So here in the video I have a blue decal star like just mapped on the ground with a split across it where it obviously should not emit because it's not intersecting the deferred decal.
+So where the positions of the star are visible are also positions that are valid for spawning those particles.
+This effect, I like it a lot because it's, again, something you could layer with specific hits, like bullet hits, ricochets, sort of anything you can think of.
+Now again, with this particular implementation, I made two variations.
+One, basically wrote everything into a single target so I wouldn't get double emission in case the decals overlapped.
+And then.
+another one where I just continually wrote out to the append buffer as I drew each decal, which would allow overlapping.
+So to summarize some important points about these techniques so far, at this point I had particles can emit from anything I draw into the screen, as long as it's in the render target, which is great.
+The pro and the con of this is that The density is dependent on pixel screen coverage.
+So we're using the existing meshes to drive all this.
+So as we draw an object to normally see it in our game view, we can attach this extra work in the fragment shader of writing into an append buffer structure to spawn particles so we don't have to have a separate draw.
+We can draw the back faces and do some tricks to make the back faces emit.
+And we still have the problems with partial and off-screen meshes not quite behaving as they should if we ever rotate or move the camera around.
+So this has some very limited uses, unfortunately.
+But depending on the context of your game, the type of your game, how you use your camera in your game.
+these could be of use to you.
+So to continue on, to elaborate more with the fragment shader stuff, writing to the pen buffer, we can do like dissolves and material specific stuff already that.
+transfers those material attributes to those shaders.
+So if we shade a blue triangle or a blue pattern or whatever, those particles that come from that can get those colors.
+It really depends on what you put into your pen buffer structure when you are going to pass that data to the GPU.
+Normally, at the bare minimum, you want world position and color.
+But you can add as many parameters as you would like to that.
+So, there's a lot of possibilities here for visual effects if the limitations of the technique are acceptable and can be worked around depending on the game and how it uses its camera.
+In the interest of pushing this technique even further and working around its limitations, there's some more ideas to consider, such as adjusting the camera FOV, using an explicit separate render pass, using a higher resolution render target if you do so to get even better coverage and sampling.
+If you did VR or something and you just allowed rotational pivoting, you could render into a cube map and handle those cases fairly easily.
+If it's in a separate pass, we can add some kind of temporal jittering to that camera to improve and catch samples in case you have very thin geometry that you want to have emitting stuff.
+And then finally, we can get fancy and look at our camera and see where it's going and somewhat fix the edge on problem by looking ahead.
+So if you're heading towards to look around the corner, your extra pass will have the camera already ahead and looking there.
+So you can get some particles spawned ahead of time before you see the effect break down a little bit.
+So in this section, I will cover object space particle emission.
+This is a more general purpose approach, and it's much better suited for all game types.
+Although I really like the view-dependent stuff for particle emission, building an entire game around the concept of everything that can make particles necessitates an object space approach that's robust enough to handle a third or first person game, moving around and then looking everywhere and moving quickly.
+So, after a lot of experiments, this is sort of what I came to to solve my problem.
+And so I call it Unfolded Mesh Shader Particle Emission.
+And a very extreme simplification of that is I basically unfold every single triangle off of the mesh, and then I shade it with a GPU to see what it looks like, and then I drive the particle emission from that.
+And this uses the GPU rasterizer.
+But there's a lot of important details to this technique, and doing it right, and getting it to run fast.
+So this is where I start my deep dive and get really technical regarding the algorithm, and also the flow of the data as it passes through the GPU pipeline.
+So a couple important points to just reinforce before I do that.
+This is view independent.
+It supports variable topology, sampling density, shader effects for every single triangle, every single draw call, every single instance.
+I assume no input topology and, I assume that the input topology and the shading is fully dynamic because I don't want to bake anything.
+I want everything to be dynamic.
+It's non-negotiable for me.
+So there's no caching or pre-computation, no baking.
+I hate it.
+I don't want that.
+So we need a few essential ingredients to get this working.
+So we need a render target for rasterization.
+The one that we have bound normally to render the game will suffice.
+We need an append buffer that's going to store the particle data when we decide we need to spawn particles on these triangle surfaces somewhere.
+And then all the bindings and uniforms and constant buffers and so on and so forth for drawing the mesh normally.
+We can just use that information.
+We actually want that because we want visual parity with what we render on the screen, what we show the player versus what we calculate when we want to emit particles.
+So, with that in mind, there's three important minimal sort of components to get this technique to work.
+So we need a vertex shader, a geometry shader, and a fragment, also known as pixel shader.
+So unfolding the mesh, the first stop is the vertex shader.
+So we need to compute the world space position of these vertices and we need to store them to the output structure that is going to flow.
+through the geometry shader and down to the fragment shader.
+This is important to do this to basically solve for the world space position of the geometry because this becomes our sort of baseline scale for once we need to determine what the sampling density is for determining particle emission.
+So we want a unified sort of scale to be in place for that.
+So, and then the SP position data obviously is going to be, those are the points we're going to manipulate to make sure that the GPU shades the topology correctly so we can do the particle emission determination correctly in the fragment shader when we get to that part.
+So an important problem to be solved is that if the bare minimum implementation of particle emission from a mesh is just three vertex positions, in case you want to dynamically triplanar texture an object or for some other reason.
+how do we determine the sampling chart and density for those triangles? How do we do it on a GPU? How do we make it fast? This is a complex problem space. There's a lot of research done. I originally thought I would need to create a unique parameterization. That got really scary. And so, yeah, thankfully I don't need to do any of that. So that was not the path I wanted to go down anyway. It seemed way more complex.
+So I needed something that would be fast, that would still give me the sampling density I needed for the triangles in object space, based on their world space size, after the visual effects and skinning modified the vertex positions.
+So if you had any squash and stretch, or grass, wind wave, wiggle, shaders, or anything happening, I wanted to account for that also.
+So it then dawned on me that I could completely avoid a majority of the problems with traditional UV atlas and sample generation and complex charting for my use case.
+All we need to do is just solve this problem for each triangle in isolation.
+We don't need to care about whatever is going on with its neighbors.
+We don't need to worry about stretching or distortion.
+We're not trying to sort of peel an orange here and then nicely chart it without squishing triangles or anything.
+So to properly unfold and generate a sampling grid, I decided to use the geometry shader.
+These things, some people find this objectionable, but it's actually really fast.
+So it's important to reiterate that I didn't want to rely on any pre-computed data whatsoever.
+It would have been easy to sort of pre-compute a unique parameterization of UV data, pre-compute some kind of sampling density ahead of time, but again, I wanted everything dynamic.
+I didn't want to rely on extra data.
+So to solve this problem one triangle at a time, For each triangle, I auto UV map it, basically, just flattening it based on its world space size into the currently bound render target device space.
+To make sure each triangle lies completely within the rasterizable space of the bound render target, so we don't clip it with a guard band or any kind of clipping, we need to apply an offset translation to it to make sure the GPU sees the whole thing.
+The easiest way to do this is I just calculated the centroid of each triangle and figured out the offset relative to the center of the render target and just slid it to the center.
+So when I do this, I get every single triangle in the mesh sort of thrown into the center in a little crazy little star, starburst kind of shape.
+So after calculating the unfolded triangle and charting it so it's centered into this render target, we can output this triangle to visually debug its correctness and make sure we accounted for.
+Some things that we may overlook, such as render target aspect ratio.
+And other things such as face winding order and so on.
+But face winding is usually correct as it comes in, so you don't need to worry about that.
+But again, it's super easy to visually debug this by just getting this part working and seeing the triangles in the render target somewhere.
+As long as they're within the rectangle somewhere, you're fine.
+It's also important in my implementation at least to set the depth of the primitive to the near clip plane in case we have a depth render target active or some kind of high Z or something going on with the GPU that could potentially basically snipe those triangles from ever going down to the fragment shader stage where we are trying to actually call and write into an append buffer and spawn these particles.
+So it's okay if these triangles overlap, unlike normal UV mapping.
+So why that works, I'll get into it later.
+So now that we have these unfolded triangles in the valid render target area where the GPU sees them, they'll cause the fragment shader to run, but we need to talk about the sampling density.
+Depending on the textures and the shader effect applied made by the artist, we may want an extremely high or very low density.
+So it really depends on what your textures look like or what the effect is and whether you want to emit a lot of particles or small amounts.
+So that's one thing to consider at this point.
+So for every pixel, the triangle covers the pixel center, satisfying the rasterization rules of the GPU, saying, hey, we need to shade this pixel.
+Fragment shader executes, the GPU will shade that portion of the triangle in a similar manner to how it draws the model normally for the game.
+So at this point, we get exactly the same shading that we would normally get on an object when we draw it in the game.
+So these shading results are then combined with additional shader code to determine if that position should emit a particle or not.
+Now, to improve the coverage of the sampling, especially in cases where you want to use a small triangle for performance reasons or...
+So, for each frame and each triangle, I add a random subpixel offset to all the vertices of that triangle.
+So we're starting to jitter, and that moves the grid around and moves the samples we get.
+The random jittering is important for improving the sampling, especially for static objects, such as world, your world, or level geometry.
+The reason being is when we take those static objects and we chart them into this space, they'll always end up in the exact same space, and then you get the same sampling points, which is what you don't want, and if your triangles are small, this is even more obvious.
+So adding the jitter, constantly jittering every single triangle, every single frame, fixes that problem and lets you use a smaller triangle.
+So in addition to adding the random subpixel offset to the triangle vertices, we can also effectively rotate the grid that we're sampling from by just rotating the triangle.
+This jittering is done for every triangle, again, 60 to 120 times a second to ensure varied sampling from different locations.
+that are also valid within the bounds of that triangle.
+So now that we have this, another step we can add is that we can adjust the size of this triangle area by uniformly scaling it.
+So this increases or decreases the scaling footprint.
+This is something you could also tune for VFX reasons.
+In the case of very few particles needing to be omit from every frame, you can actually make these triangles very small.
+So a lot of the stuff I do, they're like eight by eight pixels or even smaller.
+For cases when you require a burst emission of a ton of particles, extremely high number, or you need fine detailed sampling, then you would scale the triangles up.
+So if you wrote your name on a wall and you wanted a burst of several thousand particles to come out perfectly shaped as your name, then you would want these triangles to be larger because then you would get more samples and you would get more accuracy where you need it.
+So, with our triangle jittered scaled, we can proceed to the final fragment shading stage of the triangles.
+So the shader code in general will look exactly like the shader that you use to draw your object, but you're gonna add just a few extra things into it.
+Specifically determining how many samples or if that sample, based on a random dice roll or some artist tuning value, whether it should emit or not.
+Now the interpolant values pass through the vertex shader and the geometry shader, down into the fragment shader, simplify the amount of calculations needed per pixel sample for driving the particle emission.
+We passed the world space position data along with each vertex, so we basically get that for free in terms of determining where should the particle actually be spawning.
+So in this video here, I have an animated horse with a texture that spawns, textured with spawning particles that inherit the color of the polygon surface underneath.
+So after the shading stage is finished, this is pushing that data into the append buffer.
+And then it can be copied with, say, a compute shader.
+Copy from the append buffer into the more managed GPU particle system buffers that you may have, or it needs to be sorted and whatnot.
+And then you would draw it with draw indirect or draw procedural type methods.
+So now that I have particles emitting from triangles with pretty much any fragment shader imaginable, there were still a number of important things to think about solving.
+One of these is handling very fast moving topology over a single time step, referred to in some particle systems as distance-based emission.
+So if you have a rocket or something flying really fast, you need to make sure you get all your smoke puffs sort of connected and covering that to make it look correct.
+So when we have...
+we need to solve for that, we need to fill in those gaps.
+So how do we do that?
+So it's similar to an animator needing to do breakdowns or tweens, so I just used the geometry shader to sort of do that.
+So this is a preferable approach, in my opinion, than pushing all the work down into the fragment shader.
+I basically create the sort of in-betweens and the geometry shader stage.
+In the case of the triangles being skinned, squashed, stretched, the surface area of these triangles is highly variable.
+You usually want also some kind of velocity data in your vertex structure to know where the triangle has sort of been and where it's going, and that can be helpful in terms of helping you calculate what the accurately tweened topology should be in between those two sort of extremes of like your current frame and your next.
+So the nice thing about this is that the code in the geometry shader stage that is calculating the sampling density, we can reuse that for these tweens.
+So each in between triangle that we add to sort of fill in these gaps, we'll also get the correct sampling based on its surface area.
+In addition to the vertex positions and the triangle area varying for these tweens, all of the shader parameters and uniforms can also be varying as well.
+So we need to also adjust those appropriate calculations that determine those things, especially things like time, delta time, your UVs could be scrolling and so on.
+So this authoring your shader effects might be a tiny little bit extra complicated to account for this.
+So, while this technique works really well, there's a limitation to it.
+Geometry shaders actually have limits.
+The more complex your vertex shader structure is, or vertex structure is, the fewer tweened triangles you can have because if you have normals, binormals, tangents, and so on and so forth.
+your max vertex count is basically dropping because your structure is getting more complex and requires more storage.
+So it's necessary to adjust your sort of maximum in-betweens that you support to account for this.
+So when I've been talking about this, this has mainly been in the context of solving this problem in isolation, but what we can do is we can actually do this work.
+in addition to just normally drawing the object by interleaving the work of those two shaders together.
+So as I draw my objects, I also use the geometry shader to push out those triangles.
+In order to get this to work, your fragment shader doesn't know whether it's drawing pixels that are intended to be for the normal game view, or whether they're for shading and figuring out whether we emit particles or not.
+So how do we figure this out?
+The easiest way to do this is to just add an interpolant that basically flags all three vertices and then you can look at that in a fragment shader and say, oh, okay, I'm emitting particles from this fragment I'm supposed to shade right now versus just drawing it normally.
+So, some more thoughts on refining the emission.
+And to reiterate is that not all your samples are going to emit, even if you run at a really high frame rate and you shrink the triangles down, you're going to call discard on a lot of those fragments.
+And adding the jitter is helping you get your improved coverage while not needing to make these triangles extraordinarily large.
+If you can sort of see the visual grid of this, if you're emitting a lot of them, I personally just add the smallest amount of world space jitter on the surface of the triangle to sort of visually break the grid.
+It's very easy.
+And then, again, if you're just trickling out particles from something, the triangles can be very small and making them bigger actually won't improve anything.
+So to recap the feature set, we finally had something that allowed textured and animated fragment shaders.
+It was view independent.
+I had conditional writes to an event buffer so I could decide which samples did and did not need to write bound particles.
+I had jittered sampling, so I wasn't tied to the resolution of the textures or any kind of pre-computed baking to make any of this happen.
+And we can work on pretty much any mesh topology imaginable.
+So for surface material transfer to your spawn particles, it's pretty straightforward.
+Because in the case of a deferred render and say using mesh particles, the output of the append buffer structure would just need to contain the necessary parameters that you would normally be writing out to the gbuffer, such as albedo, emission, and other things of that nature.
+In the case of forward rendered objects emitting particles, you might want to do a little bit more work.
+Or maybe you want to bake stuff and just have then the particle emission code pass some of that through.
+Again, there's no hard rules here.
+It's just whatever works for you.
+So one important thing for refining this is you need to be, or you probably want to be selective about where these particles are coming from and where they don't.
+So a few engines out there mostly only support particle emission on a per object or sub-mesh level.
+So when we have the ability to paint stuff and run the fragment shader and determine where this is going to happen, I use a texture painting workflow for pretty much all of this stuff.
+So in this example, areas that should not be emitting particles, I just made them painted black.
+And the painted texture, I then save as an uncompressed texture asset.
+So it's just another texture that I add to my shader and then fetch and sort of look at.
+So in the fragment shader program, there's just one line that says, hey, is this pixel black?
+If it is black, then hey, we're not going to run the particle emission code.
+It's very easy to drive this stuff based on your textures.
+Mesh here, of course, has a unique UV set applied to it that's independent of the particle emission density.
+So I'm not relying on that whatsoever, just to reiterate that.
+So here's another video of me painting on a mesh to dissolve away specific areas.
+This has a lot of use for visual destruction effects where you want to emit or not emit particles.
+Now, since we're emitting this topology in object space, we're not tied to the resolution of the source texture asset mapped on this geometry.
+So the texture for this is like 256 or something.
+This is rendered at a much higher resolution.
+We can combine masking, dissolving, mixed resolutions, sign distance fields, or any sort of smoothing stuff and get accurate emission, because remember, we're jittering the triangles, moving them around.
+and getting the sampling at a higher density that's above whatever the texturing is.
+So now that I have the ability to control where the particles emit at a much finer detail level, the next desirable parameter to control is the particle flow direction as it leaves the surface of a particular point.
+There's a lot of pre-existing material here, flow maps and so on and so forth, and it basically just works out of the box if you just implement it.
+When I author this data, I don't use normalized flow.
+I just started painting and just mapping this stuff to basically red and blue channels.
+And I got interesting stuff.
+So there's no rules here.
+I mean, just experiment.
+All the texture data that you have in the shader already could create interesting effects with this.
+So you don't need to run off and create a bunch of extra textures to make some of this stuff happen.
+So some important things to keep in mind.
+Non-destructive workflow, of course, is really good.
+I like to also use Photoshop and adjustment layers.
+Use a little bit of Quixel and some other stuff too.
+Sometimes Illustrator for paths and gradients for dissolves and whatnot.
+Also, I add some tuning values and also a curve modifier in my actual shader so I can get a little more out of those assets as well.
+So to stretch the topology limit even further and just really drive home what this allows us to do with this approach, is that we can stack and combine multiple effects here in our vertex and geometry shader stages to modify the input topology.
+And it doesn't really increase the performance cost of the later fragment shading stage.
+The reason for that is the surface area would not probably be varying that much, so the triangles, when you unfold and chart them, don't change in size significantly.
+Now, for certain geometry amplification and procedural stuff, such as tessellation or anything that's going to make the surface area of those triangles get bigger, then you're obviously gonna start to pay more cost in the geometry shader and fragment shader stages.
+So one more thing.
+So this video here, this is like a 60,000 objects thing.
+I just sort of blew up.
+This is actually all on the GPU.
+It's done in the geometry shader.
+So I just fractured each triangle, turned each triangle into a tetrahedra, and then sort of spun it with a sort of stateless animation.
+and just randomly tumbled them and then fed them to the particle emission stuff.
+So this is like having 60,000 particle emitters of things blowing up and it's all one draw call.
+So I was pretty happy with this.
+So tessellation and other approaches that can increase the number of triangles can also be used with this emission technique.
+So again, we need to remember though that the more triangles we make or the more surface area we increase, then we increase the cost of doing this work.
+Depending on your use cases, you may want to adjust your tessellation factor in your particle emission geometry separate from what you render and show to the player in the normal rendering view.
+So one extremely common question I got when I showed this to some colleagues was what happens with extremely thin geometry, like grass?
+And this is something I thought about when I also did this implementation because I wanted to make grass burn and have particles come off every grass blade and stuff like that.
+And the thing is, is you can just dilate the triangle after you unfold it into the space where the GPU's gonna shade it, basically using like a conservative rasterization approach.
+and we're jittering so we're going to hit those triangles and we're going to be able to emit from them. Another thing to keep in mind when you do this is you don't do this by default because there's a lot of visual effects you may have where you intentionally crush triangles to be zero area because you have them either some kind of destruction or ‑‑ you know, limbs or whatever sort of collapsing and you don't want particles to come off of those things.
+So you would test it with an epsilon to make sure that those particles happen.
+And the cool thing about doing this is that if you destroy or just hide things by shrinking them down, you don't have to worry about them emitting particles.
+So you sort of get that for free.
+So, talk a little bit about level of detail.
+A lot of this is kind of obvious, but one way to do it is based on distance, whether something's in and out of the frustum, you decide, hey, we're gonna emit 50% less particles, whether something's in or out of the frustum, where you decide to...
+do that sort of calling or determination would be in the vertex shader or the geometry shader, or maybe you have a compute shader that runs even further in advance and writes out to a specific stream of data and sort of helps inform whether you should be emitting from certain pieces of geometry or not.
+So I personally write, a lot of my shaders by hand, but graph and node-based workflows are everywhere.
+I mean, tens of thousands, maybe hundreds of thousands of people are used to this workflow.
+It's really easy.
+You pick it up, and you just start connecting things, and you see results.
+So, I've thought a lot about what do we do with this technique?
+How do we put it in the hands of more people?
+Because many of the existing tools for shader graph-based workflows were only letting you play with the vertex shader and the fragment shader.
+So what does that interface look like when we say, hey, you run a fragment shader, but then you can emit particles from it?
+So these are important questions for not just myself, but everybody that wants to do this stuff, to think about and eventually answer so we can leverage the immense amount of shaders and visual effects that a lot of us have already made without any tedious hand-porting to make this stuff happen.
+I have a lot of ideas on how to continue to refine this and optimize it.
+But I'm kind of really just having fun Porting a lot of shaders and figuring stuff out more but again graph-based work workflow You know if we add something You know do we just make it one particle one sample does it does it become?
+One sample can spawn up to N particles.
+And I think we need to collectively consider what kind of interface do we add to compute or open up the geometry shader stage and other things to existing tools.
+So my final thoughts, although I'm quite in love with the techniques presented today for emitting particles, and I'm really excited to share them with you, and I hope you find some inspiration from them.
+These don't replace all the use cases.
+You know, a lot of the just very simple point line sphere emitters and stuff are still great tools.
+You know, so this is just another, the stuff I've covered today is just more tools in your toolbox.
+So I'd like to thank the following people who reviewed this material and encouraged me to chase it.
+So that's it, and thank you for your time.

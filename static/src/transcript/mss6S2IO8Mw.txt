@@ -1,0 +1,428 @@
+Hello everyone, this is Breaking the Ankh, Deterministic Propagation Netcode in Spelunky 2.
+Please remember to silence your phone, fill out the feedback form, and enjoy life.
+To introduce a bit myself, I'm Guillermo, and I've been balancing the last five years of my life with working at Bladeworks and helping as part of the teaching staff of local universities, where I try my best to improve the system from within.
+I consider myself an in-perpetual training problem solver who happens to be working on his maths overviews master thesis, and enjoys creating and experiencing all kinds of fiction.
+I'd also like to introduce Bleedworks.
+We are a medium-sized studio specialized in high-quality game porting that does a bit of publishing and co-development.
+We have been very lucky to work with incredibly talented developers from all over the world on awesome indie titles including the original Spelunky HD port.
+Also I am very thankful for the whole...
+Bleedworks team for being a great community, and to management for providing me the extreme flexibility needed to contribute mentoring students and new developers at both Open University of Catalonia and University of Barcelona.
+Now for all of you who aren't familiar with Spelunky series, Spelunky is a precision platformer run based game designed by Derek Yu.
+In Spelunky, each run is different due to changing room layouts and there is no progression.
+Because of this, the focus of the game is put on the player, who is changed through the emergent stories experienced on each run and each run will also provide a lot of knowledge and practice.
+More specifically, Spelunky 2 introduces a lot of novelties to the series, such as real-time liquid physics and online multiplayer.
+You can get more information about Spelunky 2 in Derek's YouTube.
+I'd also like to introduce this talk course so that you can identify if it is interesting for you.
+This talk is about how the online stack of Spelunky 2 works.
+It's about the problems we didn't expect, the netcode, the servers, the decisions, and the problem that surprised us even after doing our homework and reading all previous literature and watching related talks.
+More specifically, we will talk we will try to avoid the topics related to determinism problems, optimization, clock drifting, and general engine design that previous talks covered in detail.
+So let's start from the beginning. After being introduced to the project, the top priority was evaluating the situation, the constraints, and getting familiar with the codebase.
+The most significant constraint was probably that we wanted to keep the world as alive as possible, so in order to do so, we decided that everything should update without camera-aware optimizations.
+This would limit a lot us into what kind of optimizations we could do.
+Also, a possible arena mode had to be as fair as possible, and because it's a punishing precision platforming game, we wanted to minimize input delay and target a local multiplayer field without nonsense interpolations and following game mechanics.
+I believe this led the team to decide that rollback netcode would be a perfect fit and it makes a lot of sense.
+Next were staffing constraints, because the whole game including work done on all three supported platforms and the 53 patches to date were around 8 months of engineering work and maybe at each one week.
+Peak time, we had around four concurrent engineers at peak.
+So that means that not a lot of resources can be dedicated to a side feature, such as online multiplayer.
+So using other solutions would have significantly increased engineering man years, or maybe even delayed the game.
+Also keeping up with the constant changes, which were on average around 60 changes per patch with a weekly patch, would have been a bit insane.
+There were also codebase constraints.
+Spelunky 2 codebase, as far as I know, tries to keep the feel of Spelunky HD while providing online mechanics and a testbed for new mechanics and features that you wanted to try.
+This in itself leads to a very flexible codebase that isn't very cache-friendly.
+However, performance profiling didn't look as bad as to raise any alarms.
+So it was definitely a net of work.
+Early on, replays were introduced to guarantee that the required amount for rollback net code.
+the required amount of determinism for rollback netcode was provided.
+This combo of replace and determinism is very powerful, and we have used it in multiple projects.
+Replace will show up again later in the talk, but I'd recommend everyone who hasn't watched the RetroCity Rampage talk on the topic of replace and automated testing to watch it.
+Other than that, the existing netcode didn't work out of the box after laying around for around 3 years, and considering how small it was and still is, we decided to redo it in order to be way more familiar with the code.
+So before getting to the meat...
+Let me provide a sales pitch of RollbackNetCon.
+Rollback synchronization is a technique that, given enough compute time and a deterministic update function, keeps in sync any game without worrying about mechanics, latency, or cheats.
+In most reasonable network conditions, players will feel exactly like local multiplayer.
+Also, programmers will be able to program the online multiplayer as if it was a local multiplayer game. So that's obviously great. Not to mention the point of cheating not being really possible without the agreement of all participating players. So well, I mean, it's perfect. That will be everything. Thank you for coming to my GDC talk. You can buy Rollback Netcode shirts in the gift shop. See you!
+But wait, hold it.
+Stay around for a bit longer.
+Before closing the case, let's see how rollback works.
+Rollback is based on a deterministic approach to netcode.
+Deterministic netcode is built on a design where each possible state is the result of running the update function with a specific input, game state and time step.
+For this to happen, a lot of considerations must go into developing the game, including avoiding the use of system calls, CPU instructions and...
+events and more things. I mean, previous talks have done a really great job explaining this.
+So for the specific case of rollback, we use this property to predict the state assuming unknown inputs will be unchanged. And when our prediction is wrong, not if, when our prediction is wrong, we roll back the state to the last good known prediction and rerun the simulation. This means that for this to work, we need to copy and store multiple copies of the state.
+So now that we have seen a bit more, let's talk about the negatives.
+First of all, in order to process a rollback of a given amount of frames, that many frames should run in a reasonable amount of time.
+Also, because multiple copies of the game state needs to exist in the heap, this means that the game must make copies.
+and sometimes restore previous copies. This is what causes memory to become entangled with space and the whole memory space trade-off stops being a trade-off. Also because it's built so heavy on determinism this means that information can be hidden from the clients. It's not important at all for Spelunky but it might be in other games.
+The game also needs to run deterministically in all platforms, and that will take part in multiplayer, and this is no small feat.
+And finally, it's worth mentioning that resource management becomes much more complex when working with rollback networks.
+With all this context in mind, we started optimizing the game.
+Because maybe three, six frames in 16 milliseconds aren't enough for rollback after all.
+That would give us around 64 milliseconds of flawless latency support.
+But would that be enough?
+We knew it wouldn't be enough.
+So in order to investigate how to improve this, we did performance profiling, and we areas of potential improvement. The four main areas of improvement were entities in red, liquids in dark blue, memory overhead which is light blue, and automated resource memory management.
+So the most interesting optimization surface, after all, were memory operations.
+As we have seen, rollback directly ties space to time. This is pretty bad for some kind of games such as Spelunky, as you can see in the blue version of the performance stats.
+Probably between 25 and 65% of the time, depending on mispredictions and the generated level, were spent on memory copies. This was because This was especially annoying because memory usage had very little surface of improvement.
+Our lead programmer, Miki, had always kept this in mind and the whole memory was very optimized with custom allocators and most data structures using small data types, bit fields and also structured packing by hand in order to avoid padding.
+As such, a lot of systems, such as particles, run in the non-deterministic state in order to reduce the deterministic state size.
+And the memory copy operation also didn't have a significant improvement surface.
+So what do you do when a big challenge comes up?
+Obviously, you do nothing, move on to something else, and start looking for a solution to it.
+So we moved on.
+One of the first areas we tried to optimize was liquids.
+Liquid physics are one of the most delicate parts of Spelunky 2 due to determinism, performance, and the cost that, well, every single particle must update every single frame.
+So it's pretty heavy performance-wise.
+We had been using LiquidFan, a very nice library that implements particle-based liquid physics on top of Box2D.
+Optimizing this made a lot of sense, because we were running the liquid simulation in parallel to entities and a few other systems, so optimizing most of the codebase wouldn't improve anything.
+as long as liquids were the bottleneck.
+It also meant that optimizing liquids wasn't going to solve the problem by itself, since then entities would become the bottleneck, but it was a good start.
+So we were trying to optimize liquids by moving away from particle-based solutions.
+For this purpose, we researched a lot.
+of alternatives in order to get significant performance gains, starting with building our own vectorized backwards moving least squares material point method.
+And it was really fast, like 8 times faster for 10 times more particles.
+It also allowed us to play around with deformable materials such as snow and jelly.
+However, we ended up reverting to liquid fun because at big granularities the liquids didn't feel really right in grid-based methods and that small granularities were very frustrating because of the game mechanics of Spelunky. You could be killed by a bunch of lava that was very small and you didn't see and it wasn't as clear as to when lava would kill you and when it would.
+Other alternatives we evaluated were LVM and cellular automata solutions, but due to the continuous movement of push blocks and moving platforms in Spelunky 2, this would have required to discretize the space at a very small granularity, which would have added a lot of inconsistencies and other performance overhead.
+This, in turn, meant that we couldn't optimize leakage that much.
+So we had to optimize the automated memory management.
+It was pretty easy.
+We went ahead and made the cleanup process around five times faster by using a more cache-friendly data structure based in Robinhood addressing.
+And then you keep working, working, working.
+And one day you can call it day...
+minus 403 based on release date, the idea of propagation network pops up.
+The deterministic propagation is essentially a rethinking of the relationship between lockstep and rollback.
+In order to explain this, I really like the analogy of time travel and multiverses.
+In deterministic rollback model, it's as if you messed up the past, so you decide to go back, fix it, and return to the present to see a more synchronized world.
+With deterministic propagation, you instead are always living in the current universe, and then one day you just wake up at the start of your update loop, and are in a different, more synchronized universe by magic.
+So, implementation-wise, the main idea is to have multiple states that are updated simultaneously.
+So, you have a fair simulation that does nothing special, nothing sings, and we know.
+we know everyone's last input, we pick it and use it to simulate the next frame.
+So it's pretty much always wrong, but only slightly wrong.
+Then a second simulation exists, which is just a regular lockstep simulation that only knows the truth and waits for everyone's inputs before running a frame.
+And then, well, the information...
+has its always ground truth.
+Finally, we have at least one propagation simulation that forks the lockstep simulation and predicts unknown inputs until it becomes the new present, replacing the existing present with a more synchronized universe.
+So if we show this in a more visual format, we can see that there are multiple blocks that access fully independent memory and have different time constraints and a few interesting properties.
+This model mitigates the cost of resizing the game.
+The amount of state copies you need to keep around is drastically reduced to a constant value, regardless of the resizing window. It's much easier to multithread than rollback model, since by itself each simulation can be used can be using a different thread with different memory.
+And also given equal compute power for each simulation, there is an equilibrium that guarantees that the proprietor can catch up with the present.
+Also because each simulation can run in a separate thread, in a transient functional manner, cache is improved as less thrashing occurs, and pretty much no locking is required except when swapping states.
+Also, it's pretty nice that only one operation per propagation is required.
+And this, because only one copy operation per propagation is required, it disentangles space from time.
+So it allows us to start trading of memory for time again.
+So to sum everything up, you can see here a totally unbiased, objective comparison table designed by a committee of myself, of no one else, who is obviously not biased towards his own solution, comparing what I consider the ideal netcode features.
+So first of all, as you can see, netcode, not based on determinism in the first column, is reactive.
+It's very implementation-specific, so it must be customized for individual game events, mechanics, and entities.
+This kind of netcode requires a huge amount of work and care that grows with the game's scope.
+So in order to provide a good experience, prevent cheating, and keep up with the gameplay logic and project scale, you need to add more resources to developing the netcode.
+Compare that with input delay.
+or lockstep netcode. That only requires determinism and doesn't really have any extra performance requirements or extrapolation issues. It's a really good model for some genres but the maximum delay before the game becomes unplayable is pretty low, especially with action games, so it's not perfect. Rollback netcode on the other side improves a lot this, a lot.
+by trading off performance, but it wastes cache usage and dyes performance to actively use the space. It can be mitigated in multiple ways and can be potentially improved with kernel support for only copying memory pages on write and mapping page by hand, but unfortunately this is not available on most platforms.
+Finally, propagation netcode rethinks determinism in order to mitigate the performance requirements introduced by rollback, while also providing some additional features at a small development cost when compared to other solutions.
+And then after talking a lot about it, this we decided to do nothing.
+It was something that we believed it would be required if a Nintendo Switch version would ever be a thing.
+But since it required a lot of changes from the existing version in order to work well with our code base and fix the update so it had no side effects, we decided to stop working here and focus on other things.
+So we started working on bad things, things that have nothing to do with this tool.
+We talked with Sony, we worked on the game.
+We decide...
+to add support for about 60 hz, which is something that doesn't play well with deterministic netcode and is often implemented either by increasing update rates or by having variable delta time.
+So we decided to go instead with a different solution.
+We decided to use interpolation in order to support higher update rates.
+This idea was validated through the creation of a prototype called SuperDot Boy Platformer that would run at 20 updates per second and be interpolated to arbitrary frame rates.
+It's something that works really great and the improvement was very obvious and perceptible to the members of the team with 144 Hz screens.
+And even though it still has a couple of glitches, we think that this is a great approach to get most of the benefits from an increased refresh rate without increasing compute costs.
+Similarly, it would have been interesting to update most of the world, but the players, at a rate of 10 to 20 updates per second while keeping the players at higher updates rates in order to improve performance, but that would have required too many changes at that stage that could introduce unintended and unnoticeable changes to gameplay that we didn't want to deal with at that stage of development.
+So we spend weeks meeting platform requirements, fixing bugs and then it just launches on PS4.
+So the game is out on PS4.
+We are barely able to release the day one patch in time.
+And then we crash with the ugly part of rollback.
+We have seen the good, we have seen the bad, now we will see the ugly part of rollback.
+The gradation.
+rollback netcode and other determinism-based netcode that does extrapolation such as propagation itself degrades so fully.
+For, I mean, for Frisa's sake, I can't even express in English how bad it degrades.
+So let me show this to you with a couple of videos publicly available, recorded on the day one, okay?
+So you can see, in this video how rollback works well, the character is juking a ghost, everything works.
+It's a happy day for that player on day one on PS4.
+Here you can see a very different game, a game that is pretty much turn-based, a game that runs at most at 10 frames per second.
+As you can see, this is pretty bad and fully broken and unacceptable.
+Let's compare this with a simple interpolation I developed for a title called Full Metal Furies, released by Cellar Door Games.
+Just keep looking at the top right enemy in the left gif, and you can see the enemy in orange with the last known server position.
+and the enemy in regular sprite with the local position.
+In this situation there was very bad network conditions, over 20% of packet loss, up to 1 second of jitter.
+You can see how simple interpolation manages to hide all of this in a way that isn't noticeable to players in the game.
+It just looks great, especially when you compare that to this.
+ok, you can see that there are a lot of teleports that it doesn't seem to work well it's extrapolation at its best ok if you notice the difference what whenever determinism messes up or extrapolation kicks in it goes very wrong ok if it's if determinism goes wrong well the game Each player starts playing a completely different game and nothing seems to make sense about the movement of other players.
+And if clock drifts due to extrapolation, extrapolation begins to go crazy and it's not very pleasant.
+So, well, that was the first day.
+We spent a lot of...
+We move on to the second day.
+We decided to stay awake until pretty late watching the stream and identifying issues.
+We conclude.
+we investigate and conclude that the issue is caused by very high latency locations to our server that we didn't take into consideration and also to people who, depending on the internet's mode, had big latency spikes that made the game update spiral out of control, with simulation times growing with each frame.
+Okay, so you might be asking yourselves, how could performance spiral out of control that much?
+Well, Spelunky 2 didn't really take more than one millisecond to run a full update on a nine-year-old dev PC.
+So how did this happen?
+Well, it was due to a combination of cachet, rollback, misprediction, latency, and core speed.
+Because the game is 2D, players will often assume that it shouldn't require much resources and it should work on all hardware. This is not the case at all for Spelunky 2. We wanted our world to feel alive. We wanted the player to ask what the freak happened here that there is this turkey dead? Why? What happened? Why is there meat there? I mean, it's that kind of thing that makes the experience much better.
+So this meant that the whole stage had to update its frame regardless of player position, which is in itself pretty challenging due to the sheer size of the fully destructible stage, real-time physics, dual layers, pathfindings and collisions, not to mention that everything can interact with everything, and by interact I mean explode, freeze, crush, ride, or whatever you can imagine.
+Also, don't forget that the game has huge stages, with two fluffing layers.
+I mean, can you look at both pictures and say it's just one level with two layers?
+I mean, that's huge. That's one level what you can see over here.
+So since changing the way that matchmaking worked to expand more regions wasn't trivial, we decided to work on a single threaded version of the propagation netcode.
+So other cores are used by liquids and particles, so it's not really that the whole implantation was single core, but both simulations didn't run at the same time.
+Okay, so it should have worked fine as far as long as we could have pushed four updates per frame.
+and the main objective was fixing the turn-based Spelunky issue, but it turns out the additional memory copying kept it unplayable.
+After profiling the cost for running four updates per frame, with the copies required to replace the state for each simulation, we found out that some levels, such as Blood or AllMech, were clogging at over 30 milliseconds per frame.
+So at this point we were pretty exhausted. We were thinking, whoa, this is bad. But in a last push, we managed to improve a lot this experience before publishing the last patch of the week.
+I believe it was the seventh patch. The two main improvements were abusing virtual memory in order to swap the game states without copying.
+and we also added another improvement by skipping the CPU cache using platform-specific functionality so that allowed us to reduce execution time a lot but unfortunately it wasn't perfect yet. So now the game worked pretty well on PS4 against PS4 but because some frames didn't make it to the 60 feet 16 millisecond barrier. This meant that in some situations, such as when one player was using a PS4 and the other was using a PS4 Pro, the performance would have diverged too much.
+Well, we have a system that allows us to accelerate or slow down frames, but it has some limits in order to feel good, to make the game feel better.
+So, well, in these situations the game was not able to catch up.
+Okay, what this meant, if you check the video, is that in some situations the game would work, would seemingly work well, and then when CPU was bored, the other universe would catch up with the present and replace the current one. You can see this is pretty bad.
+Fortunately, a lot of people were playing PS4, PS4, so it wasn't that bad to a big portion of our player base, but the problem was that a lot of friends were playing using different systems, different PS4 systems.
+So for them, all games...
+would at some point, if they reach a deep enough portion of the game, be fully unplayable.
+Okay, so on a side note from all the bad news, we were really happy that adding an option to pick input delay was a well-received decision.
+Okay, we believed from the very beginning that it was the right choice, because everyone has its own preference, but we were worried it may cause a lot of, a swarm of the same lag reports because people, because of people lowering their delay to zero or increasing it too much, but it didn't happen.
+So this proved a good decision since different players have different preferences.
+For example, I don't care if the game has one or two or three frames of constant input delay.
+It's very important for me that it is constant.
+However, instead, Tony Cabello, BlitzWolf's CEO, didn't enjoy the game with more than one frame of input delay. And some people, like Colin Norway, the blue spelunker, Well, we're also very thrilled to know that they could disable all input delay, even if that meant having frequent extrapolation glitches, but a much better experience.
+A popular streamer of Spelunky 2 called Janagir has been making a lot of content with pretty much everything Spelunky 2 related, including patch notes.
+And for example, he prefers to have input delay at the default value because it makes for a much better viewer experience in his Twitch channel.
+Back to the main topic, in order to get propagation fully working, we needed to make the game able to run multiple instances of the simulation concurrently.
+we needed each universe to do its thing.
+This was a problem as our update function wasn't made with this in mind.
+So it had a lot of side effects and existing optimizations used shared data outside the deterministic state, which meant we couldn't make this really easy or fast.
+This meant that we had to make a lot of very small and deliberate changes so that everything would work well without crashes, race conditions, and all kinds of issues.
+So eventually we get a pretty solid playable version.
+It has multi-instance and you can play it with, or at least 60 minutes without crashes.
+So we decide to release that preview version so that we can spot any unforeseen problems and avoid what happened on PS4.
+It was very useful, we received a lot of feedback and patches on a daily basis using Discord to distribute the patches.
+Both using Discord and releasing a preview proved very useful.
+Using Discord gave us a tight control over who could play the preview through the use of roles that could be revoked when needed.
+And Discord also facilitated receiving feedback, sharing files and updating the build.
+So in the end deciding how many people and who and why we would invite to the review was hard.
+We didn't know how many crashes due to obscure race conditions there could be. We didn't know how long it would take to get the game to a playable state for more than 10 hours.
+We didn't expect many problems and the build was definitely playable, so we wanted to invite people that were very vocal and could complain about things, as to improve as many things as possible while we were setting up the new server fleet and adding some PC-specific features such as the Discord and Steam invites.
+Okay, so this led us to multiple inviting criteria, starting with everyone that had created something cool, such a mod, a modding tool, streams, videos, fan art, and pretty much everything, which ended up being a very good decision that would give them early material for their content.
+And also it had some unexpected perks for us.
+such as being able to watch a 10-hour stream at higher speed in order to investigate issues that happened or could happen.
+This also ended up building a lot of hype. Building a lot of hype has been a very weird experience. We'll see later how this was both good and bad for us.
+And well, we invited more groups of people.
+We invited a group that was already playing online.
+We wanted to improve their life.
+As streaming a precision platformer is a super experience.
+And it was very nice from them to provide us with feedback comparing our solution to compare to a streaming solution.
+We were also...
+inviting some people that had somehow problematic setups, such as people that didn't meet the minimum requirements, people that didn't play on North America or Europe, and people who had very bad internet connection.
+All this helped us validate some of the most extreme and worst cases.
+And finally, we also wanted to reward users that were active on multiple communities, such as Reddit, Steam, Discord and Twitter. We believed this would be to the best of everyone's interest because in the current world, it's very hard to keep up with everything that goes around and communicative people that are honest and they express their opinion in all platforms without sugarcoating the truth are very helpful, especially when empowered with first-hand information so that we can in some way be more transparent to our community.
+Also, during the preview days, we took one of the best decisions, adding the best feature I haven't seen praised enough in the Terminism talks.
+Imagine the following situation.
+There is a ghost issue that our awesome CUDA team at Lollipop Robot had tried to reproduce for a very extended period of time at a sink at Olmec.
+However, no matter what they tried, it was impossible to reproduce the issue.
+and not much information was provided by the seven PS4 players that had reported this issue.
+So, after more than a month, we believed that it was the same issue that was affecting other players. The game just couldn't keep up.
+A month later, during the preview, two people, including one streamer that was streaming, had a full desync live.
+So after watching it, we went ahead and made a special build in a few hours with this specific feature and asked them to play again.
+Six hours later, the bug was fixed.
+As you can see the scene was a very heavy scene.
+This is the same frame running in both games.
+It's very early in the OMEG level.
+So it was where no one could reproduce it.
+Even more after a whole month of time testing, fiddling around with settings, running automated tests with our AI player, et cetera.
+See, at this point, if you told me that it was caused because of a game setting such as a screen shake, I would have said, okay, it makes sense.
+It's something we expect.
+It's something we are very careful with, but mistakes happen.
+So it wouldn't be surprising at all.
+Pretty sure everyone working with determinism has experienced something similar.
+But what if you told me that the code had already rolled the random numbers outside the branch?
+Well, at that point, I would have assumed that the screenshot wasn't deterministic.
+But why was it happening if the deterministic code was fully, if the screenshot code was fully deterministic? Well, it turns out that after some, at some point, the number generator we had had this very common check.
+If you are rolling a random number and the maximum value is the same value or less than the minimum value, return the minimum value.
+This would mean that if you wanted to roll a number between four and four, the result was four.
+So why even bother rolling the random number generator?
+Well, of course, this doesn't apply to deterministic online multiplayer games, so the internal state of the random number generator would desync at this point.
+When investigating how this could happen, we noticed that this code comes from a very early comic, probably something we inherited from a previous title.
+it from a previous title, meaning Spelunk HD.
+It was a little optimization that wouldn't matter in most codebases, but not here.
+So how did we manage to reproduce this and fix it within six hours?
+Meet ReplayTech. ReplayTech is an awesome piece of software, great for testing, iterating and debugging.
+We also used automatic debugging for sniffing out determinism books, but that's a story for another day that should be told by another person.
+Network replays are crucial.
+It's something we had used in multiple earlier titles to do network debugging.
+The general idea is that at any given point in time, a replay capable of recreating the whole session can be sent to the development team.
+So if a bug happens with a properly working replay system hooked at a very low level, a single file can be sent to the development team that will provide all information needed to investigate the issue.
+These will make issues that are almost impossible to reproduce, even after two months, 100% reproducible.
+And will empower whatever programming, whatever the programmer is using.
+So he can, for example, live in a situation similar to the movie Groundhog Day, in an environment with the book.
+In that situation, it is trivial to allocate memory at a deterministic address and to assign a deterministic ID to stuff in the world, so that you know that freaky ghost with ID 37 on frame 42 causes a crash because of stuff.
+Furthermore, it will make each iteration faster, since you will know better each time you run the replay.
+You can do binary search.
+You can note down frames, IDs, and it doesn't require the reporter to try to find a set of specific steps or guidelines to reproduce an issue.
+None, no steps at all.
+It can be of help even to catch race conditions by rolling multiple times each frame.
+And if properly implemented, it also allows to swap between release and debug without losing information.
+Furthermore, because the developer has both the code and the replay, it's easy to check that the issue has been fixed by applying a code change at an exact frame and replaying the replay to see if the bug no longer happens.
+Honestly, if something in development could be called a superpower or cheat, it's this.
+And it's baffling that this tech is pretty much nowhere by default, specifically, especially when so many engines rely on virtual machines for script execution.
+So while the preview was ongoing, we went forward with the plans to expand our server fleet, which we did in multiple stages. We felt reassured doing this as Glenn Cleveland kept threshing out reliability at the edge, and we have had a pretty bad experience on previous peer-to-peer titles regarding host bandwidth and NAT traversal.
+So we started the preview with a single server in Chicago that was later during the following two weeks expanded to 14 servers pretty much everywhere in the globe.
+The positive experience that players of the preview reported, including popular streamers playing for more than 10 hours a session.
+without any sort of crash or the sink, were generating a lot of hype in the community.
+So we decided to rush a public beta so that everyone could enjoy an online multiplayer on Spelunky 2 before Christmas.
+As a side note for everyone, or for everyone or anyone, trying to build a similar infrastructure as an indie, If you use a deterministic model for networking, you can use pretty much any server with a fair share of CPU time and good peering, regardless of RAM and storage. There are a lot of service providers other than Amazon Web Services, Google, Compute Platform and Azure, so be careful about bandwidth. Look for a provider that gives you a free coupon to test their servers and check that they have helpful features for your use case.
+For some examples of helpful features are digital source bandwidth pooling and vultr shutdown after reaching a specified amount of bandwidth, which are great ways to avoid unexpected expenses.
+Regarding tech or backends, RCC++ hot reloading dynamic libraries that run on free base server.
+The whole reliability of the system that has four processes, including the server is great.
+And even after more than 50 patches across 20 updates during more than half a year, we have only had one partial interruption of service.
+Regarding implementation details, it's nothing too fancy.
+We are just batching a few received buffered syscalls to receive truncated data into fixed size buffers that are always zero-value.
+The most interesting design choices are probably the leaderboard system that is designed so that clients fetch the whole leaderboard as a compressed block through content delivery networks, not complex APIs, and also the log image-making system, which is unreliable by design so communication is performed by merging changes to a desired state structure that defines how the client envisions itself in the future.
+It works nice, it's easy to implement, it's easy to test, but it's a very bad model to provide meaningful error handling on logs.
+So was using a hosted service instead of peer-to-peer a good idea?
+For whom, you might ask?
+It provides guarantees regarding quality of services, allows players behind asymmetric.
+we find a symmetric knot to play together and makes cross-play easier.
+For deterministic games, it's also something that provides us explicit timeline of events and makes it easier to compensate for latency.
+However, it's also very harsh, especially as an indie, you can have someone in each time zone looking out for the clip.
+So if any problem arises, you might take a lot of time to react.
+This didn't happen to us, but it concerned me to the point of waking up during weeks in the middle of the night with nightmares to check if the server was up.
+In the end, having an Android app to check the Plit health helped a lot getting over it.
+Another frustrating point is that the player base becomes smaller on consoles because of gatekeeping.
+This is annoying because small games often don't have the luxury of having big player bases, so gatekeeping a portion ends up with...
+way more dead online modes on consoles where no one is playing online while on PC you can find two or three players if you wait a bit of time. This is the case for many small games and it's even more frustrating when it's the platform gatekeeping players who paid for your game and they want to play on the servers we paid for.
+It's also a bit annoying because it's the path of most resistance regarding requirements.
+Going with independent servers and crossplay seems to be very biased and focused on pre-to-play titles with in-app purchases or games that are full services with leagues, grant systems, party systems, ranked systems, etc.
+It's a pity that it has become so complex.
+We want crossplay so our players can have fun.
+We don't want account system, we don't want retention techniques, daily missions, in-app purchases, and definitely we don't want to exploit the variable ratio and interval schedule of reinforcement to keep the player spending. We just want them to play with their friends regardless of platform. So the promised day comes and we release the public online beta on Steam so that everyone can play. It was a beautiful day, a Tuesday the 13th.
+The sky was taking a beautiful orange shade during sunrise and the day went mad.
+No, I'm not superstitious, but maybe we should have waited for the 16th.
+To sum everything up, first multiple Google services went down.
+This was bad because that would prove discouraged presence.
+And discouraged presence is what made the invite system work well.
+We didn't have this information at the beginning.
+So we were investigating what was going on.
+It was a catastrophe. Our money was on something we had recently added.
+Dynamically assigning matchmaking servers based on quality of service to the matchmaking service.
+Fortunately, a very cool community member called Gary, who also has been developing a lot of stuff to mod Spelunky 2, happened to work at Discord and pointed to us that this could be the problem and it would be outside of our control.
+So we went ahead and did a pair of run on lines before releasing the build.
+And then the Steam invite system had stopped working.
+It didn't make much sense.
+We had to investigate.
+However, because of the hype for the online release was huge, probably thanks to multiple streamers such as ChocolateCake, Xanagir, HecTic, Ix, Twiggle, TicTacToe, IbyoJari, Nobduro and more were playing during the preview, and other players such as Akira or Redscan were also making videos of the multiplayer.
+So it was huge to the point that 30% of the messages sent during all the lifetime of the Discord server, three months.
+had been sent that day.
+It was huge to the point we had to disallow all people without a special role to chat for an hour.
+So huge that we had two rates of more than 200 people.
+So huge that it was the day of the year that most people joined the server.
+So huge that emote reactions on message became a problem.
+So incredibly huge that even then, many players decided to buy Nitro and boost the server in order to get a special role and toll.
+effectively making our Discord pay to chat.
+So we decided to release a siege.
+It went wrong, Steam invites were broken, and lots of people couldn't join through Discord too.
+We had no idea of what was causing the invite problem.
+We investigated and investigated and investigated and investigated.
+We couldn't reproduce it, but they could.
+Why?
+At some point near 1am, after trying to do pretty much everything, I happened to misclick the build event and ended clicking the rebuild event.
+Both invites on Steam and Discord were working again, and they didn't break anymore to this date.
+Obviously some object of the build was corrupt, and for some reason it didn't trigger a rebuild.
+It's something that every now and then happens.
+So we always do a review before submitting a patch.
+But that day had been so chaotic with Google going down and all the moderation we had to do, that protocols were broken and we paid for it.
+But what if I told you that that wasn't all?
+That at the same time we were investigating, people playing in ArcanaLab were having problems.
+What if I told you that after fixing that and waking up the next morning, we noticed some emails from our service provider or that specific server stating, hey, we are having a DDoS here.
+Either way, it was a fun crazy day.
+In the end, all went good enough so we can complain.
+But deep down, sometimes I think, maybe we should have waited for Wednesday.
+So a few days later, we released the PlayStation 4 Propagation Network version and the feedback is very positive, with expressions such as, Online on PS4 feels amazing now, and today I played with a friend and it was really the best time.
+The feedback from the PC version was also very encouraging and this feedback was the best Christmas present that the community could have given us.
+So was adding online multiplayer a good idea?
+I don't think that multiplayer, by default, is a good idea.
+The rationale being that netcode takes a lot of time to implement, and you have to wait what the multiplayer will bring to the table against what you could implement in that amount of time.
+Of course, for games that rely on increasing LTV and retention, it's another issue.
+But from our point of view, it just may not be worth for all games.
+You may feel inclined to add it because it's requested, but keep in mind, it will always be requested.
+It has been requested in Kerbal, gone home, and life is strange because it's a very appealing concept and each person has its own preferences.
+However, going that way, the stream of requests will never end.
+Matchmaking, VoteKick, Lobby Browser, Crossplay, Player vs. Player, Invite Codes, Friendlist, Reconnection, Race Modes, Battle Royales.
+progress, achievements, 8-player multiplayer, voice chat, text chat, quick chat, pinging markers, custom online controller mappings, LAN modes, more randoms in the online matches, which is something we can't even control, drop-in, options to customize online user interface, seated online multiplayer, etc. It will never end.
+Also, we believe that the Arcade Vivo online multiplayer is a good option.
+We don't want to optimize retention.
+We don't want an app purchases.
+We just want the players to go online and play as if they were using Arcade cabinets with multiplayer and a leaderboard.
+And we believe that this approach for Spelunky works really well.
+Enter server analytics.
+It let us measure big community reactions, such as when an awesome Korean streamer going by the name of Noctudo invited viewers to play online.
+You can see the spikes in the chat, how a lot of players were in lobbies, but the amount of ongoing runs didn't change that much.
+In general, a server dashboard feels very satisfying to look at.
+Analytics have proven very useful in many situations, such as keeping calm when someone says that the server doesn't work, but there are 700 online players.
+It also helps scheduling patches in order to avoid...
+in order to release them in peak hours to avoid inconveniencing for player base.
+And it allows us to verify that the bandwidth usage...
+well, that we avoided a huge bandwidth cost by using the right providers.
+Overall, we are really happy with our setup.
+It's understandable that some people assume it costs a lot, but for deterministic netcode, the needs...
+means that probably 10 years of the whole fleet costs less than the average yearly salary of a junior game developer that just left college.
+So we believe it's a pretty reasonable and cheap price to pay in order to improve player stability and experience.
+Before Christmas, we also managed to squeeze in the last patch we wanted the community to have, invite codes.
+We believe that invite codes are a great way for communities to allow inviting through any platform, including things such as WhatsApp or people that are in offline modes.
+and it will also be very useful for cross-play.
+Two details worth mentioning are that the invite codes are automatically copied from the clipboard and pasted, and that we decided not to show the invite code by default so that the streamers could keep a code room private when inviting specific guests.
+Moving on to the last big topic of the talk, problems.
+We didn't have much problems with determinism, probably thanks to the culture of determinism and a very small engineering time in.
+However, extrapolation working as intended has been an issue.
+It has been brought on multiple GDC talks and it's something that most people, including us, deemed unacceptable. Unfortunately, this can happen in rollback and propagation if under certain circumstances. Also, clogged drifting of machines that don't meet the requirements was quite a problem and is quite a problem. However, the biggest problem of all, the most significant problem was and this, the ambiguous feedback we receive.
+So ambiguous feedback.
+You may know this game called Chinese whispers or broken telephone.
+And it feels a lot like that. I mean, the users try to communicate a problem, a problem they are having, using the best description they can provide with the knowledge they have. And that tends to be the game design. The game...
+crashed the game, whatever.
+The point of it is that all these, you will see all these words being used as if they, as if all words were perfect synonyms.
+you'll see people say that lag is stuttering, that clock drifting is crashing, that disconnections are sluggish, that input delay is the same, all combinations are possible and it makes very hard to know what problem a user has in order to help the user enjoy the game.
+So regarding other open challenges, one of the open challenges we are still facing is as mentioned before, extrapolation.
+It's something we are considering addressing by adding some sort of output delay.
+We believe that buffering the last end stage of remote client and then using a past state to render the remote players might mitigate enough this to actually remove input delay in a non-competitive mode where other players' positions doesn't need to be that accurate.
+Also, regarding matchmaking, we have been running A-B testing global.
+comparing global matchmaking on PS4 versus regional matchmaking on PC.
+And this has been going on for a few months and we are still unsure of what approach is the best approach. Regional matchmaking provides a great experience but creates fragmentation.
+It's hard to find a match of peak hours.
+so most users rely on the discord server to find a match that may provide a worse network experience.
+On the other side, non-regional matchmaking makes matchmaking actually useful, but every now and then we receive sporadic complaints of people that found a match with someone on the other side of the world and had a subpar experience.
+It's something we are still debating about and in the end, the best solution might be mixing both so players can fall back to a global matchmaking.
+Another open challenge is how to handle computers not meeting minimum requirements, because you can lower the resolution to almost zero without with pretty much any PC supporting DX11, be it through an integrated graphics or dedicated, can actually run Spelunky 2, even way below minimum requirements.
+This means, instead of four cores, a single-core Pentium 4 computer.
+We have seen this.
+real life. So we have a lot of players unable to enjoy online because of hardware. Keep in mind that this is not exclusive of potato PCs, but also happens to laptops running on battery. Happens to desktop PCs that just got the latest Windows update.
+happens when one computer has only one fast core and the rest of the cores are very slow.
+And it happens to high-end Intel laptops that can sustain boosts for only a very short amount of time and then throttle a lot.
+External programs that show notifications also sometimes cause lags, spikes, frame drops, and sporadic extrapolation teleports.
+It's something we detected early in 2021, and we're still considering how to approach this as we were able to conclude without a doubt that 32 of the 36 cases in which players were seeing constant teleports were caused by this.
+It's a big problem for us because other than detecting this reliably, it doesn't seem to have an obvious solution, as micropausing would actually hurt a lot precision platforming.
+We could also slow more the game below 57 updates per second, but it may throw experienced players out of rhythm and it may be exploitable in Arena.
+We may be able to show this information in the HUD, but it could cause discrimination.
+There are also many unexpected findings, interesting findings.
+One of them was that roughly 8% of players experienced internet microcodes of more than three seconds.
+We didn't see this coming, and we have found a variety of reasons for this.
+Cheap routers, Wi-Fi adapters performing background scans.
+and ESP service microcodes.
+We plan on increasing the disconnect windows, but we first need to find a way to mitigate the damage that PC not meeting requirements could do in these situations.
+Also regarding crossplay requirements, we didn't expect platforms to be so focused on one-size-fits-all requirements clearly designed for in-app purchases and games as a service that doesn't fit at all indie games. We would appreciate if this was revised in the future as the requirements are an overkill for an arcade-like online multiplayer.
+Finally, we found out why many people couldn't connect to any of the 30 servers.
+It wasn't because of a network problem, but because of players not following mother's instructions.
+It caught us by surprise, but finally it made sense why some layout bugs that were fixed in the past kept happening and being reported.
+On a separate note, modding can cause desyncs.
+We haven't been able to analyze this in depth because of how time-consuming it is, but two out of the three early, long investigations of hard desyncs in the wild, were caused by mods.
+Still, modding is great.
+We announced that we would evaluate it early on, and our plan was to fix up some bugs, then evaluate it.
+However, because of all the problems that came up while developing the online multiplayer, we...
+didn't manage to do this in time and somehow the a full-blown modding community with more than 800 mods became a thing before the online was released and with no tools and a lot of reverse engineering work. We are sure that mods are here to stay and while it's low priority we want to integrate mods with online in a safe way for everyone but right now it's well wasted.
+So this will be everything.
+Thank you for coming to my GBC talk.
+I hope you have enjoyed the talk a lot.
+And feel free to ask me whatever.
+Have a good day.

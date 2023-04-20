@@ -1,0 +1,608 @@
+My name is Doug Sheehan.
+I'm one of the lead gameplay programmers at Insomniac Games.
+And we're here to talk about building traversal in Marvel's Spider-Man.
+So let's just jump right in.
+So in the fall of 2014, I found out Insomniac Games was making a Spider-Man game, and that I was going to be assigned to bring his traversal to life.
+This was not only going to be the biggest game in Insomniac's history, but it was also using a legendary IP that had really heavily infested and rabid fan base, and it had an unrivaled expectation of quality for anything that we'd ever made.
+And as someone that, as a poor college student, holed up in bookstores and read Spider-Man comics, the idea of making Spider-Man swing was super exciting and also at the same time completely and utterly terrifying.
+Fortunately, we had the game's vision statement as a starting point, which was, play like a superhero movie feels.
+So we kind of set upon our journey to, as the saying goes, make you feel like Spider-Man.
+So what does playing like a superhero movie feels even mean for Traversal?
+Well, with Swingin' as our starting point, we decided on a few core beliefs that would kind of guide the feature's development.
+So the first thing we acknowledged was that we wanted to target a pretty broad audience.
+Spider-Man has a really big worldwide following, and we wanted as many people as possible to be able to play and enjoy the game.
+However, we knew that we had the issue that most gamers don't really have any muscle memory for swinging.
+Unlike, say, a third-person shooter or a first-person shooter, most folks don't have any brain map for how to make swinging go and function.
+So to add to the challenge, we start the game out by chucking you out a window, giving you the control, and saying, all right, swing time, go.
+So wanting that first moment to feel just right, we knew we had to get the controls to a point where they were easy to learn but hard to master.
+Next, we wanted traversal and swinging in particular to be rooted in physics.
+This was vital to give players a sense of believability, that feeling that they could actually swing through New York as a superhero.
+Following that, swing lines had to attach to in-world geometry.
+No questions asked.
+This was extremely important in order to ground the simulation correctly, but we were mostly terrified that a bunch of angry fans would tell us we were ruining their childhood if we didn't do it.
+So finally, we wanted to have a dynamic camera.
+The look and feel of swinging needed to be fluid, fast, exciting, and especially cinematic.
+We needed a camera that helped translate all that high-flying acrobatics and velocity into a really visceral experience for the player, something that they could just feel in their gut.
+Today, I'm going to show you how we achieved those core principles by taking you through the process by which we created Traversal.
+The biggest key to our success is iteration.
+For a lot of the elements I'll show you, not just what we ended up actually shipping, but where we started, where we failed, what we learned, and how we got better.
+However, knowing when you needed to improve isn't necessarily always obvious to you.
+It came from a steady diet of playtesting and learning how players interacted with the game and where it was failing them.
+This meant we had to stay really flexible in our execution and always looking to be greater.
+So before we can actually swing, we have to have something to attach to.
+So as stated, we wanted swinging to be accessible.
+And this meant that we needed to think a bit about attach points from the player's perspective.
+Namely, what is the player actually going to be responsible for when it comes to picking an attach point?
+And what is the system going to be responsible for and doing to help them?
+So we first decided that we wanted players really just thinking about where they wanted to go, rather than where they were attaching.
+This removed a pretty significant burden from the player and let them focus on additional layers of gameplay, like chasing cars, dodging bullets, rockets, and the occasional pigeon.
+The player would communicate their directional intent with the analog stick, and then the system would take it from there.
+So our first attempt at finding attach points was to comb the environment using an array of ray casts.
+This was designed to minimize the required effort from design and environment and to ensure that we were actually attaching to geometry.
+But this presented a number of problems that we just couldn't overcome at the end of the day.
+The biggest issue is that raycasts simply didn't provide enough resolution for us.
+Our line lengths would often exceed 50 meters, and even with a respectable density of raycasts, we were getting these 20 meter gaps at full range.
+This was enough to not only miss small objects that we wanted to swing from, like flagpoles and radio towers, but it would completely miss large sections of buildings entirely.
+Specifically, an additional issue we recognized is that corners were often the optimal swing points and raycasts were just really bad at finding those positions because of the resolution problem.
+So a more obvious problem is that Raycast can't hit things that don't have collision.
+This was particularly problematic with trees in areas like Central Park, and even if those objects did have a little bit of collision for the trunk or something like that, we still weren't going to be able to find them because of the resolution issue.
+And finally, as we'll talk about later, a lot of points require some additional fix-up after you find that initial point.
+Doing these adjustments via collision checks could prove really costly in a performance hit when processing dozens of potential attach points.
+And they still might not really be what we want.
+So with those raycasts coming up short, we moved on.
+We decided to use a markup-based approach by wrapping our buildings in box volumes that approximate the shape of the building.
+We could find those nearby volumes, process them on a face-by-face basis, and then only then perform a final raycast on that point to get their true attach point on the geometry.
+But moving to markup provided a number of advantages that were absent when using raycasts.
+First, point collection was really fast.
+By using a kind of a cache-friendly sphere database that was just our data, it significantly helped with scalability in terms of being able to have a lot of markup out in the world and be able to process it quickly.
+By using the shape information, we effectively now had infinite resolution for point placement on each face of the volume.
+This allowed us to easily find edges and corners and never have to worry about missing smaller objects.
+And finally, by using markup, we were able to afford designers a lot of additional control over various gameplay aspects, like custom swing parameters and where you could and couldn't swing.
+So the main drawback with markup was placement scalability.
+We had a huge world full of things that were going to require the markup.
+And placing all of this by hand and maintaining it through production as environment was constantly changing was going to be an enormous amount of upkeep and potential bugs.
+So our solution to that involved a couple of primary tools.
+First, we had to handle the buildings.
+Fortunately, we were using a system called Houdini to help us generate the geometry for our environment out of building blocks.
+This software could also then be leveraged to analyze that geometry and procedurally place volumes to approximate our building shapes.
+For objects outside of Houdini's operation, we deployed our engine's prefab system.
+This bundled up markup with all of those objects that we'd place, and every time an instance was put down, it would just bring the markup in with it so we didn't have to worry about it.
+So with our markup now populating the world, we needed to actually do something kind of useful for it rather than just stare at it.
+And at any point, the immediate area can be filled with just hundreds of volumes that are all potential swing points.
+And we needed to filter through all that to find the best one.
+So in order to pick that final attach point, we need to start with a reasonable reference point as our ideal position.
+Here we kind of have a top-down view of our hero surrounded by buildings.
+And the player influence over point selection comes from the input on the left stick.
+And as stated before, we want the player thinking only about where they're going, not specifically where they're attaching.
+So the input direction really just kind of provides a starting point.
+From that input direction, we can then apply an ideal slope and a line length to transform the input direction into a position that represents kind of our ideal attach point, where we would want to go if we had infinite attach points all over.
+And moving back to a top-down view, we can then use that position to generate two more points on each face.
+First one is the point that's closest to our reference point, and the next is a raycast point along our ideal line direction, which is then just clamped to the volume bounds.
+So we can then blend between those two points to get our output point for any situation.
+The closest point is most useful when you want to swing along the face and swing parallel to it, while the right cast point is most useful when you're swinging directly at the object.
+And then we can just kind of blend between those based on what your input is relative to the face normal to get one that's most appropriate.
+So now that we have a point, we need to refine it a little bit in order to make it more effective.
+Our blended point can change the slope and the line length a lot, which can lead to really long flat lines, short and steep lines, and everything kind of in between.
+So we really wanted to try and give the player a more consistent rhythm with swinging.
+And that meant that we needed to try and keep those lines as consistent as possible.
+So we wanted to move things around a little bit to get closer to the ideal.
+So this is an example of shifting the attach point up just a little bit in order to get closer to that ideal slope, which had gotten kind of overly flattened by the closest point calculation.
+By moving more towards this ideal slope, you can see that we prevent the player from having quite such an excessive drop during the swing, which will then make it more consistent as they go swing to swing and more predictable.
+So now that we've generated this field of points across a whole bunch of markup faces, and we need to actually decide which one's going to be our swing point for this frame.
+So we do this by scoring each of the points and taking the best one.
+Our scoring algorithm is then geared to fulfill that desire of translating that stick input to a point that moves us in the desired direction.
+So our first scoring element is how the face normal relates to input direction.
+As I said, you're trying to swing parallel to the faces where possible in this case.
+And so the input direction means that the player will be able to swing along that surface in the direction they desire.
+Now, because corners provide the player the most control, we do try and snap points to edges when they're nearby.
+So we can then use the best normal available on that entire sweep of the corner to compare against input for our score calculation.
+We can also give corners a bonus when we're trying to turn if that corner is going to help us make that turn.
+When taking input into account, we start with the angle between the input direction and the direction of the attach point, and then we score that delta.
+And for range, we're looking for points that match our ideal length, and then it just falls off in either direction as we deviate from that.
+And we apply a similar fall-off method for slope as the angle moves away from our ideal.
+And once we have all that together, we can do a weighted sum, and the highest score is going to win.
+So here you can see it all coming together in game.
+The blue boxes are our market volumes, and you can see a little bit of debug info about each point's score floating above it that kind of helps us figure out when we try to debug why one point is better than another point, particularly if we didn't want that to be the case, we can go adjust those weighting values in order to tune swing to make it so that we're continuing to get the expected point.
+Now that we have our attach point, we can talk about what happens when you're actually on the line.
+As stated, we wanted to have a physics-based system that we modify the results of.
+We're going to start with the physics and then proceed to mess with the universe a little bit.
+So the two basic forces involved in the pendulum are gravity and tension.
+As you can see here, the tension is a factor of line length, angle, and gravity, all in the direction of the line.
+And it's kind of responsible for pulling that bob of the pendulum in a circle around the center of the system.
+We also break gravity up into its two component vectors here, one parallel to the line and one perpendicular.
+The perpendicular portion represents that kind of restoring force.
+It's the thing that makes the pendulum oscillate back and forth.
+And the parallel portion is what's left.
+And you'll see in our calculations, we can actually cancel that out with part of tension to simplify the math a little bit, which we do here.
+So when actually calculating this in code, we internally just set the mass to one since we're not really dealing with a variable mass system, and we can tune gravity how we want to.
+And after a bit of simplification, we apply the remaining forces of tension and perpendicular gravity to our velocity.
+Also, just for a little bit more accuracy, we do four iterations each frame to run the entire thing at about 120 hertz.
+So when we're talking about how we wanted swinging to feel, the number one thing that came up was that swings needed to feel fluid.
+This led to a couple of rules that drove a variety of other elements within the swing system.
+First, we wanted to avoid slack lines.
+We wanted to keep the player feeling like they were swinging, not falling.
+So by keeping the line taut at all times, it gave the player a much more predictable experience and prevented kind of bounciness and sudden change in direction as that slack line goes taut from a free fall.
+And this led to the need that once a line is shortened, it generally stays that length.
+We do look for opportunities to try and kind of restore lost line length when possible, but doing so too quickly feels really wrong to people.
+And so we had to be really careful to do that with caution.
+So our first goal on getting a new line is then giving the player a good experience of just getting into the swing.
+But the initial setup poses an immediate challenge.
+The incoming velocity is almost always very, very different than the velocity that's going to be tangent to the swing arc.
+And we don't want to just snap it, because that's going to feel like a sudden change in direction and just give players whiplash.
+So, however, if we just let the simulation play out as is, you get something that looks a bit like this.
+Because of our rule that we don't allow the line to lengthen again, the velocity running into the center of the swing arc shortens the line up considerably, and this can result in losing the entirety of the swing's dip as well as causing a really rapid acceleration in angular velocity that's hard for players to react to.
+They just get shot up in the air without knowing what happened.
+So to improve, we blend the incoming velocity towards the tangent direction of the swing arc a little bit on each iteration.
+This helps maintain healthier line lengths and improves the expected behavior in the angular velocity.
+And the player can also now feel a lot more significant drop in the swing arc compared to the previous motion path.
+So now that they're into the swing, the player is going to want to further mess around with their motion in order to move themselves around.
+So we do this with just a simple accelerated rotation on the total velocity.
+We scale that turn speed based on your max, we scale that turn speed based on where you are in the swing arc, so you get more control at the trough, less up at the apexes, so you kind of come to a stall that feels about right.
+And we can also adjust the turn speed based on whether you're turning with the attach point or away from the attach point.
+So when it comes to managing speed while on the line, things are going to vary a lot from swing to swing.
+The two biggest influences on speed for any given swing will be the amount of speed the hero brings in, as well as the gravity that's applied during the swing that's going to accelerate them throughout the swing arc.
+So due to streaming considerations, we also needed to stay below about a 10 second average speed of 30 meters per second so that we could avoid loading stalls and just get everything in as we're hurtling through the world.
+So we start by deciding what our horizontal terminal velocity is for any given swing.
+As a baseline, this is done by translating our fall speed into a max speed while never letting it actually slow you down so we don't cut your incoming speed at all.
+So this ends up feeling pretty natural to players because they're basically using gravity to help generate speed.
+And it helps with streaming because in order to generate fall speed, they have to be just falling for a while, which is going to have drag, which is going to slow their horizontal speed, which helps our average speed.
+So, once they're attached, we let normal physics accelerate them up to the max speed, and we go from there.
+But to enforce that terminal velocity, we do kind of a little bit of a weird thing.
+We only cap the hero's horizontal speed.
+And this can have a little bit of an odd side effect in some cases, where you're actually slowing down in 3D through the downswing, but it does help you get through these really long swing arcs a lot faster, get down to the trough, get down to where you wanna be in a better way.
+And the slowdown doesn't come into play too often, and most players are completely unaware it's happening due to a lot of other speed cues going on, like camera rotation, environment motion, motion blur, screen effects, everything else that we're just throwing at them to try and sell.
+sell that speed.
+Now, on the other side of the swing, on the upswing, gravity is going to be slowing you down.
+However, we do have a few things that we wanted to take into account on this side of the swing.
+First, we want players to feel like gravity is appropriately slowing them down, so it needs to feel physically correct and natural.
+But, with line lengths being highly variable, it creates an inconsistent timing to the various release levels, something we wanted to try and close the gap on.
+So we also don't want to slow the player down too much when they're near the trough.
+We want to let them keep that hard-earned speed just a little bit longer so that they can use it to fling themselves through the world.
+And from there, we account for all this by implementing a variable gravity upswing.
+At any given point on the upswing, your gravity is going to be determined by a combination of your current speed and where you are on the swing arc.
+What this ends up doing is really helping swing timing be a lot more consistent and allowing more swings to move through the full range of release points.
+So the player ends up having a much more predictable time and can get those high releases even if they're not necessarily moving that fast.
+So.
+With the basics all now in place, I want to talk a bit about our experience of refining the swinging mechanics over the course of production.
+Again, we go back to our usability-driven, iterative approach, and per our initial goals, we really wanted the player to feel the momentum in physics, but we also wanted swinging to be accessible.
+So usability testing proves a critical element in iterating on this accessibility.
+This is because developers quickly become their own worst testers, and I say this all the time to people that I work with, because basically, we just know too much about how things work, and we're generally really quick to forgive ourselves because our code is amazing, and shame on you for suggesting otherwise.
+So, we also tend to play the game in a very particular way, the way we designed it.
+Real players, however, will interact with the game in a number of unexpected and sometimes confounding ways, stressing elements of the system that the developer may never encounter.
+So finally, you need to make sure functionality lines up with player expectations.
+As a developer, we may have a perfectly rational explanation for why something works the way it does put to a player, it just seems weird, broken, confusing, or just not any fun whatsoever.
+So what did we find?
+Well, players suck at managing physics.
+So forces will often act against their desires, attach points aren't really directly player-driven, leading to a lot of variability, and world geometry is complex and difficult for many players to effectively navigate while tethered to an attach point.
+The end result was that players felt that they kind of lacked control over the in-game results.
+This was despite everything working just as intended when we made the initial version of Swinging.
+So how do we approach solving this problem?
+We injected a number of assists into swinging to help smooth out the experience, giving them a few less things to worry about and moving the system's behavior to be closer to the player expectations wherever possible.
+Our goal was to keep these as invisible to the player as we could, and we found that if you deviated too far from real physics, players would notice, and often they would react pretty negatively to it.
+So our first major usability problem was that players felt like it was basically impossible to swing in a straight line.
+The result of the simulation was creating a mismatch between the player's input intent and the character motion.
+And the results were confusing and frustrating a lot of our players.
+So the reason this was happening is that forces were conspiring to move the character in a way that it would settle underneath the attach point, as you might imagine with a normal pendulum.
+The tension force has this component that moves towards the attach point and gravity just reinforces that to continue to pull you down.
+So in this video you'll be able to see what happens when the tension forces are in full effect.
+The player is going to be trying to swing straight down the middle of the street here, but they're consistently getting pulled sideways towards the attach point.
+When they then try and counter-steer to get back to the middle, their next attach point goes on the other side of the street, and it just increases frustration.
+So to top all this off, that zigzagging motion also slows them down for their straight line speed, and they just feel like they can't really build up that momentum that they're looking for.
+So, how do you fight gravity?
+Well, you cheat.
+So we move the simulation pivot away from the wall into a position that will help us swing straighter while leaving the visible attach point on the wall.
+We then can blend that pivot position back over time or when the player is turning.
+This makes sure that turns do pivot on the right place and on the visible place, and that if you settle underneath the attach point, you're settling under the visual one, not the one that we've moved away.
+This motion was detectable to players, particularly when we A-B tested it, but we found that most Veldt it actually worked more as they expected, aligning their input desire to the results.
+In this video, you'll see that pivot tweaking is going to be fully active.
+The player can maintain a lot more consistent center line and build speed a lot more easily.
+Their directional intent is transferred a lot more cleanly to motion.
+The next usability problem was that players felt they weren't really able to get a swing line when their body was at or near the top of a building.
+This was happening because we required an attach point to be just a minimum height above you.
+And we do that because it prevents you from just flying over the pivot point or requiring that we just slam you straight down in order to get you under it.
+However, this rule was completely hidden from the player.
+And there was not really any reason for them to expect or anticipate that it was there.
+An additional reason this can occur is that players' perception of the character position for the world is pretty murky when they're in the air and all the buildings are pretty far off to the side.
+And players are just frankly pretty impatient when falling and spamming that R2 button and trying to get a swing line.
+So what do we do?
+Well, once a cheater, always a cheater.
+We secretly allowed the simulation attach point to rise above the building edge.
+This would raise the valid attach point ceiling and let people attach a little bit sooner.
+It also had this nice side effect of improving lines that were previously good, but not really all that great.
+And so player awareness of this was actually almost zero.
+It's actually pretty hard to notice a vertical shift in the pivot point when you're swinging underneath it.
+So our next usability problem was our game director special, which is that players were often oversteering when trying to turn and clipping into the edges of buildings.
+And so our solution here is to do a number of collision tests to scan the world for problem cases.
+We'd send a cone of checks forward, looking for things that we might run into, so that we can nudge you just a little to the left or the right.
+And we would also send a series of checks kind of forward and sideways, looking for gaps in upcoming walls.
+This gave us a clue that we might want to dampen your steering values a little bit, so that you don't oversteer when trying to make a turn and slam yourself into the wall, instead of clearing that wall and swinging into the gap.
+So these two things combined to give players a hugely empowering feeling of just made it without really noticing that we were the ones letting them make it.
+So yet another consistent problem was that players would often have a line that was just long enough to smack them right into the top of a building that they thought they were going to clear.
+And this was kind of particularly bad because players, as we've said, didn't have any control over line length, so they were quick to blame us for all their problems.
+So the solution, then, is to just shorten the line, slowly but dynamically, in order to get it just short enough to clear that building.
+So we'd use collision to scan ahead for the maximum height, and then we would slowly raise the player through the swing until the new line length was just short enough to clear that building.
+So one final element to talk about is how we shorten the line to keep players above the ground.
+So we do this because our ground and rooftops are so littered with cars and props and pedestrians and squirrels and other things that trying to navigate and swing through all that would be basically impossible.
+We didn't want players face-planing into the ground all the time, and we also didn't want them becoming just a bug on a windshield.
+So, similar to clearing buildings, we'd use collision to get the ground tight and then we'd scale that vertical motion on their downswing in order to keep them above the ground and have kind of a swing floor so that they could get that nice street sweeping feel.
+So once a player's time on the line is complete, it's time for what ends up being one of the most satisfying elements of swinging, flinging yourself off the line across the world with reckless abandon.
+So when doing so, we have two sets of data for letting go.
+We have releasing and jumping.
+Jumping gives you a lot more acrobatic motion, a lot more height and more speed.
+But just simple releasing has simpler animations and allows you to take a follow-up action more quickly.
+So players get to choose between the two based on what they're trying to do.
+One of the really nice gameplay features of swinging when it comes to these releases is the inherent analog nature of how release points translate into exit direction.
+So a player can choose to release low to get more speed or hold on just a little bit longer to get more height.
+Now our first approach to swing releases was very metric driven, something that was totally sane based on Insomniac's platforming history.
+So we defined a desired jump height and a time to peak for various release points and speeds along the swing arc, and then kind of blend those values from those key points to get one for any release point.
+The goal was to make jumps feel predictable and consistent so that players could plan ahead and get their next move going.
+We had this model for about two years, and we were getting mostly positive feedback on it.
+But there was always this kind of undercurrent pointing at a lack of player satisfaction.
+Players felt like jumps were too heavy and that their momentum on the swing line wasn't really translating to their jumps.
+This was because the metric-driven approach was changing gravity significantly for any given release point based on player speed to hit that jump height target that we had set.
+Instead of feeling really rewarding with an expected amount of fling, players' kind of physics feel was being violated, and they felt that they were being penalized somehow.
+We had this model in for the helicopter chase demo in 2017, when a lot of people online were saying, oh, the swinging looks slow.
+And so part of that was this kind of heaviness to the swing...
+excuse me, to the swing jumps.
+So to fix this, we moved to a more free release model that let go of all those controlling metrics in order to keep a fixed gravity for each release point.
+This was the only design factor into the jump, other than your velocity on the swing line, and as we wanted to remove anything else that was gonna feel artificial.
+So once implemented, this change created a much more natural translation of swing speed to jump size that better matched player expectation.
+We saw an immediate increase in fun factor as players were now able to fling themselves across the world with just abandon, which led to a greatly increased sense of speed and joy and just general cohesiveness of the entire swinging experience.
+So stepping away from the simulation side for a minute, I want to talk just a little bit about how the animation for swinging is implemented on the code side.
+So it's mostly going to be about the mechanics of how we pick animations to play and then adjust them to more accurately represent the underlying simulation.
+So when we first started talking about swinging, the gameplay and animation groups laid out some high-level goals for how we wanted the animation to look and feel.
+This included having fluid animation over the course of the swing arc, having a clean entry animation from our air pose through the sling and into the swing.
+The character's body, obviously, wanted to align to the web line so that it felt right.
+And we needed to have this kind of well-timed kick at the trough in order to sell momentum and for a player cue as to where they were in the swing arc.
+So our first iteration of animating the swing, we approached the seamless animation through the swing arc by actually just using a single animation.
+The animator created an on-the-line animation that started at the drop horizon and went all the way through to the apex horizon.
+In code, we would then drive the animation's time based on where the player was in the swing arc for any given frame.
+So in order to get our clean entry animations, we created separate swing intro animations for different points along the swing arc.
+These animations would end pose matched with the full swing animation, so that the blend to the swing would be seamless.
+And when a player began a swing, we would calculate where they were in the swing arc and blend between those different kind of...
+pointed animations in order to get one specifically for that angle.
+We would then continue to dynamically blend that value during the entirety of that intro animation so that we would get a nice match for the final pose of the swing as they go into that swing animation.
+In order to get the body to align without having to make duplicate swing arc animations, we then deployed partial animations to just kind of adjust the final body angle.
+We used this on both the body to go side to side, as well as the arms for kind of a final fix up when those weren't matching.
+So after iterating on this model for most of production, we had some things that worked just as expected.
+These included the entry animation system working really, really well.
+It allowed smooth entry and timing into the swing animation.
+And our adjustment partials did a really good job at aligning the character to the swing line with minimal amount of additional animation required.
+Finally, the animation through the swing arc was fluid.
+But the system presented a few limitations that were capping the animator's creativity.
+First, we had really limited variability in the swing.
+Getting any variation in this model required animating a brand new swing from start to finish, one end to the other.
+And if you wanted to do something different, you had to make another one and another one and another one.
+And so next we had very, very perceptible animation time scaling.
+Line lengths and player speeds are highly variable, which was born out in highly variable arc speeds.
+And with a fixed number of animation frames scaling over a variable time range, we would get these really easy-to-feel time scaling artifacts.
+And this was especially evident when we get these really slow, sluggish kick-throughs that lacked any impact whatsoever on longer lines or slower swings.
+So we had a couple of new goals.
+Enable variety and reduce the time scaling.
+We accomplished, we attacked these by breaking the swing arc up into pieces that we then animated separately.
+We would animate the downswing and the upswing independently all the way through the trough, which let us kind of overlap the kick animation wherever we wanted to kind of overlap that inflection point.
+We would then continue to drive the animation time as before on the up and downswing animations as they weren't as susceptible to the visible scaling as the kick animations were.
+So once we were in a swing, we would estimate the time to trough during the downswing so that we could trigger that kick animation at just the right time in order to be able to play at a full speed.
+This instantly made our kicks feel a lot more powerful and consistent.
+It also meant that we could plug in a variety of animations into the kick portion without needing to reanimate the rest of the swing.
+But animators be animators, and we weren't done yet.
+They wanted more.
+So by breaking the swing animation into pieces, it allowed us to now have a lot more variety in the way we constructed the animation for the swing.
+We were able to introduce custom kicks and spins with custom upswings.
+We had hard catch variations of the downswing.
+And all of these things could be played with or without one another to get a whole bunch of custom swings and unique swings that look different as you went from one swing to the next and add a lot more texture and flavor to swinging in the game.
+So this new iteration helped us solve our major problems by allowing us to create a lot more animation variety, and it also helped us eliminate the animation scaling for the most notable portion of the swing.
+So one final problem worth noting was that with all of the various moves that Spider-Man can do, he would often end up in poses that didn't really play nicely with our swing intro animations.
+We needed to either wait for the animation to get to a point where the character could blend into the intro better.
+or live with really, really bad looking blends as we tried to get into those sling animations.
+So to solve this, Animation wanted to add a lot more variety to swing intros, but programming didn't really want to manage each of those clips manually.
+So to push that work over to the content creators, we added a data-driven setup that allowed animators to tell the game what the next animation would be.
+from the current time in the active animation.
+They'd mark up a section of a jump animation with data that would point to custom sling animations, and this allowed them to cleanly get out of all these crazy acrobatic poses with custom slings that made the traversal feel a lot more seamless and the character feel a lot more dynamic.
+So, kind of stepping away now from animation, I want to talk a bit about our approach to the traversal camera.
+We knew from previous games that good motion and animation only goes so far in translating the experience to the player.
+The camera is actually often the most important aspect in conveying elements of speed and translation in a way that gives the player that kind of visceral connection to the action that's on the screen.
+So when we started out our top level goals for the traversal camera, we came up with three main items that we found important after early prototyping with kind of a mostly static camera.
+First, we wanted to minimize the amount of player input was required.
+This is because players would often need to be using the face buttons and we didn't want to require them to have to switch between that and a stick input.
+That was just a lot of camera management that we didn't want people to mess with.
+Next, we needed to accentuate the pendulum motion and the forces on the line.
+And finally, we wanted to communicate a sense of speed to the player.
+So we have a pretty long history of third-person games at Insomniac, and we've generally started with a follow camera model that tries to have the camera looking in the same direction as the hero's velocity.
+So while successful in other games, in other contexts, it did present a few problems for Spider-Man, particularly at the high speeds that Spider-Man could move and how much we had to let you see where you were going.
+So the biggest issue was that when we tuned it effectively, to where you were going, it was extremely susceptible to these sudden changes in velocity causing large changes in view direction.
+The camera would just swing around incessantly on people.
+This had this feedback loop with camera relative controls where the camera would change a lot, which would change your input a lot, which would change your camera a lot, and you'd just get into this death spiral.
+So in order to fix the problem, we moved to a model based on the player more dragging the camera around.
+This was done by we'd predict the player's position based on their current speed, and then we'd use that to calculate how it would drag more of a camera boom and how that would change the rotation.
+This ended up being a lot less noisy with velocity changes, as the frame-to-frame delta was generally a whole lot smaller.
+So with the camera now following us more appropriately, I want to talk a bit about how we accentuate the pendulum motion of the player through camera motion.
+In addition to just feeling better, this also actually helped address two major usability issues that a more static camera was presenting.
+First, as stated before, players weren't really noticing the full extent of vertical translation the character was actually performing.
+Players were also presenting a really poor level of comprehension of where they actually were in the swing arc.
+They were frequently hanging on for too long, releasing high, losing all their forward momentum, and wondering what in the hell happened.
+So the first thing we manipulate to help sell the swing arc is the camera's pitch.
+We try and roughly match the swing arc's pitch in order to feel that motion through the camera.
+As you can see here, we want to keep the pitch a little more flattened on the downswing so that you can keep your eyes on the horizon and keep an eye on where you're going.
+And then on the upswing, we tend to exaggerate the pitch a little bit in order to communicate that rise more effectively and let them feel like they're moving up without getting too far into the upswing.
+So the next element we added to help the player feel the swing arc more was to move the character's position and screen space down and then back up over the course of the swing.
+This created kind of a real-world physical tracking response from the player that would reinforce the in-game motion as they kind of looked down and looked up with the character moving on screen.
+So when it came to turning, we really wanted to get players to feel that they were whipping around a corner at high speed and bringing that same sensation you get when you're in a turning car leaning to the side.
+And to get this effect, we apply a little bit of roll to the camera when turning and scale it based on the line angle and turn speed.
+But a word of caution here, we did have to be careful not to push it too far due to motion sickness concerns.
+And we did add an option to scale it down or turn it off entirely for people that had problems with that.
+So now that we have players feeling the translation in traversal, we need to make sure that they actually felt the speed.
+So this means we needed to layer as many visual cues as possible to help sell not just the current speed, but changes in speed.
+Probably the most impactful thing to sensing speed through the world is going to be field of view.
+A wider field of view tends to elongate objects in front of you, making it feel like you're covering more ground.
+And it also brings a lot of peripheral objects into view that are going to be moving really fast by you so you get a lot more of that relative motion feel.
+In order to really sell the changes in speed, we're constantly updating the game's field of view while traversing.
+To deal with sudden speed changes, we rely more on actually adjusting the camera's follow distance, as you don't want to bounce field of view around too much.
+It gets really weird.
+We have certain kind of explosive moves that create a spring action on the camera so that it falls back before blending closer again.
+This gives those moves a much bigger sense of impact, like the character's boosting away suddenly, leaving the camera in the dust, and then it has to play catch up a little bit.
+So here you'll be able to see all of that coming together to show the sense of speed.
+There's a little bit of debugger on the side to give you a better idea of how the field of view and follow distance are changing as it goes through the action.
+So the final bit of camera development I want to talk about is related to how the camera is handled when we perform a variety of traversal moves.
+So our first version of the traversal camera treated each move as its kind of special, unique item.
+This was driven by a desire to make every move as cinematic as possible with the thought that if you string together a bunch of really cinematic moves, you're going to get something extra special, super cinematic.
+This presented a couple of problems though.
+In this video from an early vertical slice, you'll see some of the issues with the everything is a special snowflake and how that kind of breaks down. You'll see that going from move to move would cause a change in framing and field of view that could kind of muddle the perception of speed and rapid sequencing of moves would create a very noisy relationship between the world, the character, and the view.
+So, how did we get better?
+Well, we started with a more unified model for all of our traversal moves that had a speed-driven field of view and follow distance that would stay consistent across all of the different moves.
+We also smoothed out any adjustments we were doing to offsets to make those changes feel less aggressive and not kind of upset the player.
+So here, you're going to see that we ended up getting some pretty good results.
+You're going to get a lot more consistent perception of speed when moving from one move to another.
+The camera ends up being a lot more predictable to the player, and one move flows into the next without feeling like there's a major state change that the player has to suddenly adjust to.
+This proved a lot more fun and predictable to players, and gave an overall better experience.
+Alright, so, as we started to get a full set of traversal moves in the game, and playing with them more both internally and through usability, we found that unsurprisingly, our first version was rarely good enough.
+So this led to a lot of feedback that motion felt stiff and imprecise.
+Players weren't able to navigate as well as they wanted, a lot of moves weren't matching expectations, and they were unable to actually land where they wanted to.
+So we started kind of revisiting things.
+So with wall run, our first pass was set up to actually be locked to either be horizontal or vertical with no in-between and no ability to switch.
+The entry was based on a combination of character velocity, input direction, the walls facing, and it had a heavy bias towards maintaining your current momentum.
+So if you're going really fast horizontally, you are really likely to get a horizontal wall run.
+The single biggest problem we had was that wall run entry direction was really poorly mapped to player expectations.
+They never really understood the concept of momentum driving the entry direction and how that overwhelmed their input.
+And this was made even worse because there was just no ability to switch from horizontal to vertical if they didn't get what they wanted.
+And on top of that, the camera direction versus a vertical wall was making input to entry mapping even more confusing.
+Can you tell me in this image, pushing up on the stick, is that supposed to make you go forward or up?
+A lot of players didn't really know what they wanted to do in that situation.
+So players would often try to compensate for this by pointing the camera where they wanted to go, but the system was paying zero attention to the camera, and so it wasn't helping them.
+So with our big problems identified, we set out to make some changes.
+The first thing we did was to add analog steering.
+This created a lot more in-between values for entry direction, as well as giving players the ability to adjust on the fly if they weren't happy with their entry direction.
+Then we revisited our entry direction process as a whole.
+We added a camera-driven influence to help translate player intent to in-game results.
+And we then significantly amped up the effect of player input over momentum so that they had a lot more control over the results and what happened on the output.
+So these combined to result in a significant reduction in player frustration.
+So for in-air control, once they're off the line, just flying through the air, we wanted the player we had an initial approach that heavily favored momentum.
+Again, we were looking at that momentum thing over and over again in the first rev.
+So this meant that in-air steering was fairly stiff and players needed to rely on web moves like swinging and web zip for rapid direction change.
+The idea was that it would make your swing releases more meaningful and consequential.
+But this model presented a number of problems in play testing, much like everything else seems to.
+First, swing speeds amplify small differences in angle over large distances.
+This made it almost impossible to be precise.
+If you tried to release off a line and you saw something in the distance, little variations in that angle would cause big variations in where you ended up.
+In addition, players were really just terrible at thinking ahead to manage their speed.
+While there are tools to slow down, they generally go as fast as possible to their destination, and only once they're there do they try and stop.
+This usually ends up with the player kind of fumbling around and orbiting their destination as they try and get closer and just having a bad time.
+So finally, players were having a lot of difficulty reacting quickly to changes in situation or geometry.
+So in order to help solve these problems, we had to put more control back in players' hands and let go of some of our really strict momentum-based concepts.
+To start, we significantly increased the in-air turn speeds.
+This immediately helped players react a lot more quickly to dynamic elements, and it also allowed people to more effectively set up their next move, increasing their ability to chain moves and just basically use the full suite of traversal elements.
+Later on, we massively increased the amount of drag applied to the player when pulling back on the stick.
+This let players feel a lot more precise when they were reaching their destination because they could go from 60 to zero in a very short time.
+Overall, this led to a lot fewer instances of players fumbling around their destination and let people feel like they could stick the landing.
+So the next thing we needed to address was our more specific world interaction moves.
+So when we started making the game, we knew that we wanted to make the city feel like a big part of traversal, and Spider-Man's interaction with the world needed to be tangible.
+And while swinging and web zip did require geometry to work, you were still kind of mid-air and disconnected when using them.
+We wanted something that was a little more tactile.
+So our first version was zipping through the legs of a water tower with our web tunnel move.
+This was really cinematic from a presentation standpoint, and it really fulfilled the fantasy of interacting with those specific objects.
+But it did have a few shortcomings.
+The first problem is that the move has a pretty rigid directionality.
+There wasn't a lot of room for players to modify the direction going through the object because it was a fixed structure.
+And in addition, the entry angles were pretty limited.
+You could only engage the web tunnel from a limited angle range before it started to look really weird of getting sucked in sideways and turning through this thing.
+So in this case, we recognize that WebTunnel had some inherent limitations that we weren't going to be able to get over.
+In addition, we liked having the move as it was for certain situations.
+That cinematic presentation was really effective for certain things.
+So instead, we created point launch, a move where you could zip to a point on top of an object and then spring back off instantly with a big jump.
+We were able to get the desired world interaction we were looking for with web tunnels, along with a number of additional benefits.
+First, the player could enter and exit a point launch from any direction.
+And because we needed just a point, the opportunity for placement in the world had increased dramatically.
+So once point launch was implemented, we started to notice that we had a lot of traversal moves that we were treating as unique.
+We had unique names for them, and we thought they were all special.
+But to the player, they all felt like the same thing.
+In this case, that was go to a thing.
+So as you can see, we had separate unique button combinations for going to a perch, point launching, and zipping to a wall.
+To make things worse, point launch only worked on perches, which were a special kind of point.
+But we had a very similar move that worked on perches and edges.
+And ultimately, this led to a lot of problems with the player's ability to mentally map this variety of controls to what felt to them like the same action.
+So they'd fumble a lot, do the wrong thing, and just generally get themselves screwed up.
+So our solution was then to merge all of this into a single input space using the triggers.
+This helped to ensure that the button to action mapping in the player's brain was a lot more one to one.
+However, it's not just a matter of merging buttons, it's never that simple.
+It did require us to adapt some of the moves as well.
+First, we expanded point launch to work on all edges, which ended up being a win for the player, and we merged it with zip to perch.
+We then moved zip to wall to be an aim mode only action so that its targeting didn't conflict with the other moves that it was sharing buttons with.
+So after iterating our controls by doing things like changing buttons and adding moves, there's a few major takeaways from this section that I feel are pretty important.
+First, if the player expectation and system designs are not aligned, then your controls just fail and the player experience is gonna drop.
+We spent a lot of time giving long-winded design reasons why our controls were the way they were when they started, but ultimately, players will just never get the most out of a system that they have trouble using.
+And the next lesson would be that trying to add analog input and behavior to our moves helped add depth, utility, freedom, and flow to our moves and just increase the player's experience.
+So as we were getting towards the end of production and our core mechanics were all in place, we started to drive down to the next level of usability feedback.
+We found that players were still feeling that they experienced a somewhat kind of stuttery rhythm, where it would feel incredibly smooth at times, but they were kind of consistently getting these little snags and hiccups that were breaking their momentum.
+So, as we kept gathering information, we found that most of the problems boiled down to just a few cases across the city.
+In response, we created a kind of small palette of moves that would help maintain flow to get around those rough edges.
+Many of these moves were designed to be a natural extension from the character's current action, so they didn't require any input.
+One of the players who feel like they were expertly executing these moves that would often require unnatural reflexes if they wanted to execute them manually.
+So my first example here shows one of our biggest issues.
+You'd clip a corner, causing a short wall run that would then eject you sideways.
+The sudden change in direction would often surprise players and would frequently create situations that were difficult to recover from as they were exiting at a high enough velocity they'd often get clear across the street before they knew what the hell happened to them.
+So we kind of fixed this by adding just a small little move to redirect you parallel to your incoming velocity if you were only wall running for a really short time.
+This very quickly got the player back in action with a consistent reference direction and they were able to just get right back to what they were doing.
+So the next example looks more at a case where players didn't really have a tool to change direction easily.
+If a player was wall running up a building and wanted to corner over it, they would have to clear the building and then figure out what their next move was once they could actually see what was above them.
+This led to kind of this gap in flow while players processed that view and caused a lot of stall for them.
+To fix this, we added a move that the player could trigger before clearing the wall to get over the edge and redirect their velocity all in one shot.
+This added a little layer of skill, which was nice, and it added some depth while letting players a lot more efficiently navigate over these buildings.
+So a lot of our additional moves centered around trying to traverse through space near walls and how that conflicts with our art team's desire to have a lot of stuff sticking out of those walls and into our play space.
+The biggest factor here was fire escapes.
+It just didn't feel like New York without them, but they were basically the total arch nemesis for the traversal team the entire production.
+We ended up making a lot of vaulting moves, both from the air and from wall run and from swing, to get around these, as well as completely custom ladder climbing web move to kind of climb them like a ladder up a fire escape stack.
+We also needed to deal with signs hanging out of buildings, particularly in places like Chinatown, and a lot of small little outcroppings and changes in wall contour that were too small to just wall run over, but they were too big to just wall run over, but too small to actually run on entirely.
+So.
+And today, that wraps up our journey that we went on with creating Traversal for Marvel's Spider-Man.
+We had a whole lot of fun along the way working with such a great character, but there are definitely a few key things I believe any developer can learn from our experience here.
+First, in creating mechanics, start with a simple implementation and then add complexity only as you uncover new problems.
+By keeping things simple early, we were able to avoid going too far down a path that our players wouldn't respond to, which in many cases kept us from wasting work.
+We ended up with a system that had a whole lot of features, but many of the additions were things that we could never have anticipated needing or wanting ahead of time.
+Second, you have to stay flexible in your approach to creating mechanics.
+We were initially really resistant to some of the best changes, because we had all the design reasons listed out why it was working like it was supposed to.
+And clearly, it was the feedback that was the problem.
+By allowing the game to evolve, we came to a final product that was far superior to what we thought was the right approach earlier in development.
+And finally, you are your own worst tester.
+And in some cases, the rest of your dev team quickly catches up with being terrible.
+Developers know exactly how their systems work and they're just, and the way they're supposed to be used.
+So when you play the game, it will often work exactly as you expected.
+Different players will play the game in wildly different ways.
+and you'll never know where the real problems and edge cases are until you let them loose in your game.
+Even with external play testers, you should always challenge yourself and others to try to play the game in different ways and try and have a different experience in mapping what your controls are into the game.
+So that's it for me.
+Thanks so much for coming.
+And it looks like we've got about 10 minutes for some Q&A.
+I'm going to start over here.
+Hello.
+So the problem space you're working in seemed like it required a ton of different skill sets to effectively solve these problems, like cinematography, physics, game design, a whole bunch of others.
+What was the composition of your team like?
+And how did you effectively organize around these different skill sets to solve these problems?
+So we have what we call the traversal pod, which consisted of a couple of programmers, a handful of animators, a designer, as well as just everybody else looking at traversal in general.
+So we'd have effects people that would come in and help with effects, our animation director.
+would also kind of be looking at things from a cinematography standpoint, as well as the animators in the Traversal Pod.
+And so it was really just getting, it was an extremely collaborative environment and getting all the different people from all the different disciplines with eyeballs on it and everybody looking for ways to give input on how to improve things.
+Thanks.
+Was any inspiration drawn from Spider-Man 2's web-slinging mechanics?
+Early on, we definitely played all of the games.
+Spider-Man 2 did a lot of really great things, so did Ultimate Spider-Man, so did Web of Shadows, so did ASM2.
+Those were all teams that had a lot of really great ideas that they executed in different ways.
+We definitely took things from them.
+The biggest thing we got through the history of Spider-Man games was your web's better darn well attached to buildings.
+But...
+When we took it from there, we ended up at the end of the day wanting to make something that was also kind of our own.
+And I think we sort of hit that by having a traversal system that layered a lot of different moves together to make you feel like you had a wider palette.
+Thank you.
+What were some of the challenges and solutions you had with swing-heavy combat situations such as like the final Doc Ock fight, which was on a rooftop?
+Yeah, so that created kind of a lot of weird things.
+And we actually had the ability to basically have a config data set that kind of parameterized how swinging worked.
+And so one of the things we were able to do was make a duplicate data set that was entirely re-parameterized for different situations.
+So when we were inside GCT, inside Grand Central, or when we were in a combat arena, like a boss fight, we could sit there and basically just change all the parameters for how swinging worked in order to make it fit that space a little bit better.
+We didn't want to deviate too far, it needed to be kind of, make sense to the player, but it did let us make sure that we weren't kind of overshooting things, when you weren't getting...
+When you're outside, it's these big, huge swings that give you a lot of height and a lot of stuff like that.
+If you're inside or in a boss arena, that becomes a problem if you're constantly getting yourself flung up in the air with nothing to swing from and just have to free fall for a while.
+So that re-parameterization really helped us to make things fit whatever situation we were dealing with.
+Thank you.
+Hi, thanks for the talk.
+Really, really excellent.
+So I have a question about What you said earlier where you would do animation blending to correct the way Spider-Man was facing during Swing.
+But with all of his cool poses and so on, how did you prevent that blend from creating like strange artifacts during the animation?
+I'll give a lot of credit there to our animation team with Elliot Grossman, who did a lot of the animation work, and to our core engine programmer for animation, Johnny Garrett.
+They made a sweet animation system and a bunch of sweet animations that did really cool stuff.
+For the most part, the blending ended up...
+We just made sure to control where those things go, and we made sure to control when we used them so that they didn't get too far outside of what we needed.
+We also had the side effect that when you're swinging, you're kind of out in the air.
+So, unlike if you're on the ground or somewhere where you have to really hand plant on things and touch things, if there was a little bit of drift from those partials and stuff, it didn't really matter as much for swinging.
+And so it gave us a lot more freedom to kind of play with that stuff.
+We just had to make sure that visually you were lined up with the line and it felt like those forces were correct, and at that point we were good to go.
+Alright, thanks.
+Yeah.
+Hey, it seems like throughout development you're changing like gravity settings, adding new mechanics that Spider-Man can use.
+How did you like work alongside the level design team like during this process to make sure that all their work isn't like thrown away as soon as you change like a huge fundamental setting or something?
+That was one of the biggest challenges we had.
+You know, working on...
+not necessarily a new IP to us.
+We didn't really have all of the mechanics locked down until we were well into production before things started to get locked down, which, as you said, creates challenges for the design team.
+A lot of it came down to the designer in our pod, Josue, basically did a lot of work of trying to maintain things consistently.
+He actually built the metrics for the entire city.
+by himself, and then it was done.
+And then we actually generated the geometry after that through Houdini.
+So we got a lot of consistency in the open world by just having that go through one person.
+For interiors and stuff, we just tried to set up some metrics and go from there.
+I would say that kind of swinging on interiors is something that I think we didn't make as good as we would have liked because it was such a big move and we didn't have the time to really focus on that.
+But we were able to use that re-parameterization to make it work for most of the spaces that we needed it.
+Awesome, thanks.
+Hi.
+Excellent talk.
+Thank you so much.
+Great game.
+I'm definitely stealing all your math.
+I noticed in this talk about traversal, you didn't really talk about the wall climbing at all, like the walking around.
+I'm assuming it might have either been outside the scope of this talk or not super relevant.
+But that's a system that I've actually messed around with for my own game.
+And I'm curious if it was ever supposed to be a bigger element of traversal than it was, and then you clamped it because it was too complicated.
+or any edge cases like that?
+So wall crawl was really, you know, it's really identifiable with the character, but it has this problem for games, which is when you do it, you can only go so fast or you look like a weird salamander.
+And usually when people are on a wall, they want to interact out from the wall.
+There's nowhere to put your camera except for inside of you or something.
+And so it creates a lot of these gameplay problems.
+Our designers in some ways had trouble figuring out how to use it.
+Our buildings had a lot of complexity to their geometry that added a lot of complexity to the wall crawl stuff.
+We actually had Ross McIntosh, one of our programmers, was working on it for.
+probably a couple years working on some wall crawl stuff.
+And it's a really, really complicated problem to deal with all of that geometry.
+I noticed that you hard clamped it to go around corners of specific animations so it didn't actually have to deal with artifacts and stuff.
+Yeah, so we tried to kind of scope down in places where we could to take some things that were really hard problems and make them into...
+little bit simpler problems.
+And so we did that wherever we could with wall crawl.
+We still wanted to make sure and fulfill that kind of fantasy element while having most of the game focused on this big, fast speed traversal.
+And so we just chose to have wall crawl be something that we implemented as well as we could, but didn't try to over-focus on.
+Makes sense.
+Thank you so much.
+Hey, amazing talk.
+Totally loved it.
+We tried to build a Spider-Man game as one of the prototypes and really, really failed to do it.
+So one of the things I had a doubt about was you mentioned that we used box volumes for collision detections.
+And so how do you decide which objects in the scene to go to?
+Was it applied to everything that he could attach to?
+And if so, how did you maintain the performance as to where you detect the collision occurs?
+Does it happen in a particular area, and how so?
+So, sorry, was your question like, how do we decide where to place markup and where not to?
+Yeah.
+So, for the most part, we wanted to, in the open world, we marked up everything.
+Like I was saying, we used our procedurally generating system Houdini, well, it's not ours, it's not worth any license, but, to place a lot of that stuff, so it was kind of everywhere.
+For interiors and things, we would just decide if the space was in metric, and we would place or not place things based on whether it was in metric for that.
+And other than that, we would just find other things that we wanted to attach to, like treetops and stuff like that, and just place markup there.
+That's where we could use our prefabs to say, okay, this object is always going to come bundled with this markup, so every time it gets out there, it's populated with that markup.
+So it really just came down to anything that, as much as possible, anything that looked like you should be able to swing from it, we tried to get markup on it.
+Did you have any performance issues in trying to find out which place to attach to or like whether anything you had to optimize to do that?
+We had a few things.
+We went through a number of iterations on that.
+We ended up getting better by, like I said, using kind of a sphere database and some search querying to kind of pack all the data in as much as we could.
+Really helped us kind of speed things up.
+We ended up being able to move it off onto a job on kind of another thread so that it could happen in the background.
+And so it ended up taking, even in an area that was highly dense, it ended up taking, on the PS4, probably in a dense area, about 2 milliseconds to process and chug through everything.
+So it wasn't necessarily cheap, but it wasn't too untractable either.
+Cool, thank you.
+Hi. Thank you for your impressive session.
+So I'm making a swinging VR game, like Spider-Man.
+So if you will make VR Spider-Man, so what do you change spec or game design?
+What was your question?
+Sorry, I didn't catch it.
+Sorry.
+So what do you change for VR game like Spider-Man?
+What do we kind of change to make a game like Spider-Man?
+go through the town and swing with rope.
+So is it kind of how do we have to change the city to make swinging work?
+Yeah, you're right.
+Gotcha. Okay, so it's actually interesting.
+We had a lot of tests early on talking about how wide the streets needed to be.
+If you actually take full New York width streets, they're actually really terrible for swinging because your line angles end up being like too far to the side.
+So we did a lot of tests to figure out what the right widths were for the streets, a lot of metric tests early on.
+And so we had to kind of play around with all of that really early.
+in order to find what the right distances were before we kind of populated the entire city with stuff.
+So it was kind of just progressing things a little bit, a little bit at a time in lockstep as we were kind of iterating on the design side and on the world construction side, iterating on the swing side to make sure those two things kind of work together in a really nice way.
+Thank you.
+Cool.
+There's other questions?
+All right, I think we're out of time.
+Thanks guys.

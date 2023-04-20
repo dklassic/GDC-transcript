@@ -1,0 +1,401 @@
+Hello, my name is Eric Johnson.
+I'm an AI programmer at Kojima Productions.
+And today I want to share with you some of the AI features we built, challenges we faced, and things we learned during the development of Death Stranding.
+This is primarily a navigation talk.
+To that end, I want to begin by discussing the game environment and why it was such a challenge for us to work with, game design's goals for NPCs, and how they affected our approach to dealing with the environment, how we reflected the complexity of the terrain on the nav mesh.
+the impact this complexity had on navigation, support for different types of dynamic terrain, a quick look at a trick we used to improve position selection in our environments, and a peek into a few of the other AI systems we built for the game.
+First, I want to give special thanks to Guerrilla for providing us with the Decima engine on which Death Stranding is built, as well as the ongoing support they've given us throughout development.
+I also want to thank the rest of the NPC team at Kojima Productions, whose work I'll be sharing with you today.
+Without them, this talk would not be possible.
+So, as most of you are probably familiar, Death Stranding is a game with a heavy focus on environmental traversal, deciding your route, what equipment to bring, and how to approach the landscape.
+overcoming environmental obstacles using a variety of tools at your disposal, such as ropes, ladders, and bridges, all in order to ultimately reach your destination. But it's not just these large-scale obstacles you need to worry about. Even flat terrain is difficult to traverse. You can lose your balance and stumble, slip in the mud when it rains, lose your footing on steep slopes, or get swept away by the current of rivers.
+Every step has the potential to be hazardous.
+So, to create an environment where even walking would be a challenge, in the early days of the company, the team went location hunting in Iceland to gather reference material.
+While they were there, they toured volcanic rock fields, rivers, valleys, and gorges.
+crevices, caves, and geysers, which they reference to create environments like these. Take a look.
+So these were the types of beautiful but unforgiving landscapes the environment team had created to challenge the player.
+But if this terrain was meant to be difficult for the player to traverse, this meant it was going to be even harder for the AI.
+Because while the central challenge is overcoming the environment, it's not the player's only obstacle.
+There are, of course, enemy encounters.
+And the ones I want to talk about today are mules, melee enemies that chase after the player and steal their cargo.
+Terrorists, ranged attackers whose target is the player who can use cover, and the catchers, giant BTs who need to be able to navigate around, climb on top of, and even destroy dynamic terrain.
+During the concept phase, the core gameplay loop revolved around the cat and mouse game of mules searching for and stealing the player's cargo, as the player attempted to make it through hostile territory to complete their delivery.
+Because they'd need to steal packages directly from the player, as much as possible, we would need to provide traversal parity.
+Wherever the player could move, mules would need to be able to follow.
+Similarly, if cargo was dropped onto the terrain, NPCs would need to be able to reach it to pick it up wherever it lands.
+Finally, a lot of effort was placed on making the player interact realistically with the terrain to feel grounded.
+We wanted NPCs to have a similar level of fidelity.
+Here's where we started.
+This is our first AI prototype.
+You can see here the mules are searching the area for cargo.
+The player can subdue them with a non-lethal takedown.
+And while still undetected, they are able to escape and make their way towards the cargo destination.
+A year later, we had added more non-lethal weapons like the Bola gun.
+NPCs could now respond to noise and perform investigation behaviors.
+Perception had been iterated on, enabling the player to evade the enemy in tall grass, but NPCs now had the ability to ping the player's cargo to track them down.
+Still, the gameplay loop remained focused on evading and escaping rather than fighting.
+And here's the final version that we shipped. When the player enters mule territory, their cargo is pinged.
+A search party is formed and a group of enemies move to the pinged location to try and find the cargo that was detected.
+This gives the player an opportunity to escape while they're searching for the package.
+If the player successfully evades the enemy long enough, they will re-ping the area and the cat and mouse game begins again.
+But if the player is spotted, all mules in the encampment will immediately begin chasing the player to steal their cargo, switching gameplay from evasion to escape.
+This is the core loop the NPC team was responsible for delivering.
+And one of the major components in doing so was developing reliable navigation over the terrain.
+So why is this terrain such an issue?
+And what kinds of problems does it create for the NavMesh?
+To explain, let's start by looking at some NavMesh that represents what we were used to seeing in a typical production.
+Here's a man-made environment with flat level ground, open spaces, clearly defined walls and corridors.
+There are challenges in navigation over a NavMesh like this, positioning, finding cover, flanking, but these are ones that we were generally familiar with and knew how to handle.
+Likewise, in natural environments, NavMesh was often just a continuous sheet with the occasional hole where rocks, trees, and other obstacles have been placed to decorate the terrain.
+However, because the environment in Death Stranding was designed first as an obstacle for the player, our NavMesh now looked like this.
+Everywhere we looked, there were jagged shapes with sharp turns, thin strips of NavMesh, and tiny, disconnected NavMesh islands covering the landscape.
+Normally, we would either make these areas off limits to the AI or work with level design to make them easier to traverse.
+But in order to chase the player in the world of Death Stranding, this time, neither of those was an option.
+To illustrate just how much more complex things had become for us, seen from above, the difference between the two looks like this.
+Both of these areas are the same scale and show a single NavMesh tile, but for every NavMesh polygon on the left, there are a dozen on the right.
+This was much more complex than anything we dealt with before.
+But let's take a step back, because you may have noticed, even if the terrain in the complex example has collision like this, at worst, the NavMesh should look something like this.
+So what is this mess?
+To explain, let's take a look at some sample terrain.
+Here we have some grassy hills on the left, rocky terrain on the right, and a river that cuts through the middle.
+In the beginning, this is what a NavMesh looked like.
+For humanoid NPCs, it was configured so that they would stay out of the water and step around rocks too big to climb over.
+However, the player's movement controller could automatically detect and step over obstacles that are roughly knee-high.
+So NPCs needed to be able to as well if they were going to follow the player.
+So we first raised the NavMesh step height, covering most of the areas where these small rocks were.
+Then we added raycast checks in front of the NPC to detect these small ledges, and then play special step up and step down animations to get over them.
+However, if the player runs over those same rocks, there is a chance they'll trip and lose their balance.
+And we wanted NPCs to do this as well to show that it's just as hard for them to traverse the terrain as it is for the player.
+So we implemented ground material checks that could trigger specific animations.
+When stepping onto a rocky material, we added a random chance for an NPC to slip or stumble.
+Of course, knowing this, the player learns to avoid running over rocks to prevent tripping, so NPCs should have enough understanding of the terrain to do so as well.
+But how are we going to add that? The answer is something we call placement painting.
+Most of the rocks, grass, and other decoration on the terrain are added via Decima's procedural placement system.
+For Rock Spawn in this way, we painted the nav mesh with a high cost area that surrounded each one.
+This encourages the navigation system to produce paths that go around obstacles without removing the nav mesh on top of them.
+This means that NPCs can still walk through rocky areas, but they'll only do so if there are no better options.
+The player is also able to wade through deep water.
+So in order to give chase, NPCs need to be able to follow them into and through these areas too.
+So we ensure that there is NavMesh generated over the water as well.
+This works, but as you can see, wading through water is very slow, and it's easy for a player on land to get away from a mule in the water.
+In addition, because it can drain stamina, players learn that in general it's better to avoid moving through water when possible.
+To handle this, we applied the same strategy as placement painting.
+We paint a high-cost area onto the nav mesh wherever water is present, allowing navigation through it, but discouraging NPCs from entering, unless it's the fastest way to the destination.
+We actually shrink this a little bit, only painting areas with at least 30 centimeters of water, as this is the threshold for the wading animation.
+As a result, NPCs would now skirt right along the edges of the shore, taking as optimal a route as possible when going around bodies of water.
+And that is how we got from this rough but still reasonable nav mesh on the left to this multicolored mesh on the right.
+But in doing so, we created a huge amount of new problems for ourselves.
+The first being the cost of pathfinding itself.
+Due to the size of the environment, the search area can be very large.
+So to manage performance, we kept A star search to 500 iterations.
+Often, this is not an issue.
+Take, for example, this scene from the time fall farm.
+If we take a look at a nav mesh, we can see some fences and small structures over basically flat terrain, nothing too complicated.
+We then try to find a path from the left side to the right.
+The result looks something like this.
+The green polygons are a path corridor, and then the nodes explored during ASTAR are shaded from yellow to red depending on when they were opened.
+In this example, we were able to successfully generate a complete path over a distance of about 200 meters without any issues.
+However, if we move to another area with more complex terrain, like the cliffs by this mule camp, we can see that the navmesh is much more fragmented.
+And if we then try to perform the same pathfinding request, navigating from the left to the right, we're only able to generate a partial path, and don't even make it 25 meters before hitting our 500 node iteration cap.
+Compared to the timefall farm, which produced a 200 meter path without hitting this limit.
+So depending on the location, the farthest range at which we could reliably produce a complete path would change dramatically.
+On top of this, the NavMesh in Death Stranding is generated at runtime using NavMesh bubbles placed on NPCs and the player.
+This means that it's common for NavMesh to not even exist at the destination we begin moving.
+So because NavMesh polygons are much smaller, it is now much more expensive to run pathfinding as more nodes need to be explored than when we started.
+As well, there's no guarantee that we'll get a complete path to a reachable destination either, even for very short distances.
+So at some point while following one of these incomplete paths, we knew we'd need to repath to continue making progress, but how could we determine when this is?
+Well, to start, how do we normally decide when to repath?
+When we're following a complete path and we want to detect when something has gone wrong, common methods include ray casting ahead to a point further along the path.
+If we hit anything, it means we've deviated too far from our path or detected a change in the nav mesh.
+Or we can automatically repath at regular intervals, avoiding the issue by ensuring that a path is only ever going to be invalid for a limited amount of time.
+However, both of these techniques have their own issues.
+Ray casting only detects problems immediately in front of us.
+Even if we can see a change in the environment further away, we won't respond to it until we get close.
+For time-free pathing, it isn't clear how frequent is frequent enough.
+Too slow when we run into things, too fast and we waste performance performing pathfinding when nothing's wrong.
+On top of that, it introduces another problem.
+So it turns out that in early development, this was actually the method we were using, rebounding twice a second and simply heading towards the next waypoint in the path.
+Around this time, we received reports that NPCs were occasionally looking around when patrolling, which was strange because we hadn't actually added any behavior to do that.
+And we thought it might be an aim or look at bug, but on closer investigation, we discovered that at specific points along the patrol route, the path could change completely for just a moment and then revert back.
+And you can see that here when the mule reaches the yellow arrow.
+This would actually be expected.
+When pathfinding, depending on your starting location in an avmesh polygon, there may be completely different optimal routes to the target.
+By chance, we were repathing after crossing one of these thresholds, which resulted in the NPC turning momentarily towards the new path, and then back again on the next repath.
+It was clear we needed a better system.
+Because our search range was limited, We knew we might need to perform multiple pathfinding requests to reach targets, even ones as close as 25 meters away.
+We also wanted to repath automatically as soon as an issue was detected, but no sooner, both to improve performance and to avoid the instability we were experiencing.
+So we first identified five conditions that could require a repath in order to reach our destination.
+To illustrate them, here we have an agent on the left following a path to a target on the right.
+and the white squares represent the NavMesh polygons of the path corridor.
+The first situation is if the agent moves outside of the path corridor entirely.
+This could happen if the NPC misses a turn or is pushed out by an external force.
+Similarly, we could also require a path if the destination moves outside its polygon at the end of the path corridor.
+Or if a polygon in the corridor becomes invalid, that indicates that the NavMesh at that location has changed.
+This can happen if an obstacle is added or removed, or if NavMesh no longer exists there.
+A tricky one is that in the event that NavMesh tiles have not been generated at our destination, to serve as a temporary stand-in, we clamp the destination to the boundary of the closest NavMesh tile in the direction of the agent and navigate to that point instead.
+then if this clamp location moves, that indicates that NavMesh tiles between the agent and the target have either been added or removed, or that the destination itself has moved.
+If this occurs, a better path may now be available.
+Now, finally, if none of the above situations occur and we successfully navigate to the end of the path, but the path itself is incomplete due to hitting the A-star iteration cap, we can try repatting again on arrival to see if we can make any further progress from our new location.
+In order to support this, we needed to move away from simple waypoint following and monitor both the path and the path corridor.
+So we added a validator that would run every frame during navigation, checking all repath conditions that we had identified.
+If any condition failed, it would automatically trigger a repath request.
+Then this new path would replace the current one, and navigation will continue uninterrupted.
+Here's our event-based repathing system in action.
+So long as no validation errors occur.
+We continue following our initial path, avoiding any unnecessary pathfinding calls.
+However, if a qualifying event occurs, such as a change in the navmesh, a corridor passes through, validation will trigger a repath, which replaces the original while we are moving.
+You can see that this happens both when an obstacle appears in our path and when it's removed.
+And here's an example of the validation check for tile clamped locations.
+As the NPC moves, new tiles are generated around its navmesh bubble.
+When this happens, it causes the clamp destination to move, triggering a repath that lets the agent make incremental progress toward the destination.
+So now agents were navigating, but they weren't navigating well.
+We started getting reports that NPCs on patrol were taking weird detours, even when they should have had a clear path to their destination.
+When we investigated, we saw the path and the port or the NPCs were following look like this, but why would this happen?
+Why would ASTI return this as the core?
+This is what we were expecting.
+If there is nothing between us and the destination, we should be getting a simple two-point path passing straight through the corridor.
+However, this is what we were actually getting.
+The problem is that the path corridor is generated by searching between the midpoints of navmesh polygon edges, which is only an approximation of the shortest path to the destination.
+When we then string pull a path through this corridor, kinks will appear wherever there's a large difference between the approximation and the optimal paths.
+I should add that you don't need a tiled nav mesh for this to happen either.
+In this example, if I search for a path from the blue point on the left to the red target on the right, because the edge midpoints used during pathfinding look like this, and it's the shortest path that passes through these midpoints that determines the path corridor, a situation like this results in a path like this.
+But by chance, while we were working on how to deal with this, I was rereading the author of Recast, Miko Manonen's old blog post about its development. Here he is describing the funnel algorithm in a post from over 10 years ago on March 8, 2010.
+In the comments section, someone posted that they were having the exact same issue.
+Kingston, what should have been a straight path over a tiled navmesh?
+Mikko's recommendation was to use navmesh raycast to find waypoints in the path that could be skipped, then replace the section of the path corridor between those two points with the corridor returned by the navmesh raycast. So this is exactly what we did.
+Starting at the first waypoint in the path, we skip over the second waypoint, and perform a NavMesh raycast to each remaining point in the path.
+And remember the last successful result.
+We continue until we reach the end or the raycast hits something.
+Once either happens, we stop, remove the portion of the path corridor from the start to the last successful result, and replace it with the corridor returned by the raycast.
+Now this part of the corridor has been straightened.
+and we repeat the process from the next uncorrected node.
+In this case, the original corridor is already optimal, so we keep it and return the merged result.
+In the version we shipped, we actually performed this straightening operation a second time from the end of the path to the start, which is usually enough to find all potential shortcuts in most situations.
+In addition, even if the raycast is successful, it may pass through a high cost area of NAV.
+So we only replace the corridor section if the straightened version has a lower traversal cost.
+Now our corridor has been straightened, but there's still one more step.
+We need to perform string pulling again through the straightened corridor to generate the final path, like this.
+And here's the final result.
+Path quality had been greatly improved, and NPCs were now navigating directly to their destination.
+At this point, things were looking good.
+NPCs could handle different types of terrain, repath on their own, and navigation looked natural until they started to run.
+Because we had stopped repathing on timed intervals, NPCs could deviate significantly from the original path as long as they stayed in their path corridor.
+And because we simply steered directly towards the next waypoint on the path, it was possible for them to get into a situation where that waypoint was no longer reachable.
+Here you can see that after an NPC passes the first two waypoints, it attempts to move directly towards the player, but falls out of the path corridor, triggering a repath.
+Because of its large turn radius while running, it then misses those waypoints, exits the corridor again, causing another repath, creating a situation where it's never able to reach its goal.
+It turns out that this problem had also been solved over 10 years ago, and the solution was in the exact same blog entry we referenced to straighten path corridors.
+At the end of Mikko's post about the funnel algorithm, he noted that it's so fast, you could perform string pulling over the path corridor every frame to find the next corridor or corner to steer towards, which is also exactly what we did.
+Now when the NPC makes its wide turn, a new corner appears in the path.
+It turns towards that instead of the player and is able to reach its destination on the first try.
+Note that we aren't repathing when this happens.
+We're only rerunning string pulling over the original corridor.
+Well, this was looking good in the test environment, but around this time, we also started getting bug reports that NPCs were randomly making 360-degree turns while walking.
+Here, you can see an NPC approaching the player.
+But when the agent gets close to the pink high-cost area, it turns around momentarily before moving forward again.
+What was happening is that when an NPC deviated from its path and stepped into a high-cost navmesh area, Leaving the corridor would immediately trigger a repath, but the new path would almost always prefer to back out of the high-cost area we just entered instead of going through it, which caused agents to turn around in order to get back to low-cost terrain.
+We did want enemies to avoid high-cost areas, but if they entered one by accident, it would usually only be for a moment, so they might as well keep going.
+So, To discourage agents from entering high-cost areas, but commit to walking through one if they stepped into one, we extended NavMesh areas to support not only traversal costs, but an entry cost as well.
+A path would receive a one-time cost penalty for moving into a NavMesh area, but this could be adjusted independently from the cost of moving through it.
+For rocks, we reduced the traversal cost to the default and added a large one-time entry cost instead.
+This meant that once inside, rocky areas would be treated like ordinary navmesh.
+But while outside, NPCs would still prefer to avoid them, staying on flat terrain as much as possible.
+And here's the result. You can see that the NPC's path tries to avoid passing through high-cost areas, but if it misses its turn and steps into one, it commits to traversing through it and continues moving forward.
+Once it gets back to low-cost terrain, it continues to avoid entering other high-cost areas, but no longer backtracks if it enters them.
+So, after all this work, we finally had natural, reliable navigation over all types of terrain, with paths that would update automatically and only when needed.
+Almost.
+Even after adding entry costs, we're still getting reports of NPCs backtracking and turning in circles.
+It turns out that there was still one more issue we had to solve.
+Using the event-based repathing system, when an agent's NavMesh bubble moves and generates or destroys NavMesh tiles, the destination's tile clamp position moves as well, triggering a repath.
+But depending on the terrain, this can trap us in an area where the partial path to the clamp oscillates between opposite directions, causing the agent to pace back and forth forever.
+Initially, we just expanded the bubble size to fix the specific case shown here in the video, but that solution wouldn't work everywhere.
+Consider the following scenario.
+Now this mule has spotted the player in its territory at the bottom of a deep chasm and wants to move in to attack range.
+The crevice is far too deep for it to jump down, so in order to pursue the player it has to find another way around.
+Looking at the area from above, we can see that there is an opening in the crevice near the top where we can enter.
+So we might expect the mule to take a route like this, moving up to the crevice entrance and then back down again to approach the player. One problem The size of the landscape features here are too large to pathfind around.
+Even if we extend the radius of an agent's navmesh bubble up to 100 meters, we still hit our A-star iteration cap without even discovering the inference.
+In this situation, the closest position to the player that we can find is our current location at the top of the cliff.
+In early testing, it was trivially easy for players to escape mules in these areas.
+Worse, if the mule did manage to make its way into the crevice, it was almost never able to make its way back out again. The size of the NAMISH polygons inside the crevice are much smaller, so our search radius would shrink to just a few dozen meters, which meant that there was also no way that it was going to make its way back to base after an encounter had ended. We needed a way to navigate around these large-scale terrain features, and it was clear that the NAMISH alone wouldn't be sufficient.
+Our solution was to take advantage of another feature in Decima, the AI Road Network.
+Initially, this existed as a self-contained graph with its own pathfinding functionality.
+We extended it so that the NPC's path-following component could use it as a general-purpose, high-level navigation layer, merging the results of road paths and navmesh paths into a hybrid navigation system.
+Once AI roads had been placed by game design, NPCs could seamlessly get on and off the road network to reach their destination if they were unable to find the complete path using only the nav image.
+Here's what our navigation behavior originally looked like.
+The NPC at the bottom is trying to reach the player at the top.
+But as it approaches the cliff in the middle, it's unable to find a way around it and get stuck.
+Even with a 500 node iteration cap, the terrain features here are just too big for it to navigate around.
+However, with the hybrid path following component, as the NPC approaches, it discovers a high-level path on the road network.
+And because it was only following a partial NavMesh path, it switches to use the road network to ensure it reaches its destination.
+The NPC now uses the NavMesh to follow the road path, navigating towards an intermediate position a few meters further along the road.
+It will then continue to follow this moving target until it exits the road network, after which point it will revert back to navigating using only the NavMesh.
+And now, finally, movement behavior was not only stable across all types of terrain, but agents could also navigate reliably across the entire map, even for complex routes spanning several kilometers. But up to this point, all the work that we had been doing was only to support navigation over static environments. We also had several types of dynamic terrain to deal with, each with its own challenges.
+For example, when a catcher encounter begins, we spawn in a number of strand objects, buildings, vehicles, chunks of concrete that rise up from the tar.
+The catcher needed to be able to not only navigate around these objects, but jump up on top of them as well in order to chase the player.
+You can see here that as soon as strand objects begin to appear, we generate nav mesh over their location, along with jump links connecting them to the ground below.
+The catcher is then able to use these links to jump up onto the buildings.
+And once it does, the building will begin to sink back into the tar.
+When this happens, that strand object's navmesh is removed.
+This allows the catcher to follow the player anywhere across the encounter area as it changes.
+And here's how we did it.
+Each strand object actually has two sets of collision, one for the object itself, and another that only responds to the navmesh.
+Because strand objects are in constant motion, using their actual collision to regenerate the navmesh wasn't a feasible option.
+Instead, on spawn, the navmesh collision is activated at the object's final position, and then off-mesh links are added around its perimeter to connect it to the ground.
+When a strand object is scheduled to sync and despawn, the navmesh collision and surrounding links are removed, and the area reverts to its original shape.
+Outside of catcher encounters, most dynamic terrain in the game takes the form of navmesh obstacles attached to props, like these retractable barriers at the entrance to distribution centers, or destructible physics objects, like barrels and fences, as well as vehicles when they are pumped, or on player-built structures, like this timefall shelter.
+But they aren't used simply to prevent movement.
+To chase the player effectively, we wanted NPCs to take advantage of the player's own traversal structures during navigation.
+For example, by attaching NavMesh obstacles to bridges, we were able to allow NPCs to use them too.
+Here you can see the player constructing a bridge.
+Once it begins printing, the NavMesh responds to the change in collision and automatically generates NavMesh across its span.
+Then, once printing is finished, NPCs are able to use it just like the player.
+Once this was working, game design came to us with a question.
+If they can use bridges, can we also let them use ladders?
+And at first, we weren't sure. In most games, ladders are statically placed, perfectly vertical, every variable is controlled.
+Even then, supporting them is a significant amount of work.
+But in our case, the player can place them anywhere and at any angle.
+Ladders placed at more than 45 degrees, like this one, need to be climbed with both hands, but ladders placed at less than 45 degrees would be walked across, like bridges.
+But because these provide avenues of escape for the player, it was important for NPCs to be able to traverse them as well.
+If they couldn't use them, it would be trivial for the player to move somewhere that they couldn't follow.
+So we accepted the challenge and started by enumerating all possible ways an NPC could get on and off a ladder.
+For vertical ladders, there were four ways to get on, grabbing on from the top or bottom, or from the sides at two different angles.
+There were five ways to get off, depending on whether we dismounted by stepping off at the end of a ladder or by jumping.
+Similarly, for horizontal ladders, there were two ways to step on, from the ends or the sides.
+and four ways to step off or jump off, depending on how close we were to the ground.
+The next step was to identify where an NPC could get on to determine entry points for the ladder.
+We started by defining sampling points at 50 centimeter intervals.
+And then at each sample point, checked for NavMesh at all possible boarding spots.
+All the locations here in white represent a possible position where we could get on the ladder from the NavMesh.
+The next step would be to find all possible exits and connect pairs of entrances and exits with off-mesh links.
+But testing all possible pairs isn't practical.
+This would generate hundreds of links, most of which would be redundant.
+So to reduce the number of tests and connections, we form groups from runs of matching NavMesh entrances.
+Then from left to right, we perform a collision check for validation from the entrance to the ladder, but only for the last entrance in a group.
+Because ladder traversal is slow, this minimizes the time we spend on it by ensuring we get on at the last possible moment.
+Then we do the same for the first entrance of subsequent groups for step-off connections.
+This ensures that we get off the ladder as soon as possible.
+Also, I should mention that to walk off a ladder from the center without turning, we add a hidden dismount exit during this step.
+For groups without entrances, we can only jump off.
+Here we perform both a collision check off the ladder down to the ground, as well as test for navmesh at the bottom.
+Jump off points that either don't have navmesh below them, or fail the collision test are leaving the final set of exit points for the first entrance group.
+We then add an off-mesh link connecting each entrance to exit pair in this set and continue the process for subsequent entrance groups.
+Finally, we perform the entire operation again in the opposite direction.
+At runtime, the process of analyzing the terrain and adding off-mesh links happens in a time-sliced job that checks one pair per tick and looks like this.
+And here's what it looks like in game.
+Here we have an NPC commanded to approach the player's position.
+If we place a ladder, the moment it hits the ground, a terrain analysis job is kicked off, and link generation is already complete by the time the player grabs onto it.
+After we jump off, we can see the NPC is already approaching the ladder entrance in order to follow us to the top of the shelter.
+Because terrain analysis failed to find any valid step-off positions on top of the shelter, the NPC dismounts by jumping and continues to our location.
+If we then place a horizontal ladder, the process repeats, connecting that mesh at the top of the shelter to the far side of the ladder and the ground below.
+Likewise, as soon as we jump off, the NPC continues to approach us, using our own ladder to jump down from above.
+Spatial queries and position picking also played a large part in navigation and behavior development, and there's a lot on this topic that I'd love to talk about, but today I want to focus on one specific problem we faced and the trick we came up to handle it. Let's imagine we are the blue NPC on the left and we want to find an attack position near the yellow player on the right.
+In between us is a high-cost navmesh area representing a large body of deep water.
+We want to get close, but stay out of the water as it's going to slow us down.
+If we generate a grid of sample points over the terrain, we can give positions inside high cost areas a low score to avoid entering them.
+And if we then rank the rest based on distance to the target we'll get something near the player and outside the water.
+Great.
+And because it is a high cost NavMesh area, the path to our attack position will go around the water as well.
+This type of query actually worked well for us in early development, but if the player was not near a lake, but a river, we would encounter a problem.
+We could test for positions in high-cost NAVMISH areas and give them a low score.
+But at the end of our position-picking query, our target position could be on the far side of the river.
+And the NPC would spend ages waiting across just to stand on the other side, when someplace on the near side would have been just as effective.
+But because both sides look equally attractive from our spatial queries perspective, In combat, NPCs would cross and recross the same river over and over as they reposition around the player.
+What we needed was not just a way to avoid choosing positions in high-cost areas, but also positions that NPCs would have to pass through high-cost areas to get to.
+So we came up with an idea.
+Our spatial query system could already use a Dijkstra search over the navmesh from the agent's position to calculate a rough approximation of path cost, letting us rank points based on their estimated navigation cost.
+Here you can see that areas on our side of the river have a low path cost shown in blue, while areas that enter or pass through the river on the right have a high cost shown in red.
+This was close to what we wanted, but places that were simply far away, like the area on the far left.
+would also have a high path cost, even though they didn't pass through a river or other high cost area.
+We wanted to test that would rank positions based on how much unfavorable terrain they would have to pass through to get there, regardless of distance.
+But the same test could also return the raw path length to areas around it.
+If we subtracted this length from the cost, places where the path length and cost differed would indicate areas that would require the MPC to pass through a high cost area at some point.
+Conversely, places where the length and cost were the same represented areas that could be reached without walking through difficult terrain.
+This is what we were after.
+So we added a third setting to our pathfinding test in the spatial query system, the delta path, delta cost, the delta between path cost and path length.
+However, there was one issue.
+While this worked as we had imagined when the NPC was outside of a high cost area, avoiding both entering and passing through the river.
+If an NPC was already in the river, it would stop moving entirely.
+The reason is because from inside a high-cost area, moving anywhere would force us to pass through more unfavorable terrain than just standing still.
+We would need a different heuristic if we wanted to discourage agents from staying in high-cost areas and instead move back into easily traversable terrain.
+The trick we came up with was to manipulate the reported path length and cost so that the total distance to all locations looked the same.
+What this means is that we would first find the highest path length among all sample locations in the query, and then for the rest of the locations, virtually extend the length at the end of their path to match.
+We then adjust the path cost to match this added length at the destination.
+Another way of putting it is that the test now compared how much time an agent was spending in high cost areas, even if it wasn't moving.
+If it could reach a location quickly, it would stay there and accumulate the traversal cost at that location until it had traveled a virtual distance equal to that of the longest path in the query.
+Now we have the heuristic we were after.
+Our special query could identify all locations that required us to pass through a high cost area to reach.
+and if we were already inside of one, we would know which locations could get us out the fastest.
+And here's the final result. Here we have an NPC moving from right to left across a river.
+Initially, both points in the river and on the other side of it have a high path cost delta and receive a low score. Once we enter, the river still has the lowest ranking, but the far side is now a bit higher and gradually increases as we get closer.
+Finally, once we leave the water, the river and the area beyond it both received low scores again, as before.
+This is actually a really simple technique and very easy to implement, but we hadn't encountered it before, and the added spatial awareness this test gave to NPCs made a real difference in the quality of behaviors we were able to achieve. So hopefully some of you will find it useful as well.
+Lastly, I want to talk briefly about a few other features we've spent time on and what they allowed us to accomplish.
+First among them is the approach we used to support cover in terrorist camps.
+We built our solution on top of Decima's dynamic cover system, which provided a way for NPCs to generate cover on demand.
+When a cover point was requested, a frame-budgeted job would analyze a subset of nearby navmesh edges, performing collision tests on any edge long enough for an NPC to hide behind.
+creating crouching or standing cover points wherever an NPC was both protected by cover and could peek out to shoot.
+Once generated, NPCs could use the spatial query system to test for a line of fire from these cover points to a target.
+which would check as many points as it could fit into its frame budget and return a list of all valid cover locations.
+Finally, these results were cached, so over time the entire area would incrementally become populated with cover points and their status would be revalidated during the encounter as NPCs continued to make additional cover requests.
+This was great for performance, but because the encounter area in terrorist camps was so large, it could take several minutes before enough cover points had been generated for an NPC to find a usable one consistently. Even after the area was populated, since only a small number of cover points are ever in the right position to actually provide cover from the target at a given time, testing only a handful of them on demand usually resulted in failure.
+As a result, terrorists weren't able to take advantage of the system as well as they should have, and sometimes they never used cover at all.
+What we needed was a way to prepare and analyze cover in advance, before it was requested, so it would be ready to go when an NPC eventually did need it.
+We could have accomplished this by just placing static cover by hand instead.
+But we didn't want to lose the ability to respond to changes in the navmesh.
+So our approach was to transition cover generation and analysis from an on-demand service to a persistent background job.
+When combat begins, agents register themselves with the cover manager and specify a target.
+And as long as at least one agent is registered, the cover manager will incrementally analyze the navmesh around them in its own thread, as well as check the line of fire from generated cover points to the target.
+Here you can see the status of cover generation as NavMesh tiles are analyzed.
+Red tiles have generated partial cover results, while blue tiles have finished analysis.
+And those that contain at least one cover point are highlighted in light blue.
+Later, when an agent finally does request a cover point, we simply return these cache results to the cover manager that it's been preparing for us.
+Here's another example viewed from ground level.
+You can see that as terrorists approach the player, cover is gradually generated around them.
+And once a valid cover point becomes available, an NPC moves into it immediately.
+And this is what the line of fire check looks like from the debug view.
+The cover points around each registered NPC are batched together, and the resulting set is sent to a background job to check for both exposure and line of fire to the target.
+As soon as one job finishes, a new one is started.
+Here an agent has moved into a green cover point, which has both cover and line of fire to the player.
+And if we crouch on the other side of the barrier, it turns red as it loses line of fire, and the NPC immediately responds by repositioning.
+And this is what we were after.
+By keeping the cover state updated asynchronously in the background, finally, we were able to produce consistent cover behavior over large encounter areas like these.
+Another feature we added was AI for low LOD entities.
+Most NPCs are actually persistent.
+When the player is far away, they don't despawn, but instead switch to a low LOD mode without a physical representation until the player comes back.
+When this happens, they also switch to a simple lightweight version of their AI so that they can continue to perform the same activities that they do in high LOD.
+This includes enemies making patrols around camps, inspecting vehicles, stopping for breaks.
+orders following delivery routes, dropping off packages, picking up new orders, and so on.
+And while we do completely suspend some NPCs when they're extremely far away, in general the whole world is alive and in motion, even when it's out of view.
+And adding this mode also allowed us to do one other neat thing.
+When the player triggers an event that causes time to pass, we could now fast forward the AI by the same amount by temporarily switching them to low LOD and running their update tick with a large delta time.
+So when the player passes time in the timefall shelter, 10 minutes will pass not only for them, but for NPCs as well.
+This is what lets us do things like advance porters along the delivery routes, like you can see here.
+Finally, it wouldn't be a postmortem if I didn't talk about some things we tried that didn't work.
+First is bidirectional pathfinding.
+At the 2018 AI Summit, Nathan Sturtevant presented a great talk on bidirectional search.
+Our environment met all the criteria it should be suited for, a weighted terrain, problem asymmetry, map asymmetry, and local minimum.
+And it just so happened that this was right around the time that we were struggling with regularly hitting our A-star iteration limit, so we were very curious to see how bidirectional search might perform.
+And after a bit of work, we actually did manage to get to port NBS to recast and had it running inside the game.
+And it was performing great.
+Early tests showed promise in areas that in the game that were difficult for forward search to handle.
+Unfortunately, we ran into two issues.
+After adding one-way jump links, the nav mesh was no longer an undirected graph.
+Jump down link had no connection in the opposite direction for the reverse search to explore, breaking search symmetry.
+Likewise, after adding NavMesh area entry costs, the reverse search would incur the entry costs as well, creating a situation where we'd pay the cost both on entry and exit.
+To be clear, both these are solvable problems.
+With some modifications to how off-mesh links and entry costs are handled, NBS can absolutely be made to work in this environment.
+But in our case, even though the results were promising, we had to put it aside and were unable to return to it later.
+We also tried a number of methods to improve path smoothing.
+If an agent was running, simply heading directly towards the next waypoint often resulted in them missing follow and turn, which made it difficult for them to reliably hit the start of jump links or the entrance to a ladder.
+The method we ended up shipping with in the end was actually just a Bezier spline that the agent could follow, constructed so that the curve would already be turning in the direction of the next segment before hitting the waypoint.
+Additionally, to avoid triggering a repath, each apex was constrained so that the smooth path would never leave the corridor.
+To a degree, this actually worked. Agents will, depending on the situation, make wide turns and do hit more waypoints, but the checks we used to constrain the spline to the corridor were overly strict, and even path corridors in flat terrain could be very narrow, which means that often the spline shape is not significantly different than the original straight path.
+So there's still a lot of work we'd like to do in this area to improve path quality further.
+Finally, while we were able to generate jump links for ladders and strand objects procedurally, every other jump link in the game was placed by hand by game designers, which became a painstaking process because links would break and need to be adjusted repeatedly as changes were made both to animation and the environment during development.
+Now, we wanted to develop a procedural placement system for these links as well, but weren't able to fit it in the development schedule.
+So we had to use brute force to make sure that every encounter area, every ledge, rooftop, and nav mesh island that the player could access was connected by jump links so that NPCs could follow.
+In the end, we had about 2,000 of these links placed across all areas, which was more than enough that by the end, we regretted not being able to automate this task.
+So to wrap everything up, in this post-mortem, we took a look at the environment of desk training and why it was such a challenge to work with for AI, discussed game design's goals for NPCs and how that drove our need for robust animation, how we went about creating a nav mesh we could use to satisfy those goals and the problems this created for navigation, techniques we used to support dynamic obstacles that NPCs could use to follow the player.
+One trick that served us well for believable repositioning over natural terrain, and a brief overview of a few other features we developed for the game, including some that didn't work out.
+So I hope you've enjoyed taking this look at some of the challenges our team faced over the course of developing the AI for Death Stranding.
+Thanks for attending.

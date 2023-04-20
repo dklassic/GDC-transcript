@@ -1,0 +1,467 @@
+All right, hello everyone.
+My name is Nikolai, and I'm the technical lead at Ubisoft Massive.
+And today I'm going to talk to you about global illumination in tone classes, the division.
+Before we begin, I've been asked to remind you to turn down your mobile phones, and to fill out your evaluations at the end.
+And if you've got questions at the end, please step up to the mics at the end.
+So, a couple of words very briefly about The Division.
+It's an open-world, online RPG, and it's based on Massif's in-house Snowdrop engine.
+So today I'm going to cover Snowdrop's solution for ambient lighting, which we call Precomputed Radiance Transfer Probes, so PRT Probes for short.
+With PRT probes, what we can get is an accurate approximation of global illumination in real-time, both on consoles and on PC.
+We support dynamic light sources such as the sun, the sky, point, spot, and area lights as well.
+And we are able to evaluate the light bounce from these light sources with a great degree of accuracy.
+Our method was developed with production in mind, and it's fast, it's GPU friendly, and also has very low memory requirements.
+So with PRT probes, lights can be added, removed, or modified without needing to rebake, and this provides instant feedback to our lighting artists.
+We use exactly the same techniques, both for indoors and outdoors.
+And we also take special care to prevent light bleeding, the light coming through building walls and also between interior rooms.
+So, here are some comparison images which show the contribution of the PRT probes.
+At the top, we have the normal output of our renderer.
+And at the bottom, I've turned off the ambient lighting and replaced it with a solid black color, so you can see the contribution better.
+So, here are some more examples from more indoor type areas this time.
+Again, top is the normal output and at the bottom you can see what happens when we switch off the ambient lighting completely.
+So here's the agenda of the talk today.
+First I'm gonna give you a very high level overview of the features of our approach.
+Next I'm going to talk about how we pre-compute the radiance transfer online, offline sorry.
+Then we get to the more interesting and exciting parts about what we do at runtime on the GPU.
+And finally, I'm going to talk about some of the problems that we encountered during production, and I'm going to show you some ugly screenshots.
+So, the division is set in an open world.
+Our version of Manhattan is quite large, more than six square kilometers.
+We have almost two million total entities placed throughout the environment.
+Our artists have hand placed about 22,000 vehicles and about 28,000 garbage piles.
+And the size of the world and the number of objects in it, makes traditional methods such as light mapping, static light mapping, unfeasible for production.
+In order to manage our costs, it was clear that we had to do with a pro-based approach.
+And as probably most of you know here.
+Light probes or irradiance volumes are kind of similar to a 3D light map.
+So rather than using a UV texture set to index them, use the position and the normals of whatever it is that you render.
+So from the production point of view, this is very good because the artists don't have to worry about unwrapping UVs.
+We also don't have to trigger a rebake whenever somebody just changes slightly a model.
+And this is especially important when you have a lot of...
+models that are placed throughout the world, that are instanced throughout the world.
+For example, a generic car or a generic brick wall.
+So, the division also features a day-night cycle, and because of this, the quality of the ambient lighting becomes really important.
+Our artists can't really cheat and set the sun direction to make their environment look as good as possible.
+And also due to the tall buildings that we have in New York, we have certain areas that are in shadow throughout the day.
+So they can only receive ambient lighting.
+The PRT probes allow our artists to tweak the lighting for any particular time of day, and immediately provide an accurate approximation of the global illumination at that point.
+And they can do that without waiting for a long rebake process.
+During the night, our main source of lighting comes from local lights, point spots, and aerial lights which are placed throughout the world.
+We don't do the typical Hollywood night thing where you get still a strong directional light, but just blue.
+So in the previous iteration of our technology, this, that we did for Far Cry, The secondary bounce from these lights would have to be actually baked inside of the probes, but for the division, what we were able to do is to make these light sources completely dynamic and also editable as well.
+The lights can be freely added, you can remove them, you can modify them as you wish, and you also get instant feedback as to how a specific environment will look during the night.
+The division also features many interior spaces.
+A lot of these are often very large and densely propped.
+Our artists try to light them in a realistic way.
+As a general rule, we don't use hacks such as negative lights.
+And we also try to avoid doing things like artificially raising the ambient light level.
+Instead, we just solely rely on the PRT probes to get good lighting.
+A lot of the interiors also have large windows and openings, and as such are affected by the day-night cycle as well.
+So this all fits together quite nicely with our pro-based approach.
+However, we have to take special care in order to prevent light bleeding between the different rooms.
+We also support different weather conditions in the division.
+So we have clear sky, we have overcast, we have snow storms, and even we have blizzards.
+And the weathering game is actually randomized by a script that runs on the server.
+Each weather preset defines its own lighting, and the artist can tweak things such as the sun, the sky color, the cloud type, the density of the clouds, and so on and so forth.
+One interesting thing is that the weather preset also determines how much snow is going to build up on the different surfaces.
+And this is effectively changing the BRDF or the shaders of the surfaces on the fly.
+It would be a problem if we were to go with a completely static GI solution, but because of the way we do PRT, this we can achieve quite easily with just a few shader instructions and at minimal rendering cost.
+So let me show you now a brief time-lapse of how everything fits together inside the game.
+So, the white spheres that you see here are the probes where we've computed the lighting.
+And you can see how the ambient lighting changes as the sun moves across the sky.
+So, they get the correct light bounce from the buildings and from the street.
+Here we have an example of the different weather conditions.
+Suddenly it becomes a lot foggier.
+And this is where our volumetric fog solution is gonna kick in.
+Finally, at night, we see that most of the illumination actually comes from the street lights.
+And here we have another example of the volumetric fog being affected by the process as well.
+So, after this brief introduction, let's now go into detail about how we implemented PRT inside Snowdrop.
+So, pre-computed transience transfer, or PRT, refers to a family of rendering techniques where we figure out what the light transport is between surfaces for a particular fixed scene.
+And this PRT, we can store it per vertex, in a texture, or in the props, just like we did for Far Cry.
+In the space of this presentation, I can only give you just a very short background on PRT, but if you want to get more information, I recommend looking at the course notes from SIGGRAPH 2005, they're really good.
+So in PRT, in general, we only can support distant light sources, such as a HDR environment probe, or directional lights.
+For Varkar3, I did develop a solution where we could also support dynamic localites, but unfortunately, it turned out to be too heavy and inaccurate, and it didn't make it to the final release.
+High frequency shadows are also possible, but so far have not been particularly suited to games, unfortunately, because of the complicated shaders that are required.
+So in the bottom image here, you can see an example of PRT done with a non-linear wavelet basis.
+So you can see the sharp shadows and the reflections, and generally that's just not possible on the GPUs with that particular wavelet-based approach.
+So to get around with these limitations, what we did was we just decided to use brute force.
+Rather than looking for something elegant and compact to represent PRT like all of these academic papers do, we just tore an explicit list of all of the surfaces that are visible from a particular probe.
+So, we have a list of surfals, or surfal elements.
+Each one of them has a position, or maybe on the normal, so color on the normal, and various other attributes, such as how much snow can build up, and so on and so forth.
+And it's quite similar to having a G-buffer cube map per probe, but not quite.
+Here is our Serphal debug view, which hopefully will make this a little bit more clear.
+So for each probe, what we do is we draw a green line from the probe towards the surface that that probe sees.
+So as I said, it's kind of similar to a Gbov cubemap, but you can also think of it as firing lots of rays from the probes and just storing the first hit, you just store the surface properties there.
+So for each direction where we don't have any geometry, we assume that the sky's visible.
+And what that gives us is a spherical shadow term per probe.
+It's somewhat similar to a large-scale directional ambient occlusion.
+And you can see in these two images to the right how this works compared to SSEO.
+SSEO is a lot more local and enhances basically the corners of the objects.
+The pre-computed sky visibility, on the other hand, works on a much larger scale and can pick up occlusion from the train tunnel, in this case, and from some of the buildings.
+And since we're using probes, we can't only pre-compute radiance transfer for just a particular normal.
+We have to do it for the entire sphere.
+And the way we do it is the way we did it for the Far Cry series, with a transfer basis.
+So in the top left image here, you can see the light probe, the HDR light probe of Grace Cathedral.
+Top right, you see the cosine convolution, which tells us how a purely diffused surface is going to be illuminated from that particular light probe.
+And what we're looking for is to get a compact representation of the light, of the cosine convolution of the light probe, or to compress it in some way.
+And one standard way to do this is to represent it as coefficients of a particular transfer basis.
+And here at the bottom, I've shown you a comparison of two of the most common challenges that you can have for transfer basis in PRT.
+Bottom left, we have second order spherical harmonics.
+They're somewhat equivalent to having like a principal light direction.
+So in this example, that will be my principal light direction and a single ambient value.
+And the usual problem with that is if you have two strong light sources coming from the opposite directions, then you only can raise the ambient value, but you lose any sense of directionality.
+On the plus side, this is actually very good for GPUs because you can just store it as four floating point values.
+And to the bottom right, we can see another representation, the Half-Life 2 ambient cube.
+This isn't a real basis, it's not a real orthogonal basis, it's really just six vectors that are axis aligned.
+And what we do is we just compute how much light each one of these vectors...
+So essentially what we do is we just compute the cosine convolution for six different normals.
+Again, the problem here is that if you want to have a rotating light source, instead of actually seeing it rotate, you will see it fade in or fade out from one of the directions and then fade into the other.
+So it's actually just gonna blend smoothly rather than actually seeing it rotate.
+And this is because the basis vectors are fixed.
+On the other hand, after evaluating different choices for the transfer basis, we finally settled on the Half-Life 2 ambient cube basis, which is also quite GPU friendly as it only requires six floats.
+So, very shortly what we do is we just compute, pre-computed radiance transfer for the six normals and we, at run time, what we'll do is just a single blend between those six vectors.
+And here you can see the isolated irradiance from each particular direction.
+So, top, sorry, left, right, top, bottom, front, and back.
+So essentially if we want to shade something, we just figure out how to blend properly between these six different values.
+So let me talk about how we actually generate irradiance transfer.
+We have to start with placing the probes in the world.
+And we do this automatically in two major ways.
+First, we have a grid of raycasts that are spread four meters apart.
+So we just fire a ray top-down and we spawn a probe at every hit.
+We also do a bunch of additional raycasts in order to move the probe slightly, to nudge it so that it doesn't intersect any objects.
+One other thing that we do is we also automatically spawn probes alongside the building walls.
+And this helps to make a smooth gradient and to prevent the buildings from looking flat.
+And most of this is down to the sky visibility that we also compute, because the probes at the bottom are going to be a lot darker than the probes that are at the top.
+So how do we store that data on disk?
+We divide the probes into a 2D grid of sectors.
+Each sector is 64 by 64 meters and can hold a maximum of 1,000 probes.
+Typically, we expect to have about 300 to 400 probes.
+I think the maximum that we've seen is about 960.
+And that sort of depends on how many buildings you've got inside of a particular area, how tall they are, how many floors you've got for a particular interior, and so on.
+So, we store the probes simply as just a very simple array, but you can probably also try to organize them in some sort of bounding volume hierarchy in order to be able to do spatial queries fast.
+And these sectors at runtime, they're streamed in as the player moves around.
+We keep a maximum of 25 sectors loaded at any one time.
+So, if we want to relight a large number of probes every frame, you can't just store the list of surfers per probe and try to relight that.
+It's just gonna be too slow.
+So what we have to do is some optimizations in order to have the GPU do less work per frame.
+And to do that, the first trick that we do is that in each sector, all of the probes are actually sharing the same surfers.
+This way we can relight all the surface in one go and then the probes will actually reference those and not do any duplicate work.
+And you can see that this would actually work quite nicely here.
+In the images to the right, you can see that the probes reference roughly the same surface all the time.
+So with that, we're actually able to reduce the number of surface that we relight on the GPU quite dramatically.
+And you could use a very sophisticated clustering algorithm here, but we just didn't have enough time to implement it, so we just went with a very simple two-level hash grid.
+I'm gonna show you some details of that right now.
+So we have two levels for our grid.
+And the first level, each cell in the grid overages the positions, the normals, the colors, and everything else for the surface.
+We use the surfer position and also the principle normal direction of the surfer in order to index into the grid, and we do that in order to avoid averaging surfers that have drastically different opposite directions.
+So the cell size here for this grid determines how much work you're gonna have to do at run time in order to compute the light tank.
+And you have to be careful here, because if you set this too coarse, you're gonna have problems, for example, with narrow spotlights, because you're just simply valuating the lighting at a very coarse grid.
+We found that for our game, one meter cube was actually a very good compromise between performance and quality.
+So the second grid level averages multiple surf fills into one irradiance brick.
+And this is an optimization that is required in order to reduce the amount of work we have to do per probe.
+So rather than the probe referencing each individual surf fills, it actually references a brick instead.
+So you have to do a lot less computation per probe here.
+And again, you kind of have to be careful here.
+If you set this size too large, then you're gonna have inaccuracies.
+If you set it too small, then your performance is not gonna be that great.
+And for us, four meter cube cell size works quite nicely.
+So now we're gonna go through a very high level overview of how we actually store all of the data on disk.
+So for each sector, we have our array of probes that you can see here on the left.
+Each probe has its own position and also the Half-Life 2 ambient cube coefficients for the sky visibility.
+So we only store the sky visibility per probe.
+It also has a range, two indices, into an array of brick factors.
+So brick factor basically defines how much influence, how much light a particular probe receives from a irradiance brick.
+And again, we just have half-life two ambient coefficients, so six float values.
+And also we have a particular, and we also have a brick index that is indexed into our irradiance array, irradiance brick array.
+So the brick is very simple, it just has two indices that define a range inside the surfoil array that you see here to the right.
+And finally we get to the last part, the surfoils, where we just store anything that we need to do in order to be able to relight them.
+So their position, their color, the normal, and any other attributes.
+So, in order to generate this, we have an offline baking process.
+We start by rendering gbuffer cubemaps for all the probes inside a certain sector.
+We read back the gbuffers to the CPU, we unproject the texels, the cubemap texels, and compress the normals, and so on and so forth.
+After we've done with rendering all of the cube maps, what we do is we put the surface into the hash grid in order to get the averaged surface and also the irradiance bricks.
+And as we do that on the CPU, we can start actually rendering the other sectors that are in the cube.
+So we do that interleaved.
+And all of this takes around 5 to 6 seconds per sector.
+Again, it really depends on how many probes and what geometry you're going to have in that particular part of the world.
+So, for the Manhattan map, that equates to about 1 gigabyte of data on disk.
+We have about 4,000 sectors, 1 million probe and 56 million surface.
+And we can generate the entire data set offline in about 8 hours.
+But here our lighting artists don't ever have to do that manually and they can only do it once and then work off of that particular nightly set of data.
+So I hope everybody is still awake after that.
+And we're going to go to the more exciting part, the rendering, what's happening at runtime on the GPU.
+So, super high level summary of what we're doing every frame, and I'm going to go into details about each one of these super shortly.
+We start by relighting all the surface and the bricks.
+So this is simply calculating the lighting at every surface and then summing it up for a particular brick.
+Very simple.
+The next thing that we do is we relight the probes.
+We compute the lighting that comes from the sky, and then we just add it to the lighting that is referenced by every single brick.
+And finally, at the bottom here, we put everything into an irradiance volume.
+So this is just...
+This is just a normal volume texture that has a single RGB color for each one of the six directions, and we use that for shading.
+So each frame, we start by taking our PRT data for the probes, we plug in the new lighting environment, and get the probe irradiance back.
+And this is not just a simple blend between different irradiance solutions for different types of bay.
+And allows us to have very accurate lighting at a specific time and to capture GI effects that are otherwise impossible to capture because they're very short duration.
+And here to the right you have an example of such an effect.
+So in the left image, we get a strong orange light bounce that's coming from the topoline because it's directly illuminated by the sun.
+And this happens only for a very few minutes during the day.
+So if you were to do, to basically pre-compute irradiance for certain times of day, you have to be either very lucky or sample it quite densely in order to be able to capture that.
+And at other times, the tarpaulin is in shadow, so the wall of the building is primarily illuminated by the sun and the bounce from the street.
+So how do we do that?
+It's actually super, very surprisingly simple.
+This is some pseudocode.
+For me as a programmer, it's quite easy to understand this.
+I hope it will be for you as well.
+First, we compute the radiance at every brick.
+For each brick, we just go through the list of every circle, we compute the lighting there, and finally we average that for that particular brick.
+And that compute lighting function is nothing more but like in your deferred shading function, you can just reuse that given the normal, the position, the albedo, you can just compute your lighting from that one as well.
+So as the sun lighting and the shadowing is evaluated per surfall, we can achieve much better accuracy than our previous PRT methods, such as the one that we used in Far Cry 3.
+where the shadowing term was just approximated per probe with some spherical homologous coefficients.
+And here we can see the difference that this makes.
+We have a scene here where the sun direction changes throughout the day and the irradiance of the sun isolated here to the right changes quite dramatically.
+We just have...
+a difference of, what is it, three hours?
+And you can see how much difference it makes just for the solution.
+And this is something that you cannot very easily capture with PRT.
+And you also have to sample quite densely if we were going for different probe sets and computing them for a specific time of day.
+So one thing that you have to be careful about if you're going to implement this is that the dynamic shadow map from the sun actually follows the player and is only guaranteed to cover the visible frustum and not all of the surface.
+So any surface that are outside of the frustum do not have a valid shadow map.
+So depending on your indexing mode, you will just get strange results.
+And to illustrate the disastrous effects of this, what I've done is I've just completely turned the shadow from the sun.
+And you can see that it sort of looks all right, but you get like a weird ambience where certain objects are illuminated even though they are completely in shadow.
+So this is just incorrect.
+We could solve this by rendering a dedicated shadow map that would cover all of the surface, but that would be too expensive.
+So, what we do instead is we just keep track, we just keep a history of whether a particular surfer has a valid shadow sample, and we just use the last known value.
+And it's kind of okay because the sun doesn't actually change direction that fast.
+So, another improvement over our previous PRT implementation is that we can easily incorporate local light sources, point spot area lights.
+What you have to do is simply to light each surfer with this and you automatically get the correct light mouse in that compute lighting function that we saw in the pseudocode.
+And in order to do this, we just have to do a little bit of extra work on the CPU in order to figure out which lights intersect the sector's bounding box.
+And then we just simply...
+store their properties into GPU constants and upload them to the GPU and then we're done.
+One nice optimization that we also do is that lights that are marked as static, so you can't actually shoot them or they won't change, they won't blink or they won't move, we just store them in a separate buffer.
+We compute them once and then store them and just re-add them.
+And this allowed us to support many more light sources than I thought originally would be possible.
+So, I'm gonna show you now a quick video of how dynamic light sources work with Snowdrop.
+So here what we have is a spotlight, very bright spotlight that is shining towards the wall.
+and the wall is multicolored, it's got like these different tiles.
+So as the light moves, it lights up the tiles and then the props capture the bounce from them.
+So you get this really nice multicolored effect.
+So as I mentioned in the beginning of the talk, each one of our weather presets also defines how much snow is going to build up on the different surfaces.
+And in order to support this, we just store a tiny bit of data that tells us how much snow is supposed to accumulate on that particular surface.
+So then simply when we relight the bricks, we read the value from the weather preset of how much snow we're supposed to go, and then we just lerp between the original, the original color of the surface and purely white.
+And you can see here a comparison of what it looks like to the right here.
+Here, to the left, I've turned the effect off, so what you get is like this still kind of correct, but not quite grayish ambience that's coming to the probe.
+And to the right, you have a much more pronounced white ambient light from the bottom.
+So it works really nicely and it's very cheap.
+So as some of you probably figure out by now, we only pre-compute a single bounce for the Sophos, for the PRT.
+And in order to simulate additional bounces, one of our programmers figured out a very nice way to do that.
+We just use the computed irradiance from the previous frame and we feed it back to the current surface when we do the lighting.
+So each surface just stores an index to the probe that is closest to it and just uses that as an ambient lighting term.
+And this feedback loop allows us to capture the light bouncing from...
+the light from the sky bouncing from the floor.
+And you can see the effect here in the bottom image here.
+Just a little bit of a close-up.
+If you just use a single bounce, then the ceilings are gonna be quite dark.
+Once you turn on the feedback loop, then suddenly everything gets a lot more correctly illuminated.
+Couple more comparison images.
+So here we have an outdoor environment and the feedback loop just makes everything brighter and brings up the bottom of the light probes.
+So it illuminates the bottom of the objects.
+So even though it works very nicely for outdoor environments, for indoor environments, it's not, the effect is not quite as pronounced.
+Here again to the left you see the effect of a single bounce, and to the right you see the effect when we turn on the feedback loop.
+So, you can see just a tiny, tiny bit of difference where the probes are a little bit brighter, but in reality it doesn't give you much.
+So, the next thing that we have to do after we've done the bricks and the radiance from the bricks, we have to go through each probe and relight the probes.
+So first what we do is we compute the radiance from the sky.
+For that, it's a very simple process.
+We render the entire sky to a very small texture, and then we compute the cosine convolution of that, and we store it as just basis coefficients of the Half-Life 2 ambient cube basis.
+And then all that we have to do here is just to multiply that with the sky visibility that is stored inside of the probe.
+So why do we have to render a small texture?
+Mainly because our skybox uses a large combination of techniques which are difficult to express analytically.
+We do have the Prism Sky model, but also on top of that we have these six point lighting cloud textures that allow us to dynamically relight them based on where the sun is.
+So here you see the same scene with different sky configurations.
+The base sky color is the same for both scenes, but at the top you don't really have any clouds and you have this blue type ambience which is captured by the probes.
+And on the bottom you have quite a lot more sky coverage.
+So the sky is actually more grayish rather than blue.
+And this is also correctly captured inside from our PRT solution in Snowdrop.
+This is another example where we have this time the same clouds, the same base color, but we've just moved the sun, so it's like at sunset or sunrise, I don't quite remember.
+So in one of the cases the clouds are very orangey, and to the bottom you see it during the day, so the clouds are now whitish.
+And you can see how this is also correctly reflected in the light probes.
+So finally, what we have to do, after we've computed the radians from the sky, we just simply have to add the lighting that comes from the sky with the lighting that comes from the bricks, and then we get the final result.
+So we just go through all of our brick factors and add them up, that's it.
+And then we're done, we've got the probes completely relit.
+So let's talk about the thing that you're probably very interested in, the performance.
+I have to preface this by saying that the performance kind of depends on where you are in the world, how many probes you've got, how many surfers and so on.
+But the numbers I'm gonna give you are quite representative.
+So every frame, what we do is we relight two full sectors.
+The one that the player is in, and also we choose one other from the sectors that are currently loaded.
+So this is done in a GPU compute task just right after the shadow rendering.
+We actually have two compute tasks, one to relight the surface and bricks and one to relight the probes themselves.
+So this is also done with an async compute shader on consoles which is running at the same time as we do the GBuffer rendering.
+Some example timings.
+For the Xbox One, it takes about one millisecond.
+We time this by putting the Compute Shader in non-async mode.
+Normally though, this runs async and it doesn't really matter if we turn it on and off.
+It's just absolutely the same performance.
+It's not that expensive at all.
+And the time here is roughly split 60%, 40% between lighting bricks and surface versus lighting probes.
+On the PC, on a GTX 760, it takes about half a millisecond to do the same amount of data.
+And the timing here is roughly split 50-50 between lighting bricks and lighting probes.
+So once we've run the relighting compute shader, the next step is to put all of the radiance data into one volume map.
+And we do this in order to have tri-linear filtering and in order to support large objects or small objects.
+The volume map follows the camera and covers 100 by 50 by 100 meters with 32 by 16 by 32 voxels.
+And we use a single texture for all of the six basis directions and the shader computes just an offset into that texture in order to figure out where to read from.
+So this volume map is used both in the deferred lighting pass and the forward lighting pass.
+So we have consistent lighting between purely opaque objects and also transparent objects or particles.
+So, 100 by 50 by 100 meters with such a relatively low dimensional volume map will create probe bleeding.
+So this is just the effect where you have the trilinear filtering reading the wrong value.
+So basically you have the effect of a light bleeding through a thin surface such as the wall of a building.
+And here at the top right, you can see an example of this.
+What happens is that the probes on the outside get illuminated by the sky.
+And this incorrectly illuminates the interior, the entrance here.
+So you get like this sort of wrong, bluish ambience.
+And in order to fix this, we use a separate volume texture for both indoor and outdoor.
+We, for a particular model, we know which room it is and we write that value inside the stencil buffer.
+Then in the deferred lighting pass, what we can do is we can read from the stencil and figure out whether to read from the outdoor or from the indoor, from the indoor volume texture.
+We also try to prevent bleeding between different rooms, and we do that by determining what the extent of the room is in volume space, and then clamping our reads just to this particular AABB in the volume map.
+And of course, this only works if you have rooms which are axis aligned.
+And you can see the effects of these fixes in the bottom right here, so we have a lot more correct ambience, so the entrance to the staircase is a lot...
+looks a lot more natural.
+Outside of the volume map, we shade using a 2D, a large 2D texture, which we call the fallback texture.
+And this is a single 2D texture that covers the entire world.
+Each texel inside of it represents a single sector probe, and we compute the information for that by just placing a probe very high up in the environment.
+And for this one, we don't actually do any of the light bounces.
+We just compute the irradiance from the sky.
+So you can see the effect of the distance shading in these two comparison images.
+To the left, I've turned it off completely.
+So the buildings far down the street are now suddenly completely black.
+And to the right, I've turned it back on, and you can see that it's almost like an invisible blend between the volume map and the fallback texture.
+So it works rather nicely.
+As pretty much everybody else, we use ambient occlusion as a shadow term for the indirect lighting.
+Ambient occlusion can come from a couple of sources.
+So things like SSCO, it can be baked into the models, into the materials, into the textures as well.
+And it also comes from the sky visibility of the probes.
+So for SSCO and the baked in ambient occlusion, we store it in a separate channel of our G-buffer.
+Ideally what you want to do is to only to use this ambient occlusion for the sky term only.
+So you don't really want to apply that to the secondary bounce that's coming from the bricks.
+But we kind of cheat here and apply it to everything in order to not having to store two terms and not having to use more than one volume map.
+So one of the things that we found during the project is that it's difficult to make SSEO good underneath vehicles.
+One of our tech artists came up with this cool way to fake ambient occlusion with just a squeeze-based projected decal.
+And you can see the difference that this makes in the comparison images to the right.
+At the top, the decals are switched off.
+So the vehicle kind of looks disconnected from the street.
+Whereas at the bottom, you suddenly get this idea that it's actually something that's grounded and it actually casts a shadow.
+And this is just done with a very simple texture box in the vehicle prop.
+You can see here some screenshots from our Snowdrop editor.
+The vehicle isn't just a simple model, it's actually a node graph with a lot of parameters that you can tweak.
+And you can also place this additional primitives inside of it.
+In that case, it's just an invisible box that has a simple gradient texture, and that texture just writes out to the dedicated gbuffer channel.
+It's very simple, but it also works surprisingly well.
+So Snowdrop also uses the PRT probes in the volumetric fog rendering.
+We just used the standard ray marching and sampled the lighting environment in order to simulate scattering from participating media particles.
+In addition to the sun and the local lights, we also sampled the ambient lighting that comes from the probes themselves.
+As an optimization, we store the average irradiance for all of the six bases direction in separate volume maps, so just a single RGB volume map, and this is what we actually sample and do trilinear filtering on as we're ray marching.
+And it kind of works because the scattering is supposed to scatter in all directions, so taking the average ambient lighting is correct in this case.
+So, we've come to the final section of the presentation where I'm going to talk to you about some of the problems that we encountered with our approach during production, and as promised, I'm gonna show you some ugly screenshots.
+So, Snowdrop initially was using an Irradiance volume like pretty much a lot of other games.
+But with a twist, instead of having a baking step for the probes offline, what we would do is we would render cubemaps on the fly and then store them on disk.
+So as you were walking around, we would render the cubemaps and store them in a cache.
+And this works very nicely with one major drawback is that the update rate isn't really fast enough.
+So what you can see is visible light pop, like a particular area would be dark and suddenly, boom, it would become bright as we render the probes.
+And as a whole, we decided that this wasn't quite suitable for our requirements, like the day-night cycle or the dynamic lighting.
+You just couldn't get it to work fast enough in order to have the dynamic lighting that we wanted.
+So when we switched to PRT probes, we started with eight basis vectors that covered the entire sphere.
+And you can see those eight basis vectors as the white dots on the probes there.
+This worked fine, except that at some points, the artist noticed that the streets were a bit too dark.
+They just couldn't put their finger quite on Y, but everything seemed a little bit too dark.
+So we sat down and eventually realized that it was because none of the vectors actually pointed straight up or straight down.
+So this meant that the light from the sky or the bounce from the street, we couldn't actually represent it properly.
+We could just blend between two vectors that were pointing this way.
+So for that reason, we decided to go back to Half-Life 2 ambient cube basis.
+And it uses six basis vectors, which is fewer, so you would think it's less accurate, but it actually is better for our needs, because there's one vector that points straight up, so it can capture the lighting from the sky accurately, and then there's another one that points straight down, so it can capture the bounce from the terrain on the streets.
+During production, we also had occasional problems where the automatic probe placement algorithm would decide that it was going to stop working properly.
+And for various reasons, probes would not be spawned in certain areas.
+And this causes dark spots in the irradiance volume.
+So like places where we just don't have any lighting information.
+And to the right here, we have one such location.
+We have This particular building and on one of two of the floors you just don't have any probes and you can also kind of see it on the On the crane there to the right as well and this is just caused because the the probes just Miss the crane completely so you don't spawn anything there And we have also a special debug tool for these situations, which would color these areas with a highlight color so that we can easily spot them.
+And to solve problems like this is not fun and also requires quite a lot of coder effort.
+And we were thinking that the way to address this in the future is to give the artists more control over how the probes are placed.
+So to allow them to add new probes, to move the automatic probes around in order to adjust things and to fine tune all of the details.
+One other possibility that we were thinking about is to support UV mapping for the buildings, so for large structures.
+So effectively what we would do is we would compute the same sort of PRT, but instead of six direction, we would just compute it for three direction in the tangent space.
+And this will allow our artists to control the resolution of the PRT a lot more effectively.
+So, we also have the problem that sometimes probes are missing from indoor entrances.
+And because we have the outdoor and indoor volumes, this presents itself as a sharp line transition between the indoors and the outdoors.
+And you can see it here in the comparison images to the right where I've just isolated the ambient lighting.
+So one way to solve this is to automate the placement of the probes, so that we spawn them at particular entrances and windows.
+Unfortunately, we only thought of that quite late during the production, so this didn't make it in the final game.
+Luckily for us, these type of artifacts are not so visible when you have full shading on, because the change in material actually masks the transition as well.
+So one of the other areas where we thought we could improve is the resolution of our solution.
+It's fairly easy to change the grid sizes and so on.
+So it's just a bunch of parameters that you put into the baking, but you have to be careful about the performance cost.
+In order for us to increase the resolution of the probes, what we have to do is to look into optimizing the baking times first and also to optimize the compression just because we don't want to blow up our memory budget.
+And as I mentioned as well, we only pre-compute the single bounds and we approximate the rest with just coarsely at run time.
+And this was primarily because we just didn't have enough time to make a more complicated, complex solver offline.
+But I think as we move on to, for the next iteration of Snowdrop, what we have to do is actually to bite the bullet and implement the proper GPU path race that will allow us to capture the multiple bounces when we bake the probes.
+So finally, just a couple of words.
+Our tech, Snowdrop, was developed at the same time as The Division.
+And because of time constraints, sometimes we did not have enough time to do proper bug fixing.
+Instead, we just gave the artist some parameters and say, here, tweak this until it kind of looks right.
+So this effectively sort of hides the problem but doesn't really solve them.
+And at the end, what happened was that we have a huge mess of parameters.
+Each one of them had sort of obscure effects or once we fixed the bugs, we just disconnected it in order not to for it not to mess up the solution. So some things straight up don't work, some things don't work as expected.
+And it's very confusing for the lighting artists because they don't know which things actually have which things actually.
+will allow them to tweak the lighting.
+And this sort of showed us that proper bug fixing is very important rather than just giving some numbers to the artists and letting them tweak things by themselves.
+So we were thinking that for the next iteration of Snowdrop we have to simplify the interface and just provide just a couple of intuitive sliders that people can tweak.
+Okay, I have to thank all of my colleagues at Massive at the end of the presentation, especially Einar and Dennis who did a lot of the work.
+So if you've got any questions, this is my email.
+The website's for Massive and for Ubisoft.
+So we're done.
+I think we have about five minutes for questions.
+I would like to step up to the microphone, please.
+Yep.
+Thank you.
+Thank you for sharing good idea.
+And I have a question.
+How long does it take to bake and placement proof?
+Many, many right proofs.
+Yeah, we mentioned it in one of the slides.
+It takes about eight hours.
+Of course, it depends on the speed of your engine and the type of geometry that you have.
+And I think there are many, many right players.
+And when players enter some region and another region, some pop-up problem occurred, I think.
+What do you...
+I don't know how to say in English.
+If you feel more comfortable, we can talk later.
+So I'll be here to answer questions as well.
+So feel free to come and ask me.
+So I will try to, if it's a little bit easier.
+Okay, thank you.
+Right, yes.
+My question is, I don't know if you mentioned it, how do you update the 3D grid, like which grid cell corresponds to which probe in the world?
+That's one thing.
+So basically the probes aren't really...
+tied to any particular grid, because we can spawn them at multiple locations.
+We also nudge them a little bit, they can be spawned at...
+Right, right. So my question is, like, for each cell you find the closest probe?
+For each of the probes? Yeah, that's right.
+So we just find the closest probe offline.
+It's just a dumb thing that just goes through each of the probes and figures out which one is the closest. That's it.
+There isn't really anything more complicated.
+So, another question is, have you experimented with, like, a cascaded approach, like having several grids, like, more resolution?
+It's a good idea. I think, in general, we just didn't have enough time to implement it.
+Okay, thank you.
+Thank you.
+Did you ever have problems with incorrect lighting at the edge of a sector because, say there was a large building at the edge of a sector and then the sector beside it was only taking the circles?
+All of the time.
+It's, there's like all sorts of weird things that you're gonna see, but most of the time they're kind of masked because we do trilinear filtering as well.
+So you don't just do one sector and then another sector, you actually do trilinear filtering between the two different sectors.
+So it's kind of masked, but the problem is there, yes.
+Cool, thank you.
+Yes, I wanted to know how you validated the accuracy of your solution.
+Like, do you have a path tracer or anything like that?
+It just went out as a kind of artistic...
+We just tweaked it until it looked fine and our director said this is good.
+Oh, that works. That's good enough.
+Thank you.
+Hey, so what's the disk size of the lightning data?
+It's in one of the slides, it's about 1 gigs, so it's fairly low.
+And you can basically make that as large as you want by increasing the properties.
+Alright, thank you very much.

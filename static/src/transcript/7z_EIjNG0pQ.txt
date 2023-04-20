@@ -1,0 +1,819 @@
+Hello, my name's Alex Fry.
+I'm a rendering engineer at Frostbite.
+And today I'm here to take you on a bit of our journey on high dynamic range color grading and TV display support.
+This is what I'll be covering today.
+Got quite a lot to get through, so I'll go pretty quickly.
+This is really the last couple of years, and it's our journey.
+I'll go into a few details where I think it'll be helpful.
+And hopefully there'll be some good discussion afterwards.
+I'll start with some history terminology, though, because it'll be helpful.
+We'll start with film, as many things do.
+So particularly film stock and how it responds to light.
+So it has three main parts here.
+And the middle section, which is where most of your data will be, what you expose for, is just characteristically the straight line region.
+That's what it's called.
+And this responds quickly to light.
+But there are two other parts, the toe, which is low down.
+Think of the toe on your body.
+And the shoulder, which is high up.
+Think of your shoulder on your body.
+And these respond much more slowly to light.
+So you get a much larger range of values compressed into a much smaller amount of film stock.
+So really, this film stock will capture a very wide range of light values into a smaller range.
+And the toe and shoulder are the range reduction.
+You're exposed to the midpoint, and this S shape gives you a very nice, characteristic, pleasant, and very familiar look.
+Now in games, fully real-time CG, we don't have film to develop, we have got limited range TVs.
+And so we must do similar range reduction.
+And that's tone mapping.
+That's the process of mapping down this very wide range that we draw into something much smaller while preserving the important detail.
+And Filmic Tone Mapping does this by emulating the film characteristic curve.
+And just a small point, that when you see many HDR photos on phone cameras, these are more accurately tone mapped.
+And I'm going to use this image quite a lot.
+This is a demo level that we've got internally.
+And it's got some quite useful parts.
+It's got very good contrast.
+It's got a very wide dynamic range.
+It has a lot of saturated colors.
+And it's also suffering from problems, which I've circled here, particularly the light and the hologram.
+You can see some serious issues with this.
+Now, applying four different tone mappers quickly.
+I won't labor on this, but the top two are simple tone mappers, the bottom two are filmic tone mappers.
+You won't see a huge amount of difference here, apart from the bottom left, perhaps, which has got more contrast.
+And color grading.
+This is the act of applying a look to your game.
+Again, it's got its background in film stock.
+For example, film development, you might choose to skip a process, such as the bleaching stage, called bleach bypass.
+And this would produce a different look, a very silvered, high-contrast look.
+But digitally, of course, we can do a lot more than this.
+We can do white balancing.
+We can do color replacement, color enhancement, push them back.
+We can do orange and teal if we want.
+And yeah, we could do an awful lot more here.
+We can fix a lot more in post.
+And TVs.
+So I'm sure you remember these old, lovely fish bowls.
+And many people actually still keep them around.
+These have a particular narrow dynamic range, around 0.1 to 100 nits, where a nit is another name for candela per meter square or unit of energy emitted per area.
+And these screens have a nonlinear response to light, at its input, sorry.
+This is called the EOTF, or the Electro-Optical Transfer Function, also known as the gamma curve.
+And a standard was introduced in the mid-'90s to bring standardization to all of these TVs, and assets that are made for these TVs.
+And that standard and the display capability were very closely aligned.
+And we still use this standard today, 20 years later.
+However.
+Modern TVs are far more capable than this.
+They'll go as dark as 0.01 nits and go above 300.
+HDR TVs will go way, way higher than this.
+And this means that the hardware is far more capable than the standard that we're using.
+And also, LCDs respond differently to CRTs.
+But we're still using 709 ISRGB.
+And so these TVs will take our narrow range signal, and they will modify it.
+And they will expand it to best show off that TV.
+And we have no control over this at all.
+We can ask people to calibrate, but not many will.
+And this tends to end up with too much contrast and also too much saturation.
+I'm sure you're familiar with the very orangey skin tones of store demo modes.
+Now with that, let's go over our legacy pipeline.
+This is a simplification of what we did.
+So we'd render our scene in full HDR and perform all of our post-processing, bloom, motion, blur, et cetera, in HDR as well.
+Then we would apply a time map, convert to sRGB, apply a color grade, draw the UI on top, and scan it out.
+This is pretty common, and I'd imagine you're familiar with this.
+Digging in a little bit.
+In these two parts, the tone map is chosen by the artist from a fixed set of drop downs.
+Usually it would be a filmic tone map.
+And these tone maps are 1D curves, which we apply independently to red, green, and blue.
+We then do the linear to sRGB, and we clip the results to not to 1.
+And that's because we then throw it into a lookup table to do color grading.
+And this is also a very standard process.
+Different ways of doing it, but we would typically load a screenshot, load an identity color cube into Photoshop as a layer, apply various look transformations or whatever else, crop off that layer, save it out as a color cube, and then index that by red, green, and blue at runtime.
+The new color would be what was ever in the LUT.
+And it's incredibly powerful.
+You can do an awful lot of different things, including color replacement.
+So yeah, we liked it.
+There were some troubles with all of this, though.
+Now the 1D curve, when applied separately to red, green, and blue, does actually cause some hue shifts.
+Because we don't have a completely linear midsection.
+And I've got some screenshots of this in a bit.
+And also, as you get near the top of the shoulder, the highlights really do hue shift an awful lot, especially as the channels clip.
+This is because you fundamentally change the ratios of light.
+Because when your red channel, say, slams into the clip point and you're overexposing, it can't go any further.
+But green can.
+So you change the ratios.
+And that changes the color.
+We also use a filmic tone map typically.
+And this applies a look, as you saw from the four-point screenshots earlier.
+And this look is characteristic, but it's also in a different place to our grading workflow.
+So there's two workflows going on to do the same thing here.
+It's also not easy, for us at least, in this particular code to author new tone maps, because it's not really data driven, only selectable.
+And when you're looking at the grading part, we use Photoshop to do this, but Photoshop's not really a grading package.
+So we have a non-optimal workflow for color grading.
+It's a very powerful package, but it's not really a grading package.
+And our LUTs are typically eight bits.
+And this would cause irrecoverable quantization, MAC banding, hue shifts, and here's a very, very early shot of Faith's arm from Mirror's Edge, and you can hopefully see some of the MAC bands going down there.
+And all this was was a bit of contrast.
+Also, we have no access in this color grade to values greater than one because we clicked them earlier.
+So performing any sort of exposure change or grading the highlights is really hard.
+And also, when you think about it, the tone map combined with the sRGB transformation are a LUT distribution function from linear light to grading space.
+And that's great for viewing, but it's not necessarily optimal for grading, because you would get a particular distribution within the lookup table, and that distribution would vary depending on choice of tone map, which also means that if a game has produced a really great look, they can't share it with another game that's using a different tone map because it's a different function, so it looks different.
+Also, the legacy pipeline was totally hard-coded to SDR.
+And we wanted to support HDR TVs.
+We wanted to get access to that high bit depth, that dynamic range, that extra color.
+We really wanted to give the content creators control over this TV, take the creative control back from the TV manufacturers, so we could actually use this power ourselves.
+So there's a few different ways to do this.
+And the simplest approach, and one that I would suspect that several people have already done.
+is to just try and look at this tone map curve and see that it's using range compression.
+So why can't we just reverse the range compression and get the values back?
+So yeah, get the shoulder, undo the shoulder, recover the original values, and profit.
+Sounds simple enough.
+And it is simple enough, but it has some trouble.
+So firstly, if you're using 8-bit, then there's not enough precision to reverse that, for a start.
+If you've got multiple different tone map curves, then they all need to be reversible, and that's harder for some than others.
+You can only recover a limited range, because those shoulders might not be infinite compression.
+They've probably got a white point somewhere.
+For example, the Frostbite filmic tone map clips at about 500 nits.
+But really, the order of operations aren't correct.
+And if you look at this diagram, the yellow boxes are the troublesome ones.
+So we would do the tone map, the sRGB conversion, then the grading, and the UI.
+Then when we reverse the tone map, we also reverse the UI, which wasn't tone mapped.
+And we reverse the grading, which wasn't tone mapped.
+So we've applied a transformation that's in the wrong place.
+And this will cause problems as well.
+But can it be made good enough?
+Absolutely, yes, it can be made good enough, especially if you've got a game out in the world and want to patch it.
+You could tweak the time map curves, change the distribution function, capture a bit more range, compute your analytical mappings, use 10-bit rather than 8-bit, re-author any grades that need to be done.
+You could back away from extreme color grading to avoid the reverse problem.
+And you could scale the UI a little bit to avoid the shoulder region.
+It can be made to work, but we decided not to do that.
+We went clean sheet, and I'm very lucky that we got to do this.
+So what we do is we transform our linear data after all post-processing into a dedicated space for grading.
+We'll do an HDR grading LUT.
+We then draw our UI to an offscreen buffer, and it's essential to use pre-multiplied alpha if you do this.
+Then we'll run a effectively kind of a scan-out shader, which is the last pass in the frame, where we take the HDR data, decode it, take the UI, decode that, composite them all together, and then tone map and encode for our target display.
+And that means that we can then target pretty much any standard that's out there.
+You could tone map for SDR, or you could tone map to HDR, or any new standard that comes along.
+And why did we do it with CleanSheet?
+Well, we really wanted to improve these troublesome workflow issues.
+And so by doing CleanSheet, we got to do that.
+It means that we could also do a single grade for any TV that we support.
+So we haven't got a horrible workflow of having to regrade every single different type of TV.
+We're mastering in a single place and then mapping out to the end.
+And if we're going to redo all the grades, we may as well redo them really well and not have any restrictions there and move the workflows into the same place.
+Also, by isolating the UI, that gets us around a couple of problems.
+Our UI tech has got a lot of legacy screens.
+Like some games, such as sports games, have a very large number of screens.
+And having to redo those to tweak them to look right was not something we wanted to entertain.
+So just putting in a different buffer made sense.
+We also wanted a really future-proof HDR implementation.
+Because the HDR spec is bigger than the range of TVs that exist, then by targeting the full spec, your game looks better and better as you buy a better and better TV.
+And we make these grades in DaVinci Resolve.
+And I've looked at the wrong slide.
+How do we do this?
+We wanted to find a nice distribution function for our color grades.
+And we did look at a few different ideas for this.
+We were really looking at log space because it made sense, especially the Sony S-log curves seemed to look really quite nice.
+But we ended up using ST2084, or PQ, or the perceptual quantizer.
+And this is a function designed by Dolby for high dynamic range.
+And it ensures that every single different value in that ramp is perceptually spaced from the last.
+And that means it's a perfect grading space, because every single entry in that LUT is perceptually spaced from the last.
+So the artist has control over that image from the darkest shadow to the brightest highlight.
+We've also gone one size larger on the LUT, 33 by 33 by 33, and this is just to align us with industry standard grading tools, which do the same.
+Now this single distribution function, apart from being nice and accurate, also means that we've unified our space so that we can share LUTs across games.
+And that means anyone can build a look and share it with another team, and that means we can build a look library or a film stock library, and that's really great.
+And this is where I'm going to talk about the winch result.
+So we decided to use this industry standard grading tool.
+We built some LUTs in there, view LUTs, to make sure that it looked exactly as the game would look.
+And that means it's a WYSIWYG workflow.
+And we did think about trying to emulate tools like Resolve in the engine.
+But actually, it's a lot of work.
+And we didn't really have the need or the time to try and reinvent this.
+And we definitely didn't want to have to keep maintaining it, because these packages keep evolving.
+And I didn't really want to commit myself to have to reverse engineer this and then maintain it forever.
+Also, using a standard package reduces friction for hiring contractors, which is really helpful for getting, say, film graders in to do a really nice pass.
+And also, Resolve, in its basic version, is free.
+However, I will say that there is a really great workflow improvement here in Resolve, which is the Resolve Live mode.
+And in this mode, you buy a capture card, so it's not free, and you pipe your game through the package.
+So you play the game through the grading package, so you live grade.
+This is almost analogous to putting all your grading tools back into the engine at runtime.
+It's still runtime, it's still live, but it's kind of inverted, and it's really nice.
+So tone mapping, or display mapping in our case.
+We've somewhat decided to call it a different name.
+It is still Tone Mapping, but we've changed the name a little bit.
+So in our case, the HDR version is now the reference version, and we've moved the Tone Map right to the last stage of the pipeline.
+And we've called it Display Mapping because this Tone Map is different depending on the TV.
+So for a standard dynamic range, we do an aggressive Tone Map.
+In HDR, it's less aggressive, but it's still varying depending on the TV capability.
+So a low-end HDR TV would be more aggressive, and a high-end HDR TV would be less aggressive.
+And it's tuned for each case.
+It's also not just a tone map curve.
+It's also re-exposure.
+Hence, because it's per display, it's display mapping for us.
+And the main challenge of this was to make sure that it did scale across a large range of different TVs and achieved a similar look.
+Also, we really wanted to get away from the hard-coded film look.
+So we didn't want a toe.
+We didn't want any contrast changes.
+We didn't want any hue shifts.
+And we didn't want any sort of built-in look.
+So essentially, we wanted the most neutral map that we possibly could get.
+And if I go back to this example image, focus again on the two troublesome areas.
+And I'll go back and forth between off and on.
+And if I just highlight those two side by side and leave it there for a second, you can see that the horrible hue shifts that were there in the light on the base, well, that's gone.
+That was an orange light, and it's now an orange light.
+And in the hologram, that was a nice blue light, but it had gone cyan.
+But now it's actually a blue light.
+So this is just the shoulder.
+The rest of the image is completely unchanged.
+If the artist wanted to put a film look, a toe, some contrast, that's entirely up to them, but we don't want to force that on them.
+And how do we do this?
+So rather than working in 1D and apply that same curve to red, green, and blue, we split it to work in chroma luma.
+And we apply the shoulder only to the top end of the luma.
+We then progressively desaturate chroma depending on the shoulder.
+It's not at the same rate.
+And we're using a relatively new working space for this, ICTCP.
+And this was developed by Dolby for the high dynamic range TVs.
+And it's got one particularly nice property, which is that the chroma part follows lines of perceptually constant hue.
+And that essentially means that as you scale chroma in and out from the center, it does not change hue.
+It only changes saturation.
+And that's a really nice property for this particular algorithm.
+We then did the non-PBR thing of totally tuning it by eye in a completely ad hoc manner.
+Lots of different screenshots, lots of different games, lots of different situations.
+And yet it's not really PBR, but this is really very perceptual.
+So it's right at the end of the pipeline, and we figured that would be okay.
+It's perception, not math.
+And I've got some examples side by side.
+These are split screens.
+So on the left of each image is the old Frostbite filmic tone map, and on the right is the display map.
+And I've highlighted two parts of this image.
+Where you see that the sky, which was going cyan, like the hologram was, now in the display map, it's actually just preserving that hue.
+It's desaturating as it hits the top, but it's preserving the hue.
+And the same is true on the right.
+But on the floor, you can just see the wood color.
+That's subtly changing color on the left, but on the right, it's not.
+But I've got some more extreme examples here.
+I'd like to particularly highlight this beige sofa.
+And hopefully, you can see the subtle difference down that split screen.
+So I mentioned that we got these hue shifts.
+And we got hue shifts in the mid-tones, very, very subtle hue shifts in the mid-tones because we don't have a true linear midsection to our tone map.
+And of course, as your RGB values go up and down this curve, they move closer together and further apart.
+So we change the ratios between the channels.
+So this beige of the sofa that's meant to be brown is actually kind of a gray green.
+And it turns out that once we'd done this, our artists had been complaining, bitterly complaining, for years about this sort of unknown and bizarre hue shift.
+And they couldn't really explain it, didn't know why it was happening.
+But they were fixing it in post, they were color grading it out.
+And it all turns out it's because of this slightly non-linear midsection where we're fundamentally changing the color channel ratios, we're changing hue.
+So now with the display mapper, we've actually recovered the original color, and we're not getting this, and that's a wonderful thing.
+The most extreme example, though, is perhaps this one on the right-hand side, which is your classic game sunset look.
+That's meant to be a very bright orange light.
+But of course, in this situation, the red channel's crept up, hit the shoulder, and then clipped completely.
+And the green channel is being boosted and boosted.
+So of course, we go from an orange to a yellow.
+And rather unfortunately, once you see this, you can't really unsee it.
+So next time you get a sunset, look at it with your eye, not actually at the sun.
+Then take a camera picture with your phone or whatever, and you'll see this.
+It is everywhere, and we wanted to get away from it.
+So we were feeling pretty pleased at this point.
+And thinking, yep, it's all going well.
+Plane sailing.
+Yeah, of course.
+Of course it wasn't plane sailing.
+So if you recall the SDR spec, which is roughly 0.1 to 100 nits, and the TVs are more capable, and they do over-brighten everything.
+Actually, that 100-nit peak is not going to be 100 nits.
+It's probably more like 200 to perhaps 400.
+That's two to four times brighter.
+HDR TVs, though, with this new standard, they largely do what they're told.
+So if you ask for 100 nits, you're going to get 100 nits.
+So in this situation, when you put an SDR TV next to an HDR TV with the same content, the HDR TV looks darker, and it looks worse.
+Well, that's not ideal.
+So how do we fix this?
+Well, we chose the effort onto making the HDR reference, and so we chose to expose for HDR.
+And...
+Working in HDR, there's a lot of latitude, a lot of range to fix things in post.
+And our SDR display mapper underexposes the SDR version.
+So we'll master for HDR, make it look good in HDR.
+And then we'll underexpose it.
+And we'll underexpose it so that when that SDR TV overbrightens it again, it recovers the original range.
+And that's kind of a pseudo-HDR on SDR look.
+It's not correct, because we can't predict exactly how the TV's going to overbrighten.
+But it does look pretty good.
+It does kind of work.
+So that's what we ended up with.
+And in Engine, the artist, by the way, can set this value.
+And that means if they're working on a calibrated monitor, they can dial in the correct number and it will look absolutely right.
+So is it now plain sailing?
+No, categorically not.
+This display mapper is a hue-preserving shoulder.
+And that really faithfully reproduces the original hue.
+But that means we were seeing that existing legacy assets were changing.
+And that's because some of those assets were authored to leverage those hue shifts present in that tone mapper.
+Of course, when you change the tone mapper, you change the look of the assets, and they don't look good.
+Now, I'd like to thank the Dice effects team for giving me a loan of an effect.
+I've heavily butchered this.
+This is not the dice effect as it is.
+I've made a very contrived example by taking a fireball and basically reproducing it in a single hue.
+It's kind of a burnt orange color.
+I've then overexposed it.
+So on the left, what you're seeing is a single color fireball that's been overexposed so that the red channel clicks, and then the green channel doesn't.
+And it's creating yellows in the hot spots.
+Now.
+Lots of assets have been authored to leverage this particular look, to create that hue shifting.
+When you apply the display mapper and it preserves the hue, you just get a very flat, original orange fiber, and it looks frankly terrible.
+So, there isn't really much you can do here, apart from re-author the effects to the tune of some very unhappy artists.
+Really, this was centralized on very bright effects, such as fire.
+And because they were authored to leverage that, we had no choice but to fix it.
+Now, remember back slightly to that slide when there was a cheap and dirty approach, which is to reverse the tone map.
+When you reverse a tone map, even if you can recover that original values, you aren't going to fix the clip point.
+There's still a white point, and that white point is quite low.
+If your effect is in that shoulder region, and you can recover that value, the effect will look different on every different HDR TV as well.
+Because those hue shifts will vary depending on the capability of the TV.
+So this isn't just limited to SDR, this is in HDR too.
+So re-authoring the effects basically had to be done.
+And we decided to use black body simulation.
+For those that don't know, you effectively author the effect as a temperature.
+And then you author a color ramp, which is derived from black body radiation, index the ramp from the texture, and then tweak the ramp to suit you.
+So this is the original display mapped horrible orange, one on the left.
+And on the right is the black body simulation.
+And these are both using the display mapper.
+So these colors are now present in the original effect.
+They're not an artifact.
+They're actually there.
+And it looks better to suit, of course, because it's not a horribly butchered example.
+And just to compare, on the right is the proper effect with the blackbody simulation using display mapping, and on the left is the butchered one, overexposed.
+You can see they've kind of got similar characteristics, but on the left is an artifact, and on the right is in the effect itself.
+So now is it plane sailing?
+Well, no.
+Again, this hue-preserving shoulder.
+It's great, we can work with it, but it's not always desirable, and it precludes the creation of very, very bright, saturated visuals, and again, that's effects.
+So if you look at the center of that fireball, that very, very bright hot spot, it looks hot.
+But it's also white, because we've knocked out all of the saturation.
+And that means that we can't match particular film stock.
+So if you've got a game that's, say, a game trying to match a particular film stock, you can't do that, because we've fundamentally changed the display mapper.
+So we've started to reintroduce some hue shifts.
+So we're going back on ourselves now.
+Now on the left and on the right, you've got two different versions.
+Subtle hue shift on the right, no hue shift on the left.
+In the underexposed parts, that's the bottom of the two rings, you can see there's not a lot of difference.
+But hopefully you can see that in the top two, on the left where it's desaturated, on the right there is now a yellow hue in there again.
+And this is what we want.
+And to show you the two comparison images once more, on the left is the original display mapper, and on the right is one with a subtle hue shift.
+It's not very much, but it's enough, and you can see the center of that light is now yellow rather than orange.
+And just to show you against the original image, which had no display mapping, yeah, it's a lot better still, but it's somewhere between the two.
+So yet, we have to reintroduce the hue shifts, and we're still not done.
+We are still iterating.
+But we are starting to get somewhere.
+And that does mean that different games that are going to ship later this year are going to have slightly different implementations.
+And they will have chosen the situation that suits them best.
+Some do prefer the hue preserving shoulder.
+Some prefer the hue shifts.
+And what we're likely to end up with is some sort of content-driven mixer.
+But this is really nice and easy to do, because we've moved the display map right to the end of the pipeline.
+And we've already graded it, so we're not affecting anything there.
+We're literally tweaking the output shader.
+and that's really, really easy to do and it's also really low cost.
+Now, a few of you are probably thinking, what about ACES?
+Because surely ACES does a lot of this, or all of this.
+And for those of you who don't know what ACES is, it's the Academy Color Encoding System.
+And this is really gaining pace.
+It's a standardized color management system for film and it also defines a processing pipeline and it also includes look and display mapping components.
+And this is broadly speaking what it looks like.
+The input device transform ensures everything's in the same working space.
+The look modification transform is where you apply your look.
+The reference rendering transform is a standardized of filmic S curve.
+And then your output device transform, of which there is one per output, TV or broadcast standard.
+And it varies per TV or broadcast standard.
+Seems very similar.
+So why didn't we use it?
+Well, we started work on this in 2014, and ACES was really only starting to get going.
+Some of the early versions of ACES also required FP16 and weren't suited to some runtime texture formats.
+And also, we weren't convinced, as I mentioned near the start, of the default filmic look.
+However, we did really agree with a lot of the principles.
+So we absolutely used it in concept.
+Like the order of operations is the same, the concept of working in a wide master working space and mapping down right at the end of the pipeline.
+The concept of the LMT is a grading pass.
+The output device transform is the display mapping.
+So we absolutely agree with ACES apart from a few little things.
+So should you use it?
+Yeah, of course.
+Have a look at it, please.
+And if you're going to do so, investigate ACEScc, which is the color correction space, and ACEScg, which is the color grading space.
+We may still also end up using ACES.
+Of course, we're going to continue to investigate it, because we agree in principle on so many things.
+And because we have a defined working space, transitioning to another one should be relatively trivial.
+We're also likely to adopt ACES for color management.
+OK, so we have some more problems now.
+For performance reasons, this display map, which is quite expensive, we chose to bake down into a highly accurate color grading.
+Well, the order of operations was still the same, so this made sense, let's make it free.
+But, the analytical tone map is on the top, the display map's on the top.
+In the middle is our baked LUT version.
+Now, you may not be able to see the artifacts here.
+They're a bit more obvious in other situations.
+So, I've magnified the difference on the bottom, and you can clearly see more MAC banding.
+there's some bands in this gradient here.
+And this really isn't ideal, it's not noticeable in a lot of situations to be fair.
+But in some, like this particular one, it's very obvious.
+And why is this happening?
+Well firstly, we're using linear texture filtering because it's fast.
+And linear texture filtering turns any curve into a piecewise linear approximation of a curve.
+But more than that.
+We're using a 3D lookup table, and we're using linear filtering, and the luma axis, which you saw in that particular chart, there wasn't a lot of color there, the luma axis goes from one corner of the LUT to the other corner of the LUT.
+It's on the diagonal.
+And when you're on the diagonal, when you're halfway between two texel centers, you're pulling in equal contributions from eight separate texels.
+And that's not wrong, it just means that you're getting slightly more contribution where you might not want it.
+So how do you fix this?
+Well, of course, you could just use higher order filtering.
+You can go from linear to tricubic.
+And this would really help, but it's also ridiculously expensive.
+And rather than spending our time trying to work out how to make this fast, we took a different approach.
+Back to the original slide.
+In RGB, we index the LUT by red, green, blue, but you don't have to do this.
+Our display mapper is a ChromaLuma display mapper.
+So we thought, why not try indexing axes by ChromaLuma instead?
+And the fastest one is YCGCO.
+And there's a big improvement straight away by using this.
+We then tried YCBCR, and it's even better still.
+Then we figured, well, since we're using ICTCP for our display mapper, we'll just try that.
+And that's slightly worse than YCbCr, but comparable to YCgCo.
+And here are the differences side by side.
+All of the 3D correlated light spaces are better than RGB.
+Far less error, far less precision problems, so this is good.
+And why is this?
+Well, it's fairly simple.
+We've simply aligned our primary axes with primary axes in the lookup table.
+We're still using piecewise linear approximation, but these are now running in 1D or 2D rather than 3D.
+We're not going on a diagonal, we're going in a primary axis.
+And that just reduces the artifacts, and that's great.
+It's still just as fast, but it looks better.
+But of course we're baking this display map on top of existing grades.
+And some of these grades could be quite extreme.
+And we wondered whether this would cause any problems with that.
+So we then plotted the access patterns of various screenshots into the different spaces to see if it would cause any precision issues or quality reduction.
+Just a reminder, the numbers are gonna be from this particular screenshot.
+These are lookup table coverage in each space from that particular screenshot.
+So we've plotted every pixel in that screenshot into the lookup table and made sure that we cover all neighbors where we'd be touching the neighbors.
+Now, red, green, blue surprisingly only uses less than 8% of all the volume of this lookup table, not as much as we expected.
+But the two de-correlated spaces, YCGCO, NCBCR, these use a lot less again.
+This has more than halved the coverage or the volume that we've used, which roughly halves the number of texels that contribute, which roughly halves the precision of the, or the accuracy of the grade.
+Not ideal.
+ICTCP is better, but not much better.
+So today, we've actually stuck with RGB.
+And those artifacts that are there, which you can't really see that often, we've kind of lived with them.
+But we're continuing to investigate this.
+OK.
+A few notes on performance.
+performance is absolutely at a premium.
+There's an increased focus on 60 frames a second, which is really good.
+Increased focus on resolution, because no one really likes 720p.
+And we really couldn't afford to give up resolution or quality or performance to pay for HDR.
+And because this new path entirely replaces our legacy one, we were required to achieve performance parity.
+It's fair enough.
+So, what was the performance of our legacy path?
+I folded two parts here together because, well, for reasons that will become evident a bit later.
+At the end of the frame, where our scan out shader would be, scan out shader, the final pass of the frame, we already did a high order resample because we do run dynamic resolution, we do run slightly sub-resolution at times, or above resolution in some cases.
+And this is a fairly quick-ish dual pass resample, high order resample where we do a vertical resample then a horizontal resample.
+And on Xbox, you go via an intermediate in the faster ESRAM.
+But your final buffer ends up in main memory, then you draw your UI on top, and it's in main memory because you scan out from main memory.
+And so we're looking at about 0.43, plus a little bit of UI, so in the cheapest situation, about 0.5 milliseconds.
+And I'm going to use numbers from Xbox One because it's the slowest platform in this case.
+So version one of this, the one we got in the hands of the artists really quickly, was a super naive implementation.
+So we rendered the UI to an offscreen target, but to do that, you must clear it.
+So we cleared the UI target, and that added a quarter of a millisecond.
+We then modified the second path of our dual-path-free sample.
+You load the HDR, you convert PQ to linear, you then load your UI target and make sure that's in linear, composite the two, tone map or re-encode to sRGB, and there we go.
+Well.
+Not really optimal, not really very good.
+Yeah, this added a large cost, and this is not OK.
+But it was OK to get into the hands of the artists.
+So of course, you take some low-hanging fruit.
+You notice that the second pass is dominated by ALU.
+And the first thing is a really easy win.
+Our UI is rendered in a U-norm format for various reasons.
+But it contains sRGB data.
+So of course, you just alias that texture, it's sRGB, and you get the conversion for free.
+Also, PQ conversions to and from linear are expensive.
+And we decided, because we're doing a lot of work here, that in this particular shader, which is ALU-dominated, it would be a lot faster to use a simple 1D lookup table for the PQ to linear part.
+And so we put that in.
+And then we started to hit bandwidth limits on this second pass.
+And, um, so, of course, you just put the UI target in ESRAM, and that halves the clear costs, and the UI also renders two times faster than before, which is great.
+And we come down. Costs come down.
+We're about .8 milliseconds now.
+It's still not very good, but it's a start.
+And then I get into the resample part, and this really isn't anything to do with HDR.
+But we were starting to run into load balancing issues, where because we had the UI in one place, and then the first pass of the resample, and then the second part of the resample, we weren't getting really great utilization across both of these two passes.
+And this was becoming a bit of a blocker.
+So by switching from a two-pass resample to an optimized compute resample, where you can do a single pass, but do dual pass inside the shader with local memory, this is an enabling optimization that brings two passes into one and lets the GPU load balance a lot better.
+There's some specific optimizations in here related to the fact that we know our tile mode because we're scanning out, and we have got some GCN-specific optimizations in here.
+And this in itself wasn't a huge win, but it's an enabling optimization, so we saved about 0.1 milliseconds.
+But the last final big win was from the CMask work and composition.
+Now, AMD's GCN hardware maintains this CMask metadata.
+And essentially, this stores whether any block of 4x4 pixels was rendered to or not.
+So when you do a clear, you don't clear the memory.
+You just clear the CMAS data.
+And then when you draw some pixels, it marks the CMAS whether it's been drawn or not.
+And then before you read this texture back, there's a fast clear eliminate pass.
+And all that does is look at the CMAS and then figures out whether you've written it to memory or not.
+And where you haven't, it writes the clear color back to memory.
+Smart and simple.
+So since we can read this metadata, why don't we just remove the fast clear eliminate, read the CMask in the composite pass, and then where we know we've not drawn the UI, we just don't read the UI, and don't do anything.
+And in concept, that's what we did.
+It isn't quite that simple, because CMASK is a custom tiled and packed format.
+And that requires that you do detiling and unpacking in software.
+And that isn't cheap.
+So doing it in the resample wasn't necessarily the right thing to do.
+However, you can, of course, issue just a very tiny transcode shader, which takes your CMASK.
+and turns it into a format that can be read in an optimal manner for the composition.
+And you choose this format to match the composition thread layout.
+And this is a really, really cheap pass, 0.02 milliseconds.
+And of course, that is so much cheaper than the FastClear Eliminate.
+And in the composite pass, you take this, you load the bit mask, you unpack the bit corresponding to you, which is very, very cheap.
+And if the bit's zero, you skip the entire URI operation.
+You don't load it, you don't clear it.
+You don't composite it, you don't do anything with it.
+And that brought us back down to half a millisecond.
+But of course, our UI is now in ESRAM, so it renders faster.
+So in some cases, it's quicker than the old path, which is nice.
+Now, I've worked only in the SDR version here, because the SDR version is the one running on the base Xbox, and most people have got SDR TVs, so that was the most important path.
+But of course, we want to support HDR.
+So when you're in HDR, there's a bit of extra work you have to do.
+Firstly, you have to rotate all the primaries from sRGB to 2020, you have to encode to PQ rather than sRGB, and that's more expensive.
+But not too much more expensive.
+So in this path, it's about 0.7 milliseconds rather than 0.5 milliseconds.
+So there's a small overhead.
+However, this path only runs on the Xbox One S and indeed the PS4.
+And the Xbox One S has a faster GPU to the tune of about 7% or about 1.1 milliseconds at 60 hertz.
+So this 0.2 milliseconds overhead is not a drop in the ocean here.
+And that means that the bulk of the Xbox One S performance actually goes straight back to the game.
+For games with dynamic resolution, that means you get high resolution.
+And HDR doesn't really make an impact.
+And that's great.
+And I've not focused on PS4 here because both PS4 and Xbox run at the same resolutions, 1080p.
+This is a scan-out shader, which runs at 1080p.
+So for the same resolution, the PS4 has more AOUs, so we haven't worried about it.
+Now, a little note on the HDR standards themselves and the platforms that support them.
+There are two primary standards at the moment, Dolby Vision, HDR10.
+And Frostbite can support both.
+And because we have this final pass, supporting more is relatively easy.
+So if something like hybrid log gamma becomes ratified and used a lot, we could support that relatively easily.
+There's a small asterisk here that I have to say.
+Just because Frostbite can support both, and we do support both, that doesn't mean that every game will support both.
+Because licensing agreements and everything else are signed on a per-game basis.
+It's entirely down to the game team to choose what they do.
+So I, unfortunately, can't stand here and say, yeah, everyone's going to support everything.
+It'll be down to each game.
+But the tech can support both.
+And so we hope that everyone will.
+But I can't guarantee it.
+So Dolby Vision has some pros and cons.
+It's a 12-bit signal rather than 10-bit.
+It's also compatible with older versions of HDMI.
+So it goes down to 1.4b.
+In Dolby Vision, there's no need to write a display mapper at all.
+Dolby does that for you, and it's embedded into the TV firmware.
+And Dolby say that because they built this display mapper for each display, they can guarantee some sort of uniformity across displays, some form of standardization.
+And we don't have any control over this.
+That's entirely down to them.
+And they also promise that you get good results from low-end panels.
+Now.
+There's a few downsides to this.
+In order to feed the TV information to let it run the display mapping, you have to generate some metadata, and you have to encode the frame buffer.
+And the metadata generation does add a cost.
+You tend to histogram the frame, and that's not entirely cheap.
+It's not insurmountable, but it's a small cost here.
+And when you encode the frame buffer, that adds a cost as well.
+But this frame buffer, once encoded, is now non-blendable.
+So you can't blend overlays on top of it.
+And that means that if you try and draw something like a friend's notification, it can corrupt the framebuffer, and that's not good.
+Also, Double Vision isn't today supported by many TVs.
+HDR10 has pros and cons as well.
+HDR10 is far more widespread.
+And because it doesn't have a custom framebuffer encoding, any blended overlays do sort of work.
+And as we showed earlier, software display mapping, reasonable software display mapping, can be done very cheaply.
+On the downside, and this is probably the biggest downside, there is no standardization at all on HDR10 across manufacturers.
+Indeed, across modes on the TV, game mode, cinema mode, whatever.
+There's no standardization at all.
+And this means that your game can look different on every different TV and every different mode on every different TV.
+So to help try and bring this a bit more closely aligned, the game really should do its own display mapping.
+Also, HDR10 is 10-bit rather than 12-bit.
+However...
+They share a huge number of commonalities.
+They share the ERTF.
+They do share a minimum and maximum mastering Luma.
+They share a color gamut.
+And that means that if you're mastering in a wider space, you pick the same space for both, because it is the same space for both, and the same master content will work on both.
+And you just have a different display map target for each one, and that means you can support both with the same data, so it's not really any extra work, apart from the implementation.
+And which platform support which?
+Well, both PS4 support HDR10.
+Xbox One S supports HDR10.
+And on PC, you can pretty much do whatever you want.
+So HDR10, Dolby Vision, whatever.
+But because you have to send metadata over HDMI to make this work, you do need GPU vendor extensions to handle that metadata.
+So you've got to call a couple of functions.
+And DX11, with exclusive full screen, this just works because you just take full control of everything.
+Do Dolby Vision, encode your frame buffer.
+Everything's fine.
+DX12 is a little bit trickier, because it doesn't have exclusive full screen.
+And the desktop compositor can then come in and perhaps scale or add overlays.
+And as I mentioned earlier, if you try and scale or add overlays to Dolby Vision, it breaks the encoding, it breaks the metadata, and that can cause some trouble.
+But we are working with various people to try and improve this.
+And of course, do not forget SDR TVs.
+There is a majority of the market.
+There's a huge number out there.
+And the SDR version needs to look great.
+It's so easy to get carried away with an HDR TV next to your desk and get really excited.
+But master your content in HDR, and treat the HDR as a reference version by all means.
+But because we own the display mapping, we need to really tune that to make the SDR version look really, really great as well.
+And as I mentioned before, you can also play to the fact that the SDR TV over brightens your image, so you can scale it to fit.
+OK, what are our next steps in FastByte?
+Well, high dynamic range video is absolutely one.
+So today, we don't support high dynamic range video.
+We do support pseudo high dynamic range video, because we can take the video and we can scale it up just like the SDR TV would.
+So we can make it look a bit brighter.
+And it actually looks pretty good.
+We can also do something cheap like reverse the tone map curve in the SDR video and extract the HDR data.
+Not a large range, but we can reverse that and get something else.
+So there's ways to make it work at the moment.
+But HDR video natively requires higher bit depth.
+It has a higher decode performance overhead.
+It's got bigger file sizes.
+It's got bigger streaming overheads.
+And also, if you've got a marketing ecosystem where you're taking a version of the game and capturing it and then producing marketing videos, like YouTube now supports HDR, for example, you don't want to have to create a different marketing video for every different version.
+It'd be a huge workflow overhead.
+So you want an ecosystem to be able to capture, playback, edit, and then spit out multiple different versions of your marketing video for every different HDR format.
+And that needs an ecosystem in your workflows.
+And really, this comes down to managing color gamut.
+And we don't support wide gamut rendering currently.
+So when looking at what HDR TVs give you, they give you wider color gamut, and they also give you a wider dynamic range.
+And we figured that the wider dynamic range, which also gives you better saturation, it was the bigger and easier thing to do.
+So we went for that straight away.
+But we really do also want to support wide gamut rendering.
+However, this is a loss of work.
+So first you have to expand the runtime gamut to feed the TV.
+You then have to have gamut metadata on every single color asset you possibly author and maintain, because not every single thing is going to be in the same gamut.
+So today we can assume, because it's a 20-plus year old standard, that everything's in sRGB.
+And so you haven't got to worry about it.
+Everything's the same space.
+Everything kind of just works.
+You can make assumptions.
+But when you go wide gamut, you're going to want to selectively author certain things that benefit from wide gamut.
+And that means they need separate metadata.
+So skin tones, flora, fauna, fire effects, all these things are outside of sRGB or 709.
+And so you need to preserve this metadata.
+And you have to move this metadata in and out of the digital content creation packages as well.
+And some of them support one standard.
+Some of them support no standard.
+Some of it's manual.
+So this is a relatively error-prone area.
+And it's also a lot of work, because you have to transform everything into the same working space to render.
+And this is where things like ACES, OpenColorIO, OpenImageIO can really help, because it's a standardized way of doing it.
+But not all packages support this.
+So this is why it's difficult.
+However, we'll start by working from the TV back.
+So the first thing we'll do is to convert the color grading, which is one of the last stages, into high dynamic range, implement some out-of-gamut or debug modes to help the artists, and then work back from there.
+However, our color grading is done in lookup tables.
+And if you recall this slide from before, this is a percentage of the volume of the lookup table that we actually use.
+And if we take this and move it into 2020, for example.
+it gets a bit more horrible.
+So yeah, our RGB value, which is about 8%, drops to just under 5%.
+YCGCO and YCBCR, they halve again, back and forth a couple of times.
+But ICTCP does not change, and that's because ICTCP is a natively wide gamma HDR format.
+So when moving to wide color gamma, considering using ICTCP for a grading format, starts to become really appealing.
+And on that, just a quick note on gamut reduction.
+Expansion is trivial.
+What will hold more will hold less.
+And it's basically a matrix transforming linear space.
+However, gamut reduction is not so trivial.
+If you take a value that's outside of your target gamut and then naively rotate it, then you get out of gamut colors and this can manifest as negative numbers, which when you clip to zero to output, you get hue shifts.
+And in a quick test, a vibrant red can become purple, which is not like a subtle thing, which is really obvious.
+So you must absolutely map your colors to the target gamut before you do the transformation.
+And again, we're back to this format, ICTCP.
+We really suggest using this as a working space, because if you recall, the chroma part of this is perceptually hue linear.
+So you could do something as simple as just scaling a saturation until it fits the target gamut.
+You won't change hue.
+You'll just change saturation.
+So this is our thinking.
+Relatively simply, just scale the saturation down until it fits in the target gamut, and then go from there.
+So just to wrap up, I tried to distill a few key thoughts, messages, and learnings over this two-year journey.
+First and foremost, ensure that your colors are actually in those assets.
+Make sure they're there.
+Do not rely on a tone map or a clip point, which all vary in HDR, to change the hue.
+Make sure those colors are in those assets.
+And please try to master your game in the widest possible space, master it in HDR, and then produce every version of that as an artifact.
+So move your tone map as late as possible in the pipeline as you can, and then start to play with your tone map for each different display.
+Also, it is worth considering using decolorated spaces, ICTCP, YCPCR, whatever, because RGB isn't the only way to do things.
+And if you can, please try to aim to support all standards.
+It's in all of our interest to try and drive the adoption of HDR.
+It is a lot better.
+But please don't also forget about SDR, because that's where most of your sales will come from.
+And that's pretty much it.
+I'd like to make sure there's a few thanks here, especially to Tomasz here.
+Tomasz is really the brains behind the display mapper.
+He's put a lot of time, energy, and love into this.
+And it's really important to make sure he's credited up here.
+Also, I'd like to thank Dobby for the help.
+Several unnamed game teams, specifically the DiceFX community, though, because they've provided a lot of test assets for us, and Mark for helping me with this talk.
+And that's me done.
+Any questions?
+Hi.
+Hello.
+Hi.
+Congratulations.
+I agree on everything here.
+It's very cool.
+I have a couple of questions.
+So you have your display mapping.
+It's nice.
+Do you use it for allowing users to calibrate different ambient levels, different displays, OLEDs, LEDs?
+And if so, how do you present that choice to the user?
+OK, so the question was about do we use the DisplayMapper?
+Can the users use it to adjust the viewing environments?
+It's a really, really good question.
+And I haven't touched at all on viewing environments.
+I kind of deliberately didn't do that because I didn't think I'd have time.
+I probably should have gone into it because I have a couple of minutes.
+Yeah, this is only about the end-to-end pipeline to produce the final image.
+Viewing environment makes a really, really big difference to how an image will look.
+You could have a very dark, light-controlled room, and everything looks great.
+You could then have a really bright living room, and everything will not look good.
+So yes, the display mapper should be used with user controls for adjusting gamma, brightness, contrast, and things like that.
+We currently don't.
+But yes, that would be the perfect place for it.
+And actually, Timothy Lotz did a talk last year on VDR.
+Yeah, that was extremely cool as well.
+And I recommend checking that out.
+And if I can, a second one very quickly.
+How do you present all this to your artists?
+I imagine that not everybody will have 16-inch TV under their desk.
+So does every artist have an HDR TV?
+No, no, no, definitely not.
+So the vast majority of the artists run the display mapper in SDR on a vaguely calibrated desktop monitor.
+And these projectors aren't HDR.
+So everything you've seen today is the SDR version.
+It's the most aggressively display mapped SDR version.
+So because it preserves hue, actually, it's really helping effects artists to create their content even without an HDR TV.
+So it's presented as it would be to anyone playing a game at home.
+The display mapper is most aggressive on an SDR monitor, less aggressive if they do plug in an HDR TV.
+It seems to be going pretty well.
+And in DaVinci Resolve, we've run, generated a view LUT for the most aggressive SDR version.
+So it's a WYSIWYG workflow in Resolve.
+man 2 I guess you have very good materials because we noticed this that...
+your highlights or your levels when they're crushed by the SDR.
+The artists don't see that sometimes.
+So when you switch to HDR, you immediately notice things that are not really VR enough.
+Something else the artist can do, because they can type in the theoretical peak luma of the SDR TV.
+If they really want to, they could type in like 2,000 or 10,000.
+And it will stop the image down multiple times so they can actually see the original highlights.
+There's roughly 100 to 1 improvement in available range in color grading by switching to HDR from SDR.
+So there's a huge amount you can play with in there.
+You can completely re-expose it in post-processing and not really lose any information.
+It's really nice.
+Thank you.
+Hi, Alex.
+Great talk.
+Just a really simple question.
+You mentioned reintroducing the hue shift, and I was wondering if you could elaborate on how you did that.
+Was it quite simple?
+Absolutely.
+Yes, it was very simple.
+We would literally run a 1D version of the shoulder of R, G, and B, and then the Chromaluma one, and just blend between them.
+Right.
+I thought it might be something like that.
+Thanks.
+Yeah.
+Any more questions?
+I have one.
+Wonderful talk, thank you.
+Yeah, I just wondered, because you mentioned that you're mastering in HDR with your final kind of tweaks and grades, what kind of display are you using to do that?
+It depends.
+So the question was about what display do you use to master.
+So it really does depend.
+For the majority of artists that are color critical or doing color grading, they would probably have either a calibrated monitor or something like an ISO, a hardware calibrated monitor with a shield around it to shield them from light.
+And that's a color critical work.
+It's a high bit depth monitor.
+And they can grade in HDR, and they still get all the results they need.
+However, you can also buy, for roughly $30,000, Sony grading monitors.
+And others are coming.
+The ideal situation would be is that every game studio, rather than game team, but every location, would figure out how to fund buying one of these.
+And they would share it and share it between teams.
+We've been very lucky that Dolby have a reference monitor.
+and called Amaui, of which there are not very many in the world.
+But they can loan them out to different people to help accelerate the adoption of HDR.
+And we were lucky enough to borrow a few of those.
+So for some artists, they were very, very fortunate to run on a roughly 2,000 net reference grading monitor.
+But if you were to use one of those ISO monitors, are they?
+Are they high net?
+ISOs are just standard dynamic range.
+So you're really grading color.
+But you can wipe the exposure up and down.
+So you can really see what's going on.
+And typically what you would do is run on a live version of the game in parallel with that running on, say, an Xbox or a PlayStation connected to a relatively cheap, off-the-shelf HDR TV just to validate side by side.
+And because it's a live workflow, you would get your feedback on both.
+And it is really important to test on a lot of different TVs, by the way.
+So.
+You would probably end up within QA taking this version where the artist has played on one HDR TV.
+And then QA would very quickly run it through a suite of different TVs from OLED to LCD and just test.
+So it's quite scalable.
+You might just work on SDR.
+You might work on SDR and a console connected to HDR.
+You might be lucky enough to have a reference grading monitor.
+It's fairly scalable.
+Thanks.
+Sure.
+I believe we're done.
+Thank you very much for coming.
+Much appreciated.

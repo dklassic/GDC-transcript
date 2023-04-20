@@ -1,0 +1,1175 @@
+Good afternoon, everyone. If I could have your attention really quick, before I get started with the talk proper, I want to share two quick notes with you. First, please silence cell phones, laptops, anything else that might make a disruptive noise. Second, this is mentioned in a few places in the program. One second.
+All right. Sure, sure.
+So it is mentioned in a couple spots in the program and at the door, but there are also a few spots where it's not mentioned.
+This is a two-hour talk.
+We are going to run until 5 including Q&A.
+Obviously, there's a whole bunch of sessions at 4.30.
+Some of you may be very attached to those sessions.
+I have good news for you.
+The slides should run about an hour and 20, and then we'll do Q&A.
+So if you're willing to skip Q&A, catch it on GDC Vault.
+You should be able to catch a 4.30 talk.
+Thirdly and lastly, I've been asked that if possible, if you could all scoot towards the center of your sections as latecomers come in.
+We want to allow them to enter the audience with minimal disruption.
+With that, welcome to I Shot You First.
+I am both honored and incredibly excited to be here today to talk to you about the gameplay networking of Halo Reach.
+When I started working on Reach three long years ago, I knew very little of what I'm going to describe to you in this talk, and I would have killed to get my hands on it.
+I hope that you will find its lessons useful in your own games.
+The very first thing that you're probably wondering is, who the heck am I to be talking to you about this?
+I'm David Aldridge.
+I'm the lead networking engineer at Bungie.
+I spent approximately three years working on Halo Reach networking.
+I've been in the games industry for quite a long time before that, starting with this gem over ten years ago.
+The second thing you're probably all wondering is what is Halo Reach?
+Fortunately, I have prepared a small video here to show you what you're missing.
+Sound.
+Please pardon the technical difficulties.
+Killing spree.
+Lost the lead.
+Double kill.
+Triple kill.
+So that's Halo Reach. We're pretty proud of it.
+So there's three things that I want you to walk out of this talk with.
+Three things that if I do my job, you will leave here with.
+First, we're gonna talk about a proven architecture for scalable gameplay networking.
+Proven across three Halo titles.
+This word scalable is very, very key here, and we're going to return to it again and again.
+There are many ways to do networking that are not scalable.
+We have a way that we have been, we have had very good luck with scaling across games with very, very large numbers of objects and very diverse gameplay mechanics.
+Second, we're going to talk about how to design solid networking for your game mechanics.
+which includes things like ensuring that your game mechanic design and your network design work hand in hand to reach the highest possible quality.
+Third, we're going to talk about how to measure and optimize your networking systems, something that is incredibly important. There are a few things that I want to get out of the way up front that this talk is not about.
+Since there's the word networking in the title, there are certain expectations.
+First, we're not talking about Halo's campaign or Firefight networking. We're specifically talking about the competitive multiplayer experience, 16 players, PvP. Campaign and Firefight use a different networking model that we'll touch on very, very briefly, but we won't go into any detail on. Second, we're not talking about sockets.
+We're not talking about traversing a gnat and punching a hole in a firewall and connecting to a remote machine. Everyone has to solve this problem once, but it's not really that interesting in the long run. Third...
+We're not going to talk about what we call high-level networking at Bungie, things like matchmaking, getting players together into games, creating your online ecosystem.
+Without further ado, let's go into the gameplay networking architecture.
+All right.
+So what is gameplay networking?
+What is this problem we're trying to solve here?
+I sat down and I tried to write a definition.
+This is what I came up with.
+It's a little wordy.
+It's very explicit.
+I don't actually like this definition very much at all.
+Communicating sufficient information, perceptually shared reality, this sounds almost like you could test an algorithm against it.
+That's crazy.
+Gameplay networking does not really work this way.
+In practice, this is what gameplay networking is, in my opinion.
+Technology to help multiple players sustain the belief that they're playing a fun game together.
+What underlies that does not matter.
+How can we solve this problem?
+How can we create some technology so that players believe they're playing a game together?
+There are some simple approaches, simpler approaches.
+Nothing is really ever simple, but simplifying approaches that will make your life easier.
+First, you can use lockstep, also called deterministic or input passing methods.
+This is what Halo's campaign and firefight networking use.
+In this model, you rely on the complete determinism of your game loop.
+You pass the non-deterministic player controller inputs over the wire, and voila, everyone's running in the same game simulation.
+The downsides to this are that your input latency from the controller to the game includes the network round trip time to the host of the game.
+This means that for first-person shooters, you end up with significant input latency when you try to shoot your gun or jump or operate on the world in any way.
+Unacceptable in a multiplayer context where players are fighting each other.
+The second way you can make your life easier.
+is to use reliable transport protocols, whether TCP or a homegrown reliable UDP to try to reduce the latency of it. This can make your life much, much easier because you don't have to worry about things being reordered or lost in the wild woolly Internet.
+This works very well as long as you have relatively simple network state or you're willing to use a very large amount of bandwidth and restrict the number of machines and Internet connections that can play your game.
+You can always send all of the network state about your game.
+Specifically, you can always send it atomically.
+What this means is you will not have problems where the network state of one object is out of sync with the network state of another.
+You can guarantee that remote clients will receive the entire network state of the world in a consistent way.
+This fixes an enormous class of bugs.
+The Quake 3 model is famous for this.
+This works very, very well as long as you can express the total network state of your game in no more than a few hundred bytes, let's say.
+Does not work with very large numbers of objects.
+Unfortunately for us, and the reason I'm here to talk to you today, Halo has to solve the hard problem.
+We have hundreds of networked objects, every one of which can stop a bullet, every one of which can affect the gameplay in a critical way.
+We have a highly competitive skill-based action game.
+that players devote thousands of hours to mastering.
+We do not use dedicated servers to minimize latency between peers.
+Players expect the game to always work.
+For many of you from the PC world, players on PCs can tolerate a certain amount of futzing with their connection.
+You can show them some interesting debug information like lag indicators, things like that.
+The console audience doesn't really tolerate much of this at all.
+It pretty much just has to work.
+And lastly, the sort of the death knell for any of these methods for Halo multiplayer is this n squared problem that comes up in so many contexts across engineering.
+For n players, we have to send the network game state to n minus one remote machines.
+And the amount of things occurring in the game world is proportional to the number of players because they're all shooting, they're all creating havoc.
+This leads us to a classic almost n squared graph, something like this.
+Where the very lower left there is the amount of bandwidth that you would need to transmit everything that was happening in the world if you were in a two-player game.
+And the far right, 100 times, is the amount you would need for a 16-player game.
+This is totally infeasible for Halo.
+We've graphed this out and it comes out to something ludicrous like 20 megabits a second of data.
+Fortunately, we are not the first game to have faced this problem.
+And even more fortunately, one of the games that did wrote a beautiful paper over ten years ago and presented it at GDC.
+The Tribes Engine Networking Model by Mark Von Meier and Tim Gift, they outlined a host client model resilient to cheating, like most PVP games.
+The key attribute of their model that made it really interesting for us and made it the only model or the top model when we were considering a model for Halo.
+is that their protocols for how they communicate about the game over the network are all about semi-reliable data delivery.
+They're all about providing networked state that is not fully reliable so that you're not forced to resend.
+Specifically they support this idea of persistent state and transient events.
+We'll go into detail on what those are and what they're used for.
+And the result of all this, the result of having these semi-reliable guarantees.
+is that the whole thing is highly scalable to match available bandwidth. We never have to build up a huge latency debt because we flooded the connection with too much data.
+All right. Before I can tell you about how our system works, I have to define three key terms. Gameplay networking terms, unfortunately, are not that standardized. So let's get our terms straight right up front. First, replication.
+Replication is a term that we use at Bungie.
+I haven't heard it used elsewhere, but it might very well be.
+It specifically is the idea of taking some state that exists on one box and then transmitting sufficient information over the network so that it can be replicated on the other box.
+The analogy to think of is like a Star Trek replicator.
+You take a description of a cup of hot earl gray tea and you encode it in the replicator and the replicator can create a copy of it that appears to match.
+Basically, that's what we mean when we use the word replication.
+We are going to give you a description of the object or what's happening with the object, and then it's going to appear and look to you to be real.
+Second term, authority.
+This is fairly intuitive.
+This is the idea of who's the host, who has the authority over objects.
+For almost all objects, for almost all things, because we're a host-client game and because we're very sensitive to cheating and to attack surfaces for cheating.
+The host has almost all the authority in our game.
+He has authority over object health, damage events, projectile positions, things like that.
+Clients can exert some limited authority over their own bipeds, and we'll talk about that as well.
+Thirdly, prediction.
+Prediction is what you do in between receiving updates about an object.
+In this little animation I've got here, if you assume that this moving circle is an object and this is a...
+simulation occurring on a client machine, and the green stars are updates coming in from the host about where this object really is and what direction it's really moving.
+All the movement of the object in between the green stars and afterwards and predictably bouncing off walls and things like that, that's all prediction.
+That's all us applying rules and guesses about what we think is going to happen with the object.
+I'm going to throw this word around a little bit.
+Okay.
+That was pretty painless.
+Now we're that much closer.
+to looking at how we network beautiful things like this.
+Networking stack.
+If there's any old school network programmers in the room, you're probably expecting this to come up a little sooner.
+But it doesn't look much like the OSI networking stack.
+Let's run through it.
+At the very highest level, we have the game code.
+Everything everyone else works on who's not on the networking team.
+It simply runs the game.
+The next level below the game we call the game interface.
+The game interface is responsible for scraping the game, for extracting all the data from the game that we might potentially want to replicate.
+The prioritization layer then takes all that data that game interface has gathered and decides what stuff is most important to send.
+Once the prioritization layer has selected what to send...
+We hand it off to the replication layer, which implements essentially the tribe's protocols.
+Again, we're going to look at all this in more detail.
+Below that, we have things we're not going to look at in detail.
+The channel manager, which has flow and congestion control to keep us from flooding players' connections.
+And the transport layer, which looks like everybody else's transport layer.
+It's just a cross-platform socket layer.
+Okay.
+In this talk, we're going to cover these three layers specifically in pretty good depth.
+We're not going to talk about anything below or above.
+OK, some meat, some actual real algorithms instead of just overviews.
+State data.
+This is the first tribes protocol and the one that accounts for the vast majority of our bandwidth.
+State data provides this very specific guarantee.
+Eventually, the most current state will arrive.
+Sounds simple, but it's incredibly powerful.
+What does this mean?
+Let's say I was the host and my position on this stage was being replicated out to all of you as clients.
+Let's say further that this position is being replicated as state data.
+If I start in this position and you all know that I'm here, we start from time zero, everything's in sync, and then I walk across the stage, then I stop.
+State data guarantees that if I stand here for long enough and the connection is not dropped, you will all eventually see me appear at this location.
+does not guarantee any of the intermediate locations that will be sent. All the intermediate information can be dropped based on available bandwidth. So this is used for all the vast majority of properties in our game, objects, positions, health, timers, tons and tons of properties. The second replication protocol is called events. Events are all about justifying state data transitions with richer data.
+Events have much, much better screenshots than state data, as you can see, because events are all about telling you about why something happened, why someone's health died or dropped, why someone died, why a warthog has just lost a wheel, all these sorts of things.
+The event reliability guarantee is nonexistent.
+Unlike state data, which guarantees the eventual delivery of the most up-to-date state, events have no guarantees whatsoever.
+Every event could potentially be dropped.
+This is important because events are describing transitions.
+If you are not in a location where you can currently see the transition occurring, like if you are, for example, outside this room, you don't care about transitions that are occurring within this room.
+You only care about the final state.
+So if you were to enter the room, you would see the updated state.
+Last replication protocol, control data.
+Control data is all about improving the accuracy of our prediction systems.
+For control data, we take a subsample of the player's controller inputs and a few other useful things, and we transmit that sort of as frequently as we can from the client to the host and reflect it back out to all clients.
+What this lets us do is it lets us infer changes in the game or predict changes in the game far in advance of when they would actually change the game.
+For example, if I'm running forward...
+And then I push the left stick to start strafing left.
+You won't actually see a change in my object for several frames plus acceleration time plus however long until it actually moves more than one pixel, you know, whatever.
+A significant amount of time.
+Control data allows us to transmit the fact that I'm pushing my stick left so that everyone else can start to predict that I'm going to begin to strafe to improve the accuracy of their prediction.
+This is a very, very tiny amount of data.
+Control data for one player is something like 20 bits.
+very, very carefully hand-packed data because it's sent so often.
+Okay. Let's look at the big picture, putting together all these protocols in one. We have a host box and a client box, as all good networking diagrams should. Firstly, the client sends control data to the host. This includes both his stick inputs and the current information about where he thinks he is in the world, like my biped is currently in a certain location.
+This is how the client exerts most of his agency in the world.
+Second, clients will transmit events to the host.
+These are transient things the client can do that he needs the host's permission to do or that he needs the host to execute.
+He needs the host to actually change the world in response to these things he's trying to do.
+From host to client, this picture is a little bit bigger.
+We have control data, which is stripped down to just the minimum at this point, just the controller inputs that are useful for prediction.
+We have state data.
+This is the vast majority of all our bandwidth.
+This is transmitting all of the final states, all the current states of everything that is important over time.
+And we have events, which are just like what the client sends to the host.
+They are justifications for the state data transitions that occurred.
+So let's take an example.
+Right here we have in state data, the warthog now has a broken windshield.
+That's a piece of state data that's transmitted.
+Windshield state is now broken.
+If that was the only thing we transmitted and we didn't transmit, this warthog just took damage at this point.
+You would just see the windshield permute.
+Maybe there would be some fake effects to cover it up, but we wouldn't really know why the windshield got broken.
+If you have the event, you see beautiful sparks, you see all the appropriate transitions, you have special sound effects, you know, all the beautiful flavor material that describes why the state data transition took place.
+Okay.
+Again, I've beat this drum several times now.
+You're going to hear me beat it several more times.
+Replication is never fully reliable.
+Unreliability enables aggressive prioritization, which lets us deal with the fact that we don't really have an object cap, which lets us deal with the fact that we have 200 synchronized objects or more in a 16-player game.
+I mean, it peaks at well over 2,000.
+So what can we do with prioritization?
+We can give the power to our flow control layer, to the guy who is looking at the current connection status.
+and figuring out whether it's safe to currently send data without causing packet loss or a latency spike.
+We can give this flow control layer that full authority.
+He decides when to send a packet.
+He decides when it's safe and how big it should be.
+When he decides to send a packet, he talks to the replication layer and says, hey, we're sending a packet now.
+What would you like to write?
+Replication fills up the packet, however big it is.
+Obviously we don't have room to fit all our data.
+We never do.
+We don't really have 20 megabit connections.
+And even if we did, we wouldn't have the perf to actually encode it all into a packet.
+So we write high-priority data first, of course.
+We write data in priority order.
+All right.
+We've sold our souls in terms of complexity to get this wonderful prioritization system.
+So let's take a quick look at what its capabilities are.
+It's sort of what you would expect.
+It's similar to the problem of culling, of like figuring out what stuff is important to render.
+It's a softer problem.
+But basically we're looking at, hey, what stuff is close to this client?
+What stuff is he looking at?
+What stuff could hurt him?
+What stuff has he recently damaged?
+Because that's a pretty strong indicator of interest.
+There's some really unintuitive stuff you get in here, which we have evolved over time.
+Things like, oh, grenades, as they fly through the air, are prioritized based on how likely they are to damage a particular player.
+That seemed reasonable to us.
+If it's not going to damage you, why do you care?
+But we discovered significant lag artifacts on the player's own grenades, because players watch their own grenades like hawks, even though they are completely irrelevant to them after they've thrown them.
+They can't affect them in any way.
+Well, that's not true.
+In general, they can't affect them in any way.
+You can shoot grenades out of the air.
+Crazy sandbox designers.
+There's tons and tons of these special cases that we have sort of built up over the years in response to player feedback to give the best behavior that we can.
+Let's look at a quick example of this.
+This is a screenshot just taken from a Halo Reach game.
+This player here in the lower left has just killed the player who is now ragdolling and falling to the ground below him.
+Let's take a look at the network prioritization of data about these objects to the guy who's still alive.
+So everything we're going to see is about sending data to the guy who's still alive.
+Firstly we have a prioritization overlay, which I'm sure most of you cannot read.
+Don't worry.
+This is our in-game debugger that sort of shows all of our prioritization decisions as they occur.
+Some examples.
+The dead body.
+So first off, the legend.
+There's three numbers here for each object.
+First is the final priority.
+This is the final, like, literally if this number is higher, you get to go in the packet first.
+Second, relevance.
+Relevance is sort of a pure measure of how noticeable something is without regard to its importance to the game.
+Third, update priority.
+This is in milliseconds and this tells us, hey, how often should we try to send updates about this object?
+So zero means we're sending updates as fast as we can about this dead body.
+Every single packet gets an opportunity to send something.
+The 1.0 relevance is basically maxed out, and that's because we know that players watch ragdolls fall for a few seconds after they kill people.
+They're proud.
+.5 is a fairly high total priority. There's tons and tons of range that has to be encapsulated into the priority range due to things like stacked bonuses. So .5 is actually a fairly high priority in this scenario. Conversely, we can look at this gun here. This strange pink thing is a covenant needle rifle. The update period for this is 127 milliseconds.
+So we're trying to send updates about eight times a second about this gun.
+Its relevance is almost as high, 0.97, because it's quite obvious, it's in the player's face, it's very, very close to his screen, it's on screen.
+But the priority is much, much lower than it was for the biped, 0.22.
+That's because priority mixes in all the information that we have gleaned about what is actually important to the player over and above what is noticeable.
+Guns when they're falling, generally not that important to players.
+They might go pick them up, but in general, they're watching the body, they're watching projectiles in flight, they're not watching the gun.
+Even lower priority example, this is a grenade, same shot, same exact moment in time, dead body in the background there.
+This is a grenade, inactive grenade that was dropped by the guy when he died, sitting in the water behind the shooter.
+This grenade is off screen.
+We're trying to send updates about this grenade about three times a second here, this 339, about three times a second.
+Relevance 0.73 still seems fairly high, from a zero to one range.
+0.73 is not actually that high because the relevance range has to encapsulate everything from objects that are near to you to unthreatening, noncritical, on-your-team objects that are across an enormous map.
+So that's why you see like a 0.73 here instead of a 0.0, just because it's an off-screen grenade.
+And the end result priority is quite low.
+So this grenade is going to get updated maybe three times a second if we have bandwidth, certainly not more than that.
+All right.
+That's the core of our architecture.
+This idea of using unreliable protocols to enable prioritization to give us unlimited scalability is the core of Bungie's approach to Halo.
+Unfortunately, our job is not over.
+We have to actually...
+design the individual pieces of gameplay networking. And this is actually quite difficult. Let's look at some examples. Firstly, throwing a grenade. Not that exciting. Pretty similar to a lot of other first-person shooters. What happens when we throw a grenade? Well, This is a sequence diagram, which is a tool we use quite a bit when we're analyzing how we're going to network a gameplay mechanic.
+Let's take a look at it.
+In terms of a single box, if we were throwing a grenade, what does it look like?
+Well, from the controller, the player presses the left trigger, very simple.
+That gets consumed by the simulation loop at some point fairly quickly.
+And then a grenade throw animation begins.
+There is some lead-up telegraph animation while the player winds up and throws.
+And then at a key release frame, somewhere around here with his hand, the grenade is detached, aimed at a target using the player's current facing directions and other code, and then launched.
+Exactly how you would think a grenade throw would work.
+It's beautiful.
+This is how it's worked since Halo 1.
+How can we network this grenade throw?
+There's actually a surprisingly wide variety of options.
+Let's try something simple.
+Now, we know, we've talked to design, we've played Halo, so we know, we played the prototype at that time for Halo, so we know grenades are very important to the game.
+We know we want them to be host adjudicated.
+We want them to be authoritative.
+We don't want to allow players to cheat with grenades.
+So let's try this sort of permission slip approach.
+We send a grenade throw request to the host.
+Once he confirms that we are allowed to throw a grenade, we do our whole animation and throw a grenade.
+Will this be a good networking approach?
+It won't.
+But how do we know that for sure?
+One of the most useful analysis tools is to use these sequence diagrams but with two boxes instead of looking at the controller with a single machine picture.
+Okay.
+First thing that happens, the client pushes a button and sends a message to the host.
+I would like to throw a grenade now.
+Very first thing you'll notice, this arrow is tilted unlike all sequence diagram standards.
+Why on earth is it tilted?
+It's because we are dealing with a distributed state machine.
+This period is the one-way network latency from the client to the host.
+These tilts of these arrows are the key that makes this sequence diagram tool so useful to us because you can see all the potential overlaps of all the pieces of your mechanic, all the different ways it could be networked, all the vulnerabilities.
+Okay.
+So what happens?
+Pretty simple.
+The host gets the request.
+He says, okay, you can throw a grenade.
+That sounds fine.
+Starts your throw animation.
+When he reaches your release frame, he throws a grenade.
+So that you're happy, he sends back a, yeah, that's cool.
+You're starting your grenade throw.
+Go ahead and start your throw animation.
+You start your throw animation.
+You play your delay for a certain period of time.
+You reach your release frame.
+About the same time you reach your release frame, you'll get a message from the host that, hey, this grenade totally exists.
+Everything's cool.
+We have a problem here.
+We are waiting our round trip time before we're giving the client any feedback on his button press.
+Players hate this.
+Players hate it with a passion.
+This is totally and completely unacceptable, so we have to find a better way.
+Okay, let's try something new, something a little more direct, a little bit less asking for permission.
+We'll just throw a grenade locally.
+We'll just let the player, like, he hits the button, he runs his animation, he throws a grenade, and we'll ask the host to also throw a grenade so that everybody else in the game can tell that we have a grenade in flight.
+What does this look like?
+Sequence diagram.
+Button press.
+We start our throw animation immediately.
+It's nice and responsive.
+Everybody's happy and playtests.
+It's so good.
+Tell the host I've begun a grenade throw.
+Host does the same thing as he did before.
+Triggers his throw animation.
+On the release frame, he throws a grenade.
+Where's the lag?
+Where are we hiding?
+the fact that the host is adjudicating the grenade throw, or is adjudicating the fact that in the end, the grenade's damage will be owned by the host.
+The answer is, there isn't any lag in this scenario.
+We have not hidden the lag anywhere in this diagram.
+We have never asked the host for permission, which means, does not mean that we've succeeded.
+You do not want this.
+You very much do not want this.
+This means you have incurred latency debt.
+You have created...
+an artifact, a dissimilarity, an asynchronicity in your simulation, which you will have to pay for in some way.
+Either you will have unhappy players due to inconsistent results in the game, or you will have some sort of warp later on, or you'll have additional code complexity to try to reconcile things in flight.
+You have to pay for this sort of thing somehow.
+Okay.
+So let's look at the actual way we do grenade throws.
+Just like in the second option, we predict the throw animation.
+So as soon as you push the trigger button on a client machine, you immediately begin your throw.
+There's no controller input latency.
+But we do not predict the grenade release.
+We wait for the host.
+This means that all grenades in flight will be real.
+The host is authoritative.
+We haven't incurred any lag debt.
+But where is the lag in this view?
+Somewhere.
+We're paying for a round-trip time.
+Let's take a look.
+Similar to before, client pushes a button, tells the host, host does it, so far so good.
+Oh, but at the moment when the client reaches his release frame, he does not throw the grenade, because as we said, the host must be authoritative over all grenades in flight.
+He deletes the grenade.
+So he gets to here and the grenade vanishes from his hand and he continues his animation.
+At the same time as he reached that release frame and deleted the grenade, he sends off a message to the host.
+Please create a grenade with this aiming information.
+Round-trip time later, the host comes back and says, yep, this grenade object got created.
+Here's its position and velocity, and the grenade appears.
+Where we put the lag.
+Fairly straightforward.
+It's right here.
+You can tell, you can see this pattern over and over.
+It's a call and response.
+It's a please do this thing, okay, here's the feedback from it.
+Clearly round-trip time.
+How is this better than the other way?
+Well, that's where networking becomes a bit more of an art than a science.
+This is much, much better than the original solution where we asked for permission before we triggered the animation for two reasons.
+One, players are extremely sensitive to input lag.
+They're extremely sensitive to anything, any button they can push on the controller that doesn't cause some reaction immediately in the game.
+So having that arm start moving immediately is infinitely preferable.
+Second, during the time of this lag, during the time between the normal release frame and the frame when the grenade actually appears, round-trip time later, there's a giant arm on the screen. It's covering like a third of the screen. It's moving really fast. It's got really high-res textures on it. It's got all my custom crap on it that I've bought with all my credits. It's really distracting. Not only that, I'm probably not looking at what's in my hand. I'm probably still looking down my crosshair just to make sure that I'm aiming my grenade correctly. Players don't notice.
+They literally don't see this. This can get up to 100, even 150 milliseconds. Casual players can get even to 200 before they notice anything. This is completely shippable. This is how we've shipped grenade throwers for three games now.
+Fortunately, having such beautiful grenade throw networking allows us to get results like this.
+Okay. That may have been a little, that grenade example may have been a little artificial.
+We never actually shipped any of those earlier sort of made up methods of networking grenades, the suboptimal methods. Let's look at some trickier gameplay examples. Let's look at some features that actually were in reach, that had multiple iterations of networking, some of which we shipped in our public beta, that were deeply flawed.
+Okay. First up, armor lock. Let's take a look at what armor lock is.
+Armor lock is an invincibility shield.
+Player pushes a button.
+There's an intro animation during which he drops into this locked pose.
+At the end of that intro animation, which is three frames long, incidentally, very important, three frames, he gets invulnerability and also infinite mass.
+He has that for some period of time and then he'll release the button or run out of energy and his shield will go away.
+Seems like a fun mechanic.
+How should we network this?
+First version we did.
+All the animations, the entry into an armor lock pose and the appearance of the blue shield and the infinite mass in the physics simulation, all were predicted by clients.
+So you locally, when you decided to use armor lock, would activate all the attributes of armor lock in your simulation.
+This felt great.
+This played great in our system link play tests, in our LAN play tests in the office.
+We had this in for a few months.
+And then we started doing take-homes where we load the game up into boxes and take it home and play together.
+And we discovered where the lag was.
+Let's look at Armour Lock V1.
+The client pushes a button.
+He begins his animation immediately.
+Everything is responsive.
+There's a three-frame delay here.
+Tells the host, hey, I've activated my Armour Lock.
+Host runs the intro.
+When the intro animation completes on the client, he gets invulnerability as depicted by this green box.
+When it completes on the host, he also gets invulnerability.
+On system link, this worked great.
+What's the vulnerability?
+Where's the lag?
+Well, it's right here.
+Grenade explodes on the host at this very, very special time.
+What does this do?
+Well, the host evaluates it and says, okay, grenade exploded.
+You're not invulnerable yet.
+You're still playing your intro animation.
+So I'm going to damage you.
+Hey, by the way, this grenade blew up, you just took damage.
+The client says, oh sure, that makes sense, I took damage.
+No, he does not.
+He says, what the hell?
+I was armor locked.
+I did the right thing.
+I saw the grenade coming.
+I pushed the button.
+I saw it flying through the air.
+Pushed the button.
+I was armor locked.
+I saw the beautiful blue shield.
+This is bullshit.
+So this was no good.
+We had very furious players.
+I just explained the lag.
+So version 2.
+Let's try it again.
+That version 1 never saw the light of day.
+No, that's too terrible.
+We would never ship that.
+Version 2.
+Let's have the animation be controlled by the client, sort of inspired by the grenade approach.
+We'll let the client immediately start his intro animation.
+But once he reaches the frame where he would normally enable the shield, he does not enable the shield.
+He stays unshielded.
+There's no beautiful blue shield.
+There's no infinite mass.
+He waits for the host to tell him that he's actually invincible.
+This is the method we shipped in our public beta.
+Where did we move the lag to here?
+Well, let's take a look at the sequence diagram.
+Client begins his animation on button press, yada, yada.
+Tell the host.
+Host runs the intro.
+Client finishes his inter-animation, does not turn on his shield, as we said.
+Host completes, turns on the real shield, and then he tells the client, hey, you're invulnerable now, you can turn on your blue shield and your infinite mass, everything's great.
+There's a really ominous hole there in that diagram.
+And indeed, same exact vulnerability, just a little less obvious.
+Grenade explodes here.
+Hey, by the way, you got damaged again, just like last time.
+The client did not have a blue shield, so he doesn't have any real strong reason to believe that he's invulnerable.
+So in some sense this is consistent networking.
+This is correct networking.
+Players unfortunately are not very understanding of this.
+And they say, why does my armor lock not work properly?
+Like this mechanic is broken.
+This shipped in our public beta.
+A million people played this and they told us loud and clear this was not acceptable.
+Well, actually, they told us loud and clear.
+And also, we data mined their use of equipment and discovered that Armor Lock was not as popular as the others.
+So we knew we had a problem.
+We needed to fix this.
+Lag shows up there.
+It's this wonderful period of sort of broken mechanics from the player's perspective.
+So we implemented a version 3 for ship with one last tweak, one very evil tweak.
+Let's take a look.
+Same thing as before.
+Client begins his animation.
+He does not turn on his shield when he finishes it.
+Tells the host standard stuff.
+Oh, this is different.
+What did we just do?
+We just said, instead of waiting for the three-frame delay to trigger invulnerability on the host, we shrink that three-frame delay by the measured round-trip time between the host and the using client.
+What does this mean?
+Well, it means this.
+We activate the shield on the host early, before the intro animation actually ends.
+So somewhere up here, the shield will activate instead of down here where it should.
+And then we tell the client, and lo and behold, it lines up with where he expects to see his armor lock activate.
+It's almost like we planned that.
+And we did.
+But it's obvious, right?
+By shrinking the frame delay by round trip time, we've paid for the lag.
+We have brought the host time stream up forward in time so that the client can see a consistent view of the world.
+And we haven't incurred latency debt.
+The world's consistent.
+There's not something out of sync that's waiting to bite us later.
+So what did we just do?
+We have grenades that can explode.
+Everything's fine.
+Everyone's always in sync.
+Everything works great.
+Players are happy.
+What do we do?
+This feels too good to be true.
+What we did was we broke the game mechanic in a very targeted way.
+We went in there and we grabbed the frame delay number that the designers had so carefully tweaked with so much love, and we slammed over it for networking.
+We actually changed the way the game played.
+We changed the real simulation.
+This is pretty much the only other way that we have yet found, that you can hide latency other than paying for a round-trip time or reconciling afterwards.
+You can change game mechanics. Fortunately, we got away with this. Because players, it was discovered once again, somewhat by luck, players do not care that someone else's armor lock activates a couple frames early. Sometimes they care, but rarely. They care tremendously that their armor lock activates on exactly the correct frame because they are very attuned to that timing.
+So we got away with it. We shifted the lag. By changing the game mechanic, we shifted the inconsistency from the player who cares a lot, who's using Armor Lock, to the host and all the other players in the game who don't care as much.
+This let us ship another wonderful feature.
+Double kill. Remember the infinite mass I mentioned? That's why they wanted that. Turns out when a rigid body hits something with infinite mass, you know, the infinite mass doesn't give. The rigid body has to give entirely. So we deal with more or less infinite damage.
+All right. Third example. Another reach mechanic that shipped with somewhat broken networking in the beta. Assassinations. Let's look at what these are.
+These were a signature multiplayer feature for us in Reach.
+We wanted to provide an exciting way to sort of take a, take a small risk and humiliate another player.
+So what does this mean in terms of what, sort of the high level of problem we're trying to solve?
+If two bipeds that are happily running along in their own simulations.
+They're both predicting their current positions, assuming they're both clients.
+They are somewhat ahead of what the host believes.
+They're ahead by one-way network time to the host of the host's current simulation.
+And then suddenly, out of the blue, we need to force these two bipeds to perform a joint, perfectly synchronized animation with very, very tiny error margins.
+The animators have carefully scripted this so that the knife slides exactly between the 13th and 14th rib of the elite, whatever their anatomy is.
+They do not we can't fudge this.
+This has to be precisely accurate.
+This turned out to be something we had never really done before in multiplayer.
+So we implemented a system which we shipped in the public beta.
+Local prediction of participant positions and orientations.
+What do I mean by this?
+What this means is...
+When the assassination order comes down from the host, which says, these two players have just begun assassinating each other, each individual box is permitted to make that assassination occur in whatever location is most convenient, most pretty for them, based on their current beliefs about the positions of those two objects.
+So everyone runs the assassination in a slightly different spot, potentially with a slightly different animation so that it can fit in that spot.
+And we thought this would be great because it would minimize lag on the way into the animation.
+It would solve this problem we were very afraid of, which was all these bipeds are in their own little predictive futures, and we need to bring them back into the host's present.
+That seems like it's going to cause artifacts.
+So we did this, and it did work that way.
+Like, it definitely prevented lag on the way into assassinations.
+And it worked really well in our play tests and take-homes.
+Unfortunately, it totally failed in the public beta.
+Let's take a look at some of the bug videos from our wonderful bug database that came back from the beta.
+This one's my favorite. This black screen is what you see in a film when there's a host migration.
+Oh my god.
+It will surprise very few of the programmers in the audience to learn that that location that we got warped to after the host migration was 0, 0, 0.
+All right, so this wasn't very good.
+There were clearly a lot of problems.
+They fell broadly into two categories.
+First, The animations didn't always fit in the predicted positions on client machines.
+Clients would decide, okay, to minimize network lag, I'm going to run the assassination over here in this corner.
+But it turned out there sometimes was no assassination animation that would fit there.
+So they would try, and then the system would panic, and havoc would freak out because you were pushing people through walls, and then we would break apart the assassination, you get people pushing through walls.
+You see all the artifacts you saw in those bug videos.
+Any class of bug was.
+At the end of the animation, any survivors need to get back in sync on all boxes.
+Remember, we allowed every peer to play the assassination in a different spot, which means all the survivors, or the survivor, or both survivors possibly, are in different spots on every box.
+But when you come out and the guy is still alive, everyone has to get back in sync somehow.
+So our system took care of that, of course.
+We received position updates.
+We said, oh, assassinations aren't happening anymore.
+Get in sync.
+So there was those artifacts like what you saw in those videos of people like warping and blending right after the assassination.
+But this was totally unacceptable for one very, very specific reason.
+We just got through playing a very expensive, very beautiful piece of content to draw the attention of every player in the game.
+They're all staring at this survivor.
+They're all wishing they were him.
+And then he warps!
+And then we get thousands of forum posts saying that our game is laggy and player perception is everything.
+You can't draw their attention and then have an artifact.
+So there were a couple of fixes to produce the shipping version.
+First, all peers, including the participants, obey the host strictly.
+This means that we get rid of the problem of discrepancies on exit.
+Survivors are always in the exact correct position at the end of the animation because we paid to get them in sync at the beginning.
+Now we still had the original problem that we were worried about to start with of, hey, on the entry into the assassination, we have to get rid of all these discrepancies.
+How are we going to do that?
+And so we very carefully implemented a, you know, visual only object state interpolator so that at the beginning of the assassination, all of the havoc state, all of the sort of true logical object state would be warped so that the assassination could begin and be in perfect sync with the host.
+But we delayed bringing the physical.
+and the renderable properties of the bipeds into those locations.
+We blended them over time using a quick exponential blend for like three quarters of a second.
+Even that didn't look great when we looked at it in our debug cameras.
+When our animators looked at this under network test conditions, they said that's not going to work.
+That's totally unacceptable.
+There's still these big blends on the way into my beautiful animation.
+And we played it in game.
+We discovered that once again, heaven had smiled upon us.
+As you may remember from the first video showing how assassinations work, when you start an assassination on the frame you start, the camera pulls out into third person to better show the ballet.
+Turns out the camera pull to third person takes about three quarters of a second.
+During that time, the camera's traveling at 25 feet per second.
+The player's perspective is changing so fast, they can't tell what's happening.
+We can blend 20 feet, they don't even notice.
+We tried it.
+Their brains fill in somehow consistency, because they're confused, and then they see the animation happen, and then they just backfill like, oh, that must have been what happened.
+So no visible latency, no reports of lag.
+Out to 300 milliseconds or so, totally fine.
+And once again, we could ship beautiful things.
+reinforcements.
+Alright, so all of our experiences on Reach and on prior games have led us to these four rules.
+four rules for designing your gameplay networking systems. First, you have to decide for each gameplay mechanic and sort of some high-level principles as well, which parts of your game are adjudicated by a single authority versus the parts that are allowed to be predicted and allowed to be out of sync for brief periods. The more stuff is adjudicated by the authority, the fairer and more consistent the game is. The more stuff that's predicted, the more responsive the game is.
+Most often you will have to mix these paradigms, even within every individual game mechanic.
+As we saw, you have to split the mechanic up and make predicted the pretty pieces and make adjudicated the important pieces. Second, always, always ask where you're hiding the lag. You can save yourself from shipping ugly public beta networking like we did.
+If you have host adjudication occurring, you will have lag somewhere.
+If you don't have lag somewhere, you don't have host adjudication.
+You have incurred lag debt.
+Third, don't be afraid to change game mechanics to improve networking.
+This is incredibly important.
+We have in the past several times had gameplay mechanics that we liked internally, that the designer was very happy with and that played very well on LAN games.
+Halo 3's shipping melee is a classic example.
+It was this fairly complex, well, somewhat complex thing where...
+When two players meleeed each other at the same time, the player with more health would win.
+The other one would die.
+They felt this added tactical depth to the game.
+In practice, on the Internet, with a few hundred milliseconds of latency, you couldn't tell with great precision what the health of your opponent was versus your own health.
+Which meant that when you went in and meleeed, it felt arbitrary.
+It felt like sometimes you died, sometimes he died.
+You had no control.
+We patched three months after ship.
+to simplify melee, to tear it down and make it this much simpler thing where if both players' shields are relatively low, they simply both die.
+Designers weren't as happy with this. It wasn't as tactically deep, but it worked on the Internet.
+It was fun and fair to players. Fourth, this almost goes without saying because it's so common across all of game dev, pardon me, and really all of engineering. Reserve time to iterate.
+Networking is incredibly hard to get full test coverage for, as all of you who have worked on it know.
+You will test it at your desk.
+You will test it with your coworkers.
+You will have an army of testers bang on it.
+You will take it home and play it.
+Then you'll hand it off to a publisher alpha with 10,000 participants.
+And an executive at your publisher will load up your game onto a kit, onto a retail Xbox.
+and he'll put it in his car and he will take it to his cabin at Whistler.
+And he will plug it in and he will boot up your game in his cabin at Whistler up in the trees.
+And then he will play and he will proceed to tell you at great length on your feedback forums how bad your networking is.
+Seriously, the Whistler forum thread as it came to be known inside Bungie.
+I'm not making this up.
+It actually was the source of several significant fixes between our alpha and delta because his connection had attributes we had never seen before.
+He had latency variance.
+We modeled the latency variance on a connection as like a sort of a normal distribution.
+His latency variance, the square of a standard deviation, was over 700 milliseconds.
+His packets were bouncing around all over the place.
+I don't know what the hell layers of buffering he had with his ISP up there.
+But he had unbelievably interesting bugs and he got the game into all kinds of crazy states because of this bad network and we were able to go in and fix them.
+It took a lot of time, so reserve that time.
+All right.
+After you've got your architecture and after you've networked your gameplay, you have to go in and measure and optimize your networking to make sure that it's actually as efficient as it needs to be.
+This is really, really hard for networking.
+Unfortunately, both because of the test coverage problem, which we just talked about, and because networking is a magnet for entropy, it's a very, very complex system.
+It gets more complex all the time because there's always tons of impetus to optimize it.
+It's invisible.
+It's only really noticed when it goes wrong.
+And perhaps most insidiously, networking has to work on an unreliable underlying layer on the Internet, which means it has tons and tons of internal safeguards and failovers, which means that if you have some system that is horribly broken somewhere in your networking tree, you probably won't notice it for a very long time because one of the safeguards will save you while consuming a ton of extra bandwidth or being inefficient in some other way. At the end of Halo 3, and when Halo 3 shipped, we had built up a couple games worth of this sort of entropy.
+As a result, 16-player games in Halo 3 did not work very consistently.
+There were a great percentage of lag artifacts.
+And so this richest, most complex, most chaotic version of Halo, which we all loved so much, didn't really work very well on the Internet, and we were sad.
+So we said, hey, let's go in, let's attack it, let's optimize it.
+Optimization is super dangerous.
+It's really easy, using your expert knowledge of the system and your belief that you yourself are a smart person, which we all share, I'm sure, to think about the architecture of your networking, decide something that seems like it could be better, implement an optimization, gain some small amount of efficiency, and introduce a ton of bugs.
+Again, this all comes back to test coverage.
+You can't really fully test your networking, or it's incredibly, incredibly hard and requires just vast, vast resources.
+So changing architecture is something that has to be done very, very deliberately.
+What this means is the kinds of optimizations you will think of from thinking about how your architecture currently works will usually not be the best bang for the buck.
+Really we don't want to be optimizing without good data.
+We don't want to just be going in and thinking about functions that are slow on a CPU optimizing or events we think are big on network optimizing and go in and change them.
+What we want is data.
+This is one of my favorite quotes from the other Michael Jackson.
+First rule of program optimization, don't do it.
+Second rule, for experts only, don't do it yet.
+Well we knew we needed to do it, unfortunately.
+We couldn't follow Mr. Jackson's advice.
+So, inspection tools are what you need to get past this problem, to get to where it's okay to optimize.
+Deep inspection tools will help you identify the things that are the best bang for the buck.
+So we thought about this.
+We sort of figured this out.
+We said, okay, we need some tools.
+What do we need?
+Well, let's think about how we do CPU optimization.
+Like we boot up the game and we run some representative test case and then we gather data, which gives us a nice hierarchical view of where all of our time is going.
+And then we figure out the best bang for the buck pieces and optimize them.
+So we built some profilers.
+That seemed natural.
+They would track bandwidth use for us and priority calculation results and show them on screen.
+Let's take a look at some of the capabilities of our profilers that we built.
+So this is from a live game of Reach, just video recording.
+And we bring up this graph view, a bunch of configuration stuff at the top, data series in the center, and then graphing of the data series at the bottom.
+You can't read these numbers or even see a lot of these lines.
+Don't worry about it.
+Not important.
+What's important is the kind of content being presented here.
+The first line here is showing the entirety of replication used bandwidth.
+The total amount of data being sent.
+Now it's split into five lines.
+This is showing all of our replication bandwidth use by protocol type.
+So state data as one, events as another, control data, and then voice.
+In particular, you can see here, well, if you take a look at the GDC vault and look at the good version of the video, you can see that state data takes up about 80% of our bandwidth.
+Hey, there's a lot more lines now.
+We've just gone another level deeper.
+We can go inside state data and events.
+and look at individual types of events and individual classes of objects.
+So we can look at bipeds versus weapons versus items and look at all their bandwidth use.
+We can go even one level deeper, which is shown here.
+We can look at every individual property of every subtype of every type of replication.
+So we can look at biped positions and compare them to weapon inventories.
+All of this data is shown, of course, with a nice graphing view so you can see which types are spiky.
+Very, very important in any kind of optimization.
+Now this is all very useful.
+This gives us a nice, like, sort of a high-level classification-based view of bandwidth use.
+But one other really interesting thing, especially in combination with priority information, is per-object bandwidth use, which I've just turned on in the background.
+There's a sea of numbers there.
+Our profiler tracks for every individual object all of the bandwidth use associated with that object as well as all of the bandwidth that the object would like to use in an ideal world.
+And it tracks all those and shows them here and they're color-coded by who's using the most bandwidth versus the least.
+And this can let us identify things like individual objects that are sitting off in a corner and chewing up bandwidth for no apparent reason, which happens all the time.
+So that's our profiling tool.
+We built this in...
+I don't know, about a month, maybe three weeks.
+And we decided to go and attack, well, I'm getting ahead of myself.
+We had one other tool besides profilers to work with.
+This tool is called Films.
+Films are something we've had since Halo 3.
+They provide us with deterministic playback of gameplay sessions.
+They're called Films instead of deterministic playback of gameplay sessions because they're a user-facing feature.
+Players can actually record their gameplay sessions and play them back.
+These are very, very useful for debugging gameplay, but they've never been really very useful for network debugging because network systems are, of course, idle during film playback.
+Networking is all about live decisions.
+It's all about looking at the current state of the Internet and making decisions.
+So that was sort of neat.
+So we looked at these and we said, hey, we've got this profiler on the one hand.
+It seems pretty sweet.
+We've got these films on the other hand that everyone loves, all the gameplay guys sort of thumb their noses at us with their incredibly easy-to-repro bugs.
+And we said, hey, these things sure would taste good together.
+Can we make that happen?
+And, of course, we're engineers.
+We can.
+So we spliced the network profiler data into the film at the times when gameplay was occurring.
+So after every frame of gameplay, we would inject a little debug blob into our films that are being streamed out to the console hard drive containing all of the new network state that was sampled during that frame.
+So all the information about every packet we sent and received.
+and all the prioritization decisions. For the first time in Halo history, we could analyze network performance after the fact. Which just enabled all kinds of wonderful deep investigations we'd never been able to do before.
+All right. Profilers and films are all very well, but we still need some way to actually gather data to actually figure out whether the game is working well. So we need play tests. We need to play the game. That's the ultimate test.
+So we ran network per focus play tests about once a month.
+We ran network filters on all the boxes in the lab so that we could simulate all kinds of different network conditions, packet loss, limited bandwidth, latency spikes, brief connection drops, all sorts of things like that.
+And then we had players play.
+And then we ran up into a problem very quickly.
+Players can play and they can sort of tell us whether they had a good time or not.
+whether they thought the networking was laggy or not, which incidentally correlates almost perfectly with whether they won or not.
+But really this wasn't very scientific and it wasn't very granular.
+It wasn't helping us figure out whether we were actually making our networking better.
+We needed a more scientific way to measure success.
+So what did we do?
+We allowed players to report every time they see lag.
+by pushing a controller button, especially assigned for that purpose, in these play tests.
+This injects an additional debug blob into the wonderful film, allowing us to jump to it later and look at what they saw and investigate why they saw lag.
+This is how we turned this from an art, a guessing-based game and an incredibly labor-intensive game, into a science.
+When we could run the game at our bandwidth goals and get...
+no perceived lag events coming out of the players, we knew we had succeeded.
+There were a few bumps along the way. Most notably, as we went through our network optimizations, we started discovering that perceived lag events were still getting put in by players.
+They were still pushing the button. We didn't really understand it. We would go in and we would look at the films and look at what they saw, and they didn't see any lag. There was no network lag. There was plenty of bandwidth available.
+Instead, they would push this button whenever some game mechanic confused them.
+If they got shot from behind by two guys at once and the death camera didn't show them how they got killed clearly enough, they would hit the button and be like, that looked laggy.
+It got incredibly subtle things like the, at one point we had, we were tuning grenade damage in the alpha.
+grenades were tuned up somewhat from their Halo 3 level, so a grenade could kill you in one shot much more often and at a larger distance.
+And in pre-alpha network perf tests, we got a significant number of perceived lag events inserted when players would get killed by these grenades, because getting killed in one shot from nearly full health is very confusing and feels very disorienting.
+So we would bring these things to our designers and send them these little sub-snippets of films and say, hey.
+These game mechanics are confusing players.
+They think they're laggy.
+And we had science to back it up.
+All right.
+The culmination of all of this, I'm going to show you the same section of gameplay that we looked at before, but I'm going to talk about everything working together.
+So this is not a live game.
+This is not a video of a live game.
+This is a video of one of our films playing back.
+So we can go into third person and view the game from different perspectives.
+We can fly the camera around and view what's happening in the game to our heart's content.
+Even more powerfully, we can rewind.
+We can go back and we can view a questionable section of the game over and over with these powerful profiling tools available to us.
+There is no excuse to us for not tracking down lag problems given this tool set.
+Of course, it gets even more interesting.
+All of this I've shown you up until now is all of the network data of the host box in one big bucket.
+Like the graph is showing all the bandwidth use of the host to all clients.
+That's not really the most interesting thing.
+The most interesting thing is this, which looks sort of the same to you, but you'll have to take my word for it.
+This is showing bandwidth as sent to the particular client there with the sword only.
+This is the contents of the packets that we sent to him in this game at this time.
+We can also go in and look at a particular object like this shotgun.
+and press a button and filter all of our data being sent to that one guy with the sword to show only data sent about that shotgun. Similarly, this biped. We can say, oh, this is all the stuff we transmitted about that biped. This is the total output of our prioritization systems, the movement of that guy recently, every attribute we care about. But these are still one second averages. Oh, we can get way more detail than that. We have all the data. We can show every single packet that we sent to this client.
+and look inside them in this very visual way to see exactly which packets included updates about this guy, what properties they included. We can scroll through time. We can scrub back and forth exactly like we could before. This whole picture is what allowed us to reduce the overall bandwidth use of Halo 3, pardon me, Halo Reach from Halo 3.
+by over 80%. The total time for development of these tools, the film integration and the various visualizers, somewhere on the order of six weeks, plus a significant amount of time ongoing reviewing perceived lag events after play tests.
+All right. So we took this wonderful process, taking you back in time again.
+We're at the end of Halo 3.
+We're starting up a reach.
+We built this beautiful tool set.
+We integrated it into our films.
+We unleashed it on Halo 3 on internal builds.
+We said, let's see what we find.
+I wonder what the problem is.
+And we got this wonderful high-level breakdown of data.
+And this is the first thing we harvested.
+This was even before we had network perf play tests.
+And we got, okay, 50% of our data is positions, velocities, and orientations, 20% player control, so forth.
+We said, hey, let's go optimize the heavy hitters just like we would in CPU perf.
+This was a false start, unfortunately.
+Turns out it's very, very difficult to further optimize positions, velocities, and orientations.
+This is very much like seeing your math functions in your CPU profiles.
+They are things that have to be done a lot.
+They're in a lot of algorithms.
+They tend to be already fairly optimal because everyone working on them knows they're going to be used a lot.
+And so we didn't get much out of it.
+They were already pretty optimal from even their original implementations.
+So we need to go up to a higher level.
+Here are some good optimizations.
+First, reducing always on bandwidth use, this was sort of a traditional networking optimization we would call it.
+We removed data that was duplicated, sorry, so the control replication from hosts to clients accounted for a significant amount of upstream.
+And we looked into it and we found that it didn't contain positions and orientations and velocities.
+It contained things we could compress pretty well.
+So we went in and we removed a bunch of data that was duplicated.
+We removed data we could infer in other ways.
+And we optimized some encoding by hand very carefully.
+And we got this down about 60% by doing this, just because we knew we had data, we knew it was a significant amount of bandwidth, we knew it was worth spending this time.
+So we spent like two weeks on this tiny section of code trying to just hand tweak the hell out of it.
+And this worked out.
+This is the only optimization we implemented that I would consider a success that was actually a networking optimization.
+But yet I have many more slides.
+Let's take a look.
+Fixing a prioritization bug.
+So, when guys die in Halo, they drop all this crap.
+a couple of guns, a couple of grenades, that sort of thing. These fall to the ground and are simulated by Havok. We discovered a problem with the profiler.
+Idle grenades rolling around on the ground had incredibly high network priority. It just showed up to us, like they're using all this bandwidth, so they're right on the object bandwidth display. Bring up the priority profiler. There's a ton of data there, a ton of very, very high priority numbers showing up. And we said, what on earth is going on?
+So we traced it back and we walked through the prioritization algorithms and we discovered that a bug fix was implemented at the end of Halo 3, which was causing this to happen.
+So we traced back, why was this done?
+Like this is crazy.
+Why do idle grenades have such high priority?
+Turned out that at the end of Halo 3, about two weeks before RC.
+Equipment was given a huge priority boost.
+Equipment in Halo 3 was like these throwable things that could spawn bubble shields or drain people's shields.
+And they were, and equipment was laggy, and so they gave it a big priority boost, and they said, all right, we're, you know, that's all that.
+They tested it, it worked.
+Turned out, through an accident of design on the gameplay coder's side, grenades and equipment had the same parent class, which was called equipment.
+So all the idle grenades on the ground without their pins pulled, totally unthreatening to anyone, received this same priority boost. Consuming tremendous amounts of bandwidth as they rolled around gently on the ground and waited for someone to pick them up.
+Simple fix. One line. Apply priority boost only to active equipment. This by itself freed up probably 20% of our bandwidth. The whole battle was identifying the issue.
+All right.
+Another example, a little different.
+Changing game mechanics.
+Halo 3 used a constant artificial friction on items, these idle grenades and weapons on the ground.
+As they rolled around on the ground, we applied this artificial friction to them to keep them from all rolling indefinitely until they reached the lowest point in the level.
+The problem with this was if you had an object on a hill, a relatively steep hill, the artificial friction would combat gravity and keep the object rolling slowly for a long period of time, consuming network bandwidth.
+Still not that relevant to the game, so we didn't really want this behavior.
+So we went into the item code and the physics code and we implemented this fake friction system.
+Totally arbitrary gameplay code, no one really understood why it was there except the networking coders.
+But it's this crazy thing where designers can say, oh yeah, please apply this friction curve over time so that we allow objects to travel down steep hills at full speed without applying any friction to them whatsoever, so they're just subject to Newtonian physics.
+Once they reach a relatively gentle slope, we apply this friction curve that designers specify, which starts with low friction and ramps up over the course of three to four seconds to infinite friction and brings them to a screeching halt.
+So grenades dropped on hills would fly down them in a couple seconds, looking better in the process, if I do say so myself, and then come to rest.
+Nobody noticed this.
+Nobody on the design team cared.
+Nobody on the sandbox team cared.
+But this probably saved another 10%.
+just because there's so many items. Players drop so much stuff and it gets disturbed so often. Next example, ragdoll networking. Ragdolls are kind of a pain. They're deeply, deep physical simulations. They have a lot of nodes that move around. There's a lot of, it's very hard to capture all of their state in a small package. Like, if you have a guy who's alive and he's running around playing an animation, you can pretty much capture his state as current position, direction he's traveling, maybe the animation he's playing, and you're done. Like, eh, a hundred bits, not that big of a deal.
+Ragdolls, on the other hand, is like, oh, God, we've got to transmit all these bones.
+They're all physically separate.
+They can bounce off things independently.
+What a mess.
+So we always sort of come across, we always come up with different compromises, trying to network less of, like, some subsections of the ragdoll.
+It never looked that great.
+It burned a lot of bandwidth.
+So we said, hey, do we have to network ragdolls?
+Like, really?
+So we're trying, we tried to turn the problem on its head and say, hey, can we just get rid of this whole problem?
+We brought this over to our sandbox design lead, Sage Merrill, and said, hey, can we not network ragdolls?
+And we went through three stages of gameplay design response to this sort of thing, which you will probably see yourselves.
+First shock, what are you doing?
+Not network ragdolls?
+We might want to do something with them someday.
+Then skepticism.
+Are you sure this will work?
+Like that seems sort of crazy.
+Doesn't everybody else network ragdolls?
+And then consideration, where they dig in and tell us, what really are the problems with not networking ragdolls, for real?
+And they came up with two things.
+First, ragdolls block bullets.
+Like every other object in our game, ragdolls are physically real and they can block bullet trajectories.
+So we needed to deal with this somehow if we were going to let ragdolls desync, because otherwise you'd have invisible objects blocking bullets on different peers.
+The second problem was humping.
+quite serious. Since Halo 1, there's been this tradition in the Halo community, this tradition that we didn't want to mess with. When you kill someone and you have some time to spare because you're not under attack right now, you walk over to their corpse and then you press your crouch button, drop it down like this, and you release your crouch button, and you push it again, and so forth, until you get bored.
+It's very important for the ragdoll to be in the right spot so that that humiliates him properly, so that he can see that you're doing this to him.
+Totally serious.
+This is a real thing.
+So we made two fixes to deal with these two problems.
+First, we went into our collision system and our projectile system and we allowed bullets and grenades to penetrate ragdolls freely.
+We allowed them to overpenetrate without any side effects.
+We used a debug harness to verify that there were no side effects.
+It was added fairly late in the game.
+Second, we added a system to synchronize the initial state of ragdolls.
+So we wouldn't network them over time as they were flying through the air or bouncing around on the ground, but we would network them very exactly with a debug harness to verify.
+We would network their initial state at the moment of death on all boxes, and all boxes would be guaranteed to start with that.
+Which meant as long as you didn't interfere with the ragdoll too much, it would be in perfect sync in most cases.
+And this worked well enough.
+Once in a while, if there's enough grenades going off, you can have ragdolls just completely desync and it becomes obvious.
+But by and large, it worked quite well.
+And we saved up another 10, 12% of bandwidth maybe.
+Lastly, I have sort of a bucket of interesting cases of smoothing out bursts of bandwidth, smoothing out worst cases, very much like smoothing out worst case frames of CPU performance.
+First, we had problems with high rate of fire weapons, machine guns.
+Bullets were networked optimally.
+but not the damage that they were causing. People who designed the original machine gun networking knew that they would fire very rapidly and so they needed an efficient bit of networking for them. So they did that. But when the bullets hit targets and dealt damage, it would trigger individual events for every bit of damage and that could take all your bandwidth very, very quickly if people with, if multiple people with machine guns were shooting targets at a lot of hit points. So we went in and we said, okay, for bullets that do a small amount of damage.
+We're going to just let clients predict some of those damage effects so that the host doesn't have to tell them, oh, yeah, this kind of spark occurred and this sound played and, yeah, yada, yada, yada.
+It's a machine gun.
+It's firing 15 times a second.
+Just play your own sparks.
+Another example, we had periodic update of game statistics data.
+So we had this blob of data we sent that shows up on the end game stats.
+It took priority over gameplay traffic because it was on a protocol below our application layers.
+This would come in every 10 to 30 seconds and just take all the bandwidth in every packet until it was updated.
+Two, three, four packets.
+And we discovered this with the bandwidth profiler because we get lag events during that time because at the end of the three or four frame period, the networking would turn back on for the game and everything would warp.
+And we dug into it with the per packet information in the profiler and discovered, lo and behold, all the gameplay data is just missing from four or five packets.
+And so we found this guy and we beat him in his submission.
+You can only send 10% of each packet maximum.
+Statistics data can be late.
+It's fine.
+Lastly, low priority objects were getting updates in perfect sync.
+This is an interesting problem.
+So our priority system ramps up the priority of objects over time to make sure that eventually the state data guarantee will be met.
+Eventually the most updated state will arrive.
+Problem was, if you had a lot of objects that were out far, far away and they all tied for lowest priority, and they all got disturbed at the same time, like a pile of crates across the level that gets bumped into.
+They would all get lowest priority, they wouldn't get sent, and they'd ramp up in priority slowly, slowly, slowly, slowly, and then they'd all get really old, and then they'd all panic on the same frame and say, oh, crap, we haven't been sent in five seconds, we need to get in sync.
+And they would eat two packets.
+To say, oh, my God, this whole stack of crates over here just got updated.
+And all the guy you're standing in front of, the guy you're fighting, didn't get any bandwidth during those two.
+Because he wasn't panicked, he got an update recently.
+And so we get lag artifacts from this.
+Simple fix again.
+Limit objects that can take this panic priority to a fixed number per packet.
+So we always reserve space in the packet for the current live gameplay that matters.
+All right.
+Three rules of network optimization gleaned from all this.
+First, measure twice, cut once.
+Just like CPU optimization, use tools.
+It will be worth the implementation time for the tools, I promise.
+Second, in general, as long as you have some very basic encoding and compression, like you're not mem copying vector threes into your packets, you're at least doing a little bit of encoding and compression, you won't get much benefit out of looking at that further.
+That mind goes, you know, empties out pretty quickly.
+You need to look at the big picture, much like CPU perf.
+Lastly, make friends with your game mechanics designers and coders because As you probably saw, four of those five network optimizations were pretty much game mechanics changes.
+They were identifying and changing the game.
+So you make friends with these guys, take them out to lunch and so on, and then abuse those friendships.
+Very important.
+All right.
+I'm almost done.
+Less than five minutes to go.
+It's 424.
+Some of you may have to rush.
+Tidbits in the future.
+I want to leave you with a couple things.
+First some numbers from Reach.
+Some actual quantitative stuff.
+Most important, I'm not going to read through all these, most important is the top number.
+Our goal for Reach was to have 16-player games function on a 384-kilobit upstream consumer connection, which we considered to be sort of the baseline DSL.
+At the end, our Nerf tests showed us that we could have a solid game with no lag artifacts with 250 kilobits per second of total bandwidth in a 16-player game.
+We were very happy with this.
+Related best practices. These are not strictly related to gameplay networking, but they're really important. First, flow and congestion control. Just dumping stuff into sockets until the connection gives up the ghost or floods or starts dropping packets, not optimal for the quality of your game. If you implement your own flow and congestion control, you can guarantee the ability to send responsive data at all times or send low latency data at all times.
+Once you have that flow control layer, you can record the quality of each individual player's connection, record how good their upstream is and how stable their connection is.
+You can save those records and then you can use that to drive your host selection.
+The benefit we got from smarter host selection in Reach was on the same order as the benefit we got from bandwidth optimizations, because finally we were actually able to select the good hosts, select the guys with the university connections, the guys with the megabit up and completely rock-solid connections.
+Third, host migration. This is hard to add. Players love it. Really nice for gameplay networking quality because if you have a bad host, if a host is having a bad day because his wife is downloading Netflix or whatever, you can host migrate in the middle of the game to a better host and get rid of all the lag artifacts in five or ten seconds instead of forcing players to live with them. Consider having a multiplayer beta or demo.
+All the top multiplayer games, Gears is doing this, COD does this. It's become almost common practice, but definitely do it. You can get a tremendous amount of test coverage from this. We would not have shipped anywhere near our quality if we did not.
+Use regular internal play tests with traffic shaping to measure your game mechanics under some levels of latency. If you play everything in a system link game, it's not going to be or pardon me, a LAN game, you're not going to get an accurate picture of how your game plays on the Internet.
+Consider having full-time network testers. This is something that Bungie has, which I had never seen before in networking on past games, and it was something of a revelation.
+We have guys, a guy in pre-production and then more guys later on in the project, whose only job is to stress and attack the networking of the game. These guys will keep your game mechanics designers and your network programmers honest, and they will give you an accurate picture of the quality of your game, of your networking over time.
+A few more resources, a couple of papers you can read, this deck will be online.
+These give you some sort of more high-level information and more detail on the replication protocols.
+Many many people worked to make Halo Reach play as well as it does online, especially these guys.
+Nick Giron, Paul Llewellyn, John Cable, and our fearless leader, Luke Timmons, the lead of our networking and UI group.
+Lastly, just sort of a quick look at the future. Our system is not completely perfect. We have usability improvements to our replication systems we want to implement. Currently it takes a lot of boilerplate code to implement new mechanics. So we want to fix that.
+We also want to extend our protocols to support more low-bandwidth, complex use cases. Like, I have a state machine off here in the corner. I just want it to be networked. I don't want to get a Ph.D. in replication. I don't want to think about it. I just want this to work.
+state machine to stay in sync on multiple boxes. We want to make that sort of thing easy.
+But, of course, the real question here is what's really next for Bungie? What are we doing? If you've been paying attention to the news recently, you may have heard the rumor as propounded by Kotaku and others that we're making World of Warcraft in space. As cool as that sounds, that's not true. That's not what we're doing.
+The only thing I can tell you today is that if you love working on or playing massively awesome multiplayer online action games, you should come talk to us.
+We are hiring across all disciplines for many positions.
+I will now take questions.
+It is 429.
+If your talk is also, if your talk you're going to at 430 is in South Hall, you can totally do it.
+But I'm sure the Q&A will be interesting too.
+Yes.
+On the grenade throw, yes.
+There is.
+Firstly, because we didn't need to.
+because we had happened upon this other design which players were okay with, and so we never really revisited it. Secondly, because it actually would not have worked for the grenade throw because there's a very specific expectation that clients have, or that players have, in Halo, which is that their grenade aiming is sampled at the release frame. It is not sampled when they push the button, or at any time earlier. And players are very attuned to this.
+hit the button when they know they're thinking about throwing a grenade, and then they'll aim it during the little telegraph.
+So doing anything where we lock in the aiming before that release frame wouldn't work.
+Please also, there will be many more questions, but please fill out your sheets.
+The correct way to do that is to circle the excellent.
+But please fill them out.
+Yes?
+There are two phases to the question was how do we handle host migration in particular when the server just vanishes off the face of the planet.
+There are two phases to this.
+If the server just drops ungracefully, the first thing we have to do is what we call a host election, which is a distributed algorithm to determine for all the individual sort of leaderless peers that remain to determine to elect a new host among themselves.
+Once they have elected a new host...
+The actual process of doing a, doing gameplay host migration is very, very complicated.
+It could be a talk in itself.
+The core of it is that in most cases, the new host takes his current game state, reinitializes his networking state, his replication state from that, does a consistency pass to look for anything that might be, might have been out of sync because at the time that the host migration occurred, he was in the middle of receiving network data, things like that.
+And then he becomes the new host and everybody joins in progress to him.
+Joining Progress is fairly simple because we have this split between state data and events.
+To join a game, all you need is all the current state data, and you're guaranteed to be in sync with all of the current network state of the game.
+I'm sorry, can you speak louder?
+Yes, and that is sort of what the state data panicking that I mentioned gives us, the priority panicking where we ratchet up priorities over time.
+Nothing in the game is more than a couple seconds out of date on any peer.
+So if something is truly irrelevant to you, you'll get updates, and it's moving, you'll get updates about it every couple seconds instead of every frame.
+If you do not have, there's one special case which is interesting, if you do not have the current game state, because for example the host dropped off the face of the earth while the game was starting up before the original host could tell everyone what was happening in the game, we call this a double host migration and we have to initialize the world from a clean slate and just, we inherit only the statistics data like the current score and things like that and we'll reset all the game state.
+That happens fairly rarely because in normal gameplay it requires two hosts to fail in rapid succession.
+Yes.
+Priority and relevance is a very interesting thing.
+It's possible that it's overengineered.
+It's not something that's unknown at Bungie.
+The idea, the way we think about it is, relevance is a pure metric of how noticeable something is.
+So relevance is calculated purely by, is it on screen?
+How far away is it?
+What is its radius?
+What is its perceptual, like, slice of the screen?
+Sort of very pure things like that that don't take into account game mechanics or what type of object it is.
+And that's sort of an algorithm we can write in isolation.
+Then we take out all those relevances for all the different objects and we mix in special rules like what type of object are you, have you damaged the player recently, things like this.
+And the output of that set of rules is what gives you priority.
+And that just gives us a nice sort of split for being able to evaluate each algorithm in isolation.
+We could mix it together.
+It's a detail.
+Next.
+Thank you.
+Sure.
+The question is who is authoritative over hits when you're dealing with bipeds that are all in slightly different positions on all the boxes.
+How we do networked aim assist with networked bullets and networked damage could be a talk all on its own.
+And in fact, one version of this talk was that.
+Let me see if I can give a quick summary.
+The core idea of that is at the moment bullets are fired, we do not transmit the world space vector of what you are shooting.
+We transmit a target relative vector, which says you're shooting relative to this target who is likely the guy you're trying to hurt with a particular lead vector.
+On remote boxes, including the host, your bullet is reconstructed to have the same lead.
+The bullet is then simulated on all peers.
+and on the host peer, when it hits someone, it will deal damage.
+That's the broad stroke of it. There's a lot more interesting stuff like how we deal with rockets versus machine guns, and how we deal with the really interesting case of you pull the trigger and fire your gun, and then before your bullet, your fire request reaches the host, you die on the host. So when he gets it, he's like, oh, you think you fired your gun, like you saw a muzzle flash on your screen, but you're dead.
+How do you deal with that?
+And the answer is that in most cases we have sanity checks and whatnot, but we will construct a fake new gun out of whole cloth, fire the bullet, and then delete it.
+Specifically so that whenever you see a muzzle flash, like, you will generally get your bullet shot with correct aim assist and all that sort of thing.
+Yes. So your question is about the splicing of the profiler data into the films and how we get the data about every client into one film. The answer is that the host film...
+includes all of the upstream and downstream that he experienced. So it includes everything he sent to every client, everything every client sent to him. Um, and every individual client film only includes their traffic, only includes their upstream and downstream. Um, so the way, the way that we investigate these things is we always work from the host film.
+If you are watching a film in Halo Reach, a user-facing retail film that was recorded by a client box and the game had any sort of bandwidth limitation, if you then detach the camera from that guy's view and go fly and look at the other side of the map, you will see certain artifacts. You will see objects updating once a second, things like that.
+Yes.
+I'm sure that's exactly how the post-dent job basically looks like before we move time forward and applying for the moment that it's done.
+This is short-term, I think, for the current time.
+Correct.
+I'm sure they're also under all of the other products, because I assume that that animation is on the same length.
+Do you think that is not a risk?
+Yes.
+Okay.
+Thank you.
+I'm not going to repeat that question because it was very long. I hope everyone heard it.
+The way that works is the appearance of the shield on a guy who is armor locking is always host authoritative. It is always transmitted from the host to everyone, including both the user and viewers. So the fact that the host shortens the timer automatically causes the shield to appear early on every other box. So we don't have to worry about that.
+Yes, we don't short circuit the animation in any way.
+Just the blue shield will appear at frame one or whatever.
+Sure, sure.
+Hi.
+Yes.
+Good question.
+Good question.
+Fantastic question.
+I love that question.
+It does not work at the field level.
+The priority is per object for state data.
+However, we do look at which fields are dirty, which fields currently need to be sent, and we use that to bias priorities in some ways.
+So for example, if the state of whether you are alive or dead has changed, your priority is quite high, because almost everyone needs to know that.
+So we do a little bit of work with that.
+There's a lot of fancier stuff we could do, like, oh, how dirty is your position?
+Like, your position could be dirty by a centimeter, and we'll send it, and it doesn't, we don't really...
+feed that into our prioritization versus something that's, you know, rolling down a hill rapidly and has a ten foot dirty position. We are considering adding stuff like that. Currently we are constrained primarily by CPU perf in the complexity of our prioritization algorithm.
+Uh, the total prioritization cost for a host at maximum bandwidth, 600 kilobits-ish, um, is around 1.8 milliseconds on the, on the, on a single 360 hardware thread, so, yeah.
+Sure.
+Very good question.
+The state data updates are not ordered with respect to each other.
+You can absolutely get, you will, out of order is an interesting question.
+So you can absolutely have this scenario.
+You can have an object change in two linked ways.
+His position changes and his health changes.
+Those updates can be sent in separate packets, which means that the client can absolutely get one of them without the other.
+So if there's any sort of interplay between those two properties, there are vulnerabilities there where clients can have sort of inconsistent state briefly.
+The only guarantee we provide is that we will never apply old state data updates about an object.
+So if you have a you have a state that update about the position of an object and then another one following it on the wire and they get crossed, packet reordering on the internet happens all the time. We will apply the first one that arrives and then we will notice that the other one is older for that entity and we will discard it. And that's important because otherwise you lose the guarantee that you will eventually converge to the final state.
+Sure.
+for actually figuring out how functions work in that simulated game of puzzle pieces where it makes you wonder if you're doing that because of occluders and things like that?
+Good question, good question.
+We are not considering occluders.
+You're quite right that evaluating that sort of thing for every potential player camera would be prohibitively costly on the CPU.
+So it's purely based on metrics that we can derive without doing massive work like that.
+Um, we do have fairly accurate information about every player's, uh, camera position and orientation.
+We, we do a lot of work to, to make that happen.
+Um, fortunately for us, client to host bandwidth is very cheap.
+So we can shove extra data into the control data for the client to host about like, here's my current camera position because I know you can't predict it because I'm using a third person camera on my vehicle right now.
+Things like that.
+Or I'm on, I'm dead and I'm currently like flying around the world in this flying camera or orbiting camera on various teammates. We'll transmit that data explicitly to the host so he can use it, but yeah, no occluders, nothing like that.
+Okay, fair enough. I guess, I guess accurate may be the wrong word. Like yeah, we can't, we can't guarantee that like at the time this data gets to that client, the camera position and orientation we use to fill that packet will be the same as his camera. That's complete nonsense, of course.
+Yeah, to some extent, like, by at least round-trip time, he can turn his camera, do whatever he wants to. To that extent, he can see artifacts that the prioritization system would have blocked. Like, we could have some off-screen thing that we deprioritize. He looks towards it and he sees under the underbelly, right?
+The way we handle that is we limit the amount of deprioritization we do for things that are off camera because that can change very quickly.
+We are primarily based on distance because that's harder to change quickly.
+And we use a frustum with a wider FOV than the basic one for on-screen tests.
+Sure.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+All right.
+So, big what, sorry?
+Yes, absolutely.
+As far as vehicle populations and using that to sort of limit network problems.
+On Reach we are entirely bound by CPU costs for pretty much everything we do.
+So we do not limit object counts for networking reasons at all.
+We can support something on the order of 30 vehicles maybe, like 30 full suspension vehicles in addition to the 16 players before networking will start to run into problems or, you know, gradually degrading priority.
+To answer your question specifically, yes, vehicle updates are a huge amount of bandwidth because they are huge.
+They are highly noticeable.
+Players care about them a lot.
+They catch the eye.
+In Halo 3, we spent a lot of perf on them.
+In Reach, we actually had a major development initiative to fix that.
+I can talk about that because we have a few more minutes.
+It's pretty interesting.
+So in Halo 3, we had a blending system which we used on bipeds.
+So when you got a network update about a biped and it was out of sync by some amount, some number of feet, and you had to sort of fix up, get in sync with the host.
+We did this visual-only interpolation that I mentioned with assassinations where your logical state warps and your physics state warps to that location, but your body gets this little blend, this little exponential blend that consumes the error as you continue to predict forward.
+So it looks pretty good.
+For vehicles, we couldn't do this in Halo 3 because of their interaction with Havok.
+Blending vehicles turned out to be very complicated because of the level of complexity of their rigid body hierarchy as it was represented in Havok.
+and because of annoying issues like the dirt kicked up by the warthog's tires is based on an impact system that is driven from havoc contact points of the wheels on the ground.
+So when you warp the physics, all the dirt starts coming up from the new locations and the fact that you're blending this object to it looks like garbage, like you're clearly cheating.
+So we, for Reach, we rewrote that system, that visual interpolation system to work with all object types.
+We fixed all the issues with vehicles, so we would calculate, you know, the transform from the... .
+the visual object to the real physics object and the inverse of that and we would use that to move things around as needed. So any visual represent, any visual element like a dirt from my wheel would get blended back to the visual position to correspond with the visual mesh being blended. The result of that is that we could cut down our vehicle update rates a lot. On Halo 3, we tried very, very hard to keep vehicles at 20 updates a second, rarely below 15 because they were very high priorities, how we did that.
+because they look really bad when they warped because we didn't have any blending. With this blending, we found we could drop vehicles to anywhere down to like five updates a second and they would look good. It is graphed very specifically, very precisely. The logical position of the object is warped immediately. The Havok representation, all the rigid bodies and things are warped immediately.
+which allows you to do, you guarantee that the guy will be able to run, um, he won't run into invisible walls, for example. Um, that's a bad example. Let me finish and I'll go back to that.
+The visual representation and the, what we call the collision representation, which is distinct from physics, are blended. And the collision representation is all the things that can be shot. So if you shoot a guy who's blending and you see it hit his, his body, it will actually do damage, it will be, it will work correctly.
+So the thing I was saying about physics, the reason we have to warp physics is because you can have this case with like a thin wall and you're predicting that you're running on the right side of the wall and then you get an update that says, oh no, you're on the left side of the wall and this is a solid wall but, you know, fairly thin.
+If you try to blend physics and not warp it, it's very hard to get that to sort of consistently, well, it won't look right, Patek will predict all sorts of terrible things as you push the rigid body through the wall, right, it'll start exploding.
+So we warp Havoc and the logical position to the other side of the wall so prediction can be happy and you know, think I'm on the right spot, everything's cool.
+And then you get this visual only blend. Visual and collision blend.
+That's great. Nobody's behind you.
+Yeah. That's a very good question. When you are driving a vehicle in Halo, you have the same level of control over it that you would normally have over your own biped. So the way that works for the biped is...
+you, as you're running around, you transmit your world space position and orientation and other things to the host and he sort of copes with it. He applies the same blending logic that clients use, unless it's insane and then of course he'll correct you. Vehicles work the same way. As soon as you get into the driver's seat of a vehicle, your control stream switches. Instead of sending your biped data, it sends your vehicle data, the host copes with it, everyone blends all the way around and everything, you know, looks beautiful.
+And yeah, there's no latency whatsoever. The client isn't actually authoritative technically because he can be corrected.
+but he's authoritative within his bubble.
+Alright, thank you very much everybody.

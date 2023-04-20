@@ -1,0 +1,223 @@
+Hey everybody, welcome to Bleeding Edge Effects on mobile.
+My name is Andy Saia and I'm the Technical Director at Levelax.
+For those of you who have never heard of LevelX before, we make video games for doctors, which I promise you is just as weird as it sounds.
+Here's an example of some of the games we make.
+We currently have four released games on iOS and Android, and a couple more currently in development.
+Our games range from hyper-realistic to hyper-stylized, and each one presents its own unique visual effects challenges.
+Throughout the process of creating these different experiences, we've developed a set of common principles of what we think makes for an interesting effect.
+We try to make our effects dynamic, reacting to players' actions.
+We want them to be controllable, which makes them easier to reuse and adapt to a wide variety of different scenarios.
+We want to create environments that feel alive, because in many cases, the environments we are depicting actually are alive.
+And most importantly, after all this, we have to figure out how to get it to run well on a telephone computer.
+So in this talk, I wanted to show you guys what we've learned making effects like this.
+And I think the best way to do that is to look back on the last four years we've been making mobile games and pull out some of the techniques we seem to reach for over and over again.
+So I've chosen four techniques that I felt I could jam into a 30-minute presentation, and I'm going to show you an example of how we implemented each one for our game PalmX.
+The four examples I'm going to show you are dynamically rendering a mask in a UV space, creating blood trails and pools, create soft body deformation with a vertex shader, and most exciting of all, I'll show you how we made volumetric boogers.
+A brief word of warning before we get started.
+This talk is pretty technical in nature.
+I will be referring to the existence of math and shaders.
+That being said, I have tried to make this presentation as accessible as possible.
+With that goal in mind, I'll be releasing the Unity project of all the examples I'm going to show on GitHub.
+I'll put a link at the end of the presentation.
+Also worth mentioning, we do make video games for doctors, so some of you might find the material, um, icky.
+I'm used to it by now, but if you're not, maybe don't look for the next half hour or so.
+Okay, ready, let's go.
+The first technique we're going to talk about is rendering a mask into UV space.
+This tool you are seeing in this video is called an Argon Plasma Coagulator.
+This is a real thing doctors use. It's literally a plasma gun they shoot inside people's butts.
+The team was so excited when we found out this thing existed. It was one of the first things we tried to implement. But it brought numerous tactical challenges.
+Burnt tissue leaves marks. The burns need to work across UVs and meshes.
+Burns need to be persistent for that level. We didn't want to add decals that fade away after a certain period of time or anything like that. And mobile devices are limited in memory.
+Our solution was to dynamically render a low-resolution mask into UV space.
+We start, like all things in computer graphics, with a poorly UV'd model of an armadillo.
+Here we create an object with a script on it called a painter.
+The script sets three global shader parameters, the world space position of the painter, a hardness value, and a radius.
+Shader globals are great for this kind of thing because they easily work across meshes with the same shader.
+With these values, we can calculate a smooth falloff from any point on our mesh.
+Here's the simple falloff function we're using.
+And for those more visually inclined, here's the same function being used in Shader Graph.
+This node is also available in Unreal Material Editor.
+In our fragment shader, we use this falloff value to lerp two colors together.
+Okay cool, that gives us a world space falloff, but we want our mask in UV space, not world space.
+In a vertex shader, we can transform our world space position into UV space.
+By caching the world space position of our mesh, we can still use our falloff function, but this time it's rendered in UV space.
+So you can imagine taking a picture of this and using it as an input into your material as a mask.
+And that's exactly what we're going to tell Unity to do.
+Unity has this very powerful API called Command Buffers, which is perfect for this sort of thing.
+We create a new command buffer and tell it to render our mesh using the shader we just created.
+But instead of outputting the results to the screen, we store it into a render texture we can use later as our mask.
+Here I'm ray casting and moving the painter to any point I hit on the mesh.
+Because we aren't clearing the render texture every frame, we get this cool painting effect.
+This is also about the time you're cursing yourself for your haphazard UV unwrapping.
+There are seams everywhere, this is totally not shippable.
+We could go back and try to hide these seams, but I don't know about you, I'll do pretty much anything to avoid laying out proper UVs.
+To understand why we are getting these seams, let's take a closer look at a single triangle.
+The problem is caused during rasterization, which is just a fancy word for turning triangles into pixels.
+During rasterization, your triangle is divided up into a grid.
+Each grid has a center position.
+If the center position of the grid is inside the triangle, a pixel is drawn on that grid.
+But if the grid's center position exists outside the triangle, no pixel is drawn.
+We can clearly see we have several locations where part of the grid is inside the triangle, but no pixels are rendered, which is causing the seams in our UV mass.
+An easy fix for this problem would be to tell the GPU to use conservative rasterization so that any part of the grid that has a single triangle in it gets drawn.
+Unfortunately, this feature isn't available on many mobile devices and at the time wasn't an option in Unity at all.
+Our solution was to write a shader that dilates our mass texture.
+Here's how a painter looks after doing a dilation pass on our mask render texture.
+Here you can see more clearly what the dilation pass is doing to the mask.
+You do need to make sure your UVs have enough padding or else the dilation would cause the UVs to overlap and you'll get artifacts.
+The dilation shader is pretty simple.
+Every pixel in the mass texture overrides its color if it has any neighbors of a higher value than itself.
+To use this, we add a line to our command buffer, telling it to render our mass texture into a dilation texture using our dilation shader.
+OK, so now that we've rendered into UV space, let's take a look at how we created blood trails and pools.
+From a design point of view, we wanted any surface in the game to be able to bleed if it got hit by a sharp object.
+Blood will flow out of the wound based on gravity, leaving a trail behind it.
+Blood will start to pool and group based on gravity.
+These blood pools will grow and start to damage the patient.
+And blood can be washed away with water or removed by suction.
+The dynamic mask system we just went over actually gives us a pretty good foundation for this effect.
+First we'll extend it so it can dynamically erase parts of our mask.
+Turns out that's actually not that hard to do.
+You can set the blend operation in the shader to be controlled with a variable.
+And we write a simple script to set that blend operation from add to subtractive.
+Okay, so that's removing. What about pooling blood?
+To get the effect of blood pooling over time, we multiply our mask by a value just over 1.
+The shader that does the multiplication is super simple.
+It just reads the value of the mask texture and multiplies it by a number slightly above 1.
+This will have the effect of slowly increasing areas that have blood while keeping areas that have no blood the same.
+We want to apply this multiplication once a frame, but reading and writing from the same render texture is super slow, so we use a technique called ping-ponging.
+Texture ping-ponging works by creating two render textures.
+The first render texture we write into using our dynamic mass shader just as before.
+We then use the first texture to write into the second texture using our multiplication shader.
+We can then alternate which texture gets written into the other each frame, ping-ponging back and forth.
+This can be pretty confusing the first time you hear about it, so let's break it down even more.
+RT1 is our mass texture, which we use to blit into RT2, applying a multiplication of 1.2.
+Next frame, we flip them.
+So RT2 is our mass texture, which we use to blit into RT1, applying the same multiplication.
+We always apply the dilation to the last texture written into.
+This is the render texture we use later for our mask.
+Another interesting thing is setting your multiplication value less than 1.
+Something like 0.98 produces this cool fade out effect.
+And this is what removing part of the mass looks like in game.
+We're ray casting to place a painter on the surface when the water jet is active, just like in our painting demo.
+We also use a cavity map to make the blood look like it's filling in the cracks more.
+For flowing blood, we attach painters to physics objects.
+It's amazing how simple primitive physics objects can add a ton of variety to something like this.
+And this is what it looks like inside the editor.
+One problem we had with this approach is players would section the trail of blood, but not treat the source of the wound itself.
+So they would still be receiving damage, even though it looked like the blood was gone.
+To fix this, we had physics objects record their locations every frame to create a path.
+We would then sweep a painter along that path to indicate to the player blood was still flowing out of the wound.
+This was one of those things that when it was suggested, I never thought it was going to work, but it actually ended up working really well.
+So after fluid simulation, the next notoriously difficult thing to do in games is soft body physics.
+For tissue deformation, we really wanted to make the world feel alive and reactive.
+You should be able to grab, pinch, and pull the tissue in any location.
+And based on the interviews we had with our physician advisors, you can actually see the heart beat and deform the tissue more on the left side of the patient than the right, which becomes important when navigating.
+To accomplish all this, we decided to use a vertex shader.
+First, we created a script we called a manipulator.
+The manipulator has a reference to two transforms, which we call an anchor and a handle.
+Next, we calculate a transformation matrix that, when applied, moves a position from the anchor space to the handle space.
+In the vertex shader, we can just multiply that matrix with the vertex position and move our mesh around with our handle.
+You can think of this like mesh skidding if you only had one bone with 100% influence.
+Instead of deforming the entire mesh with our handle, we can use the same world space mass technique I showed you earlier to create a smooth falloff for our deformation.
+all we need to do is pass in our manipulator's position, radius, and hardness value, and we can use the same exact sphere mask function we used earlier.
+Then, we just use that falloff value in a lerp from the original vertex position to the position after the matrix multiplication.
+This is already kind of awesome, but you might notice the lighting looks a little bit off.
+This is because our normals aren't being recalculated after changing the vertex position.
+To recalculate the normals, we are going to call our applyManipulator function two additional times.
+Once with our vertex position slightly offset in the direction of the mesh's tangent, and the other with the position offset in the direction of the mesh's bitangent.
+we can use these two new positions to calculate the manipulated tangent and bitangent vectors, which when we cross together, gives us our corrected world normal.
+Just multiplying by a matrix works great if you aren't rotating too much.
+This is actually what we ended up shipping with for a game Palm X.
+But if you do end up rotating a lot, you get this really ugly pinch artifact.
+This is because we're applying a linear falloff to our matrix and rotations aren't linear.
+The solution is to separate out the rotation, translation, and scale components and handle the falloff for them all individually.
+Translation is the easiest.
+We just subtract our handle's rotation with our anchor's position.
+For scale, we divide our handle's scale and our anchor's scale.
+For rotation, we convert our rotation to angle axis and multiply them together.
+Now on the GPU, we can apply each transformation with falloff separately and sum them together at the end.
+Here's the rotate about axis method we're using if you're curious about it.
+It applies a rotation to a position given an angle and an axis.
+This is also available as a node in Shader Graph.
+And here's what the corrected rotations look like.
+One manipulator is fun, but multiple manipulators is a party.
+You can really do some cool stuff with more than one of them.
+To do this, we'll send all the manipulator parameters as arrays of floats and vectors to the shader.
+We'll modify our apply manipulator function to loop through all the manipulators.
+In the loop, we'll add the amount each manipulator displaces each vert by.
+We can then add that total displacement to the position after the loop.
+And of course, we need to attach physics objects to these things.
+You can get some pretty convincingly volume-preserving effects just by connecting a bunch of rigid bodies together with constraints.
+You could do that previous example with bones, and honestly, you would probably have better control over it.
+But where this effect really shines is attaching manipulators dynamically.
+In this example, we are adding a manipulator at the position the raycast hits, and then dragging the handle around the code.
+Something like this would work great for a loading screen, or a little vignette before you started the game.
+I don't know, just a random idea.
+Or if you're making a doctor on doctor fighting game, you could use the manipulator to add hit reacts.
+What's really cool about this is it works across any animation and any character.
+They just need to have the same material and shaders applied.
+And even if I take the reaction animation off, you can still feel the impact from just the manipulator.
+One thing to keep in mind when you're working with something like this is because it's a world space fall off, it doesn't respect any sort of information about connectivity.
+So if a leg is very close to another leg, you're going to get that manipulated influence, which probably isn't what you want.
+Depending on your use cases and your mesh, this might not be a problem, or you might want to consider implementing a mask or some other system.
+But at a certain point.
+you're probably better off just implementing regular skinning.
+And here's what the heartbeat ended up looking like in game.
+And this is what it looks like in the Unity editor.
+We have these gizmos where we can place these manipulators around and scale and animate them and transform them just like any other game object.
+And here we're just scaling a manipulator to get that pinch effect.
+If you're interested in implementing something like this, I highly recommend checking out the Sculpting and Simulating with 6 Degrees of Freedom controllers on the GDC4ALL.
+David goes into a lot more detail than I had time to today.
+and he extends this technique using something called Calvinlitz, which creates a much more physically believable result.
+Okay, our last and clearly most important effect I wanted to show you today, volumetric boogers.
+In terms of design requirements, we wanted to create a sense of discovery and exploration by hiding complications from plain sight.
+We wanted the boogers to be interactive, so you can push them around and use your suction tool to remove them.
+We also wanted to be able to attach these objects to anatomy and other things.
+And honestly, we just really wanted to make boogers.
+The boogers are implemented using SphereTraceSineDistance functions.
+The first time I heard about SineDistance functions, I was like, I know what all those words mean individually, but I have no idea what they mean together.
+So let's break down each part.
+First of all, it's literally a function you call in a shader.
+You can pass any position into this function, and it will return the closest distance to a surface.
+It's a way of asking, how far do I need to travel to get to the surface of something?
+And the sine part means if the position is inside the surface, it returns negative.
+So you can easily detect if you're inside of something.
+One of the most powerful properties of sine distance functions is you can easily blend objects together.
+This method of combining sine distance functions is called smoothman.
+Typically, when you're working with sine distance functions, you are building things out of simple primitives.
+The good news is there's a large library of these primitive functions that people have already written and hosted online for pretty much any primitive.
+And by combining these primitives together, you can create some really complicated objects.
+Our boogers are made out of only spheres and cylinders.
+To render sine distance functions, we use a technique called sphere tracing.
+Sphere tracing is a screen space technique, meaning for every pixel we shoot out a ray.
+We then march along that ray using the distance to the closest surface as our minimum step size.
+When the distance to the closest surface is small enough, you can set the color of the corresponding pixel in the screen to the color of the object you are closest to.
+I know I'm going kind of fast through this, but there's actually a ton of information online on sphere marching sign distance fields in Unity.
+So if you're lost, here are a bunch of resources that you can check out.
+OK, so we have a brief overview on sine distance functions and sphere tracing.
+Let's break down each step to make a booger.
+We start by rendering sine distance function spheres into a low resolution render texture.
+We then blur that render texture to remove any artifacts due to the low resolution.
+We then introduce transparency.
+We connect the sine distance cylinders to our neighboring booger blobs.
+We do a smoothman operation to blend the whole thing together.
+We add refraction and distortion.
+We distort the normals using a 3D noise function.
+And here, we're using the same smoothman technique to blend our SDFs with the depth buffer, which really sells the effect of these objects having some sort of surface tension.
+And you should have guessed by now, we're definitely going to add physics to these things.
+I think every game needs bouncy boogers.
+And here we're attaching a booger to a nail an unfortunate patient has swallowed.
+The booger here is just attached with a spring physics object.
+It's super simple.
+And here's an example of hiding a foreign object behind the boogers.
+I think this is my favorite case.
+Okay, so that's the four techniques I wanted to go over.
+Let's review what we learned on this journey together.
+You can use world space falloff functions to create very controllable effects by attaching these falloffs to different objects in your game.
+We learned how to render into UV space and avoid seams by running a dilation pass.
+We learned how to make a simple simulation by ping-ponging two render textures with each other.
+We saw how adding physics improves pretty much any effect, making it more dynamic and alive.
+And in case you didn't already know, we were reminded to never swallow a nail.
+I wanted to thank everyone at LevelX for helping with this talk, especially these folks who were instrumental in implementing several of the facts I showed today.
+We were also hiring, so if anything I showed you today inspired you, you thought this looked fun, you want to help, maybe make the next generation volumetric boogers, we're always looking for that kind of thing.
+And remember, all the source code is posted on GitHub, but if you have any questions, feel free to reach out to me on Twitter or send me an email.
+Thanks so much.

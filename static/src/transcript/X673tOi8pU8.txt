@@ -1,0 +1,614 @@
+I'm Robert Masella.
+I'm a software engineer from Rare.
+Because we had such bad experiences with testing on our previous projects, when we started working on our latest game, Sea of Thieves, instead of relying on manual testing, we decided to completely change our approach and use automated testing on every part of the code base, including on gameplay features, which are notoriously tricky to test.
+So in this talk, I'm gonna walk through the approach we took.
+our learnings and how we benefited from it.
+First a few quick details about me.
+I've been a gameplay engineer at Rare for about 14 years.
+For anyone who doesn't know Rare, we're a Microsoft first party studio.
+We're based in central England and we've got a very long history of game development.
+Just for context, we have about 200 people in the studio at the moment.
+So games I've worked on are Banjo-Kazooie, Nuts and Bolts, all three of the Kinect sports games, and in the last four years or so, I've been working on Sea of Thieves.
+So rare gameplay engineers don't tend to specialize too much.
+So on Sea of Thieves, I ended up doing a bit of everything, including AI, physics, character movement, animation, and just whatever needed doing.
+So for those who aren't aware of what Sea of Thieves is, it's a multiplayer, open-world pirate adventure game where players can join in crews and cooperatively sail around the world, follow maps to find treasure, steal treasure from other players, and fight skeletons.
+That's what you can do, but if you want, you can just play instruments and get drunk on grog.
+It's up to the players.
+So since we released the game about a year ago, in fact, exactly a year ago now, we've added multiple new updates.
+So we've added skeleton AI ships for the players to fight, a new set of volcanic islands to explore, and a Megalodon shark that can appear and attack the players at any time.
+So in this presentation, I'll be talking about why we thought automated tests would be a good fit for Sea of Thieves.
+how our testing framework worked and how we created tests, how we optimized our testing during production, and then finally I'll talk about the benefits we got.
+So first of all, why did we decide to use automated testing?
+Well, Sea of Thieves was gonna be a very different game for Rare, and some of those differences meant that in terms of testing, there were gonna be some different challenges than we'd had before.
+So the first one was that this was an open world game, our first open world game.
+And it was going to be very open in terms of gameplay.
+There were very few restrictions, really, on what the players could do and when they could do it.
+So the challenge here was all the complexity that I did.
+The way features interacted meant that we'd have to keep checking all those interactions, all those features, making sure they still worked.
+So the other issue is this was going to be a constantly evolving game.
+This is going to be our first game as a service that we're going to be constantly evolving, responding to player feedback.
+And the issue there is that as you're constantly changing the code base, you've got a lot of risk of causing bug regressions, breaking features that you'd already implemented.
+And then the third challenge was that we wanted to, if possible, release the game within a week so we could respond quickly to player feedback or add hop fixes, that kind of thing.
+So the issue with that was that on previous projects, it had taken at least two weeks to verify build.
+With the extra complexity that Sea of Thieves had, a week just wasn't going to be enough time to have confidence that the build we were putting out to players was actually not going to be full of bugs.
+So if we look at the testing process that we used previously on our previous games, if you look at this dev timeline from the point where a developer makes a local change in their PC to the point where players get a game update, our old process essentially only had one point where we did testing, really.
+We just got lots of manual testers.
+They got a build that was created from the build system every so often, and we just got them to check it.
+and hope that they found all the bugs.
+So the problem with this approach is it's quite slow and a fairly unreliable way of actually finding all our issues.
+So let's look at an example of kind of the failure of that kind of approach.
+Yeah, so in this bug, an engineer has made a change to the game that meant that the skeleton AI's target memory was broken so that as soon as they lost line of sight with a target, they would completely forget about them.
+Okay, I admit, this engineer was me. I put this bug in the game during the beta. So again, I thought this would be a good example to show. So who is in action on a test level?
+So the skeleton starts attacking the player, but when the player goes around the corner, he just starts wandering off, so not great.
+This is what we'd expect to see.
+So now when the player goes around the corner, the skeleton follows, as you'd expect.
+So let's go through kind of the process this bug went through.
+So first of all, the bug wasn't noticed by the developer as they were developing IME.
+So why did this happen?
+Did I not test the game properly?
+Well, I did try the Skeleton AI on a test level before I submitted my change.
+But it was on an open area where there were no obstacles, so you didn't see this issue.
+So again, I just submitted the change.
+Then the testers will take the latest changes and test it.
+In this case, again, because the bug was subtle enough, they didn't actually notice it.
+And eventually, yeah, it ends up in a game update and released to players.
+So if we cut to a few weeks later, and we see how the bug was eventually fixed.
+So at this point the community team are gathering feedback from the beta players and they noticed that players are starting to mention that skeletons seem a bit more dumb, less responsive than they used to be. So again an engineer is taken away from their normal work, they have to be a science bug and they have to spend time fixing it, finding the bug and then fixing it.
+Eventually there is a fix, that's put into the build, the test doesn't have to spend time verifying that fixed, then that fix goes into the players, but of course there's every chance that this bug could still reoccur because we've got no way to stop it.
+So rather than this kind of scattershot process of kind of adding a bug, finding a bug, fixing it, maybe what we do instead is kind of regularly check that scenario and just make sure that it's never in the build.
+So let's say we've got one of our testers, manual testers, to kind of check that scenario every day or so.
+That wouldn't take too long to do, but in a game like Sea of Thieves, you're probably gonna end up with.
+Thousands of this and it's going to be like a full-time job for someone or probably more like several people and not particularly You know, not particularly productive job. Really. They're just going to be doing the same mind-numbing checks all the time So instead of wasting a human time Humans time doing this we could just ask the game to do it itself right with an automated test Then we avoid wasting the testers time So the automated tests also give us a few other advantages that the humans are able to do So, first of all, we could run tests a lot faster with automation.
+Yeah, we could run a lot faster.
+And then, the second one is that we can be a bit more precise.
+Like, the game can test its own game state, which the human can only really check what's going on by eyeballing the game.
+And then the third thing that the automated test can do is test at a different code level, different levels in terms of the game.
+They can check individual code function is working correctly.
+The inputs, if there's certain inputs, certain outputs come out, which again, a human tester can't do.
+They can only really play the game in its complete form.
+So we shouldn't just get rid of all our manual testers straight away though.
+There's a few things that they're a bit better at than an automated test.
+So humans are going to be a lot better at noticing defects to do with the visual and audio elements of the game.
+Humans are also going to be able to use their creativity, do exploratory testing and find issues that we hadn't really considered yet.
+And humans are just going to be a lot better at assessing the actual game experience, you know, how does it feel to play.
+So until we get very advanced AIs that could possibly do these more human-like factors, we wanna have a mix of human and automated testing.
+But the advantage of having automated testing there is that the humans don't have to do so many repetitive checks.
+They can do more productive things.
+Cool, so that was why we decided automated testing would be a good fit.
+Now I'll talk about how our test framework worked and how we made tests.
+So, CFE was built on top of the Unreal Engine.
+So, we used the version that was taken a few years ago.
+So, what you see in this presentation might not completely match with the latest version.
+So, just bear that in mind.
+So, we implemented our test framework by heavily modifying the automation framework that was already there.
+So, when we took advantage of that, we could do things like in the editor, well, to run tests in the editor, all we did was go to the automation tab, select the test we wanted to run.
+and they would all run, and they would give you a kind of result, a pass or fail result.
+So we could run our tests in the editor like this, but we could also run them on built executables.
+And we also have the standalone tool, which our engineers in particular used to kind of verify their latest code changes without ever having to build the game or build the editor.
+So the simplest kind of tests we had were unit tests.
+And if you're familiar with well-known test frameworks like NUnit, these will look very similar.
+So it's essentially a bit of code that registers with the automation system so it can be recognized as a test.
+So unit tests generally check a specific operation on the smallest testable bit of code, which generally means testing a code function level.
+So in this example, we have a test that's checking, you know, a very simple math library function, just checking that if we've got two, counting and calculating the distance between the vectors and they're equal, then we return zero.
+So most of our tests broke down into three stages.
+So first you do the setup, here where we just create the vector objects.
+Then we run the actual operation where we run the distance function.
+And then we do the assertion where we check the results as expected.
+So in this case, if the test comes through and fails, then we will throw an error to the log.
+That will get picked up by the automation system and actually fail the test for us.
+So if we had unit tests that cover every code function in the game, in theory we have enough testing that covers all the game, right?
+But of course, sometimes the way units interact can themselves contain bugs.
+So it's a good idea to have integration tests on top.
+So integration tests will generally cover like a whole feature or action in the game.
+So they provide coverage for multiple units that are in that feature and also cover the communication between them.
+So now if a unit test fails, for example, we know straight away that that specific unit is probably gonna be the problem.
+However, if one unit test passed, an integration test fails, we know there's probably some other issue to do with that feature.
+Probably something to do with, could be the communication between units or maybe an asset problem, something like that.
+So an integration test failure is gonna take longer to investigate because it's covering a larger scope.
+So we generally prefer unit tests when we can.
+But they're still very useful to give us that high-level signal that something's wrong, kind of broadly with a feature.
+So to create integration tests for CFEs, we just created them as maps within the Unreal Editor.
+So each map would run a, each integration test map would run a fixed scenario of some kind, then report back its results as a pass or fail, to see whether that behavior happened as expected.
+And to do the logic of what happens in these integration tests, we made use of the Unreal Blueprint system.
+So if you're not aware of Blueprint, it's a node-based scripting system available in the Unreal Engine.
+So to follow the flow of Blueprint, you just look for the white line, which is the execution line.
+So in this example, we just start from the beginPlay event.
+We delay for two seconds, then set the actor rotation to all zeros.
+So, Blueprint was very good for running integration tests as nodes can be latent, which means that they'll pause execution until a certain condition has occurred, which is something you tend to do quite a lot in these integration tests.
+So, for example, this delay node is just gonna be delay execution for two seconds.
+So we could have written our integration test logic with code, but because of later node support and because of how easy it is to iterate on blueprint just inside the editor, we found it more convenient to use blueprint.
+So as an example of an integration test for Sea of Thieves, let's say we want to create one for one of the most basic actions for a pirate game like Sea of Thieves.
+It's having the player interact with and turn the wheel.
+So specifically we're going to check that when they do that, the actual wheel angle of the mesh turns correctly.
+So this is what it looks like in game at the moment.
+Okay, so if we wanted to go back, create an integration test for this, you know, one thing we could do, we could load up the full world, we could have a player stand on the ship and turn the wheel, but that's gonna be very, very slow to load.
+And also you're bringing so many other systems that are gonna affect your test, you're not really kind of looking specifically at the wheel anymore.
+So instead, you can have a much simpler version, and this is what we end up doing in this example.
+So we're gonna have a player, just standing on a platform, interacting with a wheel, and that's essentially all we need.
+So this is a blueprint for the test, and you can see it splits up into those three phases like we had before, setup, run operation, and check results.
+So I'll zoom in a bit better so you can see.
+So in the first half we start with a big in-play event, which is on the level blueprint We a lot of the setups already done for us essentially by adding the wheel and the player But we also need the player to interact with the wheel before you can actually turn it. So we do that first Then we do the run operation which is in this case is having the player apply a fake input just to turn the wheel.
+And then finally we do an assertion and we check that the wheel angle has kind of gone beyond a certain tolerance so we know that the wheel has been interacted with correctly.
+And then we finish the test.
+So this is what the test looks like in action.
+I've slowed it down a bit and made the angle a bit larger just to show visually what's happening.
+So in reality, probably running less than a second.
+And if we go back to the automation window, we can see that the test is passing.
+So now we have a test that's checking that whole operation, including all the units involved and the in-game assets.
+And if we run it regularly, we can see if something breaks this feature.
+So it's good practice that a test, particularly an integration test, is made to be robust to all the changes we could kind of expect that still conform to the behavioral contract that we kind of started with.
+So in this case that the player interacts with the wheel and turns it.
+If you end up kind of relying on something more specific than that, you're in danger of kind of relying more on the implementation of the feature, and you'll probably find that you're gonna have to be constantly reworking your test as you're reworking the implementation.
+So as an example of this, if we look at the test that we just made, this is the three broadly code steps that are happening when we run it.
+So first, we have a character input handler on the player character.
+That gets a negative input sent to it.
+That input handler then sends the input to the wheel object, and then the wheel applies that input to the wheel mesh.
+And then we check the results.
+But, and we're doing it all on the same frame, which is the danger, because if we decide to make a code change, which happens a lot, where we wanna defer something to the next frame, so let's say we defer the application of the wheel mesh angle to the next frame, so suddenly we're gonna be checking the results at a time when the wheel hasn't actually been changed yet.
+And if we check, then we find, yes, that the test is now failing, with an error saying that the angle is not correct.
+So the most straightforward way to fix a test is just to add a delay for one frame between the run operation and checking the result.
+And the test succeeds again.
+But let's say that we wanna do another code change now.
+This time we're gonna add a animation that happens kind of in that stage of the code between when the input handler sends the input to the wheel and between when we set it on the wheel mesh.
+And we're not sure how long that animation's gonna be.
+And it looks like, yep, the test is now failing again.
+So how would we fix it at this point?
+So one thing we could do is possibly inspect the animation and find out how long it is.
+But again, the problem there is we're kind of looking at the implementation again.
+And we're kind of, you know, if we take the animation out, we'll have to fix the test again.
+Maybe we could add a large delay, say 100 frames, because we're sure that the animation's not going to be any longer than that.
+And this would work, but you've added at least 100 frames to the test time now.
+And they maybe expect the animation to be a lot less.
+And again, if you run the test once or twice, that's not too bad.
+But we're going to be running this test hundreds of times a day, possibly, on our build system.
+So all those extra frames are going to add up.
+So instead, a better solution is just to use a polling version.
+So what we do is we just use a delayUntil node, and that will just, again, it's a latent node, and it will keep spinning, waiting for the angle to be correct.
+So again, it doesn't really matter what's happening as the player interacts with the wheel.
+It will find the right result eventually, which it does with the added animation in our works again.
+And if for some reason the wheel is actually broken, what we get is a timeout.
+So in this case, it will timeout after five seconds because the wheel is broken and we just never see the angle change.
+So this is a little bit wasteful, I suppose, because we're, you know, we're all wasting five seconds.
+But we don't expect this to happen very regularly because hopefully the feature is gonna be working almost all the time.
+So again, we tended to set our test timeouts to be quite high for that reason because we felt kind of safe doing that.
+So, I'll just have a bit more.
+So Sea of Thieves is a multiplayer game.
+It uses a network client server architecture.
+So we really wanted to make sure that we covered that aspect of the game with our integration test as well.
+So integration tests, we changed the automation framework that was there in Unreal to allow integration tests to pass execution between the server and the client so that we could check both sides of kind of a network communication.
+And we did this, this could work with kind of built executables of an actual client, an actual server, and it also works just on the editor with kind of virtual client and server processes.
+So this is what would happen in a typical networked integration test.
+So first the test begins on the server.
+So here we would do the setup and say how many clients we want in the test and do the initial kind of handshaking.
+And generally we'd set up some kind of behavior here on the server.
+And then we'd switch over to the client and we'd check that whatever we set up on the server has been communicated correctly over the network over to that first client.
+Then we'd go back to a server.
+And then depending on the test, you might end it here, but in this, let's say that we want to actually test that that communication or slightly different communication has been sent over to a second client.
+So again, the test could support that.
+So we could go back and forth, ping-ponging between server and clients, but when we're ready to end the test, we just go back to the server and we finish the test.
+So let's, as an example of what a multiplayer integration test looks like, for real, let's modify the test that we just did, based on the wheel, we're gonna look for the same thing, the change in the wheel angle, but we'll check that it's actually working on a different client, on the second client in the scene, which is this guy just standing to the side here.
+So what we expect to see in terms of the flow of code and network communication, is first the player interacts and turns the wheel, just like in the previous test example.
+Then when that wheel angle changes, that gets communicated up to a server.
+And then finally, that server will communicate it to the other client, the observing client.
+So this is the blueprint for this.
+I'll probably go a little bit faster because it's a little longer, but I'll point out all the interesting parts in terms of the network version.
+So we'll start from begin play again.
+Then we have a sync client server node, which starts the test with two clients.
+We'll then switch execution over to the first client.
+This is gonna be the interacting client.
+That client then interacts with the wheel and applies the fake input, just as we did previously.
+Then we'll switch to the observing client.
+So this node kind of does it in a shortcut way, but essentially we go to the server first and then to the second client.
+So this is client ID one, this is the observing client.
+that client will do the polling, just like on the previous version of the test.
+So when that client then sees that the wheel angle has changed past the tolerance, then we switch back to the server and we finish the test.
+So those were unit tests and integration tests, but we had a few other test types that I'd like to talk about briefly.
+So we also had asset audit tests.
+So these would check the setup on assets, make sure they're kind of compatible with what we expect in the game.
+So we had one of these per a lot, most of our asset types had some kind of asset audit test that it picked up on.
+We also had screenshot tests.
+So these looked in practice a lot like integration tests.
+But at the end of it, they usually took a screenshot, where we, and then we compare that screenshot with a process afterwards against the last known good screenshot of that test to check and if there were any differences that meant there was some kind of visual error or rendering bug.
+We also had performance tests.
+These are, again, similar to integration tests, but they ran a bit longer, and they would collect data based, to see if we got some trends or spikes in terms of frame rate, memory use, loading times, that kind of thing.
+Then finally we had boot flow tests.
+So these were the closest tests to kind of simulating what it's like to actually run the game, because they tested communication between the client, server, and all our services that are vital to running the game as well.
+And they would check under kind of common scenarios, such as a client joining a new server and registering all the services and that kind of thing.
+So I'm going to talk very briefly about the kind of infrastructure we had.
+It's not really the focus of this talk, but sort of it's kind of relevant.
+If you want to learn more, then my colleague Jafar did another talk in last year's GDC called Adopting Continuous Delivery.
+So check that out on the vault if you want to learn a bit more.
+So we run our tests as part of a build system, which is like a TeamCity.
+It uses the TeamCity continuous integration software.
+So TeamCity will go ahead, use our build farm of PCs, and then allocate them to do various jobs, such as building the game and running a group of tests.
+So depending on what kind of test it was, and how slow it was, and how important it was sometimes, would depend on how often we ran the test.
+But generally, on average, we ran every test we had about every 20 minutes or so.
+So if the build system encounters test failure, we would set the build to red.
+We have screens all around the studio which show kind of the status of the current build.
+And if that happens, we kind of have a bit of information about kind of what test job has failed and who was probably responsible as the last person to change something in that area.
+I've blanked out the name in this example because I didn't want to embarrass anyone at GDC.
+So to make sure we didn't have a broken build and that team members could carry on working, we have a kind of a three-step process for doing submits, submitting changes.
+So the first one was that you could only submit changes if the build was green, i.e. there was no test failing.
+We didn't want to allow people to continue submitting something if the build was already broken and maybe making the situation worse.
+So that would have made it very important if the test was failing, whoever was responsible needed to fix it as soon as they could because it was blocking the whole team from committing any more changes.
+Next, we always expect that each change has reasonable test coverage.
+So reasonable is obviously where there's some kind of a leeway and some kind of, you know, a grey area.
+If it was an artist or a designer, they generally wouldn't submit a test with their change.
+Often, when they submit that asset, it would get picked up by an asset audit and it would be checked there.
+But an engineer adding a new bit of code or a new feature, we would reasonably expect that they would include a test, a unit test, integration test with that submission.
+So at Rare, we don't really have, well, we don't have test engineers who do the test coverage for other engineers, the feature work they've done.
+We found it better if engineers decided themselves and took responsibility for the test coverage that would be needed for their change.
+And the third thing is that we ask people to run a pre-commit first.
+So, obviously, engineers or developers, they need to take some responsibility for their local, for submitting changes, they need to check that they're working correctly.
+We could have asked them to run automated tests locally, which, that would have taken a bit of time.
+Also, there's every chance they could forget, and every chance that they don't, running all the tests isn't really practical because there's a lot of them, so they would have to pick which tests are relevant to their change, which is gonna be prone to error.
+So instead, we ask an engineer to, or a developer, sorry, we ask all our developers to run a pre-commit first, which would mean that they send their change to the build system.
+That wouldn't actually submit it to the main branch, it would just, the build system would go ahead.
+build the game with that current change, and then run tests that it decides are related to that change, and to see if those, and then send the results back to that developer to say whether that change looks good enough to submit.
+So, here's a summary of kind of the full Sea of Thieves testing process that we ended up with, using that same dev timeline that I showed you earlier.
+So first of all, as I mentioned before, when the developer makes a local change, they run the pre-commit, which runs a set of automated, the related automated tests.
+So if the developer does this first, then they can be reasonably sure that when they submit their changes, it's not gonna affect the rest of the team.
+Second of all, after the developer submits the change, so the build system is constantly running all our tests, checking to see if there's intimate issues, running some more long-running tests to find trends, that kind of thing.
+So because we do this, we're fairly confident almost all the time that our build is good and we can kind of move on to the next stage and with whatever build we have at the moment.
+So at this point, once the build system kind of spits out a build, which we do every so often, probably every day, then we have the manual testers check the build.
+So this is obviously very similar to what we had in the previous process, but because we've done all that automated testing first, the manual testers are gonna always get a good build to test with, so they're not gonna get that show-stopping bug that happens all the time where...
+they get the build for the day and the build is just completely broken and they waste hours then having to get the next build which has got that fixed.
+That's not going to happen because we're fairly sure that all the automated tests would have picked up those kind of issues.
+Then finally, we don't do this all the time, but occasionally, especially when we've got new features that we want to get some input on, we'll send a latest update to a group of insider players to get kind of feedback on that change before we submit it to all of our player base.
+Again, similar to what a lot of studios would do.
+Again, the difference here is we don't we hopefully don't expect them to see actually many bugs because again we've gone through the automated testing process and we've gone through our manual testing process and Hopefully they can just concentrate and give us feedback on you know, the feature and the gameplay itself So, so far what I've shown you is what our testing looked like when we started full production on CFEs.
+Next I'll show you how we optimized our testing during development, or in other words, how we became more pragmatic over time with our automated testing.
+So, as we entered full production, we had our full team now creating tests, and we were seeing the benefits of the extra build quality we were getting, but we were also finding the test to be a bit of a burden in several ways.
+So first of all, we were spending a lot more time creating the tests than we expected.
+We knew we would be spending some, but it was happening, we were spending a lot more than we'd like.
+The second issue was that the tests were generally quite slow to run.
+We had quite a lot of them, and some of them were very slow to run.
+The aim was that the pre-commit process would take about an hour, but it was kind of creeping up to like hour and a half because it was taking such a long time, which meant that developers were put in a queue to do their pre-commit, which means that it would take half a day or two a day to kind of get their changes in.
+So that was really slowing down our development.
+The third issue was that our tests, particularly some tests, the long and complex ones, were quite unreliable, excuse me.
+And that meant that a lot of engineer time was put into kind of figuring out why a test would fail occasionally and kind of improving the tests, maintaining the tests.
+So for those three issues that I mentioned, the creation time, running time, unreliability, almost all of them were much, much worse for our map-based integration tests.
+So if we look at the running time, for example, the unit tests would run 10th of a second, something like that, that's a max.
+And then our integration tests would take up to 20 seconds.
+So this was because of all the assets these tests generally had to load.
+Initializing network connections took a long time getting, you know spinning up a new world each time We still wanted to use integration tests, but because they were so slow. We really needed to find a way to Improve them so we could or if possible use a lot less So why did we have so many integration tests?
+And we had them for gameplay features in particular.
+So if you imagine kind of the code, like our code base is a pyramid with Sea of Thieves city on top of the Unreal Engine, then unit tests kind of sit right at the bottom because they didn't really have dependencies on Unreal or Sea of Thieves.
+So they were nice and fast to run.
+Whereas integration tests, because they had dependency, they needed a built version of the game or the editor, they were dependent on everything Unreal, everything in Sea of Thieves.
+And we definitely found that the more dependencies on a test, the slower the test was to run and less reliable it was.
+So we really wanted to not use as many integration tests as we could, as possible.
+But unfortunately, for gameplay testing in particular, we were using a lot of integration tests.
+And the reason for this is because we were building our gameplay code on top of Unreal, which you know, so we're using classes such as actors and components, which are integral to Unreal.
+And we thought that if we wanted to get a true representation of our gameplay features, we really need to use them in the proper context, which meant in an Unreal map, which meant we had to use an integration test.
+But it was obviously very taxing.
+We were creating a lot of these very expensive tests.
+So when we kind of changed our assumption, and we thought, you know, maybe we could use, make our tests, gameplay tests run at a lower level, where we just check the logic, but didn't have all the dependencies, you know, we wondered if that would work.
+So instead we came up with a new kind of test, which we called actor tests, because they're so named, because they use the actor object in Unreal so heavily.
+So, actor tests were essentially a unit test for Unreal game code.
+They treated Unreal Engine concepts such as actors and components as kind of first class dependencies.
+So they weren't really unit tests in a strict, strictest sense because they had, you know, some extra dependencies on them, but engineers could kind of treat them that way.
+So as an example of an actor test, here's a typical game scenario we had during development.
+So in Sea of Thieves, we have a variety of different skeleton types.
+One of those is the shadow skeleton.
+So at nighttime, the shadow skeleton becomes all ghost-like, and he's virtually invulnerable.
+But when the time of day changes, then the skeleton changes its state.
+It becomes more like a normal skeleton, and it can be attacked again.
+So we want to make a test that checks that when the time of day changes, the shadow skeleton changes from its dark to its light state.
+So we could have done this as an integration test, but actually doing it as an actor test is a lot more efficient, as I'll show you.
+So this is the actor test that checks that feature.
+And as you can see, it looks a lot like a unit test.
+And behind the scenes, there's a little bit more kind of going on in terms of setup.
+There's a minimal world that's been created where the actors can live in.
+But for the engineer who kind of creates a test, they can kind of treat it like a unit test.
+So like all the other test examples, this kind of splits down into three phases.
+So I'll go through what's happening in this test.
+So first of all, in the setup phase, we create the shadow skeleton.
+We set its current state to dark.
+Then when we run the operation, we set the game world time to midday.
+And then finally, we check the results to check that the state of the shadow skeleton has changed to light as we expect.
+So note this line here, where we're ticking the shadow skeleton manually.
+So we have to do this because that's kind of where it polls the...
+the world time and checks that the, you know, whether it needs to change state or not.
+Now obviously in the real game you would never just call tick explicitly, split it explicitly like this. You would expect the Unreal Engine to, you know, run it in its own engine loop.
+But again, if we did it like that, then we'd have to use an integration test.
+So doing it like this has a disadvantage in that it's not using it in its true way.
+Yeah, it's outside of its normal environment.
+But the major benefit we get is this test runs a lot, lot quicker than the integration test.
+So now we had actor tests.
+We weren't going to completely throw away integration tests.
+They still gave us useful test coverage that the actor test didn't, such as checking the asset setup and checking the integration with the Unreal Engine.
+But we didn't want to use too many, because they're very expensive.
+So we tried to settle on a good kind of rule of thumb of when you would use a integration test and when you would use an actor test.
+And what we came up with was if you took a feature, you could then create an integration test for the golden path of the feature.
+So a golden path is like the successful run of the feature.
+And then we'd use actor tests for the edge cases or the failure cases.
+And we found this kind of gave us a good mix in terms of a balance of running the test, the time that took the test to run, and giving us kind of a reasonable test coverage that we could use.
+So as an example, there's a feature in the game where players can give items to other players.
+And if we look at where the test breakdown for the coverage for this feature.
+So the actor test cover times when giving the item wasn't successful, for example, because the player didn't have an item, or they can't give every kind of item.
+Whereas the integration test covered the full successful passing of an item.
+So in terms of how it breaks down numerically, is we found that the ratio of actor tests to integration tests was about 12 to one, which gave us kind of a coverage that we were happy with.
+So by using integration tests for only the golden path, we reduced their number by a large amount, but we still wanted to speed up the ones we had as much as possible.
+So one way we found to do that was to merge multiple related features.
+So this broke a general rule of testing that you should only really test one thing per test.
+But again, because of the speed that we were getting, again, we were happy to break this rule.
+So as an example, so the skeletons in the game have three different attacks.
+So we wanted to have a test that checked each of those worked and damaged the player correctly.
+So, we could have had a test per attack, and that's originally what I started with, but I realized it was just as easy to have one test that ran all the free attacks in sequence.
+And again, this meant that the initialization of the world, loading the skeleton and all its animations, that kind of thing, we only had to do that once, so we saved a lot of time.
+So, combining the tests only really worked if there were related features.
+But there was one aspect, one thing in most integration tests that was common, and that was the player.
+And it turned out the player was one of the most expensive objects when we used it.
+Again, it's quite a complicated object with a lot of animations attached to it and also initializing it kind of in a network scene for the network version of the integration test took a long time.
+So in fact, in a lot of cases, just initializing the player took longer than running the actual test.
+So one thing we used that was a, we took advantage of a feature in Unreal where you could world travel.
+So essentially you keep the same player object but move him from map to map.
+So we use this to transition the player between integration maps and meant that we didn't have to keep loading the player.
+So in this example, the player starts off in an integration test map a lot like the one we did before with the ship's wheel.
+We then unload that map but keep the player and then load him in another integration test map where he's interacting with the capstan.
+So again, we had to be careful here, and we had some bugs to do with state leaking from state to state, some test to test.
+But again, we were kind of happy to fix those bugs and sort that out because of the speed up game we were getting in terms of running the tests.
+The other issue we had, which I mentioned, were intermittent test failures, which are when tests succeed almost all the time, but very occasionally fail.
+Some level of test fakiness is kind of inevitable when you're running such a large amount of tests continuously.
+It seems to happen to almost everyone, which I'm quite amused by this quote on the Google testing blog.
+It happens to the best of people.
+So we looked into the reasons for our intermittent test failures, and they were kind of a mix of network issues, infrastructure issues, and sometimes a state that was leaking from test to test.
+So we would investigate and fix these causes, but we found that just stopping the team from checking in when we found one of these intermittent test failures was wasting a lot of time.
+Quite disruptive.
+So instead what happened was, when we, we changed the kind of the way the build system did things, and when it found a test failure, it would immediately run the test again.
+If the test failed for the second time, we would actually turn the build red.
+If it succeeded on that second time, we would just keep it green instead.
+Now, just because we did that didn't mean we completely ignored those intermittent test issues.
+We just wanted to concentrate our efforts a bit more.
+So what we did is we kept a record of those intermittent test failures.
+And every week or so, we drew up a list of the worst offending tests.
+And then we asked engineers to just look at those.
+Because those tests may have genuine issues with the actual test or the actual feature of the test, which meant that they're worth investigating.
+And the final thing we did to kind of improve our testing was to handle consistently failing tests.
+So these are tests that are generally badly written and just kind of just keep failing.
+So tests like this, they just can't be trusted because they're just off, they're worse often than having no test at all due to the time they waste on the build system and the false information they're giving to the team.
+So what we did is if a test was failing regularly, we moved it to a quarantine area, where we'd keep running the test, but we wouldn't turn the build red anymore if it failed.
+And at the same time, we told the engineer responsible for the test that your test has been moved into quarantine, could you please sort it out?
+And then we gave them a few weeks to do that, and if they didn't get around to it, then we just bin the test.
+So this seems a bit harsh, but again, we're thinking was that if an engineer can't prioritize the time to fix that test, it's probably not giving us a worthwhile test coverage and it can be recovered later anyway, so check it a minute.
+Okay, so for the final part of this presentation, I'd like to talk about the benefits we got from doing all this automated testing.
+So here's the breakdown of the tests that we currently have in our code base.
+So as you can see, 70% of our tests are actor tests.
+So it definitely felt like we were right when we thought that this was kind of the sweet spot in terms of the code level in where to run those tests for gameplay, because we were using so many.
+We only have 5% integration tests there.
+So again, trying not to overwhelm our build system with so many integration tests.
+But they did give us vital kind of high level feedback if something was broken in a feature in the game.
+About half of those were network tests.
+And screenshot performance and boot flow tests, we only have a very small number of those.
+Those were by far our slowest tests, so we only use them sparingly.
+So if you add all those up, we have about 23,000 tests, which is quite a lot.
+But I didn't add asset audits because, again, they're kind of not quite tests, but if we add those as well, I didn't want to skew the results too much, so I didn't add those in there.
+But if we add those as well, then we end up with over 100,000 tests, which is quite a lot.
+So if we hadn't made all those efficiency savings that I've been talking about, there's just no way we could have run those tests in a reasonable way on our build system.
+Cool, so with all that testing we had, we were seeing a lot of benefits in terms of build stability and that extra confidence that it gave us.
+So I'll go through what those things were.
+So the first one we had was the reduced time it took to verify the build.
+So on Connect Support's arrivals, as I mentioned, it took about two weeks to verify build before we sent it out as an update to players.
+Whereas on Sea of Thieves it took about a day and a half now, we were confident enough.
+So this was really powerful, it meant that we could very quickly turn around a hotfix if we needed to, just from the current version of the bill.
+The other benefit we got is we drastically reduced our manual testing team.
+So we went from 50 members that we had on Connect Sports Rivals at the time of release to 17 which at the time of Sea of Thieves.
+So what the numbers don't show is kind of the way that we could actually use the smaller number of testers we had a lot more Productively again because of all the repetitive checks were being done by automated testing the the QA team could work more closely with the rest of the development team and actually kind of Feedback and kind of what the player experience is like of playing the current bill So the third benefit we had was keeping our bug count very low.
+So on Sea of Thieves, our max bug count over production was about 214, whereas on Banjo-Kazooie-Nuts and Bolts, yeah, quite an older project, but still it's a good comparison.
+We went to about 3,000.
+And you can see from the bug trend graph how different they were.
+So on Sea of Thieves, because of all the automated testing we had, a lot of issues didn't really make it as far as bugs, because they were caught by automated testing earlier on and never made it into the build.
+We also had a process where we asked developers to look at fixing their bugs before they did feature work, just to keep the build as stable and clean as possible.
+Rails and Banjo-Kazooie-Nuts-and-Bolts.
+As you can see, we kind of let long-running issues in the build just build up, build up, build up until, oh no, it's a few months before release, and we had to fix all the bugs.
+So yeah, we spent a lot of time doing that.
+And that kind of brings me to my third one, is reducing crunch.
+So this was really important to us at Rare, and we hoped that automated testing would help us reduce crunch quite a bit.
+I don't have concrete stats for this, unfortunately.
+But anecdotally, developers at the studio definitely found that they work less over time.
+And I think the bug trend graphs kind of show why this is.
+So on CFEs, because we had automated testing, highlighting issues all the time, there weren't those kind of unexpected moments where you have issues crop up that you didn't expect or have been around a long time.
+And developers could maintain more regular working hours because of that.
+whereas on Bajo Kazoo, nuts and bolts, when it got to that point, before release, and we had all those bugs, there was definitely a lot of crunching going on.
+So, just to finish up, I'd like to go through a few bonus lessons we learned on our automated testing adventure.
+So, first one is that team buy-in is really important.
+So, the most common reason not to use automated testing is obviously the time it takes to do the automated testing.
+You know, there's no time to do it.
+We've got to finish the game.
+So, my counter argument would be to that, that you might actually spend more time, you might actually spend the same amount of time or less time if you use automated tests because the developers won't be spending as much time fixing reoccurring bugs.
+So we were lucky on the project that everyone on the team, in fact, well, everyone at Rare kind of bought into what we wanted to do with automated testing and went along with us, including producers and project managers.
+Again, if we didn't have that, if we didn't have that support from that highest level, we really probably wouldn't have been able to achieve what we did.
+So the second one was that you should really allow time if you're doing automated testing to kind of build up that knowledge in the team.
+Again, a lot of us were unfamiliar with testing when we started this.
+There's a lot you need to think about in terms of what makes a good test and what you have to do to make your code testable, which is quite an important one as well because it's very easy to make code, which is just so difficult to test.
+The bonus is that if you make code more testable, it actually makes it cleaner and better as well.
+And the second part of this is that you should make sure that you spend time making sure your infrastructure is robust and stable because you're gonna be relying on it a lot.
+So if this all seems a bit intimidating to get started, then I'd suggest not doing what we did and actually just starting testing on a small part of your game or your project to begin with, just to build it up rather than go all in.
+The third lesson we learned was that iterative development, testing, they don't really mix.
+So if you're still kind of working on your game and on the actual gameplay and checking to find the fun, then it's probably not a good idea to do testing at the same time because you'll be constantly having to rework your tests.
+So, on Sea of Thieves, when we were working on new features, we actually had a prototype branch that we used that didn't need testing so that the developers could work quickly and not have to worry about tests when they're working on those features.
+But even when they worked on the production branch, we didn't really do the kind of the test-driven development, test-first style approach because...
+again, we would probably end up having to rework those tests a bit too often.
+So what the process was more, was that we, an engineer or a developer, would make a change, get it working locally, and then build the tests to kind of pin down what they'd done to make sure it doesn't break in the future.
+And then the final one is that pragmatism is important.
+So we found we had to constantly, as you saw, we had to constantly change how we were doing our testing as things weren't working for us.
+So we often weren't able to do the textbook way of doing things because.
+it wasn't working for us.
+So my suggestion, my advice is just don't be afraid to change what you're doing and do what works for you.
+Remember that testing has a cost.
+So you can't possibly test absolutely everything.
+So if something is trivial, maybe don't test it.
+If something is very, If a test you're going to be creating is going to be very complex and hard to maintain, maybe don't do it.
+And then on the flip side, if you're writing some code that looks quite like a complicated logic or something, then definitely concentrate your testing there.
+So, you know, just remember that you're not going to be able to have perfect test coverage, so it's just not really worth trying to do.
+And just to show that we don't have perfect test coverage, here's a video of one of my favorite bugs, sorry, one of my favorite videos from bugs in our game.
+I just love the expression on this guy's face.
+Look.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+Yeah.
+It goes all the way over the horizon as well.
+So what can I say, testing is a journey.
+We're constantly improving, so yeah.
+Cool, so that's the end of my talk.
+What I've talked about here is a big team effort from virtually everyone at Rare, so I'd just like to thank everyone who contributed to our test process in Sea of Thieves.
+And Rarer Hiring, particularly for software engineers, so if you're interested, check out the website link on the page or just come and find me later.
+And that's it.
+Does anyone have any questions?
+I have a question.
+Thanks.
+Great talk.
+Thank you.
+I have a question about the integration testing.
+You didn't mention mocking at all.
+Did you ever think about mocking away the server if you did some client tests?
+Or mocking some units away when you do some integration tests?
+Yeah.
+So we did a bit of that.
+I guess because the actor test obviously didn't have network communication, we would have done something similar.
+Yes, we did.
+So we often did things like we could fake replication.
+So we had a way of doing that.
+Replication is kind of the Unreal term for sending something from.
+server to client.
+So yeah, we could fake that essentially to say, this has been replicated now, do the correct thing on the client when you've picked that up, that kind of thing.
+The integration tests again, because there were so few of them, they were kind of, they wanted, we wanted kind of a more, kind of a broader view, a kind of more high level view.
+So that's why we kind of did actual network communication in those.
+Okay, but you always kept the units, like you always retested the units with the tests also in the actual test, right?
+I mean, yeah.
+Sorry, we always checked.
+Yeah, you always kept the units when you tested the actual tests, so you never like, so you retested the units as well in the actual tests always, right, I guess?
+I'm not sure what you mean, sorry.
+So you're saying the, we checked the, you mean unit tests or?
+No, it's not such, I mean, I'm just thinking if you sometimes mark away units you already tested, you probably, you don't retest them and, I mean, that's kind of.
+Yes, that's a good point, yeah, yeah.
+So I suppose you're right, there's a bit of retesting going, but we, again, integration tests, I like that, right?
+Like I showed that diagram where the integration tests contain the unit tests, so in a way, you are kind of repeating yourself a bit, but the unit tests are very useful because they give you that kind of very specific point of failure that you could investigate.
+Integration tests are quite high level because they give you that kind of very broad sense of something's wrong.
+It takes a bit longer to investigate it, but that's something you need to look at.
+Okay, thanks.
+Thank you.
+Hi, so I was wondering for the pre-commit tests, I found them very interesting, but is there a way to sort of automate which tests are picked up in that pre-commit?
+So like analyzing what code was changed?
+Yes, yeah, I left that out because I didn't have time and it kind of didn't fit in, but yeah.
+So how that works is every day when we're running the tests, the tests kind of record what code they're touching and what assets they're touching.
+And we sort of build a map up of that.
+And then when you do a pre-commit, you kind of do a reverse lookup of that.
+And then you kind of find out which tests are kind of, were affected by that code change.
+And then that builds your list of tests that we think are related.
+Again, it's not perfect, but it's kind of good enough for what we needed, especially for a pre-commit, because, yeah, again, we wanted, that was, it was very important to us to keep the pre-commit as fast as possible.
+And it's been a kind of ongoing challenge as we keep adding more and more testing.
+You know, we can only, we paralyze things as much as we can, but there's kind of limits to that.
+So, you know, that was kind of our latest way of kind of making sure that we were speeding that up enough.
+But it gave us good enough coverage to be confident for a developer to submit their changes, fairly sure that they're not gonna break things for the rest of the team.
+Cool, is there somewhere that I can read more about automating that process?
+I could probably put you in touch with someone who can kind of tell you a bit more how that works if you want, just find me on later or on Twitter or something like that.
+Awesome, thank you.
+And then one more small question is, what do you think about testing, developing with testing as first class concerns?
+So instead of sort of bolting it on at the end, sort of designing your units for testability so that they're more robust and well-structured.
+Yes, I briefly mentioned that, but you mean like when you're actually building the code up?
+Right, yeah, after prototyping, of course.
+Yeah, so we do, again, as I mentioned, we don't really do it in a strictest test-driven way.
+We just found that for gameplay especially, it's just a bit too fluid, and often you had to...
+you're using the Unreal engine, which is not tested.
+So that's kind of one of the limitations with what we're doing here is that Unreal engine, we're kind of assuming it all works.
+And yeah, it does for the most part, right?
+But it's not tested.
+So often, and it's not in a very kind of, it's not been built in a way, there's a lot of dependencies between everything.
+It's an old-ish engine, right?
+So, I'm dissing Unreal now, so I'm getting in trouble.
+I don't know.
+So yeah, so often you would find that when you're building gameplay up, you might find, oh actually I have to bring this dependency in and things like this.
+So it's often good to get things working.
+We just found, again, being pragmatic, that it's good to get things working rather than kind of build up your tests and then your unit.
+But you still kind of...
+it was still definitely, when you had tests in mind that you would need to make later, it still meant that you would really have to think about those dependencies because you knew that the more you added, the more you'd have to mock later and things like this.
+So it's like, do you really need that dependency as another way of doing it?
+I definitely found that our code base was a lot cleaner in C thieves than it had been in C previous projects because of that.
+Awesome, thank you.
+Thank you.
+Thanks for the talk.
+Were you tempted to parallelize the integration tests when you first realized they were taking so long to run and you switched to actor tests?
+Did you find that?
+So do you mean like?
+Well, you were running them all on one build agent after the build.
+Oh, yeah, we do parallelize them, actually, yeah.
+Yeah, so as I mentioned, we do groups of tests.
+So yeah, one thing we did was, but we could only go as wide as, we just have a limited number of agents.
+We only, we have all our agents on site and things like this.
+So, and especially because we're running them on Xbox as well, running on Xbox dev kits, and that's a little, it's not quite as easy to kind of, again, it's a bit more work to set that up, and there's limits to the amount of dev kits we had and things like that.
+Yes, we were paralyzing them, but even with that, with the amount of changes and pre-commits people are sending through, it is just an ongoing battle in terms of keeping that workable.
+Hi.
+I was curious, you had the one line about getting buy-in from the rest of the team and the trade-offs with a little bit of velocity for sustainability and all that.
+I was curious how you presented that argument to the rest of the team leadership, and if there was any particular data you pointed to.
+I mean, that graph of nuts and bolts and their bug count.
+Yeah, unfortunately, we didn't have that until we finished.
+Good job, it did work out that way.
+I guess, I think the reality of it really, again, because we knew this was the kind of game it was, I think mostly we'd had such a bad experience with previous projects. I think I was told, when I was researching for this presentation, I was told that we didn't do some DLC for an old project because it would just been, the testing for it would have been too much work, which sounds insane, but that's apparently the situation it was. So I think when the producers were looking at that they were thinking, well...
+whatever you think.
+If this means we can actually do an update every week if we need to, that kind of thing, then let's give it a go.
+And I've not really received much pushback from, I've not heard any pushback in terms of, from our producers that the tests are taking too long.
+Thank you.
+So your tests are running, is the actor test running essentially without a world?
+There is a world, but we kind of, we almost do like new object world and have our own world rather than whatever If you know Unreal, then there's like, especially in the editor I think there's like two or three worlds at the same time or something We just essentially spin up a very minimal world and use that with the, you know, with the actors in there. And we again It's one of those things that, again, we're not, it feels like it's wrong to do because it's not, you're not using things in the proper way, but if you're just testing the logic of something, then it was good enough for what we needed, so.
+And how different is that sort of testing compared to, like, how much did you need to change the automation system, really, for it to do what you needed to do?
+change the automation system.
+Again, I believe this is, it wasn't that much work to do.
+It was more a kind of a change of thinking than changing much code in the framework, to be honest.
+I think it, again, I think the engine does kind of support, probably if you talk to Epic, they were like, don't do that, it's weird.
+But if you, you know, if you just do a new world, ax a spawn actor on world or whatever, then I think it will work.
+So, and again.
+There were some caveats, it meant some things didn't work.
+Again, it wasn't perfect, but it was good enough for what we needed, and it was so much faster to run.
+It's a big game, so we had a lot of tests.
+Thanks.
+Thank you.
+I'm curious if you've ever used or heard of hypothesis or property-based testing, and whether you considered using that, and if so, why not?
+I... no, I don't think I have, actually.
+Are you able to talk briefly about what that is?
+Yeah, so basically the idea is that the test system generates inputs for you.
+So the classic example is you have an encode and a decode code function, and you just say the encode function is the inverse of the decode function and vice versa, generate a lot of string inputs, where does it fail?
+Okay.
+And then it tries to find, like, the minimal string that makes it fail.
+I see, I see.
+No, I have to say, I don't think anyone mentioned trying that.
+Yeah, it'd be interesting how that works in a game play scenario.
+Yeah, it's definitely worth checking out then.
+Hypothesis is a Python library that lets you get a good idea of how it works.
+Cool. All right, I'll look into that. That sounds really cool.
+Hello, first of all, one thing to address the previous concern about buy-in and something I find very interesting and good to see from your perspective how you outlined how you've avoided crunch potentially.
+Yeah, again, not completely, I get in trouble if I say that we've completely abolished crunch.
+But reduced.
+A lot better, definitely.
+But for me, it's like the reduction of crunch, the more reliable production timeline trumps moving fast and break shit because you will accumulate technical debt that you will have to fix in the end.
+And your producers will like you for having a reliable production timeline.
+On that line, besides bug accumulation and technical adaptation accumulation, the other typical issue I see for productions to fail in the end is performance.
+And that is, you build your systems, you build systems upon systems upon systems, and then content hits and shit hits the fan. Sorry.
+Did you do anything to account for content hitting later onto the systems in your performance testing?
+Did you do anything on that?
+So, yeah, as I mentioned, we have the performance tests and those would do things like you would have the whole world, a client in a world, sorry, in the actual full C.
+and we'd collect data for five minutes or something like that, travel to every island, you know, those kind of things.
+And then we have graphs that we'll monitor, the engine team have that up on screens in theirs and they can see in real time that something has happened and it's trended down and then they'll often kind of...
+jump in quickly, find what has changed that recently.
+The more difficult ones are when you've got this kind of a very slow downward trend, when it's like, okay, we're just kind of adding content and at that point often, someone has to be assigned to some kind of optimization task to kind of, yeah, just get it a bit above, get us a bit above water again.
+And again, that's just kind of the way it is with a continually evolving game like this.
+But had you any kind of like budgeting system for that to like find these slow trends and go like okay?
+Maybe this is something that It's okay because we're still within budget. Oh, you mean yes So we do give you mean like we give the artist budgets in terms of polys and things like that you mean yes And in terms of memory consumption yeah, yeah, we have that as well. Yeah Yeah, but then again, we're always pushing it as much as we can and then obviously, that's a bit harder to do when we add stuff in terms of gameplay and things like that because, well, in terms of general performance rather than just kind of performance caused by the complexity of the world.
+So that's something that's a bit more nebulous, that's a bit hard to kind of give strict guidelines on.
+And just one quick question to follow up on that.
+Yeah, I think we're almost out of time, but.
+Did you have anything to stabilize the performance testing?
+Stabilize it?
+Because performance can be quite noisy.
+Oh, okay, I think we just ran over a long time, I believe.
+I can probably find out for you if we did anything more than that.
+Cool, thank you.

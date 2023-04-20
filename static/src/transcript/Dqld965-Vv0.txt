@@ -1,0 +1,495 @@
+My name is Tim Cheblakov.
+I'm Senior Developer Technology Engineer at NVIDIA.
+And let Mark introduce himself and introduce us to Atlas.
+My name is Mark Mihalich.
+I'm an Engine Programmer at Grapeshot Games.
+And we're currently working on a game called Atlas.
+And what is Atlas?
+Atlas is a.
+Pirate Fantasy MMO, but it's made by the people who made Ark Survival Evolved, so there's some survival aspect to it as well.
+We're currently in early access, you can get it on Steam.
+And I have a little video here, it's an intro, so we can play it.
+So as you can see, a lot of your time in the game is spent on the ocean and looking at the water surface.
+we really wanted to get the most realistic possible water simulation and rendering.
+So we enlisted the help of NVIDIA.
+And the game is still under development, but we feel pretty proud of what we've achieved so far.
+We had to get a lot of things right.
+First, we obviously had to simulate the ocean state.
+We have to handle the physics of buoyancy, of course, rendering the ocean surface, and then other interactive features such as wakes, explosions, and detailed particles.
+So those four components are basically what the agenda is for today for this talk.
+And I'll let Tim start by talking about simulation.
+Thank you. So, in order to keep you guys not distracted by the rendering, this screenshot and the following screenshots are just black and white.
+So, it's just the Fresnel term rendered, so you can focus on the displacements.
+We'll start with the simulation of the C states.
+We use vanilla spectrum-based approach evolved from famous Tessendorf's paper called Simulating Ocean Water.
+Essentially, what you do there is you generate the wind wave spectrum, you evolve it in a frequency space, and you transform the data to the spatial domain using reverse FFT steps.
+Then you just rinse and repeat for any moment in time, you can just calculate the C-state and frequency space, and convert it to the spatial domain.
+This simulation has a bunch of good properties.
+First of all, It only depends on the time and the spectrum state.
+So at any moment in time, you can know the displacements of the ocean surface.
+It is very good for us because we are working on an MMO game.
+So the simulation has to be similar for the server and all the clients.
+So we can run the simulation independently using those properties of the simulation.
+And what is more important is that all the servers on the grid can simulate the same C state.
+So the transitioning of the player from the server to server can be seamless.
+Why is that important?
+Because the online portion of the game, the servers are forming the grid.
+And each server simulates a square of this much, thousands of square kilometers of the ocean with all the players and islands and actions happening.
+And when the player moves to another server, this transition happens seamlessly.
+So the results are tiles with periodic displacement data, and the results can cover infinite planes of the ocean surface, which is also good for us.
+But there are.
+Some issues with this simulation, it's not good enough for us.
+And there are a few reasons for this.
+First of all, it uses FFT.
+And FFTs, as you know, are expensive.
+So if we use large FFTs, we sacrifice the performance.
+If you use smaller FFTs, then we either see the repeats that you can see on the right portion of the screenshot, or if we increase the world space area that our tiles are covering, we don't see enough details.
+and this is clearly visible on the left portion of the screenshot.
+To fix that, we use advanced approach.
+So what we do is we still use small FFTs, but we do split our spectra to several frequency bands.
+We decided to go with four frequency bands, and each frequency band for us stores the wavelengths of a certain range.
+So to simulate the ocean surface in this case, we split our spectrum, we evolve the frequency band in the frequency space independently, and then we just convert the simulation results back to the spatial domain using the inverse FFT steps.
+Then we post-process the results to get a nice isotropic BRDF.
+We're going to talk about this a little later.
+And then we just combine all the displacements from all the frequency bands to get a nice displaced ocean surface.
+This is how it looks.
+From left to right are the frequency band from the lowest resolution one, number 0.
+Then goes number 1.
+Then goes number 3.
+And then on the right portion, you see all the frequency bands combined.
+And if you are attentive enough.
+On the frequency band number three, you will see that there are some repeats.
+And it's kind of weird, isn't it?
+We tried to solve the problem, and we introduced the very same problem.
+It's not something good, right?
+And if you take a look at the UVs for those frequency bands in the world space, which are marked.
+white for the most higher detailed frequency band, then goes blue, then goes green, then goes red.
+You will see that the white cascades are pretty small, and obviously they will show some repeats.
+But in fact, they are not showing the repeats because the lower frequency bands, the larger waves, do distort or displace those small cascades, small frequency bands.
+enough so that we just don't see the repeats at all.
+Another thing that we didn't like about the vanilla Tessendorf's approach was the Phillips spectrum.
+It is the spectrum that defines or describes the sea state for the fully evolved sea which means the wind was blowing over the ocean surface for infinite amount of time so that the waves fully evolved.
+And what would happen if you tried to apply this Phillips spectrum formula for a puddle with the wind blowing with like 100 miles an hour speed over it?
+You will get something like 20 meters wave or something like that.
+It's obviously not something that you would see in nature.
+To fix that, we just used better spectras.
+We used dual Jones-Wabb spectra.
+And Jones-Wabb is de-abbreviated as Joint North Sea Wave Project.
+A bunch of scientists just gathered together and measured the wave displacements in the North Seas, in Northern Atlantic, using the Boise satellite data.
+And they generated the formulas for us that we can use.
+So we used dual Jones-Wabb spectra.
+Why dual?
+Because it will allow us to simulate two spectra for the cost of one.
+So the first spectra will simulate, for instance, if we want to simulate the small, medium, local waves generated by the local winds and the large decaying waves generated by the storms, like 100 miles away a long time ago, these long waves will be simulated by the second drone swap.
+And this is how it looks.
+It's artificially emphasized so that the long waves are too long and the short waves, the local waves, are too small.
+But you can see what I'm talking about.
+Now, these Joneswap spectra allow a lot of artistic control compared to Phillips spectrum.
+So it's wind speed, wind direction, wind fetch.
+This is the parameter that defines how long the wind was blowing over the ocean surface or how big was the area that the wind was blowing over.
+Then the spectrum picking that tells us how dominant are the dominant wavelengths so that the peaks, the wavetops are more pronounced. Then the directional distribution which tells us how chaotic are the waves, so how big is the portion of the waves that do follow the wind direction.
+Then if you want you can override the amplitude. You're gonna be not physically correct, but for like artistic purposes you can emphasize the Heights of the waves or dampen them down if you want and then low-pass filter. It's pretty useful for Swells you don't want the swells to have the smaller wavelengths And Mark will talk about the buoyancy.
+Not Beyonce.
+So we've covered how you generate the ocean displacement data.
+So now I'll cover how we can use that data to have objects in the ocean interact with the ocean simulation.
+And that interaction is basically physics of buoyancy.
+Now you may be familiar with Archimedes' principle.
+Basically it states that body and fluid experiences a buoyant force equal to the weight of the fluid it displaces.
+And the direction of that force is opposite to the direction of gravity.
+Now, if you notice in this formula here, the main unknown that we have here is displaced volume, or V.
+And with our complex ocean simulation, calculating that can be kind of complicated.
+So how might you approach it?
+You might take a bunch of discrete, displacement samples along the whole of the boat.
+And then you can use each sample, assume it represents a cross-section of displaced volume, and apply it back to the previous formula to generate force.
+The corresponding.
+buoyancy for each sample can then be applied back to the rigid body simulation.
+Your game engine's rigid body physics simulation can handle all that.
+So here's what that kind of looks like.
+You have, ooh, it's going really fast.
+So you have your discrete samples here, discrete displacement samples, and each one of these red arrows represents independent force acting on the whole of the boat.
+Obviously, this is a 2D representation.
+We would actually have an array of 3D forces.
+And then here's what that looks like in code.
+It's actually fairly straightforward, as you can see.
+You would basically call it, this is happening on the CPU.
+You call this in your physics update loop, each tick for each boat in the, each relevant boat, I guess I should say.
+So we came across some issues when just using pure physics simulation.
+One of the main things we found was that discrete wave height samples can be quite noisy.
+And this is because we're just sampling instantaneous location at an instantaneous time.
+So our wave simulation doesn't allow us to integrate over time or space.
+So ultimately, we're not able to take enough samples fast enough, especially for server simulation, which can run quite slow.
+The other issue we came across is just not being able to control the dynamics very well.
+And we found that using just physics alone creates some instability and latency.
+And then finally, maybe most importantly, We have quite epic waves, but we don't necessarily want our players playing the game to get seasick.
+So we decided against doing a pure physics simulation.
+And instead, our solution, we still use the indiscreet wave height samples.
+But instead, we feed those samples into a plane fitting algorithm.
+I'm not going to cover how to do a plane fitting algorithm, but I just want to call out that David Eberle's Geometric Tools has a symmetric eigensolver that might be a good place to start.
+And that's under the Boost license.
+So once your plane fitting algorithm outputs a target plane, you can use this as your target transform for your ship.
+And that's what we do with each frame.
+We also apply a simple spring as a filter to help filter the noise and also mimic the physics of buoyancy and inertia.
+But before we move on, I just wanted to call out something about one of those previous slides here.
+This function, getWaterHeightAtPoint, which is something that we do quite a bit in the game, both on the CPU and the GPU, is actually not as simple as it seems because of the way that we represent the ocean displacement.
+It's represented as a 3D displacement relative to imaginary plane.
+And so we actually are just looking for the height at a specific world location.
+And one way we could potentially achieve that is to have an intermediary step where we output a height map in world space.
+But we decided to just use a iterative approximation instead.
+And here's what that looks like in code.
+This is basically Newton's approximation method.
+We're just doing multiple iterations on this, and it should converge over time or over a number of iterations.
+You could potentially stop when subsequent sample locations are within a specific 2D distance.
+But for optimization reasons, sometimes it's faster just to do a fixed number of iterations.
+Now I'll hand back to Tim to talk about actual rendering.
+Thank you.
+So we figured out the physics, the buoyancy, Beyonce buoyancy, and physics of the.
+Rigid bodies floating in the water.
+Let's get to the rendering.
+So we want the ocean to be rendered as beautiful as possible.
+This photo is actually not a photo.
+It's our rendering and the screenshot is taken with the camera located at roughly like half a mile above the ocean surface.
+So by the way, even here, you can see the large swell waves and shorter like the local wind waves.
+To get to this level of realism, we need to 3DAR see as a micro-facet surface.
+This is schematic drawing.
+I'm not very good at drawing, so my micro-facets are just all around.
+They do not touch each other, but you get the idea, right?
+This is another nice screenshot, which is not correct at all, because those micro-facets are not micro-facets, but you see those as the facets.
+So let's start with the rendering equation.
+The light that comes to our eye consists of three portions, three...
+First is scattered light, the light that came through the water body and refracted towards our eyes.
+Then the specular component from the sun and then the environment mapping component, the light that came from skies and surrounding geometry and whatnot.
+And this FR function that we need to integrate is the BRDF.
+Everybody familiar with PBR should know what is that, right?
+And the micro-facet BRDF model in our case, and this is the vanilla case, is.
+It depends on the Fresnel reflectance.
+We're gonna talk about this a little later.
+Then the normal distribution function, D, and the masking function.
+It's pretty important.
+We're gonna talk about this later as well.
+All these formulas look scary, but you shouldn't focus on those.
+You should focus on what those mean, and I'm gonna explain this stuff.
+So, our micro-facet surface is defined by NDF, normal distribution function.
+It's the function.
+that shows how our normals are distributed within the pixel.
+And this little egg-shaped thing on the bottom is the distribution of the normals.
+And in this case, for instance, the...
+The vertical normals will be most likely, I mean, you will most likely see the normals oriented vertically and the normals pointing at other directions have less chance to appear.
+And if you unwrap this x-shaped thing to a 2D plane where angle is on x-axis, you will see the familiar bell shaped curve.
+Now, the MDF, Normal Distribution Function, for us, we use Beckman distribution, is defined as a function of PDF, Probability Density Function.
+These formulas are quite scary.
+These are here just for the reference.
+But they mean that our PDF defines our surface roughnesses along the x and y-axis, because we are rendering the waves.
+And we need to use an isotropic PRDF, right?
+So, what's important and this is the thing that you probably should focus on, is that we use our surface moments to calculate the PDF, just like they do in Liader paper.
+Liader is linear, efficient, anti-LAS, displacement, and reflectance mapping.
+It's pretty cool paper, you should read that.
+So, using the moments allows us to calculate those variances.
+just from the moments.
+And the moments, the first and second order moments, can be stored in texture.
+And what is cool about those moments is that they do survive the linear operators.
+And those linear operators are the MIP mapping and texture filtering.
+And that is something that we will gladly use, right?
+So how do we calculate the moments?
+After we get our displacements using the reverse FFT step.
+We calculate those first order moments, which are essentially the gradients, the slopes of the ocean surface, and the second order moments, which are essentially the squares of the first order moments, the squares of those slopes, and then the covariance, which is just cross multiplication of those.
+We just store this in textures, and this is how it looks schematically.
+We get our displacement textures in the first texture array.
+which has four slices because we have four frequency band.
+We start those displacements in RGB channels of those slices.
+Then we, using the computators, we get the first order moments and store them to another texture array.
+And then the second order moments are stored in the third texture array.
+And the free channels we use in those textures we use to store the foam intensity, displacement, Jacobian, and other things.
+I'll talk about those a little later.
+Now, since we have multiple frequency band, we need to carefully and mathematically correctly combine all those moments.
+The first order moments, the slopes or the gradients, are very easy to combine.
+You just sum those up.
+And the second order moments, just a little more complicated to combine.
+Okay, we figured out the moments.
+We combined all those moments.
+We got our roughness values.
+Now we can calculate the specular reflection.
+We are very lucky.
+The specular reflection integral over the hemisphere is just analytic, right?
+Because we only have one light source.
+It's the sun.
+And the integral is just analytic.
+We take this PDF, We take into account those masking and shadowing factors that we're gonna talk about a little later, and we calculate this scaly formula.
+This is how the specular reflection looks with simple calculation, just vanilla specular, and with PBR on the right.
+And the picture on the right is obviously much, much, much more correct.
+And what is also good about it is that the specular does not sparkle, it's not noisy, it's anti-aliased and it's smooth at any distance to the ocean surface.
+Now the environment reflection.
+It is a little more complicated because we don't have a single light source.
+We have entire environment map.
+So in order to calculate it, we just sum up few samples.
+Just like in this Liadar paper, we use a set of samples which are effectively the cones.
+We just sample our environment maps with the cones.
+And I'm not gonna go into much details about it.
+It's all explained in the other paper.
+It's not the point of this presentation.
+The thing is that we cannot afford full-blown calculation for those samples.
+For instance, it's just too expensive.
+We do not calculate the Fresnel term or masking and shadowing for each of those environmental samples.
+We're going to talk about the Fresnel and masking shadowing terms just a little later.
+And this is how it looks.
+On the left, you see the simple reflection.
+It's just one.
+sample per point, and it's pretty noisy.
+And what is more annoying is that the, as the normals do degrade to pure vertical distance, your reflection is just simple planar reflection of distance.
+It just doesn't look right.
+And on the right portion of the screenshot, you see nice environment reflection that does use the statistical properties of the surface.
+Now the masking and shadowing.
+We are rendering the waves.
+And it's quite obvious that at the distance or at the grazing angles, the waves will obstruct each other.
+And this schematic drawing shows this.
+With waves obstructing each other, right?
+Did I say it right?
+You don't have as much light as you would think at the distance.
+And lucky for us, the approximation for this, for RBODF exists, so we just use this Walters approximation for us, this scary formula in blue on this picture.
+And what it actually gives us, as I just told, on the distance, you will see that the specular light from the sun gets too bright on the left portion of the screenshot.
+And it's just about right on the right portion of the screenshot.
+And if it wasn't clear enough, let's just decrease the intensity of our sun and pretend that it's moon.
+So you will see that on the left it's just incorrect, it's too bright.
+And on the right it's looking much, much better.
+Now the Fresnel reflectance.
+Again, waves do abstract each other.
+So the distribution of normals that you would see that will combine and project to your pixel will be just tilted.
+So you will see that the normal distribution is not, how do I say it?
+So it does not average to vertical anymore.
+And again, we are lucky.
+The approximation for this microfacet BRDF Fresnel does exist, so we just use it in our case.
+And this is how it looks.
+On the left portion, you see the planar Fresnel that does not use the microfacet properties of the surface.
+And as you can see, as the normals do degrade to vertical at distance, the Fresnel term will degrade to just one, which is obviously not correct.
+And on the right portion of the screenshot, you will see the Fresnel with the microfacet properties.
+It's obviously much more closer to nature.
+Now the last but not least, scattered light.
+It's hard.
+Calculating scattered light in real time is too time consuming.
+You have to kind of trace to the water body.
+It's too much for the real time.
+We cannot afford that.
+So we just came up with a bunch of hoax and fudge numbers.
+This formula looks scary, but let me just explain it step by step.
+So what we do there is we just multiply the chances.
+This blue portion on the left just tells us that the chance to see the scattered light is higher as we get closer to the wavetop.
+So the higher are the waves, and the closer we are to the wavetops, the chance to see the scattered light is higher.
+Then the next one, the blue portion, shows us that the chance to see the scattered light is higher when we look at the oceans that are scattered.
+are located between us and the source of light, the sun in our case.
+Then this third, the red portion, shows us that the chance to see scattered light is much higher if we see just straight at the ocean surface, if the normal of the ocean surface coincides with our view vector.
+There is a couple, the blue and the yellow terms.
+These are just five factors to take into account, the bubbles that are spreading in the water, and the shallow scatter.
+We render the ocean surface just a bit like a diffuse surface.
+So it behaves just like a diffuse surface of some kind.
+This allows us to simulate the shallow scatter.
+And this is how it looks.
+Luckily, this projector will allow you to see the scatter.
+It's on the right top portion of the screenshot, but the next screenshot will show it better.
+So on the left, you see no scatter at all.
+On the right, you see the sun, the scatter with the sun elevation of 5 degrees, then 15 degrees, and then 45 degrees.
+It's kind of nice.
+It's kind of cool.
+It gives nice pictures.
+And what's important is that.
+Scatter of the light in the water body is the thing that defines the color of the water surface.
+The turbidity, the algae, whatnot, everything that is in the water surface defines its color.
+And scatter is what you... is what defines its color.
+Now let's put it all together.
+We did use Fresnel term for our specular reflection.
+It's all good.
+We did not use the Fresnel for environment reflection.
+We have to use it now.
+And of course, we have to use the Fresnel for the scattered light.
+So we can sum up all those components and get rendered ocean surface.
+One thing we forgot is the foam.
+So we need to calculate foam color and just learn between the foam color and the ocean surface color in the foamed areas.
+And of course we need to increase the roughness just a little for the foamed areas because the foam bubbles are bumpy.
+To calculate the foam, we use a pretty simple approach.
+We calculate the Jacobian of the displacements.
+Jacobian sounds scary, but it's just the measure of how much our water surface was squeezed or stretched.
+And if it's squeezed, then obviously we are on a wavetop.
+And if we are on a wavetop, we inject.
+just the float value, we call it turbulent energy, into the corresponding texels, and let them leave, evolve over time, spread over space, and just dissipate over time.
+Then, of course, we need to mix or add all those foam energies from all the frequency bands and use to modulate the foam textures, and this is how it looks.
+Kind of nice.
+A couple final tweaks.
+We did not realize that our famous formula that allows us to get the variances from the moments does not survive bilinear magnification because guess what?
+The bilinear magnification, even if it sounds kind of linear, it's not a linear operator because it's bilinear.
+So we had to detect the cases or the areas where we do magnify our textures using DDX and DDY.
+And then if we end up being magnifying the textures, we just lerp the second order moments that we get from those textures with the second order moments that we calculate just in place, just as the squares of the first order moments that we get from those textures.
+This effectively lerps our variance to zero and makes our ocean surface perfectly mirror, a perfect mirror in close-ups, but this is probably what we want to do, right?
+And this is how it looks.
+On the left, you see kind of weird artifacts where we are trying to magnify the microfacet surface.
+And obviously, it's something wrong to do because we are trying to use this method outside of its applicable domain.
+And on the right, you see the effects.
+Oh, and plus, we use the bicubic filtering for the normals for those gradients in close-ups.
+So this gives us smoother normals.
+Now, we didn't talk about the geometry, but the geometry is pretty simple.
+We use quadtree approach there.
+And quadtree with LODs.
+does have smaller density of those vertices in the distance.
+So we obviously undersample our displacements with geometry, and this could lead to crawling geometry and like.
+all kind of weird artifacts.
+And to avoid that, we just damped down our displacements at some distance.
+And we empirically figured out that 30 world spaces of a frequency band is good for us.
+So after that distance in a world space, we just start damping down those individual frequency band displacements.
+Now Mark.
+So as we just mentioned, we output foam and wave hat data basically to render the ocean surface and this works really well and obviously you can see in that previous slide right there that just that alone is really good at representing the turbulence of the ocean under high winds.
+But we wanted to add some more detail by adding particles that come off the top, the white caps of the waves.
+And one of the, our game is in Unreal Engine, so one of the most important things that we wanted to do was allow the artist to have some control of these particles.
+So we wanted it to work inside of Unreal's cascade particle system.
+And we're using the GPU particles there.
+But unfortunately we can't spawn from the GPU in that system.
+So our solution is to create a custom emitter that emits a triangle basically projected down onto the ocean plane that represents the camera frustum.
+And we're randomly emitting particles everywhere in that triangle.
+But these particles that we emit are just tracer particles and they're not actually simulating or rendering yet.
+And then the particles in their simulation shader will just basically look for the foam texture, or the white cap features, and start the regular simulation and rendering when they detect that they're inside of a white cap on top of the wave.
+And then the normal cascade particle system simulation dynamics and whatnot will kick in.
+So here's what the modification to Unreal's particle simulation shaders looks like.
+These functions getDisplacedVertex.
+That function is exactly the same function we call in our vertex shader or domain shader when we're rendering our ocean surface.
+And that just gets us our displacement information.
+And then the getSurface parameters, that's just the exact same function we call for our pixel shader when we're rendering our ocean surface.
+But we're doing it here inside the particle simulation.
+And we use that information just to do a simple check to see if our foam wave hat's value is high enough, it's larger than our threshold.
+And then we kick off our normal particle simulation and rendering.
+Otherwise, we might come back around for a few frames and keep looking.
+And then after some time, this particle, if it's not on a wave top, then it will basically get killed and never be seen.
+So that was the wavehead particles.
+We do have other particles and effects that interact with the ocean surface in our game.
+Currently, our cascade particle system outputs particle sprites for our wakes from our ships.
+And these are displaced by the ocean surface displacement.
+And you can see they're kind of like decals on top of the ocean surface.
+Our explosions are just normal cascade particle systems.
+But none of these things actually affect the ocean surface displacement itself.
+So they are just kind of on top of the ocean surface.
+And it's kind of misses some of the detail that way.
+But so we're working, the game is in development still.
+So we're working on some prototypes for the future.
+And Tim can talk about something he's working on.
+Thank you.
+So yes, we need the waves, the ocean surface, to be displaced by the local objects, like ships, boats, and explosions, and whatnot.
+And that leads us to need to introduce some local kind of simulation.
+For this, we do use another Thessendorf's paper.
+It's called e-wave solver.
+It's exponential solver.
+And the idea is quite the same as we used for the wind wave simulation.
+So what happens there is that you have a grid of displacements and velocity potentials, like, I don't know, like 1k by 1k grid of these guys.
+Then you convert those displacements and velocity potentials.
+to the frequency domain.
+Then you evolve those guys in frequency domain using evolving operators that do depend on the size of this domain in world space and delta t.
+Then those evolved displacement and velocity potentials just get converted back to spatial domain and rendered.
+And this is how it's supposed to look.
+Kind of nice, right?
+You see the almost perfect Kelvin wake, and it looks really nice.
+OK.
+This solution is good and all, but it's not good for us.
+I mean, we need it to be improved.
+First of all, the solution is periodic, because it uses the inverse FFT steps.
+And periodicity is not something that we want to, right?
+So we introduced exponential dampening on the edges of the frequency of the.
+simulation domain so that we don't get repeats.
+We don't have ringing or some weird artifacts caused by the dampening.
+Then, the simulation does not simulate foam.
+We use the very same logic.
+We just detect the areas where the displacements are large and Jacobian is.
+enough so that we can inject some turbulent energy, and we simulate the foam in those areas.
+So overall, we get two forward FFTs to convert those displacements and velocity potentials to frequency space.
+Then applying those evolving operators is just a per-component multiplication in frequency space.
+It's pretty cheap.
+And then four inverse FFTs to get the data back to spatial domain.
+Why four?
+Because two more inverse FFTs are adding.
+because we're gonna have the lateral displacements, the X displacements and the Y displacements as well.
+So it's two more.
+And this is how it looks.
+Looks kinda nice, but it's boring because it doesn't move.
+Let us move the thing.
+Okay, as you can see, as our virtual non-existing boat starts to accelerate, it starts forming perfect Calvin wake.
+That looks awesome.
+And you can also see that it does respect the dispersion relation so that the longer waves move faster and the smaller waves move slower.
+And after the boat stopped...
+The waves continue to propagate beyond that point.
+So you can clearly see it's not a combination of textures or kind of hacks that we used there.
+And it looks kind of nice.
+And it looks really great.
+OK, the waves do propagate after beyond that point.
+It looks really good.
+So let's look at the thing closer.
+this time taking, paying more attention to the rendering.
+So as we can see, the foam is simulated quite nicely.
+The foam appears on the wavetops of this wake.
+It evolves, it spreads over time, it disappears over time.
+And the gradients.
+and moments from the wind wave simulation and from the local wave simulation blend together nicely, so we don't see any disconnections and whatnot.
+So it looks good.
+It's a perfect candidate for us to introduce in Atlas, right?
+And as you can see, as the boat moves and turns, the Kelvin wake kinda changes.
+It's good.
+Okay, so Calvin Wiggs, gradients, it's all nice but it's boring.
+We are pirates here, right?
+So let's explode something.
+Something like, I don't know, like a barrel of gunpowder on a raft.
+Ready? Boom.
+So this explosion consists of three phases.
+The first phase, you notice, that was a shock wave.
+It's just a random displacement added on an expanding circular area.
+Then the major displacement area that formed the major explosion area.
+And then just random debris falling here and there.
+Okay, so time to wrap up.
+The simulation, while sounding scary and too expensive and whatnot, it's not expensive at all.
+So the wind wave simulation and local waves or interactive wave simulation combined together barely take more than a millisecond on contemporary GPUs.
+And if it's too much for lower end GPUs, we can always scale down the sizes of those FFTs, lacking some details, but still running the full blown simulation.
+That's it, thank you.
+Questions?
+Hi, is there any hope that you will be putting all this beautiful work into a UE4 plugin for me to?
+Yes.
+Yes?
+Yes, the plugin, I'm not sure.
+We may want to have some branch or something.
+But yes, we want the public to see it.
+Oh, wow.
+OK, awesome.
+Thank you.
+How do you keep the water from showing up inside a boat?
+Water from showing up inside the boat.
+Mark?
+What if you have a rowboat or something, and it's popping up and down in your waves?
+How do you keep the water from leaking in?
+Yeah, so we use the distance fields that are generated from the static mesh of the boat hull.
+And then in the shader, we just basically don't render where you're inside the distance field of the boat.
+It's pretty cheap, actually.
+Okay, thanks.
+Hi, how do simulate coastlines, breaking waves, and this part of water simulation?
+And the second question, when you combine the wakes, how you recalculate lighting, because you have a moment for wind waves, and you integrate different type of...
+where waves, Kelvin waves, and how you combine the lighting normals.
+Okay, okay.
+I'll answer.
+You should recalculate roughness, make transition.
+Good question, okay.
+So I'll answer the question, the second question first.
+So since we, so the idea for us was not to use physically based.
+a rendering or the PBR or BRDF for the local simulation because this thing is not going to be absurd at the large distance.
+We will only simulate like the local wakes and whatnot for ships that are like in local battle, right?
+It doesn't make sense to simulate this on the horizon.
+So the second order moments are not calculated for the local wakes.
+But the first order moments, the gradients do calculate.
+So to combine this stuff and be still physically correct, we just combine the first order moments from the wind wave simulation, just add those.
+The first order moments from the wind simulation and the local wave simulation, and the second order moments for the local simulation are just zeros.
+This thing does not bring any more roughness.
+That's it.
+breaking waves, Mark?
+Oh yeah, so for the shoreline currently, we actually just kind of tapered down the water to the shoreline.
+That was kind of a decision based on gameplay.
+We want rafts to be able to dock near the shore and also be able to put those rafts to sleep in terms of physics update and whatnot for the server so it's not constantly having to process those.
+We did have a prototype, it may actually end up in the game in the future, of just Gerstner wave, shoreline waves that look pretty good and we had particles coming off them and whatnot.
+But the gameplay aspect of that is difficult just because of transitioning from on land to the water.
+So yeah, long story short, it's just for the shorelines, it's just a bunch of Gerstner waves.
+We had phases and amplitudes and wavelengths calculated based on the spectral parameters.
+It's pretty easy to calculate.
+But we decided not to put it in the game yet, because the players will not be happy trying to undock a raft or something with the giant Gerstner shore waves.
+Yeah, we're working on a solution for that.
+But yeah, it's not in there yet.
+More questions?
+One, two, three, sold.
+Sweet.
+Thank you.
