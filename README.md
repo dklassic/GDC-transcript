@@ -32,7 +32,7 @@ And again, being able to just view/preview the content in text format is just ea
 
 ## Limitation
 
-As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will sometimes go haywire and make things up which surely exhibits generative AI's trait.
+As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will sometimes go haywire and make things up which surely exhibits generative AI's trait. You might see filler script "This initial prompt states that this is a game development transcript" showing up from time to time during music only segments due to this behaviour.
 
 The transcription also tends to mess up when the speaker goes 88 mph and you'll see the structure of subtitle gets messier.
 
