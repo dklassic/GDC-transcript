@@ -34,7 +34,7 @@ As far as Whisper goes, it is a decent transcription tool which often rivals hum
 
 The transcript also tends to mess up when the speaker goes 88 mph and you'll see the the transcript gets messier after that.
 
-Lastly in order to make sure all English speaking part is properly transcribed, we forcedfully set the langauge detected as "English," which will cause whipser to transribe and translate the non-English part as well if so exists (such as in the case of [This Nier: Automata talk](https://youtu.be/jKbH9i5axxU)). We might go through these case one by one and produce a much robust version of subtitle including orignal language, so that if anyone choose to translate subtitles to non-English versions can have much more context to work on.
+Lastly in order to make sure all English speaking part is properly transcribed, we forcedfully set the langauge detected as "English," which will potentially cause whipser to transribe and translate the non-English part or just having a hard time aligning the subtitle to the right timing. We might go through these case one by one and produce a much robust version of subtitle including orignal language, so that if anyone choose to translate subtitles to non-English versions can have much more context to work on.
 
 ## Contributing
 
