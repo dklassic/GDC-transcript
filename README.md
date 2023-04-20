@@ -24,17 +24,19 @@ Though in this case, we opted for a version by m-bain called [whipserX](https://
 
 ## Why not just YouTube transcription?
 
-Firstly, Whisper showed better results than YouTube in our testing.
+Firstly, Whisper showed better results in accuracy than YouTube in our testing.
 
 Secondly Whisper produces transcripts with better sentence structure that's much easier to read.
+
+And again, being able to just view/preview the content in text format is just easier than sitting through whole video then find out the talk isn't for you.
 
 ## Limitation
 
 As far as Whisper goes, it is a decent transcription tool which often rivals human translators in terms of context recognition. However, it will sometimes go haywire and make things up which surely exhibits generative AI's trait.
 
-The transcript also tends to mess up when the speaker goes 88 mph and you'll see the the transcript gets messier after that.
+The transcription also tends to mess up when the speaker goes 88 mph and you'll see the structure of subtitle gets messier.
 
-Lastly in order to make sure all English speaking part is properly transcribed, we forcedfully set the langauge detected as "English," which will cause whipser to transribe and translate the non-English part as well if so exists (such as in the case of [This Nier: Automata talk](https://youtu.be/jKbH9i5axxU)). We might go through these case one by one and produce a much robust version of subtitle including orignal language, so that if anyone choose to translate subtitles to non-English versions can have much more context to work on.
+Lastly in order to make sure all English speaking part is properly transcribed, we forcedfully set the langauge detected as "English," which will potentially cause whipser to transribe and translate the non-English part or just having a hard time aligning the subtitle to the right timing. We might go through these case one by one and produce a much robust version of subtitle including orignal language, so that if anyone choose to translate subtitles to non-English versions can have much more context to work on.
 
 ## Contributing
 

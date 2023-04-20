@@ -9,13 +9,13 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 - The issue list of this repo is **exclusively** for feature requests (i.e. requesting for new transcription or tool function). Non-conforming issues will be closed immediately.
 
-- Transcription and translation error definitely exists so please don't open an issue, help us fix it instead!
+- Transcription and translation error definitely exists so please don't open an issue for that, help us fix it instead!
 
 - Try to search for your issue, it may have already been asked for.
 
 - If your issue is resolved but still open, don’t hesitate to close it.
 
-- Most importantly, we beg your patience: this is a side project that takes time and money to process. The issue list is not paid support and we cannot make guarantees about how fast your it can be resolved.
+- Most importantly, we beg your patience: this is a side project that takes time and money to process. The issue list is not paid support and we cannot make guarantees about how fast your issue can be resolved.
 
 ## Pull Request Guidelines
 
@@ -27,4 +27,4 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 ## Financial Contribution
 
-GDC-transcript uses [Whipser](https://github.com/openai/whisper)'s large model to transcript for best accuracy which costs money. Its ongoing development can be supported via [KoFi](https://ko-fi.com/dkliao).
+GDC-transcript uses [Whipser](https://github.com/openai/whisper)'s large model to transcribe for best accuracy which costs money, extra tools take time to development. The ongoing development and transcription of the project can be supported via [KoFi](https://ko-fi.com/dkliao).
