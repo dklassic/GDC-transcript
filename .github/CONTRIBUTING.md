@@ -9,7 +9,7 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 - The issue list of this repo is **exclusively** for feature requests (i.e. requesting for new transcription or tool function). Non-conforming issues will be closed immediately.
 
-- Transcription and translation error definitely exists so please don't open an issue, help us fix it instead!
+- Transcription and translation error definitely exists so please don't open an issue for that, help us fix it instead!
 
 - Try to search for your issue, it may have already been asked for.
 
