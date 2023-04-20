@@ -44,7 +44,7 @@ def transcribe_audio():
         new_bitrate = current_bitrate // 2
 
         # Create the new file name
-        new_filename = f"reduced_{filename}"
+        new_filename = f"./reduced_video.mp3"
 
         # Execute the ffmpeg command to reduce the bitrate
         ffmpeg_cmd = f"ffmpeg -i {filename} -b:a {new_bitrate} {new_filename}"
