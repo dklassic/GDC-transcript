@@ -24,9 +24,11 @@ Though in this case, we opted for a version by m-bain called [whipserX](https://
 
 ## Why not just YouTube transcription?
 
-Firstly, Whisper showed better results than YouTube in our testing.
+Firstly, Whisper showed better results in accuracy than YouTube in our testing.
 
 Secondly Whisper produces transcripts with better sentence structure that's much easier to read.
+
+And again, being able to just view/preview the content in text format is just easier than sitting through whole video then find out the talk isn't for you.
 
 ## Limitation
 
