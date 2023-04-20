@@ -14,7 +14,7 @@ You can also simply use GET method to link to the video. For example: https://bl
 
 In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to. For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
 
-With full transcript, it would be a lot easier to find whatever you need with text search. Plus since YouTube has stopped allowing community translation, a possibility to setup community translation would be nice.
+With full transcript, it would be a lot easier to find whatever you need with text search or just being able to have a quick glance if the content is for you or not. Plus since YouTube has stopped allowing community translation, a possibility to setup community translation would be nice.
 
 ## How
 
