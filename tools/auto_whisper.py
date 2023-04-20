@@ -6,7 +6,7 @@ from pytube import YouTube
 # not sure how to do this properly yet: https://platform.openai.com/docs/guides/speech-to-text/quickstart
 
 def download_video(video_id):
-    video_url = 'http://youtube.com/watch?v=' + video_id
+    video_url = f'http://youtube.com/watch?v={video_id}'
     yt = YouTube(video_url)
     audio_stream = yt.streams.filter(only_audio=True).first()
     audio_stream.download(filename="video.mp3", output_path=".", skip_existing=False)
