@@ -8,7 +8,7 @@ GDC-transcript is a pet project of [PeDev](https://twitter.com/PeDev_) and [DK L
 
 The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-transcript), enter video ID to attempt loading the embedded video with transcript from this repository.
 
-You can also simply use GET method to link to the video. For example: https://blog.chosenconcept.dev/GDC-transcript/?v=c2YRVWZupwo
+You can also simply use GET method to link to the video. For example with https://dklassic.github.io/GDC-transcript/?v=c2YRVWZupwo or https://blog.chosenconcept.dev/GDC-transcript/?v=c2YRVWZupwo
 
 ## Why
 
