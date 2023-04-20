@@ -1,6 +1,7 @@
 import os
 import sys
 import openai
+import subprocess
 # from pytube import YouTube
 from yt_dlp import YoutubeDL
 
@@ -32,7 +33,24 @@ def download_video(video_id):
 
 def transcribe_audio():
     openai.api_key = os.environ["OPENAI_API_KEY"]
-    audio_file = open("./video.mp3", "rb")
+    filename = "./video.mp3"
+    file_size = os.path.getsize(filename) / (1024 * 1024)
+    if file_size > 24:
+        # Extract the current bitrate from the file
+        ffprobe_cmd = f"ffprobe -v error -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 {filename}"
+        current_bitrate = int(subprocess.check_output(ffprobe_cmd, shell=True))
+
+        # Calculate the new bitrate (half of the current bitrate)
+        new_bitrate = current_bitrate // 2
+
+        # Create the new file name
+        new_filename = f"reduced_{filename}"
+
+        # Execute the ffmpeg command to reduce the bitrate
+        ffmpeg_cmd = f"ffmpeg -i {filename} -b:a {new_bitrate} {new_filename}"
+        subprocess.run(ffmpeg_cmd, shell=True)
+        filename = new_filename
+    audio_file = open(filename, "rb")
     transcript = openai.Audio.transcribe("whisper-1", audio_file, response_format="srt")
     return transcript['srt']
 
