@@ -25,7 +25,7 @@ def main(video_id):
     download_video(video_id)
     transcript = transcribe_audio()
 
-    with open(f"static/src/subtitle/{video_id}.srt", 'w') as f:
+    with open(f"static/src/subtitle/{video_id}.srt", 'w', encoding='utf-8') as f:
         f.write(transcript)
 
 if __name__ == "__main__":
