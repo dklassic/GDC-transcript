@@ -17,7 +17,7 @@ def download_video(video_id):
     #     print(f"Error downloading audio from {video_url}: {e}")
     URLS = [video_url]
     ydl_opts = {
-        "outtmpl": '/video.%(ext)s',
+        "outtmpl": './video.%(ext)s',
         'format': 'm4a/bestaudio/best',
         # ℹ️ See help(yt_dlp.postprocessor) for a list of available Postprocessors and their arguments
         'postprocessors': [{  # Extract audio using ffmpeg
@@ -32,7 +32,7 @@ def download_video(video_id):
 
 def transcribe_audio():
     openai.api_key = os.environ["OPENAI_API_KEY"]
-    audio_file = open("video.mp3", "rb")
+    audio_file = open("./video.mp3", "rb")
     transcript = openai.Audio.transcribe("whisper-1", audio_file, response_format="srt")
     return transcript['srt']
 
@@ -41,7 +41,7 @@ def main(video_id):
         download_video(video_id)
         transcript = transcribe_audio()
 
-        with open(f"static/src/subtitle/{video_id}.srt", 'w', encoding='utf-8') as f:
+        with open(f"./static/src/subtitle/{video_id}.srt", 'w', encoding='utf-8') as f:
             f.write(transcript)
     except Exception as e:
         print(f"Error: {e}")
