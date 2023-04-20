@@ -14,8 +14,8 @@ def download_video(video_id):
 def transcribe_audio():
     openai.api_key = os.environ["OPENAI_API_KEY"]
     audio_file = open("video.mp3", "rb")
-    transcript = openai.Audio.transcribe("whisper-1", audio_file)
-    return transcript['text']
+    transcript = openai.Audio.transcribe("whisper-1", audio_file, response_format="srt")
+    return transcript['srt']
 
 def main(video_id):
     download_video(video_id)
