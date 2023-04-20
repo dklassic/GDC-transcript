@@ -15,7 +15,7 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 - If your issue is resolved but still open, don’t hesitate to close it.
 
-- Most importantly, we beg your patience: this is a side project that takes time and money to process. The issue list is not paid support and we cannot make guarantees about how fast your it can be resolved.
+- Most importantly, we beg your patience: this is a side project that takes time and money to process. The issue list is not paid support and we cannot make guarantees about how fast your issue can be resolved.
 
 ## Pull Request Guidelines
 
