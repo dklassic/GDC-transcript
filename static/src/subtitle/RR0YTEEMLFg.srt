@@ -1,0 +1,3516 @@
+1
+00:00:12,309 --> 00:00:18,151
+Hi everyone, my name is Nick Heron. I'm the Technical Director of Infrastructure for EVE
+
+2
+00:00:18,151 --> 00:00:23,473
+Online at CCB Games, which is a really long title for Cosmic Plumber. We'll be talking about Quasar,
+
+3
+00:00:23,473 --> 00:00:32,036
+which is a collection of technologies that we've employed to evolve the development stack for EVE
+
+4
+00:00:32,036 --> 00:00:32,356
+Online.
+
+5
+00:00:32,752 --> 00:00:38,357
+This includes things like gRPC, it includes things like Kubernetes and Golang.
+
+6
+00:00:38,357 --> 00:00:42,380
+We'll talk a lot of different technologies as we work our way through.
+
+7
+00:00:42,380 --> 00:00:49,446
+And first, we'll kind of go through what is EVE Online for those of you that might be unfamiliar.
+
+8
+00:00:49,446 --> 00:00:53,709
+We'll talk a bit about EVE's network topology and what that looks like and how that's evolved
+
+9
+00:00:53,709 --> 00:00:59,534
+over time to get us to this point of solving some of these problems with a system like Quasar.
+
+10
+00:01:00,228 --> 00:01:04,370
+and ultimately how we fundamentally worked on changing
+
+11
+00:01:04,370 --> 00:01:07,191
+how we build services in EVE Online
+
+12
+00:01:07,191 --> 00:01:09,152
+from a technical aspect and from a cultural aspect.
+
+13
+00:01:09,152 --> 00:01:12,273
+And so hopefully we can drink from the fire hose fast enough
+
+14
+00:01:12,273 --> 00:01:14,514
+to get to some questions towards the end.
+
+15
+00:01:14,514 --> 00:01:18,256
+And let's just start with EVE Online.
+
+16
+00:01:18,256 --> 00:01:20,217
+EVE Online has many different names.
+
+17
+00:01:20,217 --> 00:01:22,658
+Internet Spaceships is probably the most endearing one.
+
+18
+00:01:22,658 --> 00:01:25,839
+There's also Spreadsheets in Space.
+
+19
+00:01:25,839 --> 00:01:28,700
+Recently heard the one Space Lord Simulator.
+
+20
+00:01:29,114 --> 00:01:33,336
+Most people though, watch Eve Online from afar,
+
+21
+00:01:33,336 --> 00:01:36,838
+in the sense that they hear about the heists
+
+22
+00:01:36,838 --> 00:01:40,661
+in corporations or alliances, players basically liquidating
+
+23
+00:01:40,661 --> 00:01:44,743
+all assets of other players in massive theft,
+
+24
+00:01:44,743 --> 00:01:48,325
+you know, that takes like one to two years
+
+25
+00:01:48,325 --> 00:01:49,906
+to kind of really pull off.
+
+26
+00:01:49,906 --> 00:01:52,308
+But ultimately, what allows this to happen
+
+27
+00:01:52,308 --> 00:01:58,212
+is that Eve is a single shard sandbox MMO for spaceships.
+
+28
+00:01:58,842 --> 00:02:06,085
+And from when we say single shard, this means that EVE Online doesn't really have realms or
+
+29
+00:02:06,085 --> 00:02:10,467
+regions. Everyone's connecting to the same server and playing with the same resources and playing in
+
+30
+00:02:10,467 --> 00:02:16,550
+the same universe. And then when we talk about sandbox, one of the more emergent mechanisms
+
+31
+00:02:16,550 --> 00:02:24,814
+inside of EVE is probably the player-driven economy. And with our market, the kind of market
+
+32
+00:02:24,814 --> 00:02:28,155
+transactions are roughly half a million on a slow day.
+
+33
+00:02:28,744 --> 00:02:33,727
+And this represents probably about 12 billion items moving around in the universe.
+
+34
+00:02:33,727 --> 00:02:40,152
+But keep in mind that that number is pretty high considering like it's not that high considering
+
+35
+00:02:40,152 --> 00:02:46,376
+that those things involve like munitions, weapons, ships, raw materials.
+
+36
+00:02:47,333 --> 00:02:50,134
+And probably the other biggest claim to fame for EVE Online
+
+37
+00:02:50,134 --> 00:02:52,555
+is the massive fleet fights that we have.
+
+38
+00:02:52,555 --> 00:02:54,096
+We're in the Guinness World Record
+
+39
+00:02:54,096 --> 00:02:57,457
+for most concurrent participants in a multiplayer video game
+
+40
+00:02:57,457 --> 00:02:58,177
+for a PVP battle.
+
+41
+00:02:58,177 --> 00:02:58,897
+We're around 6,500.
+
+42
+00:02:58,897 --> 00:03:03,258
+And we'll talk a bit about how dealing
+
+43
+00:03:03,258 --> 00:03:08,040
+with the natural tendencies of the player base
+
+44
+00:03:08,040 --> 00:03:09,880
+to all congregate and want to basically have
+
+45
+00:03:09,880 --> 00:03:12,101
+a brawl in the same place, how that kind of affects
+
+46
+00:03:12,101 --> 00:03:14,822
+some of the technology decisions we made and the techniques
+
+47
+00:03:14,822 --> 00:03:15,422
+that we used.
+
+48
+00:03:15,913 --> 00:03:23,879
+to deal with that kind of server load. And to get a little bit more perspective on what that means
+
+49
+00:03:23,879 --> 00:03:29,323
+for EVE Online, we can't really just make these broad sweeping changes easily because EVE Online
+
+50
+00:03:29,323 --> 00:03:35,387
+has been in development for about 20 years. And I'm sorry, I shouldn't say in development. It's
+
+51
+00:03:35,387 --> 00:03:41,972
+been EVE's been running for 20 years, but we've been developing on it that entire time. It released
+
+52
+00:03:41,972 --> 00:03:44,894
+back in 2003 and started development a few years before that.
+
+53
+00:03:45,991 --> 00:03:51,694
+After 20 years, this roughly looks like a little bit more than 2 million change lists in Perforce.
+
+54
+00:03:51,694 --> 00:03:57,357
+And kind of as a silly unit of measurement to give a little bit of perspective on the size
+
+55
+00:03:57,357 --> 00:04:05,240
+of the code base, we talk in the measurement of, you know, how many UE4s this represents.
+
+56
+00:04:05,240 --> 00:04:08,122
+And so if we start with the C++ aspect of the engine,
+
+57
+00:04:08,122 --> 00:04:10,743
+this contains things like the renderer, the simulation engine,
+
+58
+00:04:11,408 --> 00:04:17,073
+and the C to Python marshaling, along with all of the other middlewares that we have that are
+
+59
+00:04:17,073 --> 00:04:23,658
+integrated into the engine itself. Next up is the SQL code base, which is a lot of the backbone of
+
+60
+00:04:23,658 --> 00:04:29,543
+EVE Online originally, because this represents about 7,000 procs that power the persistence
+
+61
+00:04:29,543 --> 00:04:35,048
+of EVE Online, and also has a lot of the logic of how the gameplay works itself.
+
+62
+00:04:35,688 --> 00:04:43,132
+I would guess to me there's probably around a 30 to 70 splits for SQL to Python logic,
+
+63
+00:04:43,132 --> 00:04:49,116
+because some of that logic is in SQL prox. A majority of that logic is definitely in Python
+
+64
+00:04:49,116 --> 00:04:53,998
+code. Speaking of Python, this represents our rules engine.
+
+65
+00:04:54,692 --> 00:05:01,875
+and all of the services that we'll be talking about, the proprietary protocol that we have
+
+66
+00:05:01,875 --> 00:05:09,397
+for our network layer, and this is all powered by stackless Python as well. And then kind of because
+
+67
+00:05:09,397 --> 00:05:14,719
+we got curious a little bit while doing these numbers, ultimately looked at how much authored
+
+68
+00:05:14,719 --> 00:05:21,181
+content is in the universe, and that ended up being a concerning 53 million lines of YAML.
+
+69
+00:05:21,181 --> 00:05:23,462
+This is ultimately where
+
+70
+00:05:24,052 --> 00:05:29,616
+Originally, the University of online was authored inside of a SQL database, but then that was
+
+71
+00:05:29,616 --> 00:05:34,520
+eventually all pulled out to be authored on file simply to take advantage of source control
+
+72
+00:05:34,520 --> 00:05:42,206
+mechanisms like Perforce. And so moving on to a little bit about what the topology of Eve looks
+
+73
+00:05:42,206 --> 00:05:51,953
+like. So in the beginning, it was deceptively simple, Eve online.
+
+74
+00:05:52,328 --> 00:05:56,371
+There was basically a data center and an SSQL database,
+
+75
+00:05:56,371 --> 00:05:58,012
+what we call sole nodes,
+
+76
+00:05:58,012 --> 00:06:02,676
+which in any modern clustered service,
+
+77
+00:06:02,676 --> 00:06:05,378
+these are just basically worker nodes
+
+78
+00:06:05,378 --> 00:06:08,340
+that can take on whatever workloads they need to take on.
+
+79
+00:06:08,340 --> 00:06:12,263
+In our case, sole nodes naturally started spreading out
+
+80
+00:06:12,263 --> 00:06:16,407
+across things like character information services
+
+81
+00:06:16,407 --> 00:06:19,389
+or alliance services or corporation services in the game.
+
+82
+00:06:20,222 --> 00:06:28,610
+That could also cover regional markets as well, depending on how much load was needed and how much processing was needed for each of those groupings of services.
+
+83
+00:06:28,610 --> 00:06:42,403
+Another example of that is we have our main trade hub solar system in the universe, which is has a dedicated sole node to it because it needs all of the single logical processor that it's using to process all the Python.
+
+84
+00:06:43,330 --> 00:06:47,653
+And all of these souls are then interconnected to one another,
+
+85
+00:06:47,653 --> 00:06:51,455
+which gives it the property of being a single hop mesh network,
+
+86
+00:06:51,455 --> 00:06:56,158
+which is very advantageous in the early stages of figuring out,
+
+87
+00:06:56,158 --> 00:06:57,799
+you know, how would you load balance?
+
+88
+00:06:57,799 --> 00:07:00,541
+How do you route information and traffic that way?
+
+89
+00:07:00,541 --> 00:07:04,143
+But ultimately, it's a quadratic problem of resource management,
+
+90
+00:07:04,143 --> 00:07:09,106
+where the more we scale horizontally, the more RAM and CPU processing
+
+91
+00:07:09,106 --> 00:07:11,648
+we need because of that guaranteed one hop mesh network.
+
+92
+00:07:12,912 --> 00:07:16,956
+Now, we also have proxies, which are basically the same as the souls.
+
+93
+00:07:16,956 --> 00:07:18,537
+It's this exact same code, actually.
+
+94
+00:07:18,537 --> 00:07:24,563
+But these are more for workloads that are slightly different in the sense
+
+95
+00:07:24,563 --> 00:07:28,126
+that they're handling all of the desktop client connections.
+
+96
+00:07:28,126 --> 00:07:34,432
+And those connections are more about making sure that we can deal with.
+
+97
+00:07:35,150 --> 00:07:38,713
+the tens of thousands of connections coming into the cluster
+
+98
+00:07:38,713 --> 00:07:41,314
+and not affect the kind of premium that we have on CPU inside the cluster.
+
+99
+00:07:41,314 --> 00:07:46,238
+And the proxies differ slightly from the sole nodes in the sense that the proxies
+
+100
+00:07:46,238 --> 00:07:50,821
+don't connect to all of the proxies, but they do connect to all of their sole nodes.
+
+101
+00:07:50,821 --> 00:07:55,444
+So we still have a scaling ceiling to deal with, but it's not as
+
+102
+00:07:55,444 --> 00:07:59,767
+exaggerated as the sole node scaling themselves.
+
+103
+00:07:59,767 --> 00:08:03,930
+And all of these are connected with a...
+
+104
+00:08:04,600 --> 00:08:06,682
+a proprietary network protocol that we have.
+
+105
+00:08:06,682 --> 00:08:09,826
+And this is built on top of what we call CarbonIO.
+
+106
+00:08:09,826 --> 00:08:11,247
+And there's a lot of mechanisms that we
+
+107
+00:08:11,247 --> 00:08:13,649
+have in a certain era of technology
+
+108
+00:08:13,649 --> 00:08:15,992
+where we just have Carbon as part of the name.
+
+109
+00:08:15,992 --> 00:08:19,055
+And we'll talk about another one later on.
+
+110
+00:08:19,055 --> 00:08:21,497
+But CarbonIO is basically the, it
+
+111
+00:08:21,497 --> 00:08:26,462
+powers the proprietary network implementation
+
+112
+00:08:26,462 --> 00:08:28,584
+of the protocol in Python.
+
+113
+00:08:29,275 --> 00:08:41,222
+And this combines with techniques like I O completion ports, which is akin to E polling for Linux, but it's specific to windows because these servers are running on windows.
+
+114
+00:08:41,222 --> 00:08:57,313
+And I O completion ports basically allows us to defer scheduling checking of sockets are available or not, which is an actual benefit for us because we use stackless Python and Python, regardless of its backless Python or not can only do one thing at a time.
+
+115
+00:08:57,790 --> 00:09:05,372
+So anything that you can do to save scheduling time when it's not needed will be a benefit to performance.
+
+116
+00:09:05,372 --> 00:09:13,993
+And so moving forward a bit, we have kind of an interesting evolution and reaction that happened in the infrastructure of EVE Online very early on.
+
+117
+00:09:13,993 --> 00:09:19,294
+Whenever there was a release, and just for clarification,
+
+118
+00:09:19,294 --> 00:09:27,015
+we kind of collapsed the souls and proxies into monolith services as we move forward to kind of declutter some of these diagrams.
+
+119
+00:09:27,645 --> 00:09:30,427
+As we made new releases for EVE Online,
+
+120
+00:09:30,427 --> 00:09:32,649
+we realized that the players understood
+
+121
+00:09:32,649 --> 00:09:34,810
+that information was power.
+
+122
+00:09:34,810 --> 00:09:36,611
+And instantly, with a new release,
+
+123
+00:09:36,611 --> 00:09:39,453
+with new information that was put on a website
+
+124
+00:09:39,453 --> 00:09:42,235
+or on a forum, that would be scraped by bots
+
+125
+00:09:42,235 --> 00:09:45,156
+almost immediately, causing traffic problems
+
+126
+00:09:45,156 --> 00:09:48,298
+and availability problems for both the forums
+
+127
+00:09:48,298 --> 00:09:49,839
+and the websites.
+
+128
+00:09:49,839 --> 00:09:53,462
+And so a response to that was made where the XML API came
+
+129
+00:09:53,462 --> 00:09:53,802
+online.
+
+130
+00:09:53,802 --> 00:09:56,724
+This is just HTTP, or sorry, this is XML over HTTP.
+
+131
+00:09:57,585 --> 00:10:03,127
+and it just had a direct read-only access to the persistent state of the universe itself.
+
+132
+00:10:03,127 --> 00:10:12,150
+And this had some heavy, heavily aggressive caching on the API itself so that probably
+
+133
+00:10:12,150 --> 00:10:17,652
+you wouldn't get anything up to date and faster than our timetable. But this was all built to protect
+
+134
+00:10:17,652 --> 00:10:23,174
+the services but also provide a ton of information to the players.
+
+135
+00:10:23,174 --> 00:10:25,815
+And this part gets a little bit more interesting because
+
+136
+00:10:27,016 --> 00:10:28,697
+The players started building on paradigms
+
+137
+00:10:28,697 --> 00:10:31,239
+that we didn't even have names for yet,
+
+138
+00:10:31,239 --> 00:10:33,020
+even as a gaming industry.
+
+139
+00:10:33,020 --> 00:10:35,702
+This was well before the advent of mobile gaming
+
+140
+00:10:35,702 --> 00:10:36,622
+and those kinds of things.
+
+141
+00:10:37,275 --> 00:10:39,536
+And players started using these APIs
+
+142
+00:10:39,536 --> 00:10:42,479
+to build appointment mechanisms to remind them
+
+143
+00:10:42,479 --> 00:10:45,161
+to go back into the game and either update
+
+144
+00:10:45,161 --> 00:10:47,502
+some information that they had or some jobs that they
+
+145
+00:10:47,502 --> 00:10:49,164
+had running in the game, or update their skill
+
+146
+00:10:49,164 --> 00:10:51,746
+queue and what they needed in that skill queue.
+
+147
+00:10:51,746 --> 00:10:55,869
+And so this kind of established one of the primary retention
+
+148
+00:10:55,869 --> 00:10:58,811
+factors of EVE Online very, very early on,
+
+149
+00:10:58,811 --> 00:11:01,373
+where the community would start augmenting
+
+150
+00:11:01,373 --> 00:11:05,916
+the actual capabilities of EVE Online as it was growing.
+
+151
+00:11:05,916 --> 00:11:07,077
+Then we kind of moved into the era.
+
+152
+00:11:07,529 --> 00:11:15,575
+of Web 2.0. And with this brought on all of the kind of federated logins, OAuth 2, all of those
+
+153
+00:11:15,575 --> 00:11:20,919
+kind of things, and this is where we started introducing more applications out in the wild
+
+154
+00:11:20,919 --> 00:11:24,783
+where they were integrated with a lot more of these services like the websites and like
+
+155
+00:11:24,783 --> 00:11:31,668
+the launcher at that point in time.
+
+156
+00:11:31,668 --> 00:11:34,290
+Then ultimately the service area grows a bit more.
+
+157
+00:11:34,930 --> 00:11:39,153
+we get to the point where CCP Games starts building
+
+158
+00:11:39,153 --> 00:11:42,955
+a first-person shooter for PlayStation called Dust 514.
+
+159
+00:11:42,955 --> 00:11:47,398
+And one of the goals was to connect Dust 514 with Eve,
+
+160
+00:11:47,398 --> 00:11:50,320
+because they were in the same universe,
+
+161
+00:11:50,320 --> 00:11:54,323
+where you could call in an orbital strike
+
+162
+00:11:54,323 --> 00:11:56,784
+from the PlayStation console
+
+163
+00:11:56,784 --> 00:11:58,605
+to an Eve player in a spaceship.
+
+164
+00:11:58,605 --> 00:12:00,006
+And they succeeded at that,
+
+165
+00:12:00,006 --> 00:12:02,728
+but they needed a way to solve for the problem of,
+
+166
+00:12:03,797 --> 00:12:08,020
+how do I make a network call from a PlayStation console
+
+167
+00:12:08,020 --> 00:12:08,360
+to EVE?
+
+168
+00:12:08,360 --> 00:12:11,181
+We're not going to rebuild all the proprietary protocol
+
+169
+00:12:11,181 --> 00:12:13,422
+and make it compatible with PlayStation
+
+170
+00:12:13,422 --> 00:12:14,043
+and all these other things.
+
+171
+00:12:14,043 --> 00:12:15,824
+And so what ended up happening was
+
+172
+00:12:15,824 --> 00:12:19,486
+they built a RESTful interface,
+
+173
+00:12:19,486 --> 00:12:22,427
+carbon REST, so we called it CREST for short.
+
+174
+00:12:22,427 --> 00:12:22,928
+And
+
+175
+00:12:23,909 --> 00:12:27,430
+This was a Hypermedia RESTful JSON API.
+
+176
+00:12:27,430 --> 00:12:32,031
+And Hypermedia is a version, a methodology
+
+177
+00:12:32,031 --> 00:12:34,952
+of RESTful implementation, where it's a bit more academic
+
+178
+00:12:34,952 --> 00:12:38,872
+in the sense that it's all about self-referential links
+
+179
+00:12:38,872 --> 00:12:41,713
+and self-documenting information,
+
+180
+00:12:41,713 --> 00:12:43,714
+so that basically any kind of bot could go through
+
+181
+00:12:43,714 --> 00:12:46,714
+and rebuild and find information that you need.
+
+182
+00:12:46,714 --> 00:12:48,895
+But we slowly learned over the years that
+
+183
+00:12:49,478 --> 00:12:53,620
+it's humans that write the integrations with those applications, not robots.
+
+184
+00:12:53,620 --> 00:12:57,942
+So that was a pro and a con for that API as soon as it was created.
+
+185
+00:12:57,942 --> 00:13:03,985
+Now, the Crest interface solved two problems. The biggest problem being that
+
+186
+00:13:03,985 --> 00:13:09,468
+the XML API was read-only, and so we couldn't actually affect any change in the universe.
+
+187
+00:13:09,468 --> 00:13:15,151
+But then there were special endpoints made that only like the PlayStation Network could talk to
+
+188
+00:13:15,151 --> 00:13:18,152
+for calling in these orbital strikes or making these requests for orbital strikes.
+
+189
+00:13:18,718 --> 00:13:20,539
+And that created a new interesting paradigm
+
+190
+00:13:20,539 --> 00:13:23,140
+where we could write into the universe,
+
+191
+00:13:23,140 --> 00:13:27,002
+or at least we had a path to do so with this RESTful API.
+
+192
+00:13:27,002 --> 00:13:31,985
+Now, we didn't necessarily open this up initially to everyone,
+
+193
+00:13:31,985 --> 00:13:36,368
+but ultimately, it kept growing and growing the same way
+
+194
+00:13:36,368 --> 00:13:37,748
+that the XML API kept growing.
+
+195
+00:13:37,748 --> 00:13:41,250
+And while we allowed write endpoints,
+
+196
+00:13:41,250 --> 00:13:44,432
+they weren't necessarily affecting
+
+197
+00:13:44,432 --> 00:13:47,113
+the universe the same way that dust could affect the universe.
+
+198
+00:13:47,827 --> 00:13:52,390
+So what I mean by affecting the universe is most of these endpoints that you could write to,
+
+199
+00:13:52,390 --> 00:13:58,034
+they would allow you to send an e-mail or set your autopilot path or change your contact list
+
+200
+00:13:58,034 --> 00:14:02,437
+in the desktop client, those kind of things. Something that's localized to the actual
+
+201
+00:14:02,437 --> 00:14:08,781
+character itself. The other interesting problem that this solved was that it dealt with the
+
+202
+00:14:08,781 --> 00:14:14,805
+problem space of needing to understand the schema of the database.
+
+203
+00:14:16,016 --> 00:14:19,297
+because Crest was actually built on top of the sole node code
+
+204
+00:14:19,297 --> 00:14:21,298
+the same way that the proxies were.
+
+205
+00:14:21,298 --> 00:14:23,519
+So it had access to all the proprietary protocols
+
+206
+00:14:23,519 --> 00:14:25,520
+and all the runtime information.
+
+207
+00:14:25,520 --> 00:14:28,040
+So it didn't really need to care about drift
+
+208
+00:14:28,040 --> 00:14:31,542
+between developers in the monolith services
+
+209
+00:14:31,542 --> 00:14:34,403
+versus making sure the XML API could keep up
+
+210
+00:14:34,403 --> 00:14:37,384
+with the changes in the database schema in the database.
+
+211
+00:14:37,384 --> 00:14:39,325
+It all just had direct access to this information.
+
+212
+00:14:40,377 --> 00:14:43,039
+And so that was probably, again, a pro and a con in the sense
+
+213
+00:14:43,039 --> 00:14:46,162
+that it gave us the capability to get runtime information,
+
+214
+00:14:46,162 --> 00:14:48,664
+not necessarily have to fight with whatever
+
+215
+00:14:48,664 --> 00:14:51,967
+the state of the database would eventually be.
+
+216
+00:14:51,967 --> 00:14:54,969
+But at the same time, it put all the constraints on us again
+
+217
+00:14:54,969 --> 00:14:59,513
+for that monolithic environment and those points in time
+
+218
+00:14:59,513 --> 00:15:03,196
+where we can't really get performance or scale out
+
+219
+00:15:03,196 --> 00:15:04,117
+for those nodes in particular.
+
+220
+00:15:06,013 --> 00:15:11,017
+And so then we get to, you know, what kind of, how do we categorize the, the,
+
+221
+00:15:11,017 --> 00:15:12,918
+the problems of, of this surface area.
+
+222
+00:15:12,918 --> 00:15:12,958
+So.
+
+223
+00:15:12,958 --> 00:15:17,441
+Can you kind of reiterate some of these pieces, you know, we're using stackless
+
+224
+00:15:17,441 --> 00:15:21,023
+Python, we're using, we're, we're dealing with the global interpreter lock in Python.
+
+225
+00:15:21,023 --> 00:15:23,945
+This is the piece, the global interpreter lock is the piece that only allows
+
+226
+00:15:23,945 --> 00:15:25,766
+Python to do one thing at a time.
+
+227
+00:15:25,766 --> 00:15:28,888
+And then there's also carbon IO, which again, got a lot of speed ups
+
+228
+00:15:28,888 --> 00:15:31,189
+with, with IOCP implementations.
+
+229
+00:15:31,822 --> 00:15:36,963
+But ultimately we'd have to like all roads lead back to the global interpreter lock.
+
+230
+00:15:36,963 --> 00:15:41,925
+We'd have to find a way to get around the global interpreter lock itself.
+
+231
+00:15:41,925 --> 00:15:46,407
+Then we have the problem of the database. The fact that every data model,
+
+232
+00:15:46,407 --> 00:15:52,309
+every bit of information, everything about the universe is in a singular database.
+
+233
+00:15:52,309 --> 00:15:56,391
+And this limits what we can change moving forward. It limits how we can,
+
+234
+00:15:56,391 --> 00:16:00,412
+the agility that we have in making bigger changes in that database.
+
+235
+00:16:00,953 --> 00:16:03,255
+because ultimately everything is shared.
+
+236
+00:16:03,255 --> 00:16:05,617
+And we'll get into some other things that reinforce this as well.
+
+237
+00:16:05,617 --> 00:16:09,020
+From a maintenance perspective,
+
+238
+00:16:09,020 --> 00:16:10,661
+we had a problem around deployment.
+
+239
+00:16:10,661 --> 00:16:15,225
+So, EVE Online goes down every day at 11 UTC
+
+240
+00:16:15,225 --> 00:16:18,988
+and probably reboots in a little under a minute.
+
+241
+00:16:19,771 --> 00:16:21,552
+During that time, it's doing a lot of housekeeping work,
+
+242
+00:16:21,552 --> 00:16:22,933
+a lot of that we've kind of taken out
+
+243
+00:16:22,933 --> 00:16:24,733
+so the housekeeping isn't needed,
+
+244
+00:16:24,733 --> 00:16:28,455
+but we still have a bigger problem to solve
+
+245
+00:16:28,455 --> 00:16:31,917
+with recycling RAM and cleaning out basically
+
+246
+00:16:31,917 --> 00:16:33,678
+what the cluster was doing during the 24
+
+247
+00:16:33,678 --> 00:16:34,959
+or the 23 hour run, I should say.
+
+248
+00:16:34,959 --> 00:16:39,521
+And this really affects agility
+
+249
+00:16:39,521 --> 00:16:42,482
+because even though we have the auto-reboot to deploy,
+
+250
+00:16:42,482 --> 00:16:45,184
+we have to take advantage of that time period
+
+251
+00:16:45,184 --> 00:16:45,904
+to deploy any changes.
+
+252
+00:16:46,547 --> 00:16:48,088
+And that means that many different teams
+
+253
+00:16:48,088 --> 00:16:51,010
+have to come online to then prep the,
+
+254
+00:16:51,010 --> 00:16:52,630
+make sure the builds for that is good,
+
+255
+00:16:52,630 --> 00:16:55,252
+prep the changes, deploy those changes,
+
+256
+00:16:55,252 --> 00:16:58,934
+and all of that has to be coordinated and synchronized.
+
+257
+00:16:58,934 --> 00:17:01,815
+There's not a lot of agility for a team
+
+258
+00:17:01,815 --> 00:17:05,577
+that wants to make a change in the universe quickly.
+
+259
+00:17:05,577 --> 00:17:06,878
+There's basically a 23 hour turnaround
+
+260
+00:17:06,878 --> 00:17:09,539
+to make a change to the server.
+
+261
+00:17:09,539 --> 00:17:11,680
+And ultimately all of these kinds of things
+
+262
+00:17:11,680 --> 00:17:13,761
+lead to uniform criticality.
+
+263
+00:17:13,761 --> 00:17:15,722
+And this is kind of present in the database where
+
+264
+00:17:15,917 --> 00:17:19,358
+If you have a database table that's causing a problem for the database,
+
+265
+00:17:19,358 --> 00:17:21,999
+it doesn't matter how insignificant that feature is.
+
+266
+00:17:21,999 --> 00:17:23,139
+It's a problem for everyone.
+
+267
+00:17:23,139 --> 00:17:27,120
+It's the same with, you know, if we have a problem with Eve mail,
+
+268
+00:17:27,120 --> 00:17:30,481
+and that we should be able to turn that off, but ultimately if it causes a
+
+269
+00:17:30,481 --> 00:17:34,001
+bigger problem for the cluster, it could cascade through the cluster,
+
+270
+00:17:34,001 --> 00:17:37,842
+bringing the entire cluster down, which makes it the same criticality
+
+271
+00:17:37,842 --> 00:17:38,622
+as the space simulation.
+
+272
+00:17:38,622 --> 00:17:40,283
+And that doesn't necessarily make sense.
+
+273
+00:17:40,283 --> 00:17:43,744
+It doesn't really allow developers to, to move quickly and iterate
+
+274
+00:17:43,744 --> 00:17:45,824
+on those services themselves.
+
+275
+00:17:47,217 --> 00:17:48,538
+And then there was ultimately problems
+
+276
+00:17:48,538 --> 00:17:49,838
+around the development process.
+
+277
+00:17:49,838 --> 00:17:52,640
+So again, with the database kind of highlights this as well
+
+278
+00:17:52,640 --> 00:17:55,201
+where there's really no domain boundaries.
+
+279
+00:17:55,201 --> 00:18:00,703
+And this gets into a place where we were seeing that,
+
+280
+00:18:00,703 --> 00:18:04,365
+while there was a user domain and character domain
+
+281
+00:18:04,365 --> 00:18:06,126
+and how all of these pieces were built,
+
+282
+00:18:06,126 --> 00:18:09,427
+all of those principles were there,
+
+283
+00:18:09,427 --> 00:18:12,508
+but over time you combine that with the fact
+
+284
+00:18:12,508 --> 00:18:14,669
+that there's a single database,
+
+285
+00:18:14,669 --> 00:18:16,190
+that there's a monolithic code base.
+
+286
+00:18:17,082 --> 00:18:19,783
+And my personal opinion that there's also
+
+287
+00:18:19,783 --> 00:18:21,924
+introduced a dynamically typed language.
+
+288
+00:18:21,924 --> 00:18:25,026
+You combine all three of those, and over time,
+
+289
+00:18:25,026 --> 00:18:28,228
+everything slowly starts to weld itself together.
+
+290
+00:18:28,228 --> 00:18:30,289
+Unless you're incredibly vigilant at that,
+
+291
+00:18:30,289 --> 00:18:32,810
+but the amount of developers that have been through CCP,
+
+292
+00:18:32,810 --> 00:18:34,731
+it's inevitable that some of that
+
+293
+00:18:34,731 --> 00:18:37,012
+will eventually slip through, and you will then
+
+294
+00:18:37,012 --> 00:18:39,254
+get this momentum that you can't really stop.
+
+295
+00:18:39,254 --> 00:18:42,355
+This also gets into data ownership.
+
+296
+00:18:42,355 --> 00:18:44,557
+The fact that we talked about if you
+
+297
+00:18:44,557 --> 00:18:46,898
+wanted to make a change to the user table and how that works.
+
+298
+00:18:47,484 --> 00:18:53,929
+it became difficult to do so because everyone owned the data in the database and no one owned the data in the database.
+
+299
+00:18:53,929 --> 00:19:04,336
+So any broad sweeping major changes were incredibly difficult to achieve and very laborious to get to the point of understanding what the effect of those changes would actually be.
+
+300
+00:19:04,336 --> 00:19:06,818
+And all of this kind of.
+
+301
+00:19:07,950 --> 00:19:12,895
+rolls into cognitive load for the developer. There are so many different things that a developer
+
+302
+00:19:12,895 --> 00:19:17,079
+needs to keep track of in order to build a feature in order to get anything done there.
+
+303
+00:19:17,079 --> 00:19:21,303
+And our developers have gotten really, really good at this. The side effect of that is that
+
+304
+00:19:21,303 --> 00:19:25,507
+it occupies so much of the work that they're doing, they can't remotely think about what
+
+305
+00:19:25,507 --> 00:19:30,112
+would happen if they tried to do something outside the box or differently to how we've
+
+306
+00:19:30,112 --> 00:19:31,313
+been doing it for the last 20 years.
+
+307
+00:19:32,071 --> 00:19:34,132
+And that's where the real problem lies,
+
+308
+00:19:34,132 --> 00:19:36,974
+as far as building new features and making things
+
+309
+00:19:36,974 --> 00:19:38,215
+more interesting for EVE Online.
+
+310
+00:19:38,215 --> 00:19:43,139
+And so taking that away and looking at this again,
+
+311
+00:19:43,139 --> 00:19:46,621
+this kind of became the list of problems
+
+312
+00:19:46,621 --> 00:19:48,383
+that we had to solve in Quasar's infancy.
+
+313
+00:19:48,383 --> 00:19:53,806
+And Quasar didn't really come about as a singular idea
+
+314
+00:19:53,806 --> 00:19:56,789
+initially, until we started seeing these patterns form.
+
+315
+00:19:56,789 --> 00:19:59,671
+And those patterns started forming in the same way
+
+316
+00:19:59,671 --> 00:20:01,772
+the patterns formed for the Crest APIs.
+
+317
+00:20:02,652 --> 00:20:04,874
+where you know, Dust had a need for that product
+
+318
+00:20:04,874 --> 00:20:08,757
+and they were trying to implement the need for that product.
+
+319
+00:20:08,757 --> 00:20:10,418
+We then started another project
+
+320
+00:20:10,418 --> 00:20:13,199
+where we were going to add a companion app to Eve Online.
+
+321
+00:20:13,199 --> 00:20:15,021
+So a mobile app for Eve Online.
+
+322
+00:20:15,021 --> 00:20:17,202
+And when looking at that,
+
+323
+00:20:17,202 --> 00:20:19,664
+there's all sorts of pieces of that puzzle
+
+324
+00:20:19,664 --> 00:20:21,305
+that don't make any sense.
+
+325
+00:20:21,305 --> 00:20:24,207
+It's in the terms of how Eve Online works.
+
+326
+00:20:24,207 --> 00:20:25,708
+The fact that you could send a message
+
+327
+00:20:25,708 --> 00:20:27,289
+to somebody who isn't online in Eve,
+
+328
+00:20:27,289 --> 00:20:29,771
+doesn't make sense unless it was Eve Mail,
+
+329
+00:20:29,771 --> 00:20:32,012
+unless there's some layer of persistence to it.
+
+330
+00:20:32,427 --> 00:20:38,130
+There was no concept of of queuing or deferring information in any of the real-time systems.
+
+331
+00:20:38,130 --> 00:20:45,615
+And then also just thinking about how many systems would be online to ask questions about this
+
+332
+00:20:45,615 --> 00:20:50,278
+would be even more interesting to see as we saw all the heavy caching that we're doing with the
+
+333
+00:20:50,278 --> 00:20:55,622
+APIs themselves. And we wanted this to be more reactive and would be more dynamic in the sense
+
+334
+00:20:55,622 --> 00:21:00,765
+of what you could do with the application itself. So we started building
+
+335
+00:21:01,178 --> 00:21:03,040
+what we call the Eve Swagger interface.
+
+336
+00:21:03,040 --> 00:21:04,482
+E-S-I, we call it E-S-I.
+
+337
+00:21:04,482 --> 00:21:08,706
+And Eve Swagger interface is based off Swagger spec
+
+338
+00:21:08,706 --> 00:21:10,128
+originally, which is now OpenAPI.
+
+339
+00:21:10,128 --> 00:21:14,592
+And we did this because we wanted something concrete
+
+340
+00:21:14,592 --> 00:21:17,675
+that our actual community could take and generate code with
+
+341
+00:21:17,675 --> 00:21:19,377
+and build some interesting things with.
+
+342
+00:21:20,091 --> 00:21:21,871
+And that was a long process.
+
+343
+00:21:21,871 --> 00:21:24,652
+And we went through a lot of things and we eventually migrated over everybody to
+
+344
+00:21:24,652 --> 00:21:27,392
+easy from XML API and Crest API.
+
+345
+00:21:27,392 --> 00:21:28,153
+Those are gone.
+
+346
+00:21:28,153 --> 00:21:31,793
+Um, all for the better from what we've heard from the community, as far as,
+
+347
+00:21:31,793 --> 00:21:34,974
+you know, how, how they've been able to build things on it.
+
+348
+00:21:34,974 --> 00:21:40,775
+Um, but then we started thinking about when we were surfer started building easy,
+
+349
+00:21:40,775 --> 00:21:43,876
+we tried to understand, okay, well, where do we put this?
+
+350
+00:21:43,876 --> 00:21:44,656
+How do we deploy this?
+
+351
+00:21:44,656 --> 00:21:47,236
+Cause we know we don't want the 23 hour cycle of deployment.
+
+352
+00:21:47,236 --> 00:21:48,237
+We definitely don't want that.
+
+353
+00:21:49,065 --> 00:21:52,129
+And how do we make sure that this doesn't roll into the same level of
+
+354
+00:21:52,129 --> 00:21:55,592
+criticality as the rest of the pieces of the cluster?
+
+355
+00:21:55,592 --> 00:21:59,737
+And how do we make sure that we stay away from any of the production database?
+
+356
+00:21:59,737 --> 00:22:03,341
+Like, like the third party API is not the same criticality as if
+
+357
+00:22:03,341 --> 00:22:04,682
+people can actually play the games.
+
+358
+00:22:04,682 --> 00:22:08,166
+We need to be careful about making sure those don't actually connect to one another.
+
+359
+00:22:09,458 --> 00:22:14,864
+And so with that, we started getting into products like Kubernetes and cloud providers.
+
+360
+00:22:14,864 --> 00:22:22,072
+And the cloud providers basically allowed us to provision any of those pieces that we needed for running a database.
+
+361
+00:22:22,072 --> 00:22:27,859
+We could just online a Postgres instance and not have to worry about our massive MSSQL instance.
+
+362
+00:22:29,165 --> 00:22:32,507
+And then Kubernetes, we actually got into Kubernetes pretty early on.
+
+363
+00:22:32,507 --> 00:22:35,270
+I don't know if that's a bad thing or a good thing considering, you know, how
+
+364
+00:22:35,270 --> 00:22:38,952
+many people talk about and joke about whether you need kube, but we've been
+
+365
+00:22:38,952 --> 00:22:41,635
+growing up with kube since probably 016, pre V1.
+
+366
+00:22:41,635 --> 00:22:49,221
+Um, and this has given us a lot of power over how we see, uh, developers building
+
+367
+00:22:49,221 --> 00:22:51,082
+services and deploying them and maintaining them.
+
+368
+00:22:51,688 --> 00:22:53,469
+And this has also given us a lot more tooling
+
+369
+00:22:53,469 --> 00:22:55,829
+around dealing with things like uniform criticality
+
+370
+00:22:55,829 --> 00:22:56,770
+in the sense of,
+
+371
+00:22:56,770 --> 00:22:58,550
+Kube will make sure that you have services
+
+372
+00:22:58,550 --> 00:23:01,431
+that can deal with being restarted.
+
+373
+00:23:01,431 --> 00:23:04,451
+So make sure you have redundancy and all these other things.
+
+374
+00:23:04,451 --> 00:23:06,252
+So just by nature of how Kube works,
+
+375
+00:23:06,252 --> 00:23:08,592
+that gave us kind of a leg up
+
+376
+00:23:08,592 --> 00:23:10,773
+in how we were building those types of services
+
+377
+00:23:10,773 --> 00:23:13,173
+to make sure we had zero hit down times
+
+378
+00:23:13,173 --> 00:23:15,754
+when we were transferring from one pod instance
+
+379
+00:23:15,754 --> 00:23:16,354
+to another, for example.
+
+380
+00:23:16,354 --> 00:23:19,115
+But then we were looking at, okay,
+
+381
+00:23:19,115 --> 00:23:21,415
+now we have a place to put these services.
+
+382
+00:23:21,875 --> 00:23:25,036
+How do we communicate with our primary cluster?
+
+383
+00:23:25,036 --> 00:23:27,656
+And that all came into a message bus.
+
+384
+00:23:27,656 --> 00:23:31,637
+The message bus ultimately is one of the key aspects
+
+385
+00:23:31,637 --> 00:23:35,518
+of the architecture of Quasar in the sense that
+
+386
+00:23:35,518 --> 00:23:38,679
+we discovered we could sidestep decades of technical debt
+
+387
+00:23:38,679 --> 00:23:39,299
+with a message bus.
+
+388
+00:23:39,299 --> 00:23:42,240
+It gave us an escape hatch to get in and out
+
+389
+00:23:42,240 --> 00:23:43,160
+of the legacy code base.
+
+390
+00:23:43,160 --> 00:23:46,701
+And then once we had a message bus connected
+
+391
+00:23:46,701 --> 00:23:47,982
+and working through that
+
+392
+00:23:48,453 --> 00:23:50,394
+I think we originally started with Google PubSub,
+
+393
+00:23:50,394 --> 00:23:52,195
+and then eventually we wound up in RabbitMQ.
+
+394
+00:23:52,195 --> 00:23:56,738
+During all that period of watching this ecosystem
+
+395
+00:23:56,738 --> 00:24:00,861
+explode inside the message bus and the growing in surface
+
+396
+00:24:00,861 --> 00:24:03,883
+area, we realized, OK, we need a way
+
+397
+00:24:03,883 --> 00:24:09,327
+to deal with our messages a bit more clearly.
+
+398
+00:24:09,327 --> 00:24:11,328
+Because at the time, they were just JSON messages
+
+399
+00:24:11,328 --> 00:24:12,629
+flying around.
+
+400
+00:24:12,629 --> 00:24:15,191
+And it became very obvious very quickly
+
+401
+00:24:15,191 --> 00:24:16,352
+that we needed to change that.
+
+402
+00:24:17,225 --> 00:24:18,946
+So we started looking into protobuf.
+
+403
+00:24:18,946 --> 00:24:21,007
+We looked at many other schema based things,
+
+404
+00:24:21,007 --> 00:24:22,368
+but ultimately landed on protobuf.
+
+405
+00:24:22,368 --> 00:24:26,831
+And this one's interesting because it actually
+
+406
+00:24:26,831 --> 00:24:30,814
+ended up helping us define domain boundaries really,
+
+407
+00:24:30,814 --> 00:24:31,955
+really well in our ecosystem.
+
+408
+00:24:33,037 --> 00:24:47,407
+Because it introduced this new concept of modeling into the system that we didn't have before, where it wasn't just a random Python function that just appeared with some different arguments that had to work for the whole system to work.
+
+409
+00:24:47,407 --> 00:24:54,532
+It was, it forced our developers to think about a little bit more about what they were building and how that worked in the whole ecosystem.
+
+410
+00:24:54,532 --> 00:24:57,574
+And so it started creating these nice domain boundaries or helping us with that.
+
+411
+00:24:58,177 --> 00:25:00,099
+We intentionally started off with this
+
+412
+00:25:00,099 --> 00:25:02,981
+because we initially started off with the proto definitions
+
+413
+00:25:02,981 --> 00:25:04,583
+or repo for the protobuf definitions.
+
+414
+00:25:04,583 --> 00:25:08,246
+We initially started off with the technique
+
+415
+00:25:08,246 --> 00:25:10,508
+of consumer driven contracts,
+
+416
+00:25:10,508 --> 00:25:13,771
+where the idea was that if you need something
+
+417
+00:25:13,771 --> 00:25:19,135
+from the ecosystem, convey that, express that in protobuf
+
+418
+00:25:19,135 --> 00:25:20,837
+and then have the teams who are responsible
+
+419
+00:25:20,837 --> 00:25:22,758
+for producing that information
+
+420
+00:25:22,758 --> 00:25:24,180
+be able to provide you with that information.
+
+421
+00:25:25,062 --> 00:25:30,186
+And that is ended up working pretty well for us for quite some time.
+
+422
+00:25:30,186 --> 00:25:33,228
+Now, one of the reasons that we picked protobuf, in addition to all the other
+
+423
+00:25:33,228 --> 00:25:39,171
+reasons, is that we had our eye on GRPC because we knew eventually we'd have to
+
+424
+00:25:39,171 --> 00:25:42,634
+deal with the fact that we shouldn't be in the business of building a protocol.
+
+425
+00:25:42,634 --> 00:25:46,256
+That doesn't make any sense unless it's solving a specific problem.
+
+426
+00:25:46,256 --> 00:25:50,339
+And our protocol was solving the problem of generic services across the
+
+427
+00:25:50,339 --> 00:25:51,740
+board, not a very specific problem.
+
+428
+00:25:53,288 --> 00:25:54,949
+And so one of the reasons why we picked Protobuf
+
+429
+00:25:54,949 --> 00:25:56,229
+is to lean into gRPC eventually.
+
+430
+00:25:56,229 --> 00:25:58,270
+And then we got to that point where we started thinking
+
+431
+00:25:58,270 --> 00:26:01,091
+about, okay, Protobuf has this interesting characteristic
+
+432
+00:26:01,091 --> 00:26:06,334
+where you can generate C++ code and Python code
+
+433
+00:26:06,334 --> 00:26:09,615
+from the same message definitions and load that C++ module
+
+434
+00:26:09,615 --> 00:26:14,837
+into the same memory that the Python module is loaded.
+
+435
+00:26:14,837 --> 00:26:18,139
+And Python will then marshal to C++
+
+436
+00:26:18,139 --> 00:26:19,919
+and let C++ do the serialization.
+
+437
+00:26:20,702 --> 00:26:23,203
+So right off the bat, we got a huge performance increase
+
+438
+00:26:23,203 --> 00:26:25,084
+in serialization because ultimately Python
+
+439
+00:26:25,084 --> 00:26:26,465
+wasn't doing the serializing C++ was.
+
+440
+00:26:26,465 --> 00:26:28,625
+And it was doing it in such a way
+
+441
+00:26:28,625 --> 00:26:31,527
+that we didn't really have to care about the complexities
+
+442
+00:26:31,527 --> 00:26:33,627
+behind the scenes of whatever scalar values we
+
+443
+00:26:33,627 --> 00:26:35,448
+were using inside of Protobuf that was all covered.
+
+444
+00:26:35,448 --> 00:26:37,729
+It also had the interesting side effect
+
+445
+00:26:37,729 --> 00:26:41,551
+of providing a more type safe environment within Python
+
+446
+00:26:41,551 --> 00:26:43,811
+because Protobuf was enforcing the types that
+
+447
+00:26:43,811 --> 00:26:45,652
+were being applied there.
+
+448
+00:26:46,565 --> 00:26:49,667
+And then we started thinking about this process of, OK,
+
+449
+00:26:49,667 --> 00:26:51,688
+if we can marshal things into C++ the same way
+
+450
+00:26:51,688 --> 00:26:55,210
+that Protobuf does, why couldn't we do that with messages?
+
+451
+00:26:55,210 --> 00:26:57,571
+Because ultimately, the biggest problem that we have
+
+452
+00:26:57,571 --> 00:27:02,014
+is when we're looking at fleet fights,
+
+453
+00:27:02,014 --> 00:27:04,375
+we saw 30% of our time was being spent in three major places,
+
+454
+00:27:04,375 --> 00:27:07,337
+serialization, transmission, and multiplexing.
+
+455
+00:27:12,927 --> 00:27:14,948
+And so serialization, pretty obvious.
+
+456
+00:27:14,948 --> 00:27:17,469
+Transmission, while we do get benefits from IOCP,
+
+457
+00:27:17,469 --> 00:27:20,230
+it doesn't change the fact that we actually
+
+458
+00:27:20,230 --> 00:27:22,632
+have to put the data on the socket.
+
+459
+00:27:22,632 --> 00:27:26,713
+So that was also a percentage of the actual CPU time.
+
+460
+00:27:26,713 --> 00:27:28,554
+But there's also the multiplexing.
+
+461
+00:27:28,554 --> 00:27:31,556
+And what I mean by multiplexing is fan in, fan out
+
+462
+00:27:31,556 --> 00:27:32,716
+of messages itself.
+
+463
+00:27:32,716 --> 00:27:35,557
+So for example, 1,000 people in the solar system,
+
+464
+00:27:35,557 --> 00:27:36,598
+one person fires.
+
+465
+00:27:37,048 --> 00:27:38,708
+That's 1,000 messages, technically not every 99.
+
+466
+00:27:38,708 --> 00:27:41,069
+But you get the point that we then
+
+467
+00:27:41,069 --> 00:27:44,490
+have to multiplex out of Python into those clients eventually.
+
+468
+00:27:44,490 --> 00:27:47,370
+And so we realized that with the message bus,
+
+469
+00:27:47,370 --> 00:27:51,691
+we got that for free ultimately because that's
+
+470
+00:27:51,691 --> 00:27:53,352
+the point of message bus.
+
+471
+00:27:53,352 --> 00:27:55,292
+They knew how to do routing and fan out.
+
+472
+00:27:55,292 --> 00:27:56,853
+All those were kind of built in.
+
+473
+00:27:56,853 --> 00:27:59,313
+So ultimately, with the domain boundaries
+
+474
+00:27:59,313 --> 00:28:02,134
+that we had set up and the modeling that we had set up,
+
+475
+00:28:02,134 --> 00:28:02,814
+usage of the.
+
+476
+00:28:04,163 --> 00:28:08,284
+of the message bus became kind of second nature to achieve what we were already doing in our own
+
+477
+00:28:08,284 --> 00:28:14,745
+proprietary systems. But then we started looking at the serialization and the transmission part.
+
+478
+00:28:14,745 --> 00:28:20,706
+So even though we got faster serialization, it still meant that we had to spend time within
+
+479
+00:28:20,706 --> 00:28:25,106
+the global interpreter lock to wait for C++ to give us that information back.
+
+480
+00:28:25,106 --> 00:28:30,507
+And so what we started toying around with was the idea of, okay, what if we had an actual thread
+
+481
+00:28:30,507 --> 00:28:33,428
+beside the main Python thread?
+
+482
+00:28:34,349 --> 00:28:40,191
+And when I say things like actual thread, so stackless Python operates on a single
+
+483
+00:28:40,191 --> 00:28:40,832
+logical processor.
+
+484
+00:28:40,832 --> 00:28:41,052
+The end.
+
+485
+00:28:41,052 --> 00:28:43,033
+I don't mean core.
+
+486
+00:28:43,033 --> 00:28:45,293
+I mean, single logical process.
+
+487
+00:28:45,293 --> 00:28:51,156
+And so we have a very finite amount of CPU that we can actually use there, which it
+
+488
+00:28:51,156 --> 00:28:55,157
+might be gobbled up by these three things that we were talking about scheduling all
+
+489
+00:28:55,157 --> 00:29:00,720
+and then actual, you know, um, rules engines or any other simulation pieces that
+
+490
+00:29:00,720 --> 00:29:02,640
+may need to be translated into Python.
+
+491
+00:29:03,641 --> 00:29:17,466
+But ultimately, we realized if we have a separate thread doing this, we could simply marshal the messages to and from Python and C++, but then have a dedicated C++ thread just burning on the actual gRPC implementations.
+
+492
+00:29:17,725 --> 00:29:19,646
+and then just handing those versions over to Python
+
+493
+00:29:19,646 --> 00:29:21,947
+because we've already generated the Python
+
+494
+00:29:21,947 --> 00:29:23,027
+version of those messages.
+
+495
+00:29:23,027 --> 00:29:26,168
+So it gave us a nice ecosystem to sidestep the global
+
+496
+00:29:26,168 --> 00:29:27,789
+interpreter lock completely.
+
+497
+00:29:27,789 --> 00:29:30,330
+Now, we can still only go as fast as global interpreter
+
+498
+00:29:30,330 --> 00:29:32,331
+lock, but theoretically, that gives us a 30% performance
+
+499
+00:29:32,331 --> 00:29:34,992
+increase because we're no longer needing
+
+500
+00:29:34,992 --> 00:29:37,693
+to care about serialization, transmission, or multiplexing
+
+501
+00:29:37,693 --> 00:29:38,973
+because the rest of the ecosystem
+
+502
+00:29:38,973 --> 00:29:39,653
+takes care of that.
+
+503
+00:29:41,056 --> 00:29:47,783
+And that's really the core of where we started looking at this whole system holistically
+
+504
+00:29:47,783 --> 00:29:50,465
+and where the name Quasar started to come from.
+
+505
+00:29:50,465 --> 00:29:56,491
+And then once we had that and we realized, well, we've done this in the server,
+
+506
+00:29:56,491 --> 00:30:00,675
+we've proven that that works, and then, well, we can do that for the client as well.
+
+507
+00:30:00,675 --> 00:30:03,318
+Like, that's just a different domain we need to model,
+
+508
+00:30:03,318 --> 00:30:04,679
+but we can do that for the client as well.
+
+509
+00:30:05,775 --> 00:30:07,196
+Once we got to that point, we realized
+
+510
+00:30:07,196 --> 00:30:08,677
+we could build domain services.
+
+511
+00:30:08,677 --> 00:30:10,939
+And we're specifically not saying microservices
+
+512
+00:30:10,939 --> 00:30:12,280
+because that gets tricky.
+
+513
+00:30:12,280 --> 00:30:14,903
+Ultimately domain services being,
+
+514
+00:30:14,903 --> 00:30:16,184
+this service is responsible
+
+515
+00:30:16,184 --> 00:30:17,124
+for anything you could do with a user.
+
+516
+00:30:17,124 --> 00:30:19,627
+This service is responsible for anything you could do
+
+517
+00:30:19,627 --> 00:30:23,250
+with skills or a corporation or the market, for example.
+
+518
+00:30:23,250 --> 00:30:25,612
+But once we saw this,
+
+519
+00:30:25,612 --> 00:30:29,375
+it became a bit more interesting to reason about
+
+520
+00:30:29,375 --> 00:30:31,717
+where we got to currently with Quasar.
+
+521
+00:30:32,761 --> 00:30:37,683
+It allowed us to then sidestep all of those pieces
+
+522
+00:30:37,683 --> 00:30:40,484
+of the previous era of technology,
+
+523
+00:30:40,484 --> 00:30:42,625
+because we could isolate the domain services
+
+524
+00:30:42,625 --> 00:30:44,766
+and every resource that they need in a cloud provider.
+
+525
+00:30:44,766 --> 00:30:48,567
+But we needed a way to get to and from all of these pieces.
+
+526
+00:30:48,567 --> 00:30:50,988
+So one of the other things that we learned early on
+
+527
+00:30:50,988 --> 00:30:55,150
+was running a message bus or having a message bus
+
+528
+00:30:55,150 --> 00:30:57,791
+is tricky because most people just want their messages.
+
+529
+00:30:57,791 --> 00:30:59,411
+The side effect of that sometimes
+
+530
+00:30:59,411 --> 00:31:01,632
+is that they start treating it as a hard drive.
+
+531
+00:31:02,481 --> 00:31:05,922
+And because of that, because of domain services,
+
+532
+00:31:05,922 --> 00:31:08,683
+we want to really standardize all of that
+
+533
+00:31:08,683 --> 00:31:11,264
+across the board based on the RPCs
+
+534
+00:31:11,264 --> 00:31:15,466
+that we defined in the gRPC protobuf definitions.
+
+535
+00:31:15,466 --> 00:31:16,666
+We onlined the service gateway, which
+
+536
+00:31:16,666 --> 00:31:19,387
+represents our east-west traffic, which is ultimately
+
+537
+00:31:19,387 --> 00:31:21,268
+any kind of CCP networks that we have,
+
+538
+00:31:21,268 --> 00:31:23,629
+which is our cloud provider and our data center,
+
+539
+00:31:23,629 --> 00:31:25,130
+among other networks as well.
+
+540
+00:31:25,130 --> 00:31:29,871
+And then for anything that was outside of those networks,
+
+541
+00:31:29,871 --> 00:31:31,872
+was north-south traffic, we had the public gateway.
+
+542
+00:31:32,529 --> 00:31:35,992
+And so on the service gateway side, that was basically all of our services and
+
+543
+00:31:35,992 --> 00:31:40,375
+our, our legacy services connected into the service gateway with gRPC.
+
+544
+00:31:40,375 --> 00:31:45,499
+And on the client side, we have all of our applications connecting in
+
+545
+00:31:45,499 --> 00:31:47,940
+through gRPC into the public gateway.
+
+546
+00:31:48,428 --> 00:31:50,689
+Now, it's not technically all gRPC.
+
+547
+00:31:50,689 --> 00:31:52,610
+So the desktop client, the launcher,
+
+548
+00:31:52,610 --> 00:31:54,831
+those are definitely gRPC.
+
+549
+00:31:54,831 --> 00:31:58,272
+Those have full connectivity and have full capabilities.
+
+550
+00:31:58,272 --> 00:32:00,733
+But things like the third party APIs, EASY,
+
+551
+00:32:00,733 --> 00:32:04,634
+is still going through a Swagger spec interface
+
+552
+00:32:04,634 --> 00:32:07,315
+and then getting to the message bus.
+
+553
+00:32:07,315 --> 00:32:09,796
+The websites and the installer are
+
+554
+00:32:09,796 --> 00:32:13,637
+going through a HTTP gateway, which then translates that
+
+555
+00:32:13,637 --> 00:32:15,198
+into events on the message bus.
+
+556
+00:32:15,797 --> 00:32:19,217
+The mobile client also same as the third party APIs.
+
+557
+00:32:19,217 --> 00:32:21,698
+It has a backend that has direct access to RabbitMQ.
+
+558
+00:32:21,698 --> 00:32:23,798
+And so with all of these pieces,
+
+559
+00:32:23,798 --> 00:32:29,900
+we basically kind of were able to address
+
+560
+00:32:29,900 --> 00:32:32,600
+most of the problem spaces of being able to have
+
+561
+00:32:32,600 --> 00:32:36,541
+go from proprietary technology to standard technology.
+
+562
+00:32:36,541 --> 00:32:38,762
+And this includes part of off gRPC, Qube, Postgres,
+
+563
+00:32:38,762 --> 00:32:43,963
+RabbitMQ, AMQP protocols, all these different things
+
+564
+00:32:43,963 --> 00:32:45,703
+that we have access to now.
+
+565
+00:32:46,715 --> 00:32:50,638
+And again, to reiterate, this was a message bus ecosystem.
+
+566
+00:32:50,638 --> 00:32:53,300
+So it allowed us to add and remove pieces
+
+567
+00:32:53,300 --> 00:32:55,741
+without really needing to reconfigure
+
+568
+00:32:55,741 --> 00:32:57,503
+any other pieces of the ecosystem, which
+
+569
+00:32:57,503 --> 00:32:59,044
+was very important for us at the beginning
+
+570
+00:32:59,044 --> 00:33:00,525
+because we didn't really know how
+
+571
+00:33:00,525 --> 00:33:04,548
+this was all going to play out.
+
+572
+00:33:04,548 --> 00:33:07,650
+And then also the ubiquitous language of the ecosystem.
+
+573
+00:33:07,650 --> 00:33:07,790
+So.
+
+574
+00:33:09,319 --> 00:33:17,262
+Protobuf provide us a way to express how the ecosystem should interact with one another
+
+575
+00:33:17,262 --> 00:33:22,383
+without being tied to implementation details. And that's a very powerful capability
+
+576
+00:33:22,383 --> 00:33:26,065
+because it allowed us to then think about, okay, what does this really need to do?
+
+577
+00:33:26,065 --> 00:33:30,746
+And it allowed us to push more into our pre-production processes and get people to
+
+578
+00:33:30,746 --> 00:33:34,928
+the place where they understood exactly what they're building and then understood exactly
+
+579
+00:33:34,928 --> 00:33:38,229
+what they needed to build and the how came later.
+
+580
+00:33:38,754 --> 00:33:40,375
+as far as the details of the implementation.
+
+581
+00:33:40,375 --> 00:33:43,736
+And then again, domain services.
+
+582
+00:33:43,736 --> 00:33:47,037
+The domain services here allowed us
+
+583
+00:33:47,037 --> 00:33:50,119
+to build a lot of different pieces in isolation
+
+584
+00:33:50,119 --> 00:33:51,739
+to get rid of that uniform criticality,
+
+585
+00:33:51,739 --> 00:33:54,740
+to allow people to iterate at their own speeds.
+
+586
+00:33:54,740 --> 00:33:57,281
+That was a very important part of this.
+
+587
+00:33:57,281 --> 00:33:57,602
+I mean.
+
+588
+00:33:58,349 --> 00:34:03,271
+We had teams who recently released features the day before the release of the feature.
+
+589
+00:34:03,271 --> 00:34:05,032
+Uh, you know, Hey, we forgot to deploy this.
+
+590
+00:34:05,032 --> 00:34:05,532
+No problem.
+
+591
+00:34:05,532 --> 00:34:05,813
+Do it now.
+
+592
+00:34:05,813 --> 00:34:08,314
+Um, and that was done.
+
+593
+00:34:08,314 --> 00:34:09,674
+They just did that.
+
+594
+00:34:09,674 --> 00:34:13,196
+And that's a wildly different cultural experience than what the rest of our
+
+595
+00:34:13,196 --> 00:34:17,358
+developers are used to where it's 11 o'clock server goes down, switch out
+
+596
+00:34:17,358 --> 00:34:20,139
+everything, work with all the other teams, get it back online.
+
+597
+00:34:20,339 --> 00:34:25,124
+hope everything's working correctly or else we have to have another downtime or hotfix it until
+
+598
+00:34:25,124 --> 00:34:31,892
+like live reload code until we get to the next downtime. And so what have we kind of learned from
+
+599
+00:34:31,892 --> 00:34:39,600
+you know introducing this suite of technologies into our ecosystem? So the first one we kind of
+
+600
+00:34:39,600 --> 00:34:41,702
+touched on earlier is the micro versus domain.
+
+601
+00:34:42,721 --> 00:34:50,849
+We've been very careful not to call them microservices simply because we kind of get the feeling that nobody knows what that means.
+
+602
+00:34:50,849 --> 00:35:03,641
+And ultimately, this came from mobile and web where you have better isolated systems like completely orthogonal systems that are interacting with each other on a specific client like a browser or mobile or mobile app itself.
+
+603
+00:35:03,641 --> 00:35:06,383
+Whereas a game client intrinsically is
+
+604
+00:35:07,283 --> 00:35:12,345
+a monolith. We're not going to get away from that anytime soon, but that'd be very interesting to see
+
+605
+00:35:12,345 --> 00:35:17,446
+us kind of grow out of that. But everything that we have is very coupled data. Ultimately,
+
+606
+00:35:17,446 --> 00:35:20,827
+everything inside of a game client needs to interact with everything else in a game client,
+
+607
+00:35:20,827 --> 00:35:24,788
+and you have to separate that by boundaries, those boundaries being domain boundaries.
+
+608
+00:35:24,788 --> 00:35:28,989
+And so these are one of the first things that we learned. Another big one was,
+
+609
+00:35:28,989 --> 00:35:33,370
+and this is probably another conversation in and of itself, is message bus versus service mesh.
+
+610
+00:35:35,238 --> 00:35:40,604
+We again, like we said earlier, chose to go with a message bus simply because it was easier. It was
+
+611
+00:35:40,604 --> 00:35:45,810
+just so much simpler because we could see everything in one place. We understood how we
+
+612
+00:35:45,810 --> 00:35:50,816
+could add and remove pieces of the puzzle and not have to worry about what was on the other side,
+
+613
+00:35:50,816 --> 00:35:53,218
+as long as producers and consumers were doing their jobs.
+
+614
+00:35:54,389 --> 00:35:56,670
+Whereas a service mesh has a lot of complexity up front.
+
+615
+00:35:56,670 --> 00:35:59,311
+A service mesh is great if you know exactly
+
+616
+00:35:59,311 --> 00:36:02,092
+how you know that change is going to play out.
+
+617
+00:36:02,092 --> 00:36:04,873
+We do keep an eye on things like Linkerd and Istio,
+
+618
+00:36:04,873 --> 00:36:11,356
+as well as things like Envoy and Ambassador for Qube.
+
+619
+00:36:12,412 --> 00:36:15,493
+But ultimately, we're pretty happy with our message bus ecosystem,
+
+620
+00:36:15,493 --> 00:36:20,135
+especially after we saw a recent release from Linkerd about performance.
+
+621
+00:36:20,135 --> 00:36:24,416
+They have probably, I think they said a 20 millisecond overhead.
+
+622
+00:36:24,416 --> 00:36:26,377
+We're seeing a five millisecond overhead in our ecosystem.
+
+623
+00:36:26,377 --> 00:36:28,598
+So we're still pretty happy with that.
+
+624
+00:36:28,598 --> 00:36:31,439
+And unless that changes anytime soon, we probably won't be heavily
+
+625
+00:36:31,439 --> 00:36:33,480
+looking into a service mesh shift.
+
+626
+00:36:33,480 --> 00:36:37,401
+But that's one of the first conversations, big conversations
+
+627
+00:36:37,401 --> 00:36:40,022
+that we had about the ecosystem.
+
+628
+00:36:40,022 --> 00:36:40,863
+We also learned that.
+
+629
+00:36:41,618 --> 00:36:43,499
+APIs represent team boundaries.
+
+630
+00:36:43,499 --> 00:36:47,263
+And this is a really big one for the cultural aspect of it,
+
+631
+00:36:47,263 --> 00:36:51,987
+simply because when teams were working in the monolith,
+
+632
+00:36:51,987 --> 00:36:54,269
+they had to solve all of the problems.
+
+633
+00:36:54,269 --> 00:36:54,449
+And.
+
+634
+00:36:55,253 --> 00:36:58,214
+once you started peeling away some of those problems,
+
+635
+00:36:58,214 --> 00:37:00,635
+they got more freedom to do more things,
+
+636
+00:37:00,635 --> 00:37:02,976
+basically focus on the product they're trying to build,
+
+637
+00:37:02,976 --> 00:37:04,917
+it got a little bit more interesting.
+
+638
+00:37:04,917 --> 00:37:08,378
+An example of this is usually when teams build something,
+
+639
+00:37:08,378 --> 00:37:11,039
+a new feature, they're building tooling
+
+640
+00:37:11,039 --> 00:37:13,460
+for the customer support, the game masters,
+
+641
+00:37:13,460 --> 00:37:15,421
+player experience, those types of teams.
+
+642
+00:37:15,421 --> 00:37:19,703
+But in this ecosystem, what we do is we basically say,
+
+643
+00:37:19,703 --> 00:37:23,384
+build the API, and then we'll help the tooling teams
+
+644
+00:37:24,149 --> 00:37:29,073
+use that API, but you don't have to provide the tooling for it. So these teams that then had to
+
+645
+00:37:29,073 --> 00:37:33,877
+worry about a UI for how to manipulate or or administrate their feature that kind of all kind
+
+646
+00:37:33,877 --> 00:37:38,661
+of fell away because ultimately it's about the API and what the actual functionality of the feature
+
+647
+00:37:38,661 --> 00:37:47,268
+was. And then ultimately like relatively speaking new technology is easy, culture is not. And we
+
+648
+00:37:47,268 --> 00:37:53,473
+learned this in a very interesting way because the TD of EVE Online, the head Cosmic Plumber,
+
+649
+00:37:54,016 --> 00:37:59,758
+We were working with a lot of teams and building these different pieces.
+
+650
+00:37:59,758 --> 00:38:03,919
+And we were trying to understand, like, the problem isn't learning the technology.
+
+651
+00:38:03,919 --> 00:38:06,700
+The problem is at the time to learn the technology.
+
+652
+00:38:06,700 --> 00:38:10,182
+It's something nobody wants to once they don't want to learn the technology.
+
+653
+00:38:10,182 --> 00:38:13,923
+That's not complex technology.
+
+654
+00:38:13,923 --> 00:38:20,205
+We learned that the cultural shift from working in a 20-year-old code base to a
+
+655
+00:38:20,762 --> 00:38:26,787
+newer, more progressive code base in the sense of having modern techniques involved, like upfront
+
+656
+00:38:26,787 --> 00:38:33,013
+test-driven development, upfront domain-driven design, all of those things built in, you have
+
+657
+00:38:33,013 --> 00:38:39,519
+these almost subconscious behaviors that happen because they're not, the developers aren't
+
+658
+00:38:39,519 --> 00:38:41,361
+belligerent or malicious in any way.
+
+659
+00:38:41,768 --> 00:38:44,689
+But when you have this giant umbrella of a monolith,
+
+660
+00:38:44,689 --> 00:38:46,030
+you think about things differently
+
+661
+00:38:46,030 --> 00:38:48,991
+and you worry about things in different ways
+
+662
+00:38:48,991 --> 00:38:51,352
+because you have to because all those big,
+
+663
+00:38:51,352 --> 00:38:53,173
+that uniform criticality.
+
+664
+00:38:53,173 --> 00:38:54,554
+And then a lot of that kind of allows
+
+665
+00:38:54,554 --> 00:38:57,715
+you to get away with some interesting things
+
+666
+00:38:57,715 --> 00:39:00,256
+that you wouldn't normally get away with if it's
+
+667
+00:39:00,256 --> 00:39:02,978
+a very isolated and focused project.
+
+668
+00:39:02,978 --> 00:39:05,899
+And so this was probably the biggest cultural change
+
+669
+00:39:05,899 --> 00:39:08,600
+that we had to deal with in general.
+
+670
+00:39:10,517 --> 00:39:13,698
+But then overall, like why, why this holistic approach?
+
+671
+00:39:13,698 --> 00:39:15,338
+Why not fix things individually?
+
+672
+00:39:15,338 --> 00:39:16,659
+I mean, we ultimately saw what the outcome
+
+673
+00:39:16,659 --> 00:39:20,140
+of fixing things individually with XML API and Crest was.
+
+674
+00:39:20,140 --> 00:39:22,341
+But we've been talking internally and externally
+
+675
+00:39:22,341 --> 00:39:23,061
+about Eve forever.
+
+676
+00:39:23,061 --> 00:39:25,562
+Like how does Eve live into the next decade?
+
+677
+00:39:25,562 --> 00:39:29,284
+And so we know that Eve needs to fundamentally change
+
+678
+00:39:29,284 --> 00:39:30,624
+to continue in the next decade.
+
+679
+00:39:30,624 --> 00:39:33,005
+And that fundamental change cannot happen
+
+680
+00:39:33,005 --> 00:39:36,627
+if we continue to work in the same manner.
+
+681
+00:39:37,199 --> 00:39:42,942
+And so Quasar has become our stepping stone to allow and facilitate that fundamental change
+
+682
+00:39:42,942 --> 00:39:45,843
+in how we build and maintain EVE Online.
+
+683
+00:39:45,843 --> 00:39:46,523
+And yeah, that about wraps it up.
+
+684
+00:39:46,523 --> 00:39:48,084
+Thanks, guys.
+
+685
+00:39:48,084 --> 00:39:53,166
+I appreciate your time, and I think we might have some time for some questions.
+
+686
+00:39:53,166 --> 00:40:01,810
+All right.
+
+687
+00:40:02,437 --> 00:40:06,960
+Thank you very much, Nick. If anybody has any questions, there are two mics. You're welcome to
+
+688
+00:40:06,960 --> 00:40:12,824
+form lines. We will just swap back and forth. If anybody has more than one question, please ask one
+
+689
+00:40:12,824 --> 00:40:17,767
+question at a time, then go back to the back of the line and come forward again so everybody gets a
+
+690
+00:40:17,767 --> 00:40:24,011
+chance. And I also just want to remind everybody after this session, if you could please fill out
+
+691
+00:40:24,011 --> 00:40:28,214
+the survey. It gives him feedback, it gives us feedback, so we can do better. Okay, thank you
+
+692
+00:40:28,214 --> 00:40:28,875
+very much, everybody.
+
+693
+00:40:32,695 --> 00:40:34,342
+Hi, can you hear me okay through the mask?
+
+694
+00:40:34,342 --> 00:40:35,447
+Sounds good.
+
+695
+00:40:37,483 --> 00:40:41,324
+So you're talking about this shift between culture,
+
+696
+00:40:41,324 --> 00:40:44,225
+we're working with a 20-year-old code base
+
+697
+00:40:44,225 --> 00:40:47,486
+and how it was the hardest thing to change.
+
+698
+00:40:47,486 --> 00:40:52,047
+Assumably, you'd think that now for the next 10 years,
+
+699
+00:40:52,047 --> 00:40:54,288
+to solve the issue of having to go through
+
+700
+00:40:54,288 --> 00:40:56,828
+that culture shift again,
+
+701
+00:40:56,828 --> 00:40:58,949
+do you have any plans to prophylactically address
+
+702
+00:40:58,949 --> 00:41:01,890
+when you're going to make the next change in culture
+
+703
+00:41:01,890 --> 00:41:04,130
+in order to integrate the new forms of tech
+
+704
+00:41:04,130 --> 00:41:06,351
+and make that switch easier?
+
+705
+00:41:07,962 --> 00:41:16,228
+So the interesting part about that is we're in a different phase of the lifespan of EVE Online.
+
+706
+00:41:16,228 --> 00:41:21,512
+So a lot of EVE Online originally had a lot of great principles in it. Like if you look at the
+
+707
+00:41:21,512 --> 00:41:26,876
+core structure of EVE Online at the code base, it is service-oriented architecture, which is just,
+
+708
+00:41:26,876 --> 00:41:31,960
+you know, an old school term for microservices really. And all of those things are there,
+
+709
+00:41:31,960 --> 00:41:37,224
+but the problem is that in those critical moments where EVE had to make it work,
+
+710
+00:41:37,723 --> 00:41:40,405
+in the early stages of its life,
+
+711
+00:41:40,405 --> 00:41:43,186
+that just kind of piled on and piled on and piled on.
+
+712
+00:41:43,186 --> 00:41:46,427
+And then of course, there's evolutions of a company's,
+
+713
+00:41:46,427 --> 00:41:49,108
+you know, lifespan and how a product lives through that.
+
+714
+00:41:49,108 --> 00:41:51,369
+And some of those things have to do with the fact that,
+
+715
+00:41:51,369 --> 00:41:53,630
+you know, at some point they just were just like,
+
+716
+00:41:53,630 --> 00:41:56,711
+great, EVE's awesome, let's just keep adding things.
+
+717
+00:41:56,711 --> 00:42:00,273
+And there was nothing really mitigating those factors.
+
+718
+00:42:00,273 --> 00:42:02,654
+And so ultimately what we're looking at here
+
+719
+00:42:02,654 --> 00:42:05,215
+is to make sure that we're more modular
+
+720
+00:42:05,215 --> 00:42:05,515
+in the sense of,
+
+721
+00:42:05,648 --> 00:42:10,112
+you know, back then, Eve had to invent a lot of things.
+
+722
+00:42:10,112 --> 00:42:13,434
+They had to invent CarbonIO in order to make things work
+
+723
+00:42:13,434 --> 00:42:14,836
+the way they want.
+
+724
+00:42:14,836 --> 00:42:18,779
+Things like RAF protocols, gRPC, none of that existed.
+
+725
+00:42:18,779 --> 00:42:22,882
+Like the concept of orchestration and routing
+
+726
+00:42:22,882 --> 00:42:24,663
+at that complexity level didn't really
+
+727
+00:42:24,663 --> 00:42:25,984
+exist in a real time system.
+
+728
+00:42:25,984 --> 00:42:29,387
+So I think the biggest difference here
+
+729
+00:42:29,387 --> 00:42:32,329
+is that the philosophy has changed where.
+
+730
+00:42:32,693 --> 00:42:35,416
+The team that started this project, we had the motto of,
+
+731
+00:42:35,416 --> 00:42:37,118
+if you can't Google it, don't use it.
+
+732
+00:42:37,118 --> 00:42:38,579
+Simple as that.
+
+733
+00:42:38,579 --> 00:42:40,081
+And so we stuck with that.
+
+734
+00:42:40,081 --> 00:42:41,442
+And that's kind of what we're hoping
+
+735
+00:42:41,442 --> 00:42:44,386
+helps keep us on track moving into the future of what
+
+736
+00:42:44,386 --> 00:42:47,129
+we should be inventing are only things that
+
+737
+00:42:47,129 --> 00:42:49,571
+are unique to our product, not the rest of the technology
+
+738
+00:42:49,571 --> 00:42:50,652
+stack the rest of the world is already using.
+
+739
+00:42:50,652 --> 00:42:52,174
+Awesome, thank you.
+
+740
+00:43:09,737 --> 00:43:10,437
+Hi, can you hear me?
+
+741
+00:43:10,437 --> 00:43:11,177
+Yep.
+
+742
+00:43:11,177 --> 00:43:11,677
+Yeah.
+
+743
+00:43:11,677 --> 00:43:14,438
+So I was wondering, it seems like one
+
+744
+00:43:14,438 --> 00:43:17,239
+of the major problems with Eve with so much information moving
+
+745
+00:43:17,239 --> 00:43:20,660
+around is that you need to keep an authoritative kind of copy
+
+746
+00:43:20,660 --> 00:43:23,540
+of the information so that you can prevent kind of desync.
+
+747
+00:43:23,540 --> 00:43:26,641
+Was that kept up mostly by the kind of a single Python thread,
+
+748
+00:43:26,641 --> 00:43:28,422
+or is there other measures you took?
+
+749
+00:43:28,422 --> 00:43:30,542
+So in the original cluster, there
+
+750
+00:43:30,542 --> 00:43:31,723
+was a concept of a session.
+
+751
+00:43:31,723 --> 00:43:36,164
+And that session could move from node to node.
+
+752
+00:43:36,164 --> 00:43:39,205
+And whether or not that session was up to date.
+
+753
+00:43:39,737 --> 00:43:45,319
+Who knows? You could only know that for certain if you knew you had an active connection to the same desktop client.
+
+754
+00:43:45,319 --> 00:43:54,001
+And so there was this authoritative state that moved around in the sense of having quick access, not necessarily for being authoritative. That's the interesting part.
+
+755
+00:43:54,001 --> 00:44:02,723
+You could always figure out what the actual authoritative information was that was easy inside of the cluster. It was the expense that that came at.
+
+756
+00:44:03,155 --> 00:44:07,019
+that function call, that dbdip, whatever that might be,
+
+757
+00:44:07,019 --> 00:44:10,643
+that was expensive in the ecosystem of Stackless Python.
+
+758
+00:44:12,097 --> 00:44:16,319
+In Quasar, that's still there, but it manifested itself differently.
+
+759
+00:44:16,319 --> 00:44:19,561
+It was interesting going through this process again and kind of, you know,
+
+760
+00:44:19,561 --> 00:44:23,283
+working with some of the original devs like Hilmar, our CEO,
+
+761
+00:44:23,283 --> 00:44:24,644
+who built some of the original pieces.
+
+762
+00:44:24,644 --> 00:44:28,886
+And working with, talking with him about like, well, why do these things exist?
+
+763
+00:44:28,886 --> 00:44:32,988
+And re kind of running into those same kind of problems like as a session.
+
+764
+00:44:32,988 --> 00:44:37,411
+But inside of Quasar, it's taken on a more modern approach that you mostly see
+
+765
+00:44:37,411 --> 00:44:38,031
+with things like.
+
+766
+00:44:38,191 --> 00:44:42,135
+headers in an HTTP ecosystem where that's the authoritative information.
+
+767
+00:44:42,135 --> 00:44:45,998
+You can't really, you know, if you've ever done anything with like AWS and
+
+768
+00:44:45,998 --> 00:44:49,441
+they're, they're off protocol, they basically signed those headers so they
+
+769
+00:44:49,441 --> 00:44:53,345
+can't be touched. And if they are, then you know, they're wrong. So those
+
+770
+00:44:53,345 --> 00:44:57,729
+paradigms still exist and move over, they just manifest slightly differently.
+
+771
+00:44:57,729 --> 00:44:58,450
+Okay, thank you.
+
+772
+00:45:06,390 --> 00:45:07,011
+Hey, Nick.
+
+773
+00:45:07,011 --> 00:45:09,272
+Quick question for you.
+
+774
+00:45:09,272 --> 00:45:12,433
+So is there a class of problems that the changes you recently
+
+775
+00:45:12,433 --> 00:45:14,033
+made are still maybe not addressing
+
+776
+00:45:14,033 --> 00:45:18,195
+to do with the challenges you were talking about earlier
+
+777
+00:45:18,195 --> 00:45:20,116
+with schema changes in the database
+
+778
+00:45:20,116 --> 00:45:21,777
+and how that kind of transpires?
+
+779
+00:45:21,777 --> 00:45:26,599
+And is there still a sort of issue with agility
+
+780
+00:45:26,599 --> 00:45:28,960
+and how fast you can move around the persistence layer?
+
+781
+00:45:30,261 --> 00:45:30,621
+Yeah.
+
+782
+00:45:30,621 --> 00:45:35,562
+So one of the things that kind of caught us off guard was when we talked about
+
+783
+00:45:35,562 --> 00:45:40,243
+the 53 million lines of YAML, um, that's where everything is authored and we use
+
+784
+00:45:40,243 --> 00:45:42,924
+Perforce as a runtime versioning mechanism for that.
+
+785
+00:45:42,924 --> 00:45:49,366
+And what we didn't really think about was that that only solved half the problem.
+
+786
+00:45:49,366 --> 00:45:49,866
+Um, sorry.
+
+787
+00:45:49,866 --> 00:45:53,007
+So the authoring time version versioning, I should say there is no runtime versioning
+
+788
+00:45:53,007 --> 00:45:54,947
+and that's where the problem lies.
+
+789
+00:45:55,291 --> 00:46:01,275
+And so what we saw developers do initially is that they're like, Oh, we just need to send these YAML files everywhere.
+
+790
+00:46:01,275 --> 00:46:03,556
+And we're like, you're not sending 53 million lines of YAML everywhere.
+
+791
+00:46:03,556 --> 00:46:05,017
+That's not going to happen.
+
+792
+00:46:05,017 --> 00:46:17,804
+And so that's probably one of the blind sides that we had in this ecosystem, where then we kind of had to, had to just kind of throw that, that mentality away and say, Hey, you own your data store.
+
+793
+00:46:17,804 --> 00:46:19,525
+How do you want to offer your data?
+
+794
+00:46:19,525 --> 00:46:20,726
+How do you want to promote your data?
+
+795
+00:46:20,726 --> 00:46:21,767
+How do you want to version your data?
+
+796
+00:46:21,767 --> 00:46:23,268
+If you even need to version.
+
+797
+00:46:24,207 --> 00:46:33,141
+And so that's one of the things that we're still working with teams on to see how that really manifests in a in a in a useful like more generic patterns.
+
+798
+00:46:33,141 --> 00:46:34,803
+Brilliant, really interesting talk. Thank you.
+
+799
+00:46:34,803 --> 00:46:35,765
+Thank you.
+
+800
+00:46:41,298 --> 00:46:42,099
+Hi there.
+
+801
+00:46:42,099 --> 00:46:45,782
+Earlier you mentioned that if you have, say, 1,000 people in
+
+802
+00:46:45,782 --> 00:46:48,664
+one system and one person shoots, you get 999 redundant
+
+803
+00:46:48,664 --> 00:46:49,604
+messages.
+
+804
+00:46:49,604 --> 00:46:52,387
+It seems redundant to have that many messages.
+
+805
+00:46:52,387 --> 00:46:55,769
+So by what system do you sort of trim that down to more
+
+806
+00:46:55,769 --> 00:46:56,730
+reasonable size?
+
+807
+00:46:56,730 --> 00:46:58,731
+Or do you just deal with all 1,000 of them?
+
+808
+00:47:00,685 --> 00:47:01,345
+It's tricky.
+
+809
+00:47:01,345 --> 00:47:04,328
+So those messages aren't necessarily redundant
+
+810
+00:47:04,328 --> 00:47:08,031
+because all clients probably need to see that that happened.
+
+811
+00:47:08,031 --> 00:47:11,354
+So EVE Online is interesting in the sense that there are no,
+
+812
+00:47:11,354 --> 00:47:13,315
+there's no wall blocking the corners.
+
+813
+00:47:13,315 --> 00:47:15,437
+Like you can't do all the old school MMO tricks
+
+814
+00:47:15,437 --> 00:47:18,540
+of making the town hall have these indented entrances.
+
+815
+00:47:18,540 --> 00:47:20,922
+And so people can't see everyone on the outside.
+
+816
+00:47:20,922 --> 00:47:22,944
+Everyone on the inside can't see everyone on the outside
+
+817
+00:47:22,944 --> 00:47:24,745
+and vice versa, right?
+
+818
+00:47:24,745 --> 00:47:27,007
+So you're in space, there's no occlusion.
+
+819
+00:47:27,007 --> 00:47:29,109
+So everyone is relevant all the time in a space battle.
+
+820
+00:47:30,215 --> 00:47:34,299
+So the bigger problem is actually worse than that.
+
+821
+00:47:34,299 --> 00:47:36,983
+So on top of the 999 that we need to send out
+
+822
+00:47:36,983 --> 00:47:38,865
+that we know we need to send out,
+
+823
+00:47:38,865 --> 00:47:41,047
+there might be parts of the object graph
+
+824
+00:47:41,047 --> 00:47:45,553
+that might be unique to certain subsets of those entities.
+
+825
+00:47:45,553 --> 00:47:47,735
+Because for example, the one part of relevancy
+
+826
+00:47:47,735 --> 00:47:49,978
+that we do have is whether or not you're cloaked.
+
+827
+00:47:50,216 --> 00:47:52,177
+If you're cloaked in a ship, you're
+
+828
+00:47:52,177 --> 00:47:53,898
+in a whole different chain of information
+
+829
+00:47:53,898 --> 00:47:55,679
+that gets pushed out to the clients.
+
+830
+00:47:55,679 --> 00:47:58,180
+Because ultimately, no one else knows you're cloaked,
+
+831
+00:47:58,180 --> 00:47:59,941
+but that means you're getting separate information
+
+832
+00:47:59,941 --> 00:48:00,341
+based on that.
+
+833
+00:48:00,341 --> 00:48:04,083
+Because we can't leak any other data that's relevant to you,
+
+834
+00:48:04,083 --> 00:48:06,224
+because then people know you're there.
+
+835
+00:48:06,224 --> 00:48:08,665
+And it kind of defeats the whole point of cloaking.
+
+836
+00:48:08,665 --> 00:48:11,627
+But more of the espionage stuff we've been looking more into
+
+837
+00:48:11,627 --> 00:48:15,589
+is how we can provide a less than perfect intel for EVE
+
+838
+00:48:15,589 --> 00:48:16,309
+Online.
+
+839
+00:48:16,309 --> 00:48:19,411
+But ultimately, I think that.
+
+840
+00:48:19,808 --> 00:48:21,289
+the things that we're trying to combat there.
+
+841
+00:48:21,289 --> 00:48:22,589
+And that's one of the next big things
+
+842
+00:48:22,589 --> 00:48:23,770
+that we wanna do with Quasar
+
+843
+00:48:23,770 --> 00:48:25,510
+since simulation data over Quasar
+
+844
+00:48:25,510 --> 00:48:27,791
+to actually achieve the goal
+
+845
+00:48:27,791 --> 00:48:32,353
+of getting rid of that multiplexing problem.
+
+846
+00:48:32,353 --> 00:48:34,693
+But it also kind of highlights a lot of the
+
+847
+00:48:35,253 --> 00:48:38,213
+I've called them barnacles on the network protocol,
+
+848
+00:48:38,213 --> 00:48:40,254
+where they're developers just like,
+
+849
+00:48:40,254 --> 00:48:42,374
+hey, I just need to send like this effect is going
+
+850
+00:48:42,374 --> 00:48:44,075
+and there's a simulation frame flying by,
+
+851
+00:48:44,075 --> 00:48:44,675
+I'm gonna put it on that.
+
+852
+00:48:44,675 --> 00:48:46,935
+And it makes it really difficult
+
+853
+00:48:46,935 --> 00:48:48,555
+to formalize those messages.
+
+854
+00:48:48,555 --> 00:48:51,796
+So the bigger problem that we have right now
+
+855
+00:48:51,796 --> 00:48:54,757
+is how do we formalize the domain boundaries
+
+856
+00:48:54,757 --> 00:48:56,877
+within the simulation frames
+
+857
+00:48:56,877 --> 00:48:58,277
+versus any of the extra gameplay logic
+
+858
+00:48:58,277 --> 00:48:58,737
+that's added onto it,
+
+859
+00:48:58,737 --> 00:49:00,318
+like if a light's blinking on the ship
+
+860
+00:49:00,318 --> 00:49:01,558
+or the turrets are facing this way
+
+861
+00:49:01,558 --> 00:49:02,438
+as opposed to that way,
+
+862
+00:49:02,438 --> 00:49:03,678
+like those kinds of things.
+
+863
+00:49:03,678 --> 00:49:04,798
+Did that answer your question?
+
+864
+00:49:06,729 --> 00:49:08,169
+Yeah, I'd say, yeah, thank you.
+
+865
+00:49:08,169 --> 00:49:08,629
+Yeah, thanks.
+
+866
+00:49:08,629 --> 00:49:18,731
+Can you hear me?
+
+867
+00:49:18,731 --> 00:49:18,991
+Yeah.
+
+868
+00:49:18,991 --> 00:49:25,252
+Do you have any data on how the transition to gRPC
+
+869
+00:49:25,252 --> 00:49:30,193
+increase the performance on the messaging system
+
+870
+00:49:30,193 --> 00:49:32,854
+between the client and your server side?
+
+871
+00:49:33,916 --> 00:49:39,262
+Yes, actually we saw, so it's, it's, it's comparing apples to oranges really.
+
+872
+00:49:39,262 --> 00:49:44,008
+Uh, because ultimately within a SACWIS Python ecosystem, there's a bit of a tax
+
+873
+00:49:44,008 --> 00:49:46,110
+that tax comes from the scheduler.
+
+874
+00:49:46,110 --> 00:49:49,574
+So the more stuff that you're doing, the more latency you incur.
+
+875
+00:49:49,574 --> 00:49:52,077
+Uh, just by definition, it's not because you're using more like.
+
+876
+00:49:52,357 --> 00:49:56,279
+I mean it is because you're using more CPU, but it's the one logical processor that you have.
+
+877
+00:49:56,279 --> 00:50:01,521
+So it's a bit apples to oranges, but in general we've seen probably an average of 60 millisecond
+
+878
+00:50:01,521 --> 00:50:08,424
+performance increase across the board, and in some cases it's been more profound than others.
+
+879
+00:50:08,424 --> 00:50:10,185
+Okay, thank you.
+

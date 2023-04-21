@@ -1,0 +1,4212 @@
+1
+00:00:05,958 --> 00:00:07,479
+Okay, let's get started.
+
+2
+00:00:09,000 --> 00:00:09,800
+Good morning, everyone.
+
+3
+00:00:09,820 --> 00:00:13,962
+So my name is Remy Canin.
+
+4
+00:00:14,103 --> 00:00:16,784
+I'm an engine architect on Far Cry 3 and Far Cry 4,
+
+5
+00:00:16,984 --> 00:00:18,305
+working at Ubisoft Montreal.
+
+6
+00:00:19,085 --> 00:00:21,006
+And we're here today to talk about Pipeline.
+
+7
+00:00:22,147 --> 00:00:24,008
+You probably already experienced this situation
+
+8
+00:00:24,048 --> 00:00:27,270
+in the past where you're coming in at work in the morning,
+
+9
+00:00:27,910 --> 00:00:29,952
+getting the latest code, starting compiling,
+
+10
+00:00:30,832 --> 00:00:33,994
+copying from the network the latest data build.
+
+11
+00:00:34,762 --> 00:00:37,043
+And then you have plenty of time to enjoy your coffee break
+
+12
+00:00:37,403 --> 00:00:39,404
+while everything is copying and compiling.
+
+13
+00:00:39,424 --> 00:00:43,346
+So on Far Cry 3, all team members have plenty of time
+
+14
+00:00:43,566 --> 00:00:44,687
+to enjoy that coffee break.
+
+15
+00:00:45,427 --> 00:00:47,808
+But on Far Cry 4, we made ourselves a lot of enemies
+
+16
+00:00:47,908 --> 00:00:50,149
+because all those operations could be performed
+
+17
+00:00:50,189 --> 00:00:51,210
+in under two minutes.
+
+18
+00:00:52,130 --> 00:00:54,771
+So maybe I could have named my talk
+
+19
+00:00:55,072 --> 00:00:57,793
+how to get rid of coffee break on your project.
+
+20
+00:00:59,235 --> 00:01:01,398
+But anyway, before getting to optimization,
+
+21
+00:01:01,438 --> 00:01:02,680
+we have applied to our pipeline.
+
+22
+00:01:02,840 --> 00:01:04,402
+I'd like to describe it a little bit
+
+23
+00:01:04,422 --> 00:01:05,963
+so you know actually how it works
+
+24
+00:01:06,044 --> 00:01:08,406
+and what our workflow and what we wanted to improve.
+
+25
+00:01:09,347 --> 00:01:11,110
+So I'll start with a few numbers.
+
+26
+00:01:13,853 --> 00:01:16,436
+And the first number is the amount of data
+
+27
+00:01:16,456 --> 00:01:18,498
+we're generating every day for every package.
+
+28
+00:01:19,502 --> 00:01:25,084
+We are generating for each nightly about 250 gig of data.
+
+29
+00:01:25,284 --> 00:01:27,385
+That's for every nightly, and actually sometimes
+
+30
+00:01:27,425 --> 00:01:29,406
+we're generating more than one package a day.
+
+31
+00:01:30,386 --> 00:01:34,847
+So some day we have half a terabyte worth of data generated.
+
+32
+00:01:34,867 --> 00:01:37,308
+We also have a huge amount of data,
+
+33
+00:01:37,348 --> 00:01:39,909
+about 3.7 million lines of code.
+
+34
+00:01:40,089 --> 00:01:45,451
+That's for the game and the tools, the editor.
+
+35
+00:01:45,751 --> 00:01:47,972
+2.5 million out of those lines are for the runtime,
+
+36
+00:01:48,032 --> 00:01:48,692
+the actual game.
+
+37
+00:01:50,113 --> 00:01:51,834
+We've been a lot of people working on the game.
+
+38
+00:01:52,134 --> 00:01:54,935
+We have been six studios, and Montreal being the lead one.
+
+39
+00:01:56,756 --> 00:02:00,057
+450 people working in Montreal in the studios.
+
+40
+00:02:00,078 --> 00:02:02,478
+That's the amount of people getting the data every day.
+
+41
+00:02:04,199 --> 00:02:05,580
+We have several Perforce instance,
+
+42
+00:02:05,720 --> 00:02:07,100
+but at the end of the project,
+
+43
+00:02:07,901 --> 00:02:10,742
+we had about 500 check-ins per day,
+
+44
+00:02:10,822 --> 00:02:13,563
+350 for data, 150 for the code.
+
+45
+00:02:14,483 --> 00:02:17,024
+And this doesn't take into account the sound,
+
+46
+00:02:17,405 --> 00:02:19,205
+which has a separate Perforce instance.
+
+47
+00:02:20,326 --> 00:02:29,072
+So talking about Perforce, we have our artists are working in some asset creation tools such as
+
+48
+00:02:30,393 --> 00:02:36,918
+Max Motion Builder or Photoshop and they're saving their work on the Perforce instance
+
+49
+00:02:37,818 --> 00:02:42,722
+and we're providing them some plugins so they can actually export their assets
+
+50
+00:02:43,202 --> 00:02:46,945
+into a platform agnostic state that is saved on another Perforce instance.
+
+51
+00:02:48,147 --> 00:02:52,949
+alongside the world definition and the design definition properties, that kind of stuff.
+
+52
+00:02:53,529 --> 00:02:57,771
+And out of this, on a PC, when you have a copy of this second-per-first instance,
+
+53
+00:02:57,791 --> 00:03:02,033
+you can run our editor, and the editor is compiling just in time
+
+54
+00:03:02,593 --> 00:03:05,754
+the resource required to actually put some stuff on the screen.
+
+55
+00:03:06,194 --> 00:03:08,175
+So let's take the example of texture.
+
+56
+00:03:08,195 --> 00:03:12,417
+The texture will be changed into, let's say, DDS for being shown on PC.
+
+57
+00:03:12,737 --> 00:03:16,158
+And all those compilations of transformation are done just in time
+
+58
+00:03:16,439 --> 00:03:17,639
+when the editor requires it.
+
+59
+00:03:18,385 --> 00:03:21,549
+and are saved on disk as a temporary file that can be reused later.
+
+60
+00:03:22,570 --> 00:03:25,272
+So the important preference instance here is the one in the middle.
+
+61
+00:03:27,314 --> 00:03:32,899
+Because out of this preference instance, we can also produce a package that can be run on the game, run on console.
+
+62
+00:03:33,820 --> 00:03:41,448
+So to do so, we are running our editor, an extraction path that is actually listing all the resources used by a given world.
+
+63
+00:03:42,227 --> 00:03:44,208
+And then out of this resource list,
+
+64
+00:03:44,429 --> 00:03:46,330
+we can then follow all the dependencies,
+
+65
+00:03:46,390 --> 00:03:48,392
+compile all the assets that are referenced,
+
+66
+00:03:49,172 --> 00:03:50,854
+and then compress everything together
+
+67
+00:03:50,994 --> 00:03:53,116
+and build a package that can be run on console.
+
+68
+00:03:56,058 --> 00:03:58,000
+This process, actually the extraction process
+
+69
+00:03:58,040 --> 00:03:59,741
+with the editor is quite long.
+
+70
+00:03:59,781 --> 00:04:02,744
+It can take between five and 15 minutes
+
+71
+00:04:03,264 --> 00:04:04,805
+per square kilometer of the world.
+
+72
+00:04:05,366 --> 00:04:08,288
+But we are a world that are 10 kilometers per 10 kilometers,
+
+73
+00:04:08,308 --> 00:04:10,810
+so it can take a huge amount of time to actually
+
+74
+00:04:11,474 --> 00:04:14,616
+do this extraction pass for the entire world.
+
+75
+00:04:15,276 --> 00:04:19,258
+So what we do at night, we are actually distributing
+
+76
+00:04:19,298 --> 00:04:20,959
+this work over a cluster of PCs.
+
+77
+00:04:21,479 --> 00:04:23,620
+So each of these PCs doing one extraction pass.
+
+78
+00:04:24,161 --> 00:04:26,902
+Then we gather all those results onto another machine,
+
+79
+00:04:27,362 --> 00:04:30,084
+do the compilation pass following the dependencies,
+
+80
+00:04:30,184 --> 00:04:33,305
+compressing everything, and then packaging everything
+
+81
+00:04:33,365 --> 00:04:35,346
+to be run by the game on console.
+
+82
+00:04:36,183 --> 00:04:39,664
+So this entire process is known as the binarization process,
+
+83
+00:04:39,924 --> 00:04:42,505
+and the binarization process is at the heart of the pipeline
+
+84
+00:04:42,705 --> 00:04:45,266
+because it's what produces the actual game for console.
+
+85
+00:04:45,946 --> 00:04:50,927
+So we want this process to be maintained in any time,
+
+86
+00:04:51,627 --> 00:04:53,747
+so we have some tests to make sure it never breaks.
+
+87
+00:04:54,568 --> 00:04:58,128
+So whenever a programmer submits some source code,
+
+88
+00:04:58,689 --> 00:05:00,229
+we have a form of build machine
+
+89
+00:05:00,249 --> 00:05:03,390
+that retrieves the change list and compiles the change list
+
+90
+00:05:03,430 --> 00:05:05,910
+for all the platform and targets that we support.
+
+91
+00:05:06,689 --> 00:05:08,731
+And if this compilation succeeds,
+
+92
+00:05:09,212 --> 00:05:11,954
+we can send those binaries to some machine
+
+93
+00:05:11,974 --> 00:05:13,256
+that are going to perform some tests.
+
+94
+00:05:13,716 --> 00:05:16,178
+And we're actually doing the binarization process,
+
+95
+00:05:16,439 --> 00:05:18,521
+not entirely, just a square kilometer of the map,
+
+96
+00:05:18,641 --> 00:05:19,682
+just to make sure it doesn't break.
+
+97
+00:05:20,343 --> 00:05:22,024
+And we also have a few regression tests,
+
+98
+00:05:22,044 --> 00:05:24,346
+just to make sure some basic features are not broken.
+
+99
+00:05:26,789 --> 00:05:28,831
+So if we look now at the timing we had
+
+100
+00:05:28,871 --> 00:05:29,852
+at the end of Far Cry 3.
+
+101
+00:05:31,605 --> 00:05:35,426
+Let's consider the example when you have the code synced,
+
+102
+00:05:35,486 --> 00:05:36,747
+but you have not compiled anything.
+
+103
+00:05:36,827 --> 00:05:38,787
+So you want now to get the latest code
+
+104
+00:05:38,987 --> 00:05:40,428
+and run the editor, let's say.
+
+105
+00:05:40,928 --> 00:05:42,088
+So to get the latest code,
+
+106
+00:05:42,768 --> 00:05:44,989
+depending on the amount of code that has changed
+
+107
+00:05:45,029 --> 00:05:47,449
+since you have last synced,
+
+108
+00:05:47,709 --> 00:05:50,370
+let's say somewhere between zero and one minute,
+
+109
+00:05:51,210 --> 00:05:52,971
+then you have to compile the entire editor.
+
+110
+00:05:53,391 --> 00:05:55,711
+A full rebuild of the editor at the end of Far Cry 3
+
+111
+00:05:55,751 --> 00:05:58,732
+was about 40 minutes for the full rebuild.
+
+112
+00:05:59,974 --> 00:06:02,015
+Then you have to get the latest data,
+
+113
+00:06:02,215 --> 00:06:04,216
+depending on when you have last synced.
+
+114
+00:06:04,276 --> 00:06:05,757
+Let's say it's between zero and five minutes.
+
+115
+00:06:06,437 --> 00:06:08,498
+And then with that, you can run the editor.
+
+116
+00:06:09,318 --> 00:06:11,860
+As I mentioned before, the editor is compiling
+
+117
+00:06:12,100 --> 00:06:14,741
+just in time all the required resources to actually run.
+
+118
+00:06:14,821 --> 00:06:16,702
+So the very first time, you have to compile
+
+119
+00:06:16,742 --> 00:06:19,963
+a lot of resources to just run the editor the first time.
+
+120
+00:06:20,403 --> 00:06:23,445
+So the very first run could take up to 15 minutes.
+
+121
+00:06:26,447 --> 00:06:27,768
+And if you want to binarize locally,
+
+122
+00:06:27,788 --> 00:06:30,250
+you still have to do the extraction pass with the editors.
+
+123
+00:06:30,290 --> 00:06:31,531
+You have to paste it 15 minutes,
+
+124
+00:06:31,911 --> 00:06:34,173
+plus all the compilation, the compression,
+
+125
+00:06:34,353 --> 00:06:35,594
+and packaging everything together,
+
+126
+00:06:35,614 --> 00:06:39,737
+was taking about 45 minutes to produce a local version
+
+127
+00:06:40,278 --> 00:06:41,118
+on your local PC.
+
+128
+00:06:42,900 --> 00:06:45,101
+If now, if you want to run the game on console,
+
+129
+00:06:46,282 --> 00:06:48,844
+you have to get the code, same thing.
+
+130
+00:06:48,864 --> 00:06:50,325
+Then you have to compile it.
+
+131
+00:06:50,606 --> 00:06:52,427
+You don't have to compile all the tools in that case,
+
+132
+00:06:52,487 --> 00:06:53,168
+it's just the game.
+
+133
+00:06:53,768 --> 00:06:56,730
+So it's less source code, it was taking about 25 minutes.
+
+134
+00:06:57,330 --> 00:07:00,611
+Then you have to copy the package from the network
+
+135
+00:07:01,471 --> 00:07:03,832
+to get the latest nightly build.
+
+136
+00:07:04,412 --> 00:07:07,554
+And then you can run the game on console.
+
+137
+00:07:08,914 --> 00:07:10,615
+So as you see, we had a pretty bad timing
+
+138
+00:07:11,215 --> 00:07:13,816
+at the end of Far Cry 6, so we had to take action
+
+139
+00:07:13,856 --> 00:07:16,857
+and make sure we solved this problem for Far Cry 4.
+
+140
+00:07:18,037 --> 00:07:20,698
+So I'm going to show you the few stuff
+
+141
+00:07:20,718 --> 00:07:21,959
+that we've done on Far Cry 4.
+
+142
+00:07:23,634 --> 00:07:26,897
+The first one being the compilation time, how we improve our compilation time.
+
+143
+00:07:27,717 --> 00:07:32,982
+The second one, how we improve our nightly build, just to make sure we can produce a data build as fast as we can.
+
+144
+00:07:33,002 --> 00:07:37,406
+The third one, how we can then deliver this data build to the team member.
+
+145
+00:07:38,267 --> 00:07:43,612
+And finally, when you have this build, how you can iterate locally on console to test your change,
+
+146
+00:07:43,732 --> 00:07:46,674
+your local change you have made on your local PC.
+
+147
+00:07:47,375 --> 00:07:48,896
+So let's start with the compilation.
+
+148
+00:07:50,458 --> 00:07:55,923
+Most of the improvements we've got are thanks to a build system called FastBuild.
+
+149
+00:07:56,424 --> 00:07:59,306
+And I'll get to the features of FastBuild and how it improves our compilation,
+
+150
+00:07:59,326 --> 00:08:02,890
+but let me start with a few of the history, actually, how we got there.
+
+151
+00:08:03,770 --> 00:08:09,696
+So, as I told you, our editor DLL target, which was our main editor target,
+
+152
+00:08:09,736 --> 00:08:11,898
+was taking up to 40 minutes for a full rebuild.
+
+153
+00:08:12,118 --> 00:08:14,140
+That's for the 3.7 millionth line of code.
+
+154
+00:08:15,002 --> 00:08:20,566
+We also add at this time, at the end of ArcWrite 3, some Unity or Blob build, depending on how you call them.
+
+155
+00:08:21,286 --> 00:08:25,609
+So it was lowering this number to 20 minutes to do the entire build.
+
+156
+00:08:26,350 --> 00:08:35,396
+But the Blob has some iteration problem because whenever you change a CPP file, the entire Blob needs to be rebuilt, so you build a lot more code that you need.
+
+157
+00:08:36,286 --> 00:08:40,269
+or some other system just reshuffle the blobs to extract the file you have changed
+
+158
+00:08:40,309 --> 00:08:42,351
+and then you have to recompile the entire library.
+
+159
+00:08:42,611 --> 00:08:44,733
+So you have bad iteration time with blobs.
+
+160
+00:08:44,753 --> 00:08:47,115
+So many people were actually not using the blob targets
+
+161
+00:08:47,816 --> 00:08:52,259
+and were willing to prefer the 40 minutes build
+
+162
+00:08:52,700 --> 00:08:54,941
+just to have good iteration time when everything is rebuilt.
+
+163
+00:08:56,202 --> 00:08:59,365
+So at this time we had a new engine architect that joined the project
+
+164
+00:08:59,465 --> 00:09:02,468
+called Franta Filin who is actually here today, Lufranta.
+
+165
+00:09:02,488 --> 00:09:05,550
+He had a pet project at home.
+
+166
+00:09:06,587 --> 00:09:07,968
+was a BL system.
+
+167
+00:09:08,908 --> 00:09:11,830
+And so we tried this BL system on the Far Cry 4 code base
+
+168
+00:09:11,890 --> 00:09:13,131
+and we had pretty good results.
+
+169
+00:09:13,171 --> 00:09:15,132
+Everything was really in good shape.
+
+170
+00:09:15,952 --> 00:09:18,493
+So after this early test, since we had good results,
+
+171
+00:09:18,513 --> 00:09:20,054
+we said, okay, Aurelien, let's try it
+
+172
+00:09:20,134 --> 00:09:21,315
+and use it on our project.
+
+173
+00:09:23,836 --> 00:09:27,818
+So FastBL is actually improving our build time
+
+174
+00:09:27,918 --> 00:09:29,999
+for four main reasons, actually four main features
+
+175
+00:09:30,059 --> 00:09:31,180
+I'm going to present today.
+
+176
+00:09:31,660 --> 00:09:33,761
+The first one being a proper parallelization,
+
+177
+00:09:33,821 --> 00:09:36,062
+so you properly use your local machine.
+
+178
+00:09:36,947 --> 00:09:41,051
+The second one is caching, so you can reuse object files between users.
+
+179
+00:09:42,312 --> 00:09:47,457
+The third one is actually a good implementation of the blobbing of the Unity builds
+
+180
+00:09:48,178 --> 00:09:50,781
+that lets you have good iteration time.
+
+181
+00:09:51,862 --> 00:09:55,966
+And the last one is the distribution, when you can actually send some work on another machine,
+
+182
+00:09:56,486 --> 00:09:57,808
+on some worker machine.
+
+183
+00:09:58,729 --> 00:10:00,130
+So let's talk about the parallelization.
+
+184
+00:10:01,486 --> 00:10:04,908
+Consider the case where you are building several dependent DLLs.
+
+185
+00:10:05,968 --> 00:10:09,090
+What MSBuild does usually, if you have properly set up your project,
+
+186
+00:10:09,110 --> 00:10:14,273
+it's going to compile all your source files, all the object files for the first project in parallel,
+
+187
+00:10:15,073 --> 00:10:17,235
+and then it's going to link that together.
+
+188
+00:10:17,775 --> 00:10:22,137
+Then it will start the dependent DLL, compiling, linking,
+
+189
+00:10:22,357 --> 00:10:25,219
+then another dependent DLL, compiling, linking.
+
+190
+00:10:27,009 --> 00:10:29,671
+All these dependencies are actually not necessary.
+
+191
+00:10:29,691 --> 00:10:32,433
+You could start compiling any of the source files
+
+192
+00:10:32,453 --> 00:10:33,294
+as soon as you can.
+
+193
+00:10:34,035 --> 00:10:36,557
+The only real dependencies are between the link steps.
+
+194
+00:10:36,737 --> 00:10:38,118
+So it's exactly what FastBuild does.
+
+195
+00:10:38,138 --> 00:10:40,620
+It tries to compile everything as soon as it can.
+
+196
+00:10:41,220 --> 00:10:42,521
+And so you actually have better time
+
+197
+00:10:43,522 --> 00:10:44,643
+for compiling the entire stuff.
+
+198
+00:10:45,444 --> 00:10:49,427
+If you take the Far Cry 4 build with MSBuild,
+
+199
+00:10:49,747 --> 00:10:51,329
+that's what the kind of results you get
+
+200
+00:10:51,389 --> 00:10:54,551
+if you look at your resource monitor with FastBuild,
+
+201
+00:10:54,591 --> 00:10:55,772
+that's the kind of results you get.
+
+202
+00:10:56,796 --> 00:10:59,778
+So you see it's pretty fast and actually have a good utilization of your PC.
+
+203
+00:11:01,519 --> 00:11:03,081
+But the parallelization also have a...
+
+204
+00:11:04,281 --> 00:11:08,204
+There is also some problems with the parallelization on static libraries within MSBuild.
+
+205
+00:11:09,165 --> 00:11:12,467
+As I told you, if you correctly set up your project, all the source files
+
+206
+00:11:12,968 --> 00:11:14,909
+are going to be compiled in parallel, so that's fine.
+
+207
+00:11:15,510 --> 00:11:18,612
+But there is also another setting in Visual Studio where you can
+
+208
+00:11:19,012 --> 00:11:22,355
+set up the amount, the number of projects that can compile in parallel.
+
+209
+00:11:22,975 --> 00:11:29,000
+So if you set, for instance, this number to 3, Visual Studio is going to start 3 libraries at the same time.
+
+210
+00:11:29,801 --> 00:11:33,603
+So you have all those tasks that are sent at the exact same time.
+
+211
+00:11:34,704 --> 00:11:39,148
+So every... since you have more tasks that have been started, that you have some available CPUs,
+
+212
+00:11:39,548 --> 00:11:42,050
+each task is going to take way longer than it should.
+
+213
+00:11:43,071 --> 00:11:48,275
+So FastBuild is properly parallelizing that, so actually it goes faster.
+
+214
+00:11:49,280 --> 00:11:54,824
+The main reason for that is when you start too many processes at the same time, you have excessive context switches
+
+215
+00:11:55,404 --> 00:12:01,528
+and each process is trashing the cache of other processes, being the code cache, data cache, or file system cache.
+
+216
+00:12:01,548 --> 00:12:02,848
+So every task is going to take longer.
+
+217
+00:12:02,868 --> 00:12:08,212
+We actually had the opportunity to test our build with a 32-core machine
+
+218
+00:12:08,792 --> 00:12:13,135
+and Visual Studio was happily spawning more than a thousand processes, which is completely ridiculous.
+
+219
+00:12:15,144 --> 00:12:16,886
+In the contrary, fastbuild does what you expect
+
+220
+00:12:16,966 --> 00:12:19,949
+and queue properly the task and start a new task
+
+221
+00:12:19,989 --> 00:12:21,510
+when the core becomes available.
+
+222
+00:12:24,373 --> 00:12:26,635
+So, we have improved utilization, so what's next?
+
+223
+00:12:26,715 --> 00:12:29,497
+We want to eliminate redundant compilation,
+
+224
+00:12:29,938 --> 00:12:31,359
+and this is where the caching helps.
+
+225
+00:12:32,560 --> 00:12:35,803
+The idea behind the caching is you are going to share
+
+226
+00:12:35,903 --> 00:12:38,485
+the build results between user.
+
+227
+00:12:39,366 --> 00:12:41,788
+So whenever you compile a library, a DLL, whatever,
+
+228
+00:12:42,661 --> 00:12:46,405
+you're going to store all the object files on a central cache and then link them together.
+
+229
+00:12:46,425 --> 00:12:52,391
+If another user is compiling the same source code, it's going to retrieve the results
+
+230
+00:12:52,672 --> 00:12:56,175
+directly from the cache so we don't have to compile it locally and then link them together.
+
+231
+00:12:58,688 --> 00:13:00,949
+So if we take, and you have some win,
+
+232
+00:13:02,470 --> 00:13:06,332
+if you take the example we had before,
+
+233
+00:13:06,712 --> 00:13:09,434
+MSBuild building Far Cry 4 editor,
+
+234
+00:13:09,754 --> 00:13:11,575
+and now building with FastBuild and the cache,
+
+235
+00:13:12,115 --> 00:13:13,376
+that's the kind of results you get.
+
+236
+00:13:17,679 --> 00:13:19,159
+But the third point is the blobbing.
+
+237
+00:13:19,279 --> 00:13:21,621
+For those of you who are blobbing or Unity build,
+
+238
+00:13:22,561 --> 00:13:24,002
+both names are used in the industry.
+
+239
+00:13:24,621 --> 00:13:27,163
+For those of you who don't know, this IDBM-BLOB
+
+240
+00:13:27,243 --> 00:13:30,406
+is just to include all the CPP files of your project
+
+241
+00:13:30,466 --> 00:13:34,369
+into BLOB files, so it reduces the header compilation.
+
+242
+00:13:34,389 --> 00:13:38,072
+So the idea here, you put all the files together into a CPP,
+
+243
+00:13:38,292 --> 00:13:41,474
+and building the CPP is actually faster
+
+244
+00:13:41,554 --> 00:13:44,437
+than the sum of each individual build together.
+
+245
+00:13:44,477 --> 00:13:46,598
+So you have great win out of this
+
+246
+00:13:46,719 --> 00:13:49,841
+and really speed up your builds.
+
+247
+00:13:50,622 --> 00:13:52,583
+The problems comes when you want to iterate on that.
+
+248
+00:13:54,524 --> 00:13:57,185
+Because whenever you change a file the entire blobs
+
+249
+00:13:58,425 --> 00:13:59,646
+Then needs to be rebuilt
+
+250
+00:14:00,946 --> 00:14:06,428
+So what Falbe will do then is we extract the modified files while maintaining all the blobs are stable
+
+251
+00:14:06,988 --> 00:14:09,469
+And then you can iterate on your file without
+
+252
+00:14:10,109 --> 00:14:14,431
+Paying for rebuilding all the the other blobs every time so you get good iteration time
+
+253
+00:14:15,671 --> 00:14:19,392
+But still benefiting from the the blobbing and the speed improvement it brings
+
+254
+00:14:22,708 --> 00:14:29,914
+And finally, the distribution, the idea behind the distribution is to separate the build of an object file into two steps.
+
+255
+00:14:30,034 --> 00:14:35,459
+The first one being the preprocessing, and then the compilation of the preprocessed file.
+
+256
+00:14:39,402 --> 00:14:44,006
+Then, when you have a preprocessed file, that means all the includence has been resolved, everything has been included,
+
+257
+00:14:44,106 --> 00:14:50,592
+you can send this preprocessed file to some worker on another machine that will do the compilation for you, so you don't have to do it locally.
+
+258
+00:14:51,767 --> 00:14:54,328
+And for sure, it helps you have a better build time.
+
+259
+00:14:57,029 --> 00:15:00,851
+There are other few features that are worth mentioning.
+
+260
+00:15:00,951 --> 00:15:02,512
+One is being the link dependencies.
+
+261
+00:15:04,333 --> 00:15:07,174
+Usually when you change a CPP with MSBuild in a given DLL,
+
+262
+00:15:07,295 --> 00:15:09,276
+so you're going to recompile your CPP,
+
+263
+00:15:09,296 --> 00:15:10,296
+then re-link the DLL,
+
+264
+00:15:10,656 --> 00:15:13,618
+but it also is going to re-link all the dependent DLL,
+
+265
+00:15:13,738 --> 00:15:15,419
+even if you haven't changed your API,
+
+266
+00:15:15,559 --> 00:15:18,420
+your export table for the DLL hasn't changed.
+
+267
+00:15:18,920 --> 00:15:21,621
+So it doesn't require actually to rebuild all the DLL,
+
+268
+00:15:21,981 --> 00:15:22,761
+dependent DLL.
+
+269
+00:15:23,182 --> 00:15:24,442
+And FastBuild actually is doing that.
+
+270
+00:15:24,502 --> 00:15:25,702
+If you don't change the API,
+
+271
+00:15:26,082 --> 00:15:28,763
+it won't be relinking the entire chain of dependencies.
+
+272
+00:15:28,783 --> 00:15:31,124
+We just relink your,
+
+273
+00:15:31,664 --> 00:15:33,484
+the DLL in which you have changed the CPP.
+
+274
+00:15:34,965 --> 00:15:38,326
+Another feature that worth mentioning is the batching.
+
+275
+00:15:38,526 --> 00:15:41,167
+You can send several targets on the same command line.
+
+276
+00:15:42,370 --> 00:15:46,671
+which in return, instead of doing each target one after each other,
+
+277
+00:15:47,251 --> 00:15:50,512
+all the targets will be done at the same time, so you have better parallelization
+
+278
+00:15:50,592 --> 00:15:53,992
+and better utilization of your PC for doing all the compilation at the same time.
+
+279
+00:15:54,532 --> 00:15:58,293
+And this is pretty useful for the build machines, when you submit a change list
+
+280
+00:15:58,333 --> 00:16:01,294
+testing several targets at the same time, it actually speeds up your build machines.
+
+281
+00:16:02,034 --> 00:16:06,695
+Also, if you want to do some pre-submit check, you can build a lot of targets at the same time,
+
+282
+00:16:06,735 --> 00:16:10,515
+making sure you're not going to break the build before submitting.
+
+283
+00:16:11,967 --> 00:16:14,650
+So if we look at the real-life timing we got out of that,
+
+284
+00:16:15,190 --> 00:16:17,352
+as I told you, our main target was 40 minutes.
+
+285
+00:16:18,614 --> 00:16:21,156
+We had the blob one, was taking about 20 minutes.
+
+286
+00:16:22,297 --> 00:16:26,101
+We did try some commercial products such as IncrediBuild,
+
+287
+00:16:26,141 --> 00:16:28,063
+was bringing actually some improvements.
+
+288
+00:16:28,483 --> 00:16:30,205
+We're able to rebuild our code base in 12 minutes.
+
+289
+00:16:31,869 --> 00:16:36,232
+The problem with Incredible, that was about with 10 machines, if I remember correctly, for this number.
+
+290
+00:16:37,913 --> 00:16:41,275
+The problem with Incredible is that it suffers the same dependency problem as MSBuild.
+
+291
+00:16:41,295 --> 00:16:44,397
+That means you won't start a project until the previous project is done.
+
+292
+00:16:44,477 --> 00:16:48,720
+So you're just waiting for stuff when you actually don't need to wait.
+
+293
+00:16:49,980 --> 00:16:55,504
+So on the contrary, FastBuild, just on a local PC, gives us a 10-minute full rebuild.
+
+294
+00:16:56,277 --> 00:17:01,501
+If you put on top of that the caching and the distribution, we're able to build our editor in 4 minutes.
+
+295
+00:17:01,821 --> 00:17:03,923
+So that's 40 minutes to 4 minutes.
+
+296
+00:17:05,364 --> 00:17:13,230
+And since the game has less code, actually we're able to rebuild our PC release target in less than a minute.
+
+297
+00:17:14,551 --> 00:17:15,432
+58 seconds to be exact.
+
+298
+00:17:19,672 --> 00:17:23,255
+Since I'm talking about compilation,
+
+299
+00:17:23,295 --> 00:17:26,318
+I just want to mention a few words about edit and continue.
+
+300
+00:17:26,858 --> 00:17:29,320
+We were using edit and continue in Far Cry 3,
+
+301
+00:17:30,221 --> 00:17:31,262
+but at the end of the project,
+
+302
+00:17:31,282 --> 00:17:32,523
+with the amount of code we had,
+
+303
+00:17:32,663 --> 00:17:34,185
+it was just getting too slow.
+
+304
+00:17:34,865 --> 00:17:36,227
+So it was not really usable.
+
+305
+00:17:36,267 --> 00:17:37,188
+Whenever you did a change,
+
+306
+00:17:37,228 --> 00:17:39,350
+it took several minutes to actually get inside
+
+307
+00:17:39,390 --> 00:17:42,572
+the executable so you can actually
+
+308
+00:17:42,953 --> 00:17:44,314
+continue executing your run.
+
+309
+00:17:46,197 --> 00:17:47,597
+And plus Microsoft is dropping,
+
+310
+00:17:47,637 --> 00:17:48,918
+actually they're dropping the support,
+
+311
+00:17:48,978 --> 00:17:51,358
+I think Visual Studio 2012.
+
+312
+00:17:52,079 --> 00:17:53,579
+Anyways, they're dropping the support,
+
+313
+00:17:53,639 --> 00:17:57,420
+so we cannot use edit and continue anymore.
+
+314
+00:17:57,921 --> 00:18:01,302
+So instead what we're using is a hot reloadable DLL.
+
+315
+00:18:02,382 --> 00:18:03,783
+I won't get into the detail of that,
+
+316
+00:18:03,883 --> 00:18:05,963
+could be an entire talk about that.
+
+317
+00:18:06,687 --> 00:18:10,468
+But the basic idea are you can change some code into a DLL
+
+318
+00:18:10,488 --> 00:18:13,209
+and this DLL can be loaded and unloaded dynamically.
+
+319
+00:18:13,689 --> 00:18:15,870
+So you can have your editor running, unload the DLL,
+
+320
+00:18:15,910 --> 00:18:17,931
+make some change in the code, reload the DLL,
+
+321
+00:18:17,951 --> 00:18:21,192
+and debug and test your code right away.
+
+322
+00:18:21,212 --> 00:18:22,452
+So we're using a lot of those.
+
+323
+00:18:23,132 --> 00:18:24,953
+Most of our AI and gameplay code
+
+324
+00:18:25,013 --> 00:18:26,694
+are actually in hot reloadable DLL.
+
+325
+00:18:27,914 --> 00:18:29,575
+We're also using incremental linking,
+
+326
+00:18:29,635 --> 00:18:30,955
+but not everywhere, actually.
+
+327
+00:18:32,512 --> 00:18:34,873
+It was really a test and see approach.
+
+328
+00:18:34,913 --> 00:18:38,915
+We are activating incremental linking on some projects.
+
+329
+00:18:38,955 --> 00:18:41,315
+It gives us some win actually on some projects.
+
+330
+00:18:41,736 --> 00:18:43,796
+On some others, it's actually not helping at all.
+
+331
+00:18:44,236 --> 00:18:46,237
+So it's just, where it helps, we're using it.
+
+332
+00:18:46,277 --> 00:18:47,618
+Where it doesn't help, we don't use it.
+
+333
+00:18:52,039 --> 00:18:55,240
+So now that we can build executable fastly,
+
+334
+00:18:55,260 --> 00:18:58,761
+we want also to build data builds as quick as we can.
+
+335
+00:18:58,781 --> 00:19:01,442
+If we look at the number we had at the end of our query three.
+
+336
+00:19:02,856 --> 00:19:05,357
+We were generating our walls
+
+337
+00:19:06,137 --> 00:19:09,359
+For the three platforms we're shipping on in six hours
+
+338
+00:19:09,899 --> 00:19:15,983
+But that's for all the official maps plus test maps, gym maps for all the users. So that's roughly six hours to build
+
+339
+00:19:16,663 --> 00:19:17,383
+something about
+
+340
+00:19:18,764 --> 00:19:22,246
+45 walls. On Far Cry 4 we managed to get this number down to 1.5 hours
+
+341
+00:19:24,549 --> 00:19:25,690
+but that's for five platforms.
+
+342
+00:19:25,710 --> 00:19:26,971
+We had two more platforms.
+
+343
+00:19:27,512 --> 00:19:29,433
+That's roughly for 75 worlds.
+
+344
+00:19:29,814 --> 00:19:32,276
+So we got a great win on Far Cry 4.
+
+345
+00:19:32,816 --> 00:19:38,281
+The main reason for that is the first one, the profiling,
+
+346
+00:19:38,321 --> 00:19:39,802
+but that's not regular profiling.
+
+347
+00:19:39,842 --> 00:19:41,103
+I get into that on the next slide.
+
+348
+00:19:41,123 --> 00:19:44,326
+And the second one is resource caching,
+
+349
+00:19:44,847 --> 00:19:46,908
+trying to share the results between user.
+
+350
+00:19:47,989 --> 00:19:49,290
+So the profiling, I'm not talking
+
+351
+00:19:49,330 --> 00:19:50,551
+about regular profiling here.
+
+352
+00:19:51,318 --> 00:20:00,283
+As I told you in the beginning, we are sending some tasks on some remote machine to do all the extraction paths when we're building a package.
+
+353
+00:20:01,204 --> 00:20:05,306
+We're also using some process isolation for the resource compilation.
+
+354
+00:20:05,326 --> 00:20:11,871
+And it's whenever we compile a resource, we send that actually to another process, just to make sure it's completely isolated.
+
+355
+00:20:11,891 --> 00:20:15,413
+It has its own memory, don't have multi-threading issue, we don't have memory issue.
+
+356
+00:20:16,887 --> 00:20:18,848
+So that's the way we actually our pipeline work.
+
+357
+00:20:19,068 --> 00:20:21,948
+Every single resource is built in process isolation.
+
+358
+00:20:22,848 --> 00:20:25,909
+The problem with that is it's really hard
+
+359
+00:20:25,949 --> 00:20:27,249
+to actually understand what's going on
+
+360
+00:20:27,329 --> 00:20:29,610
+because there is some interaction between different machines,
+
+361
+00:20:29,630 --> 00:20:30,610
+different processes.
+
+362
+00:20:31,350 --> 00:20:35,391
+You don't have a clear picture that you usually have
+
+363
+00:20:35,451 --> 00:20:37,511
+when you have a single process with multi-thread.
+
+364
+00:20:37,891 --> 00:20:39,832
+We can just put some profile points in your code
+
+365
+00:20:39,872 --> 00:20:40,872
+and just profile this stuff.
+
+366
+00:20:41,332 --> 00:20:43,272
+You cannot do that actually with that kind of setup.
+
+367
+00:20:43,830 --> 00:20:46,551
+So the real problem is you don't see the interactions,
+
+368
+00:20:46,591 --> 00:20:49,212
+you don't see how those processes are actually interacting
+
+369
+00:20:49,592 --> 00:20:51,852
+with each other, and you don't have the big picture
+
+370
+00:20:51,892 --> 00:20:52,633
+of what's going on.
+
+371
+00:20:53,453 --> 00:20:56,534
+So that's where the remote profiling is actually helping us
+
+372
+00:20:56,634 --> 00:20:57,975
+and I explain what it is.
+
+373
+00:20:59,055 --> 00:21:01,716
+So let's consider the case when you are running a process
+
+374
+00:21:01,756 --> 00:21:02,516
+on a given machine.
+
+375
+00:21:03,376 --> 00:21:05,617
+If you want to profile this process,
+
+376
+00:21:05,637 --> 00:21:07,738
+usually what you do is you add some profile points
+
+377
+00:21:07,778 --> 00:21:09,138
+in your code, you instrument your code.
+
+378
+00:21:10,029 --> 00:21:13,611
+and then this code is actually generating some profiling data
+
+379
+00:21:13,971 --> 00:21:15,492
+that you save in a buffer into RAM.
+
+380
+00:21:15,932 --> 00:21:19,414
+At some point you can dump this buffer onto disk
+
+381
+00:21:19,434 --> 00:21:21,536
+and analyze the results with the profiling tool.
+
+382
+00:21:21,576 --> 00:21:23,297
+That's pretty regular profiling here.
+
+383
+00:21:24,177 --> 00:21:26,398
+So when you have subprocesses, how do you do that?
+
+384
+00:21:27,050 --> 00:21:30,773
+The idea here is just simply to open a socket on your main process
+
+385
+00:21:31,074 --> 00:21:35,578
+and have all your subprocesses report the profiling data directly on that socket
+
+386
+00:21:36,038 --> 00:21:41,784
+and then you just save this information into the same regular buffer that you have in your main process
+
+387
+00:21:41,824 --> 00:21:44,867
+and then you can dump the results on disk and analyze them.
+
+388
+00:21:46,768 --> 00:21:50,712
+So what's good with this approach is at the end you just have...
+
+389
+00:21:52,332 --> 00:21:57,355
+a profile dump, which is exactly the same I used to have.
+
+390
+00:21:57,755 --> 00:22:02,017
+So you can actually analyze your run with subprocesses
+
+391
+00:22:02,077 --> 00:22:04,398
+with your regular tool and you just see the subprocesses.
+
+392
+00:22:05,267 --> 00:22:06,628
+as being sub-threads.
+
+393
+00:22:06,708 --> 00:22:09,110
+It just shows a thread in your profiling tool.
+
+394
+00:22:09,130 --> 00:22:11,231
+So that's pretty cool because then you can see exactly
+
+395
+00:22:11,251 --> 00:22:13,352
+what are interactions, when you send a command,
+
+396
+00:22:13,392 --> 00:22:15,293
+when it's actually processed by the sub-process,
+
+397
+00:22:15,574 --> 00:22:17,475
+when you read span, what it's exactly doing
+
+398
+00:22:17,495 --> 00:22:19,736
+in just a single view.
+
+399
+00:22:19,756 --> 00:22:20,877
+You have all the information.
+
+400
+00:22:21,277 --> 00:22:23,198
+When you get that, actually, now you can start
+
+401
+00:22:23,258 --> 00:22:24,519
+to understand what's going on.
+
+402
+00:22:24,539 --> 00:22:25,360
+You can start to fix.
+
+403
+00:22:26,281 --> 00:22:28,982
+And we found tons of problems using that,
+
+404
+00:22:29,603 --> 00:22:32,524
+some stuff that are repeated into each of processes,
+
+405
+00:22:32,625 --> 00:22:35,146
+some useless steps that were done,
+
+406
+00:22:35,186 --> 00:22:37,387
+the sync point and the scheduling
+
+407
+00:22:37,427 --> 00:22:39,728
+were actually badly implemented,
+
+408
+00:22:39,748 --> 00:22:41,990
+but a lot of inefficiency in there.
+
+409
+00:22:42,330 --> 00:22:45,111
+So we saw all those problems, we were then able to fix them.
+
+410
+00:22:45,752 --> 00:22:48,073
+And when actually we got that,
+
+411
+00:22:48,093 --> 00:22:50,815
+we were able to have that kind of CPU utilization
+
+412
+00:22:50,875 --> 00:22:52,576
+when you're actually compiling a lot of resources
+
+413
+00:22:52,596 --> 00:22:53,176
+at the same time.
+
+414
+00:22:53,750 --> 00:22:56,753
+when you see here my 12 core PC hard at work.
+
+415
+00:22:57,733 --> 00:22:59,375
+Actually compiling texture in this case.
+
+416
+00:23:00,956 --> 00:23:03,298
+So when you get to that kind of results,
+
+417
+00:23:03,338 --> 00:23:07,541
+you say now the next step is actually trying to do less work
+
+418
+00:23:07,561 --> 00:23:09,082
+would actually improve my build time.
+
+419
+00:23:09,963 --> 00:23:11,764
+And this is where the resource caching helps.
+
+420
+00:23:12,645 --> 00:23:15,807
+The idea is pretty simple behind the resource caching.
+
+421
+00:23:16,388 --> 00:23:18,790
+Is whenever you are actually generating some
+
+422
+00:23:21,582 --> 00:23:23,344
+compiling some assets for a given platform,
+
+423
+00:23:23,644 --> 00:23:27,507
+going to store all those assets onto a central cache.
+
+424
+00:23:27,527 --> 00:23:31,471
+Then when another user requires the asset,
+
+425
+00:23:31,511 --> 00:23:32,011
+he can find it.
+
+426
+00:23:32,051 --> 00:23:33,432
+So let's consider this example.
+
+427
+00:23:33,472 --> 00:23:34,874
+You want to use a texture.
+
+428
+00:23:36,275 --> 00:23:38,176
+You are going to ask the central cache,
+
+429
+00:23:38,196 --> 00:23:39,678
+do you already have the results,
+
+430
+00:23:39,778 --> 00:23:41,579
+the compiled asset for this texture?
+
+431
+00:23:41,599 --> 00:23:44,081
+If it doesn't, you just compile it locally.
+
+432
+00:23:44,800 --> 00:23:50,064
+and then store it into the cache and provide the results to whoever asked for the texture.
+
+433
+00:23:50,544 --> 00:23:53,145
+But if another user is doing the same call,
+
+434
+00:23:53,926 --> 00:23:56,767
+we'd be actually able to retrieve the results directly from the cache.
+
+435
+00:23:58,589 --> 00:24:01,690
+So the caching helps to share the results between users.
+
+436
+00:24:02,891 --> 00:24:04,112
+We're populating the cache.
+
+437
+00:24:04,432 --> 00:24:07,074
+It's not every user that is pushing stuff into the cache.
+
+438
+00:24:07,134 --> 00:24:09,855
+It's actually the build machines at night that are populating the cache.
+
+439
+00:24:09,915 --> 00:24:14,018
+We are sure on the cache we always have official assets.
+
+440
+00:24:14,847 --> 00:24:16,530
+produced by an official build.
+
+441
+00:24:16,671 --> 00:24:19,838
+We don't have an intermediate asset
+
+442
+00:24:19,878 --> 00:24:23,466
+that could have been compiled by someone working on the compiler during the day, for instance.
+
+443
+00:24:25,495 --> 00:24:30,137
+And actually what's pretty cool with that as I told you our editor is JIT compiling the resources
+
+444
+00:24:30,777 --> 00:24:34,138
+Whenever it requires it so now it can the editor can use
+
+445
+00:24:34,978 --> 00:24:35,958
+The cache as well
+
+446
+00:24:36,038 --> 00:24:42,120
+So actually we have some benefits here because the editor can load really faster because it directly get the results out of the cache
+
+447
+00:24:42,520 --> 00:24:44,500
+Instead of compiling stuff locally
+
+448
+00:24:47,778 --> 00:24:49,659
+So what we can say about Onightly is
+
+449
+00:24:49,999 --> 00:24:52,121
+there is not a lot of information in this section,
+
+450
+00:24:52,181 --> 00:24:55,022
+but it was a complex system,
+
+451
+00:24:55,062 --> 00:24:57,043
+so the key was really understanding what's going on,
+
+452
+00:24:57,444 --> 00:24:59,485
+and here the remote profiling was a great help
+
+453
+00:24:59,805 --> 00:25:02,827
+and a great tool to actually see what was going on
+
+454
+00:25:03,688 --> 00:25:05,609
+in the process and the different processes
+
+455
+00:25:05,649 --> 00:25:07,410
+interacting to this entire operation.
+
+456
+00:25:08,470 --> 00:25:10,492
+And also the big win was actually from
+
+457
+00:25:10,932 --> 00:25:13,373
+preventing doing useless work, thanks to the cache.
+
+458
+00:25:14,549 --> 00:25:17,251
+But I have to raise a big warning here.
+
+459
+00:25:17,612 --> 00:25:20,894
+Having a resource cache requires some really good hardware behind.
+
+460
+00:25:21,355 --> 00:25:22,456
+Because if you are...
+
+461
+00:25:23,056 --> 00:25:25,658
+If you have some bad hardware on which you put your cache,
+
+462
+00:25:25,698 --> 00:25:28,761
+and you have a lot of users actually eating the cache at the same time,
+
+463
+00:25:29,742 --> 00:25:32,944
+you can get to the situation when actually retrieving something from the cache
+
+464
+00:25:33,004 --> 00:25:34,626
+is longer than compiling it locally.
+
+465
+00:25:34,646 --> 00:25:37,048
+So you have to have a good balance to what you put on the cache
+
+466
+00:25:37,068 --> 00:25:38,088
+and when you compile locally,
+
+467
+00:25:38,449 --> 00:25:40,530
+because you don't want to actually make your build longer
+
+468
+00:25:40,911 --> 00:25:43,133
+by getting stuff out of the cache when it's actually...
+
+469
+00:25:45,419 --> 00:25:46,819
+faster to just compile it locally.
+
+470
+00:25:47,379 --> 00:25:49,140
+So I'll get to that later, what kind of hardware
+
+471
+00:25:49,180 --> 00:25:52,221
+we're using for our cache, but it's really a crucial point
+
+472
+00:25:52,261 --> 00:25:55,602
+with bad hardware or something that cannot deliver,
+
+473
+00:25:55,622 --> 00:25:56,882
+the cache is actually useless.
+
+474
+00:25:59,223 --> 00:26:02,984
+We want actually to continue improving our nightly build.
+
+475
+00:26:03,824 --> 00:26:06,225
+What we want to do, the first big step we want to do
+
+476
+00:26:06,265 --> 00:26:08,966
+is just get rid of the editor, because running the editor,
+
+477
+00:26:09,006 --> 00:26:10,746
+I told you, is kind of very long,
+
+478
+00:26:11,507 --> 00:26:13,327
+and so we'd like to get rid of that.
+
+479
+00:26:13,945 --> 00:26:19,249
+And the main reason also for that is that this is right now the only step in the build which is not incremental.
+
+480
+00:26:20,029 --> 00:26:28,516
+And also I'd like to emphasize this on that having an incremental build, data build, is the best thing you can do to have a fast data build.
+
+481
+00:26:29,356 --> 00:26:33,039
+What you want to do is just redo what has changed and not redo all the stuff all the time.
+
+482
+00:26:33,079 --> 00:26:39,284
+And that's really actually what's more important stuff to have a fast data build is being totally incremental from the beginning to the end.
+
+483
+00:26:41,135 --> 00:26:44,820
+So now we have a way to create executables quickly,
+
+484
+00:26:44,880 --> 00:26:47,042
+we have a way to create data builds quickly,
+
+485
+00:26:47,082 --> 00:26:48,905
+we want a way to deliver those builds
+
+486
+00:26:49,105 --> 00:26:51,268
+as quickly as we can to the end user.
+
+487
+00:26:53,431 --> 00:26:54,793
+Before getting to the detail of that,
+
+488
+00:26:55,674 --> 00:26:57,856
+let me talk of what happens in the 2012 summer.
+
+489
+00:26:59,782 --> 00:27:04,644
+We were shipping Far Cry 3 at this time. We shipped it at the end of 2012.
+
+490
+00:27:05,184 --> 00:27:09,565
+But actually in the studio we were shipping another big AAA game, Assassin's Creed 3.
+
+491
+00:27:09,625 --> 00:27:14,526
+So we had actually two major AAA games shipping from the same studio.
+
+492
+00:27:14,566 --> 00:27:19,968
+And at some point, the network just could not handle it anymore.
+
+493
+00:27:20,028 --> 00:27:23,169
+Having thousands of users just eating the network all the day.
+
+494
+00:27:23,629 --> 00:27:25,910
+It was completely done and we could not work anymore.
+
+495
+00:27:26,559 --> 00:27:27,919
+If you look at this graph, actually,
+
+496
+00:27:27,959 --> 00:27:30,020
+for network usage during this period,
+
+497
+00:27:31,240 --> 00:27:34,381
+we had double of the utilization in the 2012 summer
+
+498
+00:27:34,421 --> 00:27:37,022
+compared to the regular release cycle
+
+499
+00:27:37,042 --> 00:27:37,982
+that we have in the studio.
+
+500
+00:27:38,942 --> 00:27:40,583
+So the network was completely down.
+
+501
+00:27:41,503 --> 00:27:43,184
+So we had to actually take action on that,
+
+502
+00:27:43,504 --> 00:27:46,445
+and we decided as a studio to take action
+
+503
+00:27:46,605 --> 00:27:48,265
+on the software side in the project,
+
+504
+00:27:48,325 --> 00:27:50,846
+just make sure we hit less the network,
+
+505
+00:27:51,326 --> 00:27:53,627
+but also on the studio side,
+
+506
+00:27:53,647 --> 00:27:55,187
+making sure that we have the proper...
+
+507
+00:27:57,727 --> 00:28:00,729
+hardware to actually handle that kind of load.
+
+508
+00:28:01,430 --> 00:28:02,911
+And this is what we've done with the asset store.
+
+509
+00:28:02,931 --> 00:28:04,693
+I'm going to present both of those solutions.
+
+510
+00:28:05,753 --> 00:28:07,615
+So the first one, a syncing package.
+
+511
+00:28:09,156 --> 00:28:11,278
+We did that with a tool that we call RTPal
+
+512
+00:28:11,338 --> 00:28:12,539
+for the runtime friend.
+
+513
+00:28:14,320 --> 00:28:16,762
+But before getting to what exactly RTPal is,
+
+514
+00:28:16,922 --> 00:28:18,584
+let me get back to the end of 2012
+
+515
+00:28:18,904 --> 00:28:20,886
+when we were shipping Far Cry 3.
+
+516
+00:28:21,346 --> 00:28:23,268
+And we were actually submitting our builds to Steam.
+
+517
+00:28:25,140 --> 00:28:27,181
+And to do that, our PC build to Steam,
+
+518
+00:28:27,561 --> 00:28:30,102
+we're using a technology provided by Steam
+
+519
+00:28:30,763 --> 00:28:31,523
+called Steam Pipe.
+
+520
+00:28:31,763 --> 00:28:34,824
+The idea behind Steam Pipe is to do differential uploads.
+
+521
+00:28:35,524 --> 00:28:37,465
+So it's going to slice your ISO into parts,
+
+522
+00:28:38,005 --> 00:28:40,406
+and then you just send the part as a change between two builds.
+
+523
+00:28:41,086 --> 00:28:44,728
+And this is giving grid saving, actually, up to 50%
+
+524
+00:28:44,848 --> 00:28:46,228
+of our build.
+
+525
+00:28:46,248 --> 00:28:49,610
+We could save up to 50% of the uploads for each build.
+
+526
+00:28:50,397 --> 00:28:53,380
+So that's pretty good, and we want to leverage on that
+
+527
+00:28:53,420 --> 00:28:55,822
+and try to actually apply that kind of ideas
+
+528
+00:28:55,842 --> 00:28:57,783
+to our pipeline.
+
+529
+00:28:58,284 --> 00:28:59,985
+But we have a great advantage over Steam.
+
+530
+00:29:00,125 --> 00:29:01,406
+We actually know our data.
+
+531
+00:29:02,287 --> 00:29:03,869
+We know that we're producing big files.
+
+532
+00:29:03,969 --> 00:29:06,251
+We know where are the file boundaries
+
+533
+00:29:06,551 --> 00:29:07,592
+within those big files.
+
+534
+00:29:08,612 --> 00:29:12,075
+We also know that we have redundancy within our packages
+
+535
+00:29:12,115 --> 00:29:14,838
+because we are actually distributing some official builds.
+
+536
+00:29:15,661 --> 00:29:18,523
+alongside some test builds that are actually using the same assets.
+
+537
+00:29:18,643 --> 00:29:22,205
+So the same assets are actually appearing at several places into the same package.
+
+538
+00:29:23,246 --> 00:29:24,827
+We also can ask the question,
+
+539
+00:29:25,167 --> 00:29:29,070
+what's the real amount of new data that we're actually generating every day
+
+540
+00:29:29,250 --> 00:29:31,051
+out of a 20 gigabyte package?
+
+541
+00:29:33,792 --> 00:29:37,673
+And the response to this question, we just looked at our data and
+
+542
+00:29:39,794 --> 00:29:43,755
+What we get out of that is actually textures are clearly the main resources of our package
+
+543
+00:29:43,775 --> 00:29:47,716
+It's using up to 80% of the actual storage of the package
+
+544
+00:29:49,497 --> 00:29:51,257
+and if you look closely of
+
+545
+00:29:52,117 --> 00:29:56,979
+how much texture change on a project you can see that most of the texture actually three revisions at most
+
+546
+00:29:57,989 --> 00:30:05,132
+If you look at this screenshot, for instance, of the end of the project, you can see that several textures actually have never changed over the course of the project.
+
+547
+00:30:05,653 --> 00:30:12,536
+But still, we are distributing those textures every time for every build, which is completely insane.
+
+548
+00:30:14,357 --> 00:30:21,480
+So then the solution is pretty easy. We want to slice our package into parts and just distribute what has changed between projects.
+
+549
+00:30:23,577 --> 00:30:25,397
+We need to slice our big file into parts,
+
+550
+00:30:25,818 --> 00:30:28,379
+hash all of those parts using a hashM algorithm,
+
+551
+00:30:28,779 --> 00:30:30,699
+in our case we're using the MD5 algorithm,
+
+552
+00:30:31,540 --> 00:30:32,880
+and then produce a manifest file
+
+553
+00:30:32,920 --> 00:30:34,601
+which describes the slicing,
+
+554
+00:30:34,981 --> 00:30:36,462
+the file that took something like that,
+
+555
+00:30:36,682 --> 00:30:39,123
+when you can see here that I have a big file,
+
+556
+00:30:39,743 --> 00:30:42,264
+and here you see actually all the parts
+
+557
+00:30:42,284 --> 00:30:43,765
+that are constituting this big file.
+
+558
+00:30:45,385 --> 00:30:46,906
+So now when you want to get a package,
+
+559
+00:30:46,926 --> 00:30:48,306
+you just retrieve the manifest,
+
+560
+00:30:48,827 --> 00:30:50,988
+you look at all the parts that are referenced
+
+561
+00:30:51,108 --> 00:30:52,008
+within this manifest,
+
+562
+00:30:52,268 --> 00:30:53,068
+get all those parts.
+
+563
+00:30:54,214 --> 00:30:59,999
+Then you get some kind of link process that puts all those parts together and you can rebuild your package.
+
+564
+00:31:00,680 --> 00:31:01,320
+That's pretty cool.
+
+565
+00:31:02,001 --> 00:31:05,864
+But what's cool is when you want to get another package and the second version of the package,
+
+566
+00:31:05,884 --> 00:31:07,666
+so you're going to compare the manifest
+
+567
+00:31:08,587 --> 00:31:12,410
+and then you'll see that just a few parts actually change between the two packages.
+
+568
+00:31:13,030 --> 00:31:18,075
+So if you want to actually get the version 2, all you need to do is just download the parts that have changed
+
+569
+00:31:18,535 --> 00:31:19,936
+and then you have everything locally.
+
+570
+00:31:20,754 --> 00:31:24,237
+available to actually rebuild your package and have it on your disk.
+
+571
+00:31:24,677 --> 00:31:28,099
+So you just downloaded just what I've changed between the two packages,
+
+572
+00:31:28,119 --> 00:31:29,620
+so it's pretty light download.
+
+573
+00:31:31,001 --> 00:31:33,983
+So the results we got out of that were actually mind-blowing.
+
+574
+00:31:34,003 --> 00:31:39,967
+You have 95% of a package that actually doesn't change at all during two versions.
+
+575
+00:31:41,007 --> 00:31:45,691
+That means you just need to get one gigabyte out of a 22 gigabyte package
+
+576
+00:31:46,191 --> 00:31:47,071
+to get the new version.
+
+577
+00:31:48,232 --> 00:31:51,094
+And actually a nice corollary of that is
+
+578
+00:31:51,214 --> 00:31:52,915
+since we have redundancy within our package,
+
+579
+00:31:53,475 --> 00:31:55,497
+just downloading one package is actually faster.
+
+580
+00:31:55,557 --> 00:31:57,898
+We had up to 40% shrink on the same package
+
+581
+00:31:57,938 --> 00:32:00,740
+because one part could be referenced several times
+
+582
+00:32:00,880 --> 00:32:01,640
+within the package.
+
+583
+00:32:01,660 --> 00:32:03,642
+So you just have to download it once
+
+584
+00:32:04,322 --> 00:32:05,243
+and then rebuild everything.
+
+585
+00:32:06,543 --> 00:32:08,705
+Another cool stuff about that is since the package
+
+586
+00:32:08,765 --> 00:32:11,486
+is now smaller to keep, we can keep more of those.
+
+587
+00:32:12,279 --> 00:32:16,542
+And actually we could keep up to a year of package history,
+
+588
+00:32:16,942 --> 00:32:18,683
+and depending on the amount of storage
+
+589
+00:32:21,945 --> 00:32:23,526
+you can afford to keep some packages,
+
+590
+00:32:23,566 --> 00:32:25,167
+you can actually keep the entire production
+
+591
+00:32:25,227 --> 00:32:26,908
+if you have enough storage for that.
+
+592
+00:32:27,789 --> 00:32:29,590
+So for instance, on the Far Cry 3,
+
+593
+00:32:29,810 --> 00:32:32,412
+we were able to keep a few weeks worth of packages,
+
+594
+00:32:32,972 --> 00:32:34,473
+plus a few major milestones.
+
+595
+00:32:35,154 --> 00:32:36,915
+On Far Cry 4, at the end of the project,
+
+596
+00:32:36,975 --> 00:32:40,657
+we had more than 10,000 manifests available to just.
+
+597
+00:32:41,432 --> 00:32:44,433
+was just the last past year worth of packages
+
+598
+00:32:44,473 --> 00:32:46,333
+that were just here, ready to be used.
+
+599
+00:32:48,134 --> 00:32:49,875
+So all those numbers are pretty cool,
+
+600
+00:32:50,515 --> 00:32:52,075
+but we can actually do better than that.
+
+601
+00:32:53,156 --> 00:32:54,736
+And the main reason for that is
+
+602
+00:32:55,317 --> 00:32:57,858
+if you look at the regular workflow for programmers
+
+603
+00:32:57,878 --> 00:32:58,958
+or people working on the team,
+
+604
+00:32:59,498 --> 00:33:03,440
+they're not, they're actually not getting the entire package
+
+605
+00:33:03,480 --> 00:33:04,920
+and playing the real game all the time.
+
+606
+00:33:04,960 --> 00:33:08,321
+They usually run some test map or some environment
+
+607
+00:33:08,341 --> 00:33:10,302
+that looks like that, pretty empty, you have nothing.
+
+608
+00:33:10,903 --> 00:33:17,128
+That means most of the users are actually touching something like 20% of the data within the package.
+
+609
+00:33:17,909 --> 00:33:23,654
+So, touching 20% out of the 5% that changed between one package,
+
+610
+00:33:24,054 --> 00:33:30,320
+that means that the regular dude on the floor just needs to get 1% of the actual data that has changed between packages.
+
+611
+00:33:30,920 --> 00:33:32,081
+So we want to leverage on that.
+
+612
+00:33:33,907 --> 00:33:38,468
+Also, we still have to go through this link process,
+
+613
+00:33:38,948 --> 00:33:41,208
+which is still 20 gigabytes to write on disk,
+
+614
+00:33:41,348 --> 00:33:42,749
+so it can take some time.
+
+615
+00:33:43,209 --> 00:33:45,109
+And then also you have to deploy this build
+
+616
+00:33:45,149 --> 00:33:47,710
+onto your kit, for instance, if you're working on console.
+
+617
+00:33:48,170 --> 00:33:50,370
+It's still also a long time, so we want to get rid of that.
+
+618
+00:33:51,511 --> 00:33:53,431
+So the idea here to solve all this problem
+
+619
+00:33:53,471 --> 00:33:56,092
+is to deliver the build on demand.
+
+620
+00:33:56,532 --> 00:33:59,332
+The idea is to stream all the parts on demand
+
+621
+00:33:59,352 --> 00:34:00,453
+when the game requires it.
+
+622
+00:34:02,470 --> 00:34:04,591
+And if you think about it, it's really not a problem.
+
+623
+00:34:04,611 --> 00:34:07,332
+We're making an open-world game, which actually already
+
+624
+00:34:07,352 --> 00:34:10,054
+streams the content in background asynchronously.
+
+625
+00:34:10,734 --> 00:34:15,617
+So we already have in the game all the required elements
+
+626
+00:34:15,697 --> 00:34:20,160
+and code to actually deal with the data arriving
+
+627
+00:34:20,180 --> 00:34:21,120
+asynchronously.
+
+628
+00:34:22,221 --> 00:34:25,303
+And also, if you look more closely to the numbers,
+
+629
+00:34:25,763 --> 00:34:28,024
+our network is actually faster than the hardware
+
+630
+00:34:28,044 --> 00:34:28,825
+you find in the kits.
+
+631
+00:34:29,719 --> 00:34:34,262
+usually they're pretty bad hard drive and our network can just go faster than this hard drive.
+
+632
+00:34:35,523 --> 00:34:39,907
+So the idea here is to virtualize the file system. The idea,
+
+633
+00:34:41,268 --> 00:34:44,991
+whenever we virtualize the file system, we can then have several implementations of that.
+
+634
+00:34:45,652 --> 00:34:49,175
+One could be just accessing the regular disk, but you can have another implementation
+
+635
+00:34:49,655 --> 00:34:54,079
+which is actually virtualizing the manifest content. So for the game, we just show
+
+636
+00:34:56,641 --> 00:34:57,321
+the file tree.
+
+637
+00:34:58,092 --> 00:35:00,173
+that is described by the manifest.
+
+638
+00:35:00,953 --> 00:35:02,154
+So the game doesn't see anything,
+
+639
+00:35:02,194 --> 00:35:04,555
+but that's the implementation of the file system
+
+640
+00:35:04,815 --> 00:35:06,536
+that's actually virtualizing this content.
+
+641
+00:35:07,336 --> 00:35:07,496
+So,
+
+642
+00:35:09,798 --> 00:35:12,059
+that also means that the manifest
+
+643
+00:35:13,599 --> 00:35:15,981
+file system needs to retrieve some parts some way,
+
+644
+00:35:16,601 --> 00:35:19,182
+and this is where actually the file system stack
+
+645
+00:35:19,843 --> 00:35:21,623
+solve this problem, but I'm going to go through
+
+646
+00:35:21,664 --> 00:35:23,865
+an example here to show you what I mean.
+
+647
+00:35:24,745 --> 00:35:27,286
+Let's consider the case where running the game on PS4.
+
+648
+00:35:28,623 --> 00:35:31,045
+And we have the regular file system, this file system.
+
+649
+00:35:31,105 --> 00:35:34,447
+So whenever the game requires a resource, let's say a texture,
+
+650
+00:35:34,467 --> 00:35:36,908
+it's going to ask the file system,
+
+651
+00:35:36,928 --> 00:35:39,610
+and the file system in return provides the file.
+
+652
+00:35:41,111 --> 00:35:44,013
+So now that we have a virtualized file system,
+
+653
+00:35:44,033 --> 00:35:45,694
+we can actually have another implementation that
+
+654
+00:35:45,734 --> 00:35:49,097
+can be, for instance, a network file system.
+
+655
+00:35:49,137 --> 00:35:51,778
+And you have a companion app on your PC.
+
+656
+00:35:51,858 --> 00:35:53,760
+So that means whenever the game requires
+
+657
+00:35:54,560 --> 00:35:55,461
+some kind of resource.
+
+658
+00:35:56,800 --> 00:35:58,961
+this request can be forwarded to your PC
+
+659
+00:35:59,121 --> 00:36:01,302
+and the companion app on your PC just provides the file
+
+660
+00:36:02,582 --> 00:36:04,543
+and in return, you can provide this file to the game.
+
+661
+00:36:07,364 --> 00:36:11,086
+So now consider the case when you have your manifest file system.
+
+662
+00:36:12,447 --> 00:36:15,048
+So whenever the game requires some resources,
+
+663
+00:36:15,108 --> 00:36:19,950
+the manifest file system is going to traduce this request into a part request.
+
+664
+00:36:20,570 --> 00:36:23,231
+And it has to forward this part request to another file system
+
+665
+00:36:23,271 --> 00:36:24,972
+and this is where we have the file system stack.
+
+666
+00:36:25,421 --> 00:36:29,043
+So we can forward this request to the network file system, for instance.
+
+667
+00:36:29,583 --> 00:36:31,283
+The file system can forward it to your PC.
+
+668
+00:36:31,784 --> 00:36:33,664
+Then your PC can do whatever it wants with that.
+
+669
+00:36:33,765 --> 00:36:38,006
+So we can have, let's say, a central part server on the network, shared between all the users.
+
+670
+00:36:38,507 --> 00:36:40,667
+So we can get the part out of this server,
+
+671
+00:36:41,488 --> 00:36:45,870
+and can provide this part to the network file system, which gives it back to the manifest file system.
+
+672
+00:36:46,590 --> 00:36:48,671
+And then we can provide the file to the game.
+
+673
+00:36:50,542 --> 00:36:53,624
+What's cool with this setup, now I can put in the middle, for instance,
+
+674
+00:36:54,225 --> 00:36:58,008
+a cache file system that's going to store locally all the parts,
+
+675
+00:36:58,028 --> 00:37:00,791
+so you don't have to go through all the network pipeline to get it back.
+
+676
+00:37:02,472 --> 00:37:05,895
+So whenever you request your file, it becomes a part request,
+
+677
+00:37:05,935 --> 00:37:08,918
+and you can get the parts directly out of the cache file system
+
+678
+00:37:10,239 --> 00:37:11,180
+and provide it to the game.
+
+679
+00:37:12,781 --> 00:37:15,944
+So I guess at this point, you get the idea behind the file system cache.
+
+680
+00:37:17,477 --> 00:37:22,859
+So also what you see here, we have a companion app running on the PC, and this is what actually is RTPal.
+
+681
+00:37:23,439 --> 00:37:26,961
+So RTPal is a companion app we have on the PC to run its own file system stack,
+
+682
+00:37:27,761 --> 00:37:34,643
+and actually provides us several features, the main one being retrieving the manifest out of the manifest server,
+
+683
+00:37:34,663 --> 00:37:37,504
+which is just a network folder where we store all the manifests,
+
+684
+00:37:38,025 --> 00:37:41,646
+and retrieving the part on demand, so whenever the game asks for a part.
+
+685
+00:37:42,722 --> 00:37:46,946
+It's going to get the part of the network, save it locally using the Cache file system
+
+686
+00:37:46,986 --> 00:37:52,431
+and providing it to the game so we don't have to go through the cache to the part server
+
+687
+00:37:52,491 --> 00:37:52,991
+all the time.
+
+688
+00:37:54,373 --> 00:37:59,377
+Another cool feature you can see here is actually I said that the game was running on PS4, but
+
+689
+00:37:59,437 --> 00:38:00,158
+we just don't care.
+
+690
+00:38:00,258 --> 00:38:04,161
+It could be on PC, 360, Xbox One or whatever.
+
+691
+00:38:05,040 --> 00:38:11,021
+It would be exactly the same so also what our t-pad is providing us is a way to unify the workflow for all the platforms
+
+692
+00:38:11,041 --> 00:38:17,023
+You just work exactly the same way the idea. You just put on your game a command line thing. I want to run this version
+
+693
+00:38:18,623 --> 00:38:23,784
+Using our t-pad which is running on this PC, and then the game connect to our t-pad and you're good to go
+
+694
+00:38:25,185 --> 00:38:27,265
+So I t-pad actually I put some screenshot here
+
+695
+00:38:28,726 --> 00:38:29,286
+Looks like that
+
+696
+00:38:32,270 --> 00:38:34,793
+And here I'm going to show you some pretty cool stuff.
+
+697
+00:38:34,833 --> 00:38:38,215
+I'm going to synchronize a version live in the video.
+
+698
+00:38:39,937 --> 00:38:41,979
+So to synchronize a version, you just hit this button.
+
+699
+00:38:43,380 --> 00:38:43,660
+Bam.
+
+700
+00:38:43,900 --> 00:38:45,642
+I just synced five versions in one click.
+
+701
+00:38:46,543 --> 00:38:48,444
+So now I'm able to actually run this version.
+
+702
+00:38:48,484 --> 00:38:50,666
+If I want to change the version, let's
+
+703
+00:38:50,686 --> 00:38:52,588
+say I want to run over the yesterday version,
+
+704
+00:38:53,429 --> 00:38:54,469
+just open this drop-down.
+
+705
+00:38:55,791 --> 00:38:56,031
+Bam.
+
+706
+00:38:56,291 --> 00:38:57,652
+I just synced yesterday's version.
+
+707
+00:38:58,133 --> 00:38:59,073
+That's that simple.
+
+708
+00:39:01,221 --> 00:39:05,924
+Another video I want to show you is actually doing something completely useless. I'm going to actually download a build
+
+709
+00:39:07,325 --> 00:39:09,626
+But doing so I'm just clicking this download button
+
+710
+00:39:09,806 --> 00:39:13,308
+So it's starting to retrieve some some parts out of the part server
+
+711
+00:39:13,768 --> 00:39:17,030
+But what you see here by getting the parts out of one manifest
+
+712
+00:39:17,090 --> 00:39:20,612
+I'm actually getting those part on disk and since those parts are shared
+
+713
+00:39:21,152 --> 00:39:26,495
+Between several builds you see all the builds progressing at the same time. This is the sharing in action
+
+714
+00:39:26,515 --> 00:39:30,157
+So that's pretty cool. You see actually the sharing in action with that kind of downloads
+
+715
+00:39:31,934 --> 00:39:37,557
+So RTPal is providing us transfer and storage reduction
+
+716
+00:39:38,438 --> 00:39:40,179
+thanks to the slicing and the parts.
+
+717
+00:39:41,880 --> 00:39:43,901
+It provides us also a unified workflow.
+
+718
+00:39:43,981 --> 00:39:46,482
+We can just work exactly the same way on all platforms.
+
+719
+00:39:48,423 --> 00:39:50,084
+It provides instant package synchronization
+
+720
+00:39:50,144 --> 00:39:50,885
+in just one click.
+
+721
+00:39:52,906 --> 00:39:53,926
+And what we can say actually,
+
+722
+00:39:54,087 --> 00:39:58,129
+RTPal is reinventing package distribution
+
+723
+00:39:58,209 --> 00:40:00,570
+by just getting rid of package distribution.
+
+724
+00:40:02,481 --> 00:40:05,482
+That's pretty cool actually, working with that is just a breeze.
+
+725
+00:40:05,502 --> 00:40:08,663
+You just put a command line, run your game, and you're good to go.
+
+726
+00:40:09,283 --> 00:40:12,704
+And that's true for actually the latest build or last year that I built, it just works.
+
+727
+00:40:15,065 --> 00:40:18,226
+So the next point is on the hardware side.
+
+728
+00:40:18,246 --> 00:40:23,868
+So we wanted also to solve the problem at the same time, at the studio level, by making
+
+729
+00:40:23,928 --> 00:40:28,089
+sure we have the proper hardware to deliver for all the projects if we had a situation
+
+730
+00:40:28,129 --> 00:40:30,550
+where many projects were asking for hardware.
+
+731
+00:40:31,636 --> 00:40:32,677
+some build at the same time.
+
+732
+00:40:33,377 --> 00:40:37,742
+So what we wanted to do is have some system that have high performance for sure,
+
+733
+00:40:38,622 --> 00:40:40,064
+in terms of high ups and throughput,
+
+734
+00:40:40,544 --> 00:40:42,526
+but also something that was quickly scalable,
+
+735
+00:40:42,646 --> 00:40:45,929
+so we can actually adapt depending on the state of production,
+
+736
+00:40:45,970 --> 00:40:47,871
+at the beginning of the production, at the end of the production,
+
+737
+00:40:47,891 --> 00:40:48,832
+you don't have the same needs.
+
+738
+00:40:49,213 --> 00:40:51,675
+So we wanted something that can adapt to that kind of reality.
+
+739
+00:40:52,522 --> 00:40:54,102
+and something that can be robust as well.
+
+740
+00:40:54,162 --> 00:40:57,403
+So if we have some failure on the hardware,
+
+741
+00:40:57,583 --> 00:40:59,224
+we can still have the service running
+
+742
+00:40:59,644 --> 00:41:01,525
+so we don't paralyze the entire production.
+
+743
+00:41:02,505 --> 00:41:04,786
+We looked at what was available at the end of 2012.
+
+744
+00:41:05,766 --> 00:41:09,307
+And we looked at TEF, which was pretty good,
+
+745
+00:41:09,347 --> 00:41:13,989
+but was not good enough for our taste in the IOPs field.
+
+746
+00:41:14,589 --> 00:41:16,210
+It seems to have improved a lot since then,
+
+747
+00:41:16,250 --> 00:41:17,830
+but in 2012, it was not good enough.
+
+748
+00:41:18,742 --> 00:41:24,224
+We looked also at Hadoop HDFS, but this system was too centralized, it has a main server,
+
+749
+00:41:24,644 --> 00:41:29,806
+so if this server gets down, you just lose the service, we don't want to use that.
+
+750
+00:41:30,806 --> 00:41:36,348
+We looked also at OpenAFS, but this project was not mature enough, so we don't want to
+
+751
+00:41:36,428 --> 00:41:36,809
+use that.
+
+752
+00:41:37,549 --> 00:41:43,111
+And we looked at the cluster implementation of Red Hat, and this one was actually responding
+
+753
+00:41:43,131 --> 00:41:45,391
+to all our needs, so we decided to go with that.
+
+754
+00:41:46,805 --> 00:41:48,507
+So what is the cluster file system?
+
+755
+00:41:50,048 --> 00:41:52,590
+You can see it as, for those of you who know
+
+756
+00:41:52,630 --> 00:41:54,511
+the red file system within a disk,
+
+757
+00:41:54,531 --> 00:41:57,894
+it's actually distributing the work on an array of disks.
+
+758
+00:41:58,314 --> 00:42:03,038
+The cluster file system is kind of the same thing,
+
+759
+00:42:03,078 --> 00:42:04,619
+but on a cluster of PCs.
+
+760
+00:42:05,079 --> 00:42:07,461
+So it's a distributed file system on a cluster of PCs.
+
+761
+00:42:09,183 --> 00:42:11,885
+It has, so we can do some replication between the nodes,
+
+762
+00:42:11,905 --> 00:42:13,666
+so you can have several copies of the same file
+
+763
+00:42:13,806 --> 00:42:15,908
+on different nodes of the cluster.
+
+764
+00:42:17,160 --> 00:42:19,181
+And also, we can build it in a way
+
+765
+00:42:19,201 --> 00:42:21,962
+when you put two network interfaces into each node.
+
+766
+00:42:22,422 --> 00:42:23,802
+So actually, one network interface
+
+767
+00:42:23,862 --> 00:42:25,403
+is used for the internal replication
+
+768
+00:42:25,463 --> 00:42:28,044
+and the internal communication, while the other is used
+
+769
+00:42:28,104 --> 00:42:29,044
+actually for servicing.
+
+770
+00:42:29,064 --> 00:42:32,185
+So you don't have both communication interacting
+
+771
+00:42:32,205 --> 00:42:35,186
+and making the service slow.
+
+772
+00:42:37,466 --> 00:42:41,988
+So we did some tests, and we're pretty happy with the results.
+
+773
+00:42:42,068 --> 00:42:43,388
+We decided to go all in with that
+
+774
+00:42:43,488 --> 00:42:46,729
+and buy some hardware to build our own.
+
+775
+00:42:48,324 --> 00:42:53,147
+Auglaster FS. So now it's the time for the IT guys, like porn IT.
+
+776
+00:42:54,368 --> 00:42:58,390
+So we built actually eight high-end PCs, the best one at this time.
+
+777
+00:42:59,871 --> 00:43:02,593
+And we added in those PCs eight SSDs
+
+778
+00:43:03,634 --> 00:43:07,956
+plugged in red zero on a dedicated controller card directly into the PCI Express slot.
+
+779
+00:43:09,893 --> 00:43:12,534
+And we added the best network card we can form at this time,
+
+780
+00:43:12,934 --> 00:43:16,015
+some 10 gigabit second network card.
+
+781
+00:43:16,435 --> 00:43:19,896
+And we put this 8-node cluster to the test.
+
+782
+00:43:20,596 --> 00:43:22,377
+So we did some tests on the throughput side
+
+783
+00:43:22,457 --> 00:43:26,398
+with a 14-gigabyte file with 30 users downloading it
+
+784
+00:43:26,418 --> 00:43:27,038
+at the same time.
+
+785
+00:43:27,058 --> 00:43:29,039
+And we compared to what we had at this time.
+
+786
+00:43:29,159 --> 00:43:32,200
+Our NAS was built on top of SAN from EMC.
+
+787
+00:43:32,380 --> 00:43:36,541
+It was a VNX EMC, for those of you who know at this time.
+
+788
+00:43:37,225 --> 00:43:41,966
+So out of the EMC SAN, we were getting up to 18 MB per second.
+
+789
+00:43:42,026 --> 00:43:44,926
+Out of the cluster, we were able to get 73 MB per second
+
+790
+00:43:44,986 --> 00:43:49,027
+for the 30 concurrent users getting the deal at the same time.
+
+791
+00:43:50,307 --> 00:43:53,348
+On the IOPS field, the test was 100,000 files
+
+792
+00:43:53,708 --> 00:43:57,909
+downloaded at the same time by several small files by several users.
+
+793
+00:43:58,609 --> 00:44:02,189
+So out of the SAN, we were able to have 250,000 IOPS.
+
+794
+00:44:02,910 --> 00:44:06,310
+And out of the cluster, we were able to get more than half a million IOPS.
+
+795
+00:44:07,344 --> 00:44:09,306
+For those of you who are familiar with those numbers,
+
+796
+00:44:09,326 --> 00:44:11,488
+half a million IOPS is completely insane.
+
+797
+00:44:14,251 --> 00:44:15,412
+And what's cool also about that,
+
+798
+00:44:15,452 --> 00:44:18,796
+we are able to compare those results
+
+799
+00:44:18,876 --> 00:44:22,000
+to another unit we got from Violin.
+
+800
+00:44:22,020 --> 00:44:25,964
+It's another brand of high-end memory,
+
+801
+00:44:26,004 --> 00:44:27,185
+and we were able to get 6,000 series.
+
+802
+00:44:29,565 --> 00:44:35,568
+violin sound and we compared to what's pretty cool here we get the same results
+
+803
+00:44:35,668 --> 00:44:41,390
+that the high-end violin memory but if you look at really the cost of do stuff
+
+804
+00:44:41,450 --> 00:44:46,352
+it's you cannot compare that it's just another world that's pretty cool
+
+805
+00:44:46,372 --> 00:44:49,314
+actually we've got some pretty good results out of that and it cost just a
+
+806
+00:44:49,354 --> 00:44:53,235
+fraction of of what the high-end equipment actually a provider
+
+807
+00:44:55,765 --> 00:45:01,370
+So we're using that for RTPAL, so we can get a build out of the asset store.
+
+808
+00:45:01,730 --> 00:45:03,392
+We're also using that for the raw source caching.
+
+809
+00:45:03,412 --> 00:45:08,976
+So as I told you, you need to have good hardware to provide a reliable cache.
+
+810
+00:45:09,437 --> 00:45:10,117
+So now we have it.
+
+811
+00:45:11,178 --> 00:45:14,080
+And we're also using that for the code compilation cache of FastBuild.
+
+812
+00:45:16,022 --> 00:45:20,726
+So future work we want to do on the GlassRefi system is actually re-evaluate the CEPH.
+
+813
+00:45:21,425 --> 00:45:26,068
+because that seems to have improved a lot since then, so it could be actually nice to re-evaluate
+
+814
+00:45:26,128 --> 00:45:31,333
+that and see if today it would be a better choice than the Gluster. And the main reason about that
+
+815
+00:45:31,433 --> 00:45:38,018
+is still the Gluster suffers from a problem, the healing process. Since we have millions of assets
+
+816
+00:45:38,138 --> 00:45:43,902
+on those disks, whenever you have a problem with a node, the Gluster enters some healing mode,
+
+817
+00:45:44,243 --> 00:45:48,266
+and while in healing mode, the entire service really gets degraded a lot.
+
+818
+00:45:48,985 --> 00:45:52,006
+and that has been a problem several times on the project.
+
+819
+00:45:53,726 --> 00:45:56,787
+So now we've seen how to build an executable quickly,
+
+820
+00:45:56,807 --> 00:45:58,808
+to build a data build quickly,
+
+821
+00:45:58,848 --> 00:46:01,168
+to deliver those builds as quickly as we can to the user.
+
+822
+00:46:01,928 --> 00:46:04,349
+The last point I want to talk about
+
+823
+00:46:04,429 --> 00:46:07,030
+is how we can iterate locally as quick as we can.
+
+824
+00:46:09,151 --> 00:46:13,512
+And to explain that, let's get back again in 2012 summer
+
+825
+00:46:13,552 --> 00:46:14,492
+when we're shipping Far Cry 3.
+
+826
+00:46:15,610 --> 00:46:21,435
+And at the end of the project, we had several small bugs that required to change the settings into some XML file in the package.
+
+827
+00:46:22,556 --> 00:46:27,360
+So, at this time, you had three solutions to actually solve that kind of problem, to fix your bug.
+
+828
+00:46:27,421 --> 00:46:34,146
+The first one was to just make your change into the source file, submit, and wait for the next day, for the nightly.
+
+829
+00:46:35,207 --> 00:46:36,508
+Not a pretty good workflow.
+
+830
+00:46:37,329 --> 00:46:40,591
+The second one was to do the change, but re-binarize locally.
+
+831
+00:46:41,132 --> 00:46:43,034
+As I told you at the beginning of this talk,
+
+832
+00:46:43,054 --> 00:46:45,976
+it was also too long, it was not actually doable.
+
+833
+00:46:46,677 --> 00:46:50,480
+And the third solution was to actually open the big file by hand,
+
+834
+00:46:50,960 --> 00:46:54,424
+try to find your file, put your modified file into the big file,
+
+835
+00:46:54,484 --> 00:46:59,768
+repackage the big file, then re-deploy the big file on console,
+
+836
+00:46:59,788 --> 00:47:00,609
+and then you were good to go.
+
+837
+00:47:01,696 --> 00:47:05,780
+So just to say it was just a nightmare to fix that kind of bug at the end of Far Cry 3.
+
+838
+00:47:05,860 --> 00:47:07,702
+And so we wanted to improve on that.
+
+839
+00:47:08,282 --> 00:47:12,266
+But still this last workflow, actually changing stuff by hand, was pretty efficient.
+
+840
+00:47:12,346 --> 00:47:15,730
+It was just a pain because you had to do everything by hand, but it was pretty efficient.
+
+841
+00:47:16,270 --> 00:47:20,234
+So we wanted to actually try to automate those stuff.
+
+842
+00:47:21,734 --> 00:47:23,935
+a system that can actually detect the changes for you,
+
+843
+00:47:24,535 --> 00:47:27,997
+compile the file if it requires some compilation
+
+844
+00:47:28,137 --> 00:47:29,898
+or some transformation,
+
+845
+00:47:30,478 --> 00:47:32,279
+and then handle the big file creation for you
+
+846
+00:47:32,339 --> 00:47:33,660
+and the deployment if necessary.
+
+847
+00:47:34,260 --> 00:47:35,981
+And these steps actually define a workflow
+
+848
+00:47:36,001 --> 00:47:37,582
+that we could call the patching workflow.
+
+849
+00:47:38,843 --> 00:47:40,404
+And this patching workflow has three stages.
+
+850
+00:47:41,124 --> 00:47:42,965
+The first one being detecting those changes.
+
+851
+00:47:43,505 --> 00:47:45,746
+We're doing that through what we call the compiled apps.
+
+852
+00:47:46,916 --> 00:47:48,497
+Then packaging those changes together.
+
+853
+00:47:48,517 --> 00:47:50,659
+We're doing that through the patch big file.
+
+854
+00:47:51,179 --> 00:47:53,341
+And then applying those changes to a running build.
+
+855
+00:47:53,721 --> 00:47:55,343
+And we're doing that through the big file stack.
+
+856
+00:47:56,964 --> 00:47:58,085
+So detecting the changes.
+
+857
+00:47:58,245 --> 00:48:00,327
+Consider the case when you have a texture
+
+858
+00:48:00,347 --> 00:48:03,329
+that needs to be compiled to produce an output.
+
+859
+00:48:05,331 --> 00:48:08,314
+What actually defines this output is the source file,
+
+860
+00:48:08,354 --> 00:48:09,495
+but you have many other stuff
+
+861
+00:48:09,515 --> 00:48:11,336
+that actually can change the output.
+
+862
+00:48:11,356 --> 00:48:13,958
+You can have some settings applied to a compiler.
+
+863
+00:48:14,664 --> 00:48:17,166
+telling him how you want to compile this texture.
+
+864
+00:48:17,686 --> 00:48:20,728
+You can have some code version that can change and compile
+
+865
+00:48:20,969 --> 00:48:22,610
+with the same setting, the same input file,
+
+866
+00:48:22,650 --> 00:48:24,151
+producing another output file.
+
+867
+00:48:24,752 --> 00:48:26,693
+So all those little things
+
+868
+00:48:26,713 --> 00:48:30,196
+actually defining the inputs of your outputs.
+
+869
+00:48:31,557 --> 00:48:34,199
+And what we do is creating a file,
+
+870
+00:48:34,259 --> 00:48:35,781
+which we call a compile.dep,
+
+871
+00:48:36,001 --> 00:48:38,363
+and just set all the inputs that have been used
+
+872
+00:48:38,383 --> 00:48:39,203
+to produce an output.
+
+873
+00:48:40,789 --> 00:48:42,149
+So now you have that.
+
+874
+00:48:43,550 --> 00:48:46,710
+When we're doing our nightly build, we are compiling a bunch of textures, let's say.
+
+875
+00:48:47,150 --> 00:48:51,251
+But we're going to come to a produce at the same time all the compiled EPs, and we're going to
+
+876
+00:48:53,132 --> 00:48:57,992
+package the texture into the regular package, but package all the compiled EPs into a separate package.
+
+877
+00:48:59,013 --> 00:49:02,693
+So now when you are on your local PC, you want to know if you have some local changes
+
+878
+00:49:03,714 --> 00:49:04,714
+for a given texture.
+
+879
+00:49:06,034 --> 00:49:09,375
+You don't have to actually get this texture. What you need to get is the compiled EPs.
+
+880
+00:49:10,020 --> 00:49:11,061
+Once you have your compiled app,
+
+881
+00:49:11,981 --> 00:49:13,542
+you can look at actually what it says.
+
+882
+00:49:13,863 --> 00:49:15,944
+So it tells you what file has been used
+
+883
+00:49:16,024 --> 00:49:17,866
+to produce the output, what version of the code,
+
+884
+00:49:18,406 --> 00:49:19,047
+what settings.
+
+885
+00:49:20,047 --> 00:49:22,569
+And then you can compare each of these inputs
+
+886
+00:49:23,110 --> 00:49:24,511
+to what you have on your local disk.
+
+887
+00:49:25,792 --> 00:49:27,433
+And if you have something that has changed,
+
+888
+00:49:27,473 --> 00:49:29,274
+that means you have some local changes
+
+889
+00:49:29,334 --> 00:49:30,675
+compared to what has been used
+
+890
+00:49:30,695 --> 00:49:32,597
+to produce the official Nightly Build.
+
+891
+00:49:33,097 --> 00:49:35,099
+And if you want to see your changes in your build,
+
+892
+00:49:35,139 --> 00:49:37,080
+you need to actually recompile this texture.
+
+893
+00:49:37,681 --> 00:49:38,521
+So recompile it.
+
+894
+00:49:39,122 --> 00:49:39,402
+And then...
+
+895
+00:49:41,107 --> 00:49:44,410
+you can package this texture into what we call the patch.b file.
+
+896
+00:49:45,831 --> 00:49:48,514
+Then when you have this patch.b file, you can actually mount it into the game.
+
+897
+00:49:49,015 --> 00:49:55,341
+So whenever the game will require the set texture, look into the patch.b file first.
+
+898
+00:49:55,401 --> 00:49:58,884
+If the patch.b file has the texture, it can provide it directly.
+
+899
+00:49:59,945 --> 00:50:04,870
+If it doesn't, we go through the regular workflow and get the texture out of the regular package.
+
+900
+00:50:06,038 --> 00:50:10,820
+What's cool also with that is you can have your patch big file, so it applies all your can changes.
+
+901
+00:50:11,161 --> 00:50:16,683
+But if you want to get back to the original package, you just have to get rid of the patch big file,
+
+902
+00:50:16,703 --> 00:50:20,264
+and bam, you're back to the original build.
+
+903
+00:50:23,365 --> 00:50:27,027
+So what's cool here, thanks to RTPAL, nothing gets downloaded.
+
+904
+00:50:27,047 --> 00:50:31,048
+You just have to get the compiled app.
+
+905
+00:50:31,889 --> 00:50:35,610
+And out of the compiled app, then, and thanks to the stack file system,
+
+906
+00:50:36,754 --> 00:50:40,876
+You can, if you have a local change, it will come from the patch.big file.
+
+907
+00:50:40,977 --> 00:50:43,758
+If you don't have local changes, it will go through the stack.file system,
+
+908
+00:50:43,838 --> 00:50:49,761
+or tp everything, and will retrieve the actual asset from the part server.
+
+909
+00:50:50,442 --> 00:50:54,504
+What's pretty cool with that is actually you can patch some asset that you have never downloaded.
+
+910
+00:50:54,524 --> 00:50:57,366
+I find it pretty cool.
+
+911
+00:50:59,287 --> 00:51:00,708
+So we've seen several stuff.
+
+912
+00:51:00,728 --> 00:51:05,290
+We've seen how we improved our compilation time thanks to fast build mostly.
+
+913
+00:51:05,914 --> 00:51:09,756
+We've seen how we improved our fast or nightly build
+
+914
+00:51:09,876 --> 00:51:11,956
+thanks to the remote profiling and the resource caching.
+
+915
+00:51:11,976 --> 00:51:15,077
+We've seen how we improved our package distribution
+
+916
+00:51:15,217 --> 00:51:16,698
+thanks to our T-Pal and the Asset Store.
+
+917
+00:51:17,238 --> 00:51:19,499
+We've seen how we improved our local iteration
+
+918
+00:51:19,519 --> 00:51:20,479
+thanks to the Dev Patcher.
+
+919
+00:51:21,480 --> 00:51:22,780
+There are many people that have been working
+
+920
+00:51:22,840 --> 00:51:25,721
+on those subjects, so I'd like to give credits
+
+921
+00:51:25,781 --> 00:51:28,342
+to a few key people that have been working on this stuff.
+
+922
+00:51:33,284 --> 00:51:33,744
+And that's it.
+
+923
+00:51:34,084 --> 00:51:34,765
+Thank you for coming.
+
+924
+00:51:44,148 --> 00:51:46,368
+I think we have a few minutes if you have some questions.
+
+925
+00:51:47,589 --> 00:51:48,609
+Hi, thank you for giving me the talk.
+
+926
+00:51:49,049 --> 00:51:50,510
+I have a question about your FastBuild.
+
+927
+00:51:50,930 --> 00:51:52,490
+Did you have any custom build steps,
+
+928
+00:51:53,190 --> 00:51:54,671
+code generation, things of that nature,
+
+929
+00:51:55,031 --> 00:51:56,871
+and was that difficult to configure with FastBuild?
+
+930
+00:52:01,533 --> 00:52:03,033
+Well, a few of those, and actually,
+
+931
+00:52:03,053 --> 00:52:04,674
+you can, in FastBuild, you can have some,
+
+932
+00:52:04,734 --> 00:52:08,255
+the idea of FastBuild is it's like a graph node
+
+933
+00:52:08,355 --> 00:52:10,835
+which every step within the compilation,
+
+934
+00:52:13,081 --> 00:52:16,543
+will be executed when you have all the dependencies that have been already executed
+
+935
+00:52:16,903 --> 00:52:19,705
+and some of those nodes can be just executing an external
+
+936
+00:52:19,745 --> 00:52:21,026
+the external
+
+937
+00:52:21,847 --> 00:52:23,948
+executable so you can actually plug whatever you want
+
+938
+00:52:24,789 --> 00:52:26,590
+in the fastbuild dependency tree
+
+939
+00:52:26,930 --> 00:52:27,651
+oh, thank you
+
+940
+00:52:29,392 --> 00:52:36,797
+about fastbuild, how does it detect dependencies or how does it know when it needs to get a file from the cache or build it locally?
+
+941
+00:52:37,966 --> 00:52:41,528
+The key for the cache is actually the preprocessed file
+
+942
+00:52:41,748 --> 00:52:43,249
+plus the option that has been used,
+
+943
+00:52:43,269 --> 00:52:45,470
+hash of the preprocessed file
+
+944
+00:52:45,550 --> 00:52:47,131
+plus the option that has been used,
+
+945
+00:52:47,211 --> 00:52:48,191
+and a few other settings.
+
+946
+00:52:48,832 --> 00:52:51,353
+And we produce a key out of those
+
+947
+00:52:51,854 --> 00:52:53,515
+that can be used to actually get
+
+948
+00:52:53,615 --> 00:52:55,055
+the object file out of the cache.
+
+949
+00:52:55,816 --> 00:52:56,156
+Thank you.
+
+950
+00:52:56,496 --> 00:52:56,796
+Welcome.
+
+951
+00:52:59,298 --> 00:53:00,118
+Hiya, thanks for the talk.
+
+952
+00:53:01,044 --> 00:53:05,926
+So you said that when your engineers submit code to the Perforce store,
+
+953
+00:53:06,306 --> 00:53:09,406
+then there are process that runs before their code can be submitted.
+
+954
+00:53:10,107 --> 00:53:13,468
+And one of those is that you run a binarize on an area of the world.
+
+955
+00:53:13,848 --> 00:53:15,708
+I was wondering, does that take a long time?
+
+956
+00:53:15,788 --> 00:53:19,129
+Does it introduce a lot of latency for when the engineer wants to check their code in?
+
+957
+00:53:20,175 --> 00:53:25,357
+The binarization is taking, we're not doing the entire wall
+
+958
+00:53:25,417 --> 00:53:28,178
+for sure, so we're just doing actually two maps
+
+959
+00:53:28,258 --> 00:53:30,278
+at the same time, what I call a map is a square kilometer
+
+960
+00:53:30,298 --> 00:53:32,759
+of the wall, so we're just doing two maps at the same time
+
+961
+00:53:32,819 --> 00:53:35,000
+and it takes between 10 and 15 minutes.
+
+962
+00:53:35,700 --> 00:53:37,721
+So yeah, we have some latency and we cannot do all
+
+963
+00:53:37,781 --> 00:53:40,882
+the change list, so when we do a change list and it's done,
+
+964
+00:53:41,462 --> 00:53:43,803
+then we go to the next change list that have been combined
+
+965
+00:53:43,863 --> 00:53:46,844
+and ready to be used, so yes, we are not doing all
+
+966
+00:53:46,864 --> 00:53:48,125
+the change list and there is some latency.
+
+967
+00:53:48,957 --> 00:53:51,258
+OK, but you are using the actual shipping world.
+
+968
+00:53:51,338 --> 00:53:52,619
+It's not just some test world.
+
+969
+00:53:52,659 --> 00:53:55,160
+No, that's the true real map of the real world.
+
+970
+00:53:55,640 --> 00:53:55,981
+Thanks.
+
+971
+00:53:56,241 --> 00:53:56,541
+Welcome.
+
+972
+00:53:59,542 --> 00:53:59,722
+Hi.
+
+973
+00:54:00,223 --> 00:54:03,584
+You said that you rebuilt the resource cache during the
+
+974
+00:54:03,624 --> 00:54:06,526
+night, so does it mean that if I change something in the
+
+975
+00:54:06,586 --> 00:54:10,547
+morning, like texture format, all the resource cache is
+
+976
+00:54:10,587 --> 00:54:11,608
+broken for entire day?
+
+977
+00:54:13,109 --> 00:54:14,329
+Sorry, excuse me?
+
+978
+00:54:15,470 --> 00:54:16,790
+If I change something in the morning?
+
+979
+00:54:17,070 --> 00:54:17,771
+In the editor, like?
+
+980
+00:54:18,397 --> 00:54:23,420
+Textual format? Does it mean that resource cache is broken until the nightly build?
+
+981
+00:54:25,081 --> 00:54:29,444
+Usually we try to ask our team member when we have big changes that are going to
+
+982
+00:54:30,065 --> 00:54:33,687
+create some problems, wait until the evening, don't submit that in the morning.
+
+983
+00:54:34,528 --> 00:54:40,992
+But it doesn't mean that it will break the build. The official build has the executable plus the
+
+984
+00:54:41,032 --> 00:54:46,195
+version. If you make a change in the code that actually introduces some
+
+985
+00:54:47,940 --> 00:54:48,921
+some...
+
+986
+00:54:50,641 --> 00:54:52,101
+I don't mean breaking the build, just...
+
+987
+00:54:53,142 --> 00:54:54,762
+the cache will be useless until you...
+
+988
+00:54:54,922 --> 00:54:56,643
+Oh yeah, yeah, yeah, for sure, yeah.
+
+989
+00:54:56,923 --> 00:54:58,663
+Yeah, so what you can do, you can
+
+990
+00:54:58,763 --> 00:55:00,704
+prime the cache locally on your machine, for instance
+
+991
+00:55:00,724 --> 00:55:02,724
+when you change the
+
+992
+00:55:02,884 --> 00:55:04,665
+version of the texture compiler, for instance
+
+993
+00:55:04,685 --> 00:55:06,725
+you can prime your cache on your PC, so just
+
+994
+00:55:07,065 --> 00:55:08,966
+send a binarization with the command line
+
+995
+00:55:09,026 --> 00:55:09,506
+cache write.
+
+996
+00:55:10,246 --> 00:55:13,127
+But you can't manually rebuild the cache on the
+
+997
+00:55:14,667 --> 00:55:15,227
+build machines
+
+998
+00:55:15,767 --> 00:55:17,328
+like with central cache.
+
+999
+00:55:18,282 --> 00:55:20,183
+It's build, whenever you submit, actually,
+
+1000
+00:55:20,203 --> 00:55:23,066
+since we're doing the binarization of this stuff,
+
+1001
+00:55:23,186 --> 00:55:25,447
+all the stuff that will be done will be pushed on the cache.
+
+1002
+00:55:26,048 --> 00:55:28,089
+No, I mean the resource cache, like?
+
+1003
+00:55:28,230 --> 00:55:28,530
+Yeah, yeah.
+
+1004
+00:55:28,950 --> 00:55:31,092
+Can you rebuild it manually, like in the morning?
+
+1005
+00:55:31,112 --> 00:55:33,794
+I'm not sure I get your question.
+
+1006
+00:55:33,814 --> 00:55:36,856
+You can run the cache locally, or you can let the blue machine
+
+1007
+00:55:36,896 --> 00:55:37,096
+do it.
+
+1008
+00:55:37,377 --> 00:55:37,757
+OK, yes.
+
+1009
+00:55:38,157 --> 00:55:38,678
+Fine, thanks.
+
+1010
+00:55:41,065 --> 00:55:44,709
+Hello, could you please clarify your comparison?
+
+1011
+00:55:44,769 --> 00:55:48,854
+So when you compared FastBuild with IncrediBuild,
+
+1012
+00:55:49,394 --> 00:55:52,358
+you said that on 10 machines, IncrediBuild was slower
+
+1013
+00:55:52,418 --> 00:55:53,559
+than on one machine.
+
+1014
+00:55:55,006 --> 00:55:59,810
+fast build work. And it was same machines? 32 cores?
+
+1015
+00:56:00,350 --> 00:56:10,418
+It was 12 cores. So actually our machines at our regular workstation, the local build was on a 12 core machine that we all have.
+
+1016
+00:56:10,438 --> 00:56:13,081
+So actually IncrediBuild was running on those same machines.
+
+1017
+00:56:13,561 --> 00:56:15,022
+Okay, so it's same machines?
+
+1018
+00:56:15,182 --> 00:56:15,823
+Yes, same machines.
+
+1019
+00:56:16,243 --> 00:56:16,704
+Okay, thank you.
+
+1020
+00:56:16,724 --> 00:56:18,585
+No, it's not. Yes, it's real numbers.
+
+1021
+00:56:21,877 --> 00:56:22,037
+Hello.
+
+1022
+00:56:22,418 --> 00:56:24,739
+Hi, so you were making comparisons to 2012
+
+1023
+00:56:25,079 --> 00:56:26,820
+and where things were in 2012.
+
+1024
+00:56:27,481 --> 00:56:29,242
+How long did it take you to get this?
+
+1025
+00:56:29,722 --> 00:56:31,203
+You know, at what point in Far Cry 4
+
+1026
+00:56:31,763 --> 00:56:33,144
+did this all sort of come together?
+
+1027
+00:56:33,604 --> 00:56:35,906
+And you thanked six people at the end
+
+1028
+00:56:35,966 --> 00:56:38,787
+about how many people total were working on this
+
+1029
+00:56:38,828 --> 00:56:40,308
+and was this like a full-time thing for them,
+
+1030
+00:56:41,169 --> 00:56:43,290
+like in terms of managing this project, how did that go?
+
+1031
+00:56:44,331 --> 00:56:45,812
+So how long does it take?
+
+1032
+00:56:45,932 --> 00:56:46,352
+It doesn't.
+
+1033
+00:56:47,107 --> 00:56:48,707
+took that, actually one of the most,
+
+1034
+00:56:48,927 --> 00:56:52,068
+actually FastBuild, how long does it take you?
+
+1035
+00:56:52,948 --> 00:56:53,968
+FastBuild, two months?
+
+1036
+00:56:54,628 --> 00:56:56,429
+So yeah, FastBuild switch, they took two months.
+
+1037
+00:56:57,289 --> 00:57:02,410
+The RT PAL, it looks like was running in two or three months.
+
+1038
+00:57:02,950 --> 00:57:05,590
+So having all the pipeline and slicing the stuff
+
+1039
+00:57:05,630 --> 00:57:06,971
+on the machines.
+
+1040
+00:57:08,411 --> 00:57:11,712
+Dev patcher took a bit more because you had to change
+
+1041
+00:57:11,752 --> 00:57:13,432
+a few stuff in our pipeline to make it work.
+
+1042
+00:57:14,429 --> 00:57:19,474
+And database improvements was like three or four months.
+
+1043
+00:57:20,715 --> 00:57:23,457
+For a fast build, actually, it was just one person.
+
+1044
+00:57:23,477 --> 00:57:25,979
+RTPAD was also just one person.
+
+1045
+00:57:26,940 --> 00:57:30,584
+Dev patcher was mostly from the system side, one person.
+
+1046
+00:57:31,464 --> 00:57:34,107
+And database also was one person.
+
+1047
+00:57:35,148 --> 00:57:37,229
+So it was not a big investment.
+
+1048
+00:57:37,249 --> 00:57:41,453
+It was just good ideas correctly applied.
+
+1049
+00:57:42,558 --> 00:57:43,219
+And it just worked.
+
+1050
+00:57:44,060 --> 00:57:44,300
+Thank you.
+
+1051
+00:57:44,661 --> 00:57:44,941
+Welcome.
+
+1052
+00:57:44,961 --> 00:57:48,625
+So I guess we're done.
+
+1053
+00:57:48,685 --> 00:57:49,326
+Thank you for coming.
+

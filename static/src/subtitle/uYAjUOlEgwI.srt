@@ -1,0 +1,4728 @@
+1
+00:00:06,275 --> 00:00:09,217
+Hi all, my name is Ben and this is Zabir.
+
+2
+00:00:09,277 --> 00:00:10,478
+We'll both be talking today.
+
+3
+00:00:11,478 --> 00:00:14,540
+We're here to talk about geometry caching that we did
+
+4
+00:00:14,660 --> 00:00:16,662
+implemented in Halo 5 Guardians.
+
+5
+00:00:18,683 --> 00:00:21,125
+So for those that are kind of new and don't know what
+
+6
+00:00:21,145 --> 00:00:25,387
+geometry caching is, it's the storage of vertex motion for
+
+7
+00:00:25,427 --> 00:00:26,148
+quick playback.
+
+8
+00:00:27,349 --> 00:00:30,491
+It's like motion capture for character animation.
+
+9
+00:00:30,511 --> 00:00:34,073
+It allows you to encapsulate really complex motion and
+
+10
+00:00:34,113 --> 00:00:35,794
+play it at runtime in a game engine.
+
+11
+00:00:37,888 --> 00:00:42,493
+For those Maya animators out there, geometry caching will be a familiar term as you do
+
+12
+00:00:42,553 --> 00:00:46,217
+play blasting in your 3D animations when you're doing flip books.
+
+13
+00:00:47,318 --> 00:00:50,020
+But let me show you an in-game example from Halo 5.
+
+14
+00:01:08,871 --> 00:01:26,737
+Keep your head down and run!
+
+15
+00:01:27,077 --> 00:01:30,278
+I'm okay, keep going!
+
+16
+00:01:43,727 --> 00:01:47,469
+So, beyond doing massive-scale destruction,
+
+17
+00:01:47,529 --> 00:01:49,669
+which was our primary goal on Halo 5,
+
+18
+00:01:50,410 --> 00:01:52,590
+we found out that geometry caching is pretty much good
+
+19
+00:01:52,610 --> 00:01:54,391
+for any type of kinematic-based motion.
+
+20
+00:01:54,871 --> 00:01:55,891
+As we developed this system,
+
+21
+00:01:55,931 --> 00:01:57,832
+we went from just purely a destruction team
+
+22
+00:01:57,872 --> 00:02:00,013
+into a wider-ranging thing,
+
+23
+00:02:00,113 --> 00:02:01,893
+using it throughout the whole package and software.
+
+24
+00:02:02,582 --> 00:02:06,285
+We used it for character rigs, effects, environments, and skyboxes.
+
+25
+00:02:07,206 --> 00:02:10,688
+The author of this team, authoring teams for this type of technology can actually be any
+
+26
+00:02:10,709 --> 00:02:11,269
+of your team.
+
+27
+00:02:11,309 --> 00:02:13,050
+You don't need to have a specific team for it.
+
+28
+00:02:13,651 --> 00:02:16,653
+You can use it based on any of your system if you componentize this code.
+
+29
+00:02:18,015 --> 00:02:21,698
+So what we're really talking about is moving geometry really fast on the GPU.
+
+30
+00:02:24,260 --> 00:02:25,601
+We got over a million.
+
+31
+00:02:26,583 --> 00:02:31,972
+GPU transforms at 60 FPS in our engine, which allowed us to fine-tune and make this thing
+
+32
+00:02:32,052 --> 00:02:34,055
+extremely fast and efficient in the gameplay.
+
+33
+00:02:37,160 --> 00:02:41,542
+Me and Zbier didn't do this alone, there was a large team of us that did it, so we want to give a quick call out to those guys.
+
+34
+00:02:42,782 --> 00:02:46,824
+Michael Bolton was the forefather, he made the first homebrew geometry caching for us on Halo 5.
+
+35
+00:02:47,904 --> 00:02:50,665
+Chris Woods was our fearless art lead who kind of led our team.
+
+36
+00:02:51,546 --> 00:02:57,608
+Zbier was our white knight engineer that came in after Michael Bolton and fine-tuned that, so he's going to go through all his technical details on that.
+
+37
+00:02:58,783 --> 00:03:00,564
+Alex Hogan was our tech art lead.
+
+38
+00:03:01,325 --> 00:03:03,267
+He helped with the initial testing and implementation.
+
+39
+00:03:03,347 --> 00:03:05,369
+Michael Fave was our content creator on the project, who
+
+40
+00:03:05,409 --> 00:03:07,691
+really put the thing through its paces.
+
+41
+00:03:08,712 --> 00:03:09,392
+My name's Ben.
+
+42
+00:03:10,133 --> 00:03:11,894
+I did the authoring story for.
+
+43
+00:03:12,750 --> 00:03:17,471
+Halo 5 for all this content that's now in actually Houdini 16, so you can actually get
+
+44
+00:03:17,491 --> 00:03:19,412
+in there and actually access this technology right now.
+
+45
+00:03:20,592 --> 00:03:23,552
+But we also want to give a shout-out to everybody else at 343 that we worked with.
+
+46
+00:03:24,113 --> 00:03:27,453
+The list is kind of long, so they all helped in a lot of different ways, so I want to give
+
+47
+00:03:27,473 --> 00:03:28,233
+them a shout-out to that.
+
+48
+00:03:30,554 --> 00:03:34,335
+So for the course of this talk, we're going to kind of give a little outline to what we're
+
+49
+00:03:34,355 --> 00:03:36,495
+going to do just so you kind of understand the data flow.
+
+50
+00:03:36,515 --> 00:03:40,416
+We're going to talk about the initial concept, how we actually kind of thought it up, where
+
+51
+00:03:40,456 --> 00:03:41,296
+we came from.
+
+52
+00:03:42,161 --> 00:03:45,404
+We give you a little background story on why we're actually optimizing things, because
+
+53
+00:03:45,804 --> 00:03:50,808
+geometry caching has actually been implemented in a few engines now, but these are optimizations
+
+54
+00:03:50,828 --> 00:03:52,249
+to actually push it up to the next level.
+
+55
+00:03:52,269 --> 00:03:58,874
+Then we're going to break down the technology and its core architecture and then all the
+
+56
+00:03:58,914 --> 00:04:00,575
+componentized systems that we have for it.
+
+57
+00:04:01,215 --> 00:04:02,696
+And then we'll wrap up for a few questions.
+
+58
+00:04:05,302 --> 00:04:08,185
+So in the spring of 2015, we knew we were going to be in the
+
+59
+00:04:08,285 --> 00:04:09,126
+E3 headliner.
+
+60
+00:04:10,387 --> 00:04:12,750
+So all eyes were on us for our talk.
+
+61
+00:04:13,370 --> 00:04:15,833
+That sequence was the main focus of the studio.
+
+62
+00:04:15,853 --> 00:04:19,056
+And our stuff started running a little bit over perf, because
+
+63
+00:04:19,076 --> 00:04:20,477
+we were trying to get the best we could out of it.
+
+64
+00:04:20,738 --> 00:04:23,040
+We were shoving as many things and sequences in there.
+
+65
+00:04:23,500 --> 00:04:26,003
+So one of the tasks that we were challenged with was
+
+66
+00:04:26,043 --> 00:04:28,345
+making our system even more faster, get more
+
+67
+00:04:28,405 --> 00:04:29,286
+geometry in there.
+
+68
+00:04:29,767 --> 00:04:34,349
+Optimize it so we had to share the load across all the different teams like lighting, animation, effects.
+
+69
+00:04:34,829 --> 00:04:37,110
+Those all had to share and coexist with our system.
+
+70
+00:04:37,851 --> 00:04:42,813
+So we had a little eye of the production, eye of our own fun as everybody was intently on us.
+
+71
+00:04:42,833 --> 00:04:45,555
+So it kicked us up to the next gear of technology.
+
+72
+00:04:48,296 --> 00:04:50,037
+For those wondering why we needed to improve...
+
+73
+00:04:51,444 --> 00:04:54,364
+That was the primary reason, so let me just kind of dive forward.
+
+74
+00:04:55,305 --> 00:04:59,226
+Our very first implementation is kind of a standard fluid approach.
+
+75
+00:04:59,526 --> 00:05:01,987
+This is topology that changes every single frame.
+
+76
+00:05:02,787 --> 00:05:06,388
+That means, we can describe it as vertex-counter-gnostic.
+
+77
+00:05:06,448 --> 00:05:10,289
+That means from one frame to the next frame, topology is completely different.
+
+78
+00:05:10,309 --> 00:05:15,591
+You can go from a human to a man, you're not using blend targets, you can literally re-topologize
+
+79
+00:05:15,691 --> 00:05:18,292
+anything like VD remeshing and surfacing.
+
+80
+00:05:19,813 --> 00:05:21,835
+This is kind of like the Olympic file format,
+
+81
+00:05:22,195 --> 00:05:24,216
+where you can quickly load and reload anything
+
+82
+00:05:24,257 --> 00:05:25,257
+in offline packages.
+
+83
+00:05:27,399 --> 00:05:29,341
+While Olympic is a good idea, it's not actually
+
+84
+00:05:29,361 --> 00:05:31,042
+a practical runtime solution in Engine.
+
+85
+00:05:32,423 --> 00:05:33,324
+So one of the things that we...
+
+86
+00:05:33,744 --> 00:05:36,526
+if we continued with Fluid, we were gonna actually
+
+87
+00:05:36,566 --> 00:05:37,647
+have all of our assets cut.
+
+88
+00:05:38,168 --> 00:05:40,049
+So we moved to the next thing, and we found out
+
+89
+00:05:40,330 --> 00:05:42,151
+Michael Bolton implemented this for us.
+
+90
+00:05:43,452 --> 00:05:43,692
+Sorry.
+
+91
+00:05:44,793 --> 00:05:46,134
+Michael Bolton helped us implement
+
+92
+00:05:46,454 --> 00:05:47,355
+a rigid pipeline.
+
+93
+00:05:48,962 --> 00:05:52,745
+So rigid is what we kind of define as multiple vertices
+
+94
+00:05:52,785 --> 00:05:54,106
+that share a single transform.
+
+95
+00:05:55,107 --> 00:05:57,228
+This is the concept of object transforms, bones,
+
+96
+00:05:57,348 --> 00:05:58,949
+particle animation, character,
+
+97
+00:06:00,210 --> 00:06:02,072
+flock swarms, leave blowing in the wind.
+
+98
+00:06:02,712 --> 00:06:04,013
+This became our golden child.
+
+99
+00:06:04,674 --> 00:06:07,336
+This is pretty much what we shipped almost all the assets.
+
+100
+00:06:08,411 --> 00:06:09,712
+with in Halo 5.
+
+101
+00:06:10,553 --> 00:06:12,394
+However, this method was not enough to ship.
+
+102
+00:06:12,434 --> 00:06:14,155
+We still needed to do soft deformation.
+
+103
+00:06:14,976 --> 00:06:16,577
+One night, Zabir was working hard,
+
+104
+00:06:16,617 --> 00:06:19,399
+and he actually came up with the next implementation for us.
+
+105
+00:06:20,760 --> 00:06:21,981
+We called this Soft.
+
+106
+00:06:22,181 --> 00:06:23,982
+It's a single transform per each vertex.
+
+107
+00:06:24,323 --> 00:06:26,044
+We found out we could pass around
+
+108
+00:06:26,084 --> 00:06:28,065
+like tens and hundreds of thousands of transforms.
+
+109
+00:06:28,686 --> 00:06:30,667
+So in order to take those transforms
+
+110
+00:06:30,687 --> 00:06:31,728
+that are per an object,
+
+111
+00:06:32,048 --> 00:06:33,069
+we put it per a vertice,
+
+112
+00:06:33,389 --> 00:06:35,150
+allowing us to bend, deform towers.
+
+113
+00:06:35,511 --> 00:06:36,591
+A lot of those actually towers
+
+114
+00:06:36,651 --> 00:06:37,672
+are really soft deforming.
+
+115
+00:06:38,133 --> 00:06:41,299
+buildings that had over 32,000 transforms that were crushing down.
+
+116
+00:06:44,125 --> 00:06:47,571
+But in order to take the technology further for us, we developed a framework in order
+
+117
+00:06:47,611 --> 00:06:50,196
+so we can further and continue to optimize this going into the future.
+
+118
+00:06:52,164 --> 00:06:53,545
+That's we got the full framework.
+
+119
+00:06:54,145 --> 00:06:55,706
+This is the core architecture on top.
+
+120
+00:06:56,026 --> 00:06:58,047
+This is the shared across all the heuristic values.
+
+121
+00:06:59,387 --> 00:07:01,488
+Our base component we actually introduced was static,
+
+122
+00:07:02,148 --> 00:07:03,969
+rigid, skin, soft, and fluid.
+
+123
+00:07:04,709 --> 00:07:06,570
+Static is something that we actually never focused on
+
+124
+00:07:06,610 --> 00:07:07,890
+at first when we first implemented this.
+
+125
+00:07:08,311 --> 00:07:09,651
+But actually the static component
+
+126
+00:07:09,691 --> 00:07:10,672
+is really kind of important.
+
+127
+00:07:11,032 --> 00:07:12,352
+It's when the geometry is not moving,
+
+128
+00:07:12,412 --> 00:07:13,933
+which is the biggest time saver.
+
+129
+00:07:13,953 --> 00:07:15,233
+You don't want to have moving geometry
+
+130
+00:07:15,293 --> 00:07:16,894
+hiding under a table or something like that.
+
+131
+00:07:17,274 --> 00:07:18,854
+you need to efficiently call and maintain this.
+
+132
+00:07:18,894 --> 00:07:21,175
+Just normal end states, environment geometry.
+
+133
+00:07:21,495 --> 00:07:23,095
+But it actually has to be built into the system.
+
+134
+00:07:23,975 --> 00:07:26,676
+And Skinned is more of your standard character pipeline.
+
+135
+00:07:27,456 --> 00:07:28,556
+We didn't really focus on this
+
+136
+00:07:28,596 --> 00:07:30,076
+because of the type of work we were doing,
+
+137
+00:07:30,176 --> 00:07:31,977
+but it is a core implementation strategy.
+
+138
+00:07:31,997 --> 00:07:34,837
+This is a multiple transform for multiple bones.
+
+139
+00:07:38,318 --> 00:07:38,818
+Going forward.
+
+140
+00:07:39,218 --> 00:07:40,538
+So as we go through the talk,
+
+141
+00:07:40,558 --> 00:07:42,678
+we kind of have this in a different little heuristic, too.
+
+142
+00:07:42,979 --> 00:07:44,259
+We're gonna talk about the core architecture,
+
+143
+00:07:44,279 --> 00:07:46,039
+which I'm gonna pass off to Zabir for a little while.
+
+144
+00:07:46,406 --> 00:07:48,847
+and he's got run through what the common optimizations
+
+145
+00:07:48,928 --> 00:07:50,929
+and quantizations for the rest of the code.
+
+146
+00:07:51,609 --> 00:07:52,590
+Then we're gonna come back to it
+
+147
+00:07:52,650 --> 00:07:54,451
+and I'm gonna talk about the fluid, rigid,
+
+148
+00:07:55,252 --> 00:07:56,452
+static, soft, and skin more
+
+149
+00:07:56,492 --> 00:07:57,833
+from the authoring side of handling.
+
+150
+00:08:05,178 --> 00:08:07,980
+Okay, so let's talk about the engineering side of things.
+
+151
+00:08:08,540 --> 00:08:10,181
+Mainly this slide is here for you
+
+152
+00:08:10,261 --> 00:08:14,043
+to kind of refer back to roughly as a.
+
+153
+00:08:14,958 --> 00:08:19,151
+We'll go through the data structures involved, the import pipeline, and what the runtime
+
+154
+00:08:19,192 --> 00:08:19,492
+involves.
+
+155
+00:08:20,860 --> 00:08:24,621
+So as Ben mentioned, in order to actually pull off
+
+156
+00:08:24,641 --> 00:08:27,422
+this geometry cache system, you have two components to it.
+
+157
+00:08:28,042 --> 00:08:29,643
+You have transforms and you have geometry.
+
+158
+00:08:30,243 --> 00:08:32,864
+These are roughly the components that are necessary
+
+159
+00:08:32,944 --> 00:08:33,604
+for each type.
+
+160
+00:08:34,184 --> 00:08:36,645
+You know, something like static, you only require geometry
+
+161
+00:08:36,705 --> 00:08:38,285
+just because it's actually not moving.
+
+162
+00:08:38,846 --> 00:08:42,147
+And something like soft implicit surfaces,
+
+163
+00:08:42,167 --> 00:08:44,907
+you only need transform since the implicit part
+
+164
+00:08:44,967 --> 00:08:46,808
+kind of describes the geometry inherently.
+
+165
+00:08:48,068 --> 00:08:50,529
+We'll touch on these exactly as we go through the slides.
+
+166
+00:08:52,919 --> 00:08:54,519
+So, let's talk about transforms first.
+
+167
+00:08:55,440 --> 00:08:59,022
+In order to represent a transform, this is kind of the bare minimum that you need to
+
+168
+00:08:59,062 --> 00:08:59,462
+represent.
+
+169
+00:09:00,623 --> 00:09:03,904
+Rotation represented using a quaternion, translation, and scale.
+
+170
+00:09:04,745 --> 00:09:10,028
+Obviously, completely unpacked, this is 32 bytes, which is quite heavy to be passing
+
+171
+00:09:10,068 --> 00:09:10,308
+around.
+
+172
+00:09:11,088 --> 00:09:15,070
+But before we go further, let's talk about some of the alternative representations that
+
+173
+00:09:15,110 --> 00:09:18,012
+we considered when developing this technology.
+
+174
+00:09:18,912 --> 00:09:23,276
+One of the first things that came to mind is storing delta position and delta rotations.
+
+175
+00:09:23,937 --> 00:09:27,720
+Of course, because of the temporal coherency, you get much better compression from this.
+
+176
+00:09:28,081 --> 00:09:31,384
+However, we knew that Halo 5 was going to have to support join in progress.
+
+177
+00:09:32,105 --> 00:09:36,408
+When you have join in progress systems, we didn't know exactly how long certain animations
+
+178
+00:09:36,428 --> 00:09:36,909
+were going to be.
+
+179
+00:09:37,269 --> 00:09:40,091
+and that we would possibly not be able to support
+
+180
+00:09:40,471 --> 00:09:42,432
+blast playing up to a particular frame
+
+181
+00:09:43,013 --> 00:09:45,074
+when a join in progress was actually happening.
+
+182
+00:09:45,775 --> 00:09:48,036
+In retrospect, this was the right decision.
+
+183
+00:09:48,336 --> 00:09:49,317
+Looking at the perfmetrics
+
+184
+00:09:49,357 --> 00:09:50,878
+and some of the lengths of animations,
+
+185
+00:09:51,378 --> 00:09:53,559
+we would not have been able to blast play everything up to
+
+186
+00:09:54,200 --> 00:09:55,901
+when join in progress needed to actually occur.
+
+187
+00:09:57,399 --> 00:10:00,682
+The second representation we also considered
+
+188
+00:10:00,742 --> 00:10:03,024
+was storing velocity and acceleration.
+
+189
+00:10:03,765 --> 00:10:06,167
+This again has a lot of temporal coherency,
+
+190
+00:10:06,847 --> 00:10:09,269
+so there's quite a bit of compression
+
+191
+00:10:09,310 --> 00:10:10,030
+you can get out of this.
+
+192
+00:10:10,390 --> 00:10:13,673
+However, I was worried about the physics simulation
+
+193
+00:10:13,693 --> 00:10:14,814
+that we would essentially be writing
+
+194
+00:10:14,854 --> 00:10:16,055
+and the stability of that, right?
+
+195
+00:10:16,636 --> 00:10:18,898
+Because again, this is still sort of like
+
+196
+00:10:18,938 --> 00:10:22,121
+a delta compression format where the previous frame
+
+197
+00:10:22,701 --> 00:10:23,582
+describes your next frame.
+
+198
+00:10:25,833 --> 00:10:27,774
+This again doesn't solve the blast plane problem
+
+199
+00:10:27,814 --> 00:10:29,775
+and joint in progress was still a concern.
+
+200
+00:10:31,036 --> 00:10:32,576
+So the third representation you can think of
+
+201
+00:10:33,237 --> 00:10:35,438
+is sort of like a video codec, right?
+
+202
+00:10:35,498 --> 00:10:37,759
+Where you have major frames where the full transforms
+
+203
+00:10:37,799 --> 00:10:40,240
+are stored and then you delta compress between them.
+
+204
+00:10:41,200 --> 00:10:42,361
+This is quite promising,
+
+205
+00:10:42,421 --> 00:10:43,781
+but of course the complexity was high.
+
+206
+00:10:45,002 --> 00:10:47,723
+Throughout the project there was only one graphics engineer
+
+207
+00:10:47,763 --> 00:10:48,284
+on this project.
+
+208
+00:10:48,324 --> 00:10:49,204
+First it was Michael Bolton
+
+209
+00:10:49,244 --> 00:10:50,665
+and then I took over midway through.
+
+210
+00:10:51,385 --> 00:10:53,966
+So we knew we didn't have a whole lot of time
+
+211
+00:10:53,986 --> 00:10:54,666
+to dedicate to this.
+
+212
+00:10:54,726 --> 00:10:54,786
+And.
+
+213
+00:10:55,652 --> 00:10:57,853
+On top of that, I had other responsibilities as well.
+
+214
+00:10:58,433 --> 00:11:01,973
+Also, when we were moving from Halo 4 to Halo 5,
+
+215
+00:11:02,794 --> 00:11:05,354
+we went from 512 megabytes to 5 gigabytes.
+
+216
+00:11:06,034 --> 00:11:08,155
+At the time, we thought, oh man, 5 gigs.
+
+217
+00:11:08,235 --> 00:11:09,595
+We have so much memory.
+
+218
+00:11:09,715 --> 00:11:11,875
+We don't need to compress that much.
+
+219
+00:11:12,155 --> 00:11:13,076
+We have plenty.
+
+220
+00:11:13,376 --> 00:11:16,316
+We're just going to have trouble filling the 5 gigs from disk.
+
+221
+00:11:16,936 --> 00:11:18,757
+This turned out to be, we were very wrong.
+
+222
+00:11:19,697 --> 00:11:21,017
+We ran out of memory right away.
+
+223
+00:11:24,235 --> 00:11:26,456
+So to remind you again, this is kind of the transform
+
+224
+00:11:26,796 --> 00:11:29,037
+which can fully describe what the transform is per frame.
+
+225
+00:11:29,077 --> 00:11:32,339
+We didn't want to be dependent on previous or next frames.
+
+226
+00:11:33,580 --> 00:11:35,341
+The pack transform that we end up coming up with
+
+227
+00:11:35,761 --> 00:11:37,422
+is we relied mostly on quantization.
+
+228
+00:11:38,002 --> 00:11:40,524
+So we ended up packing the quaternion translation
+
+229
+00:11:40,564 --> 00:11:42,105
+and scale sort of as follows.
+
+230
+00:11:43,354 --> 00:11:46,035
+So let's go through each one of the quantizations that we did.
+
+231
+00:11:46,776 --> 00:11:50,757
+For translation, we generate a axis-aligned bounding box
+
+232
+00:11:51,078 --> 00:11:54,199
+per frame, and we store that per frame bounding box off
+
+233
+00:11:54,699 --> 00:11:55,600
+as constant data.
+
+234
+00:11:55,960 --> 00:11:58,181
+We quantize the translation between 0 and 1
+
+235
+00:11:58,241 --> 00:11:59,921
+within the axis-aligned bounding box.
+
+236
+00:12:00,542 --> 00:12:03,524
+and it's a simple operation to reconstruct
+
+237
+00:12:03,564 --> 00:12:04,624
+our original translation.
+
+238
+00:12:04,985 --> 00:12:07,266
+Of course, this is a lossy compression,
+
+239
+00:12:07,907 --> 00:12:10,668
+but this, as long as your content team
+
+240
+00:12:10,708 --> 00:12:13,250
+is sort of aware when they're starting to lose precision,
+
+241
+00:12:13,830 --> 00:12:16,272
+they can work with this, and then we'll touch on
+
+242
+00:12:16,332 --> 00:12:17,553
+exactly some of the techniques we use
+
+243
+00:12:17,593 --> 00:12:18,433
+to try and mitigate this.
+
+244
+00:12:19,855 --> 00:12:20,895
+So, quaternion compression.
+
+245
+00:12:21,375 --> 00:12:22,375
+This isn't entirely novel,
+
+246
+00:12:22,415 --> 00:12:23,636
+I've seen it in a few different places,
+
+247
+00:12:24,276 --> 00:12:25,576
+but I don't remember the exact source
+
+248
+00:12:25,636 --> 00:12:27,536
+where I pulled some of the ideas from.
+
+249
+00:12:27,596 --> 00:12:29,377
+But we start with a quaternion identity.
+
+250
+00:12:30,237 --> 00:12:31,357
+Given the quaternion identity,
+
+251
+00:12:31,517 --> 00:12:34,198
+we know that we can derive the fourth component
+
+252
+00:12:34,278 --> 00:12:36,398
+from using only the three others.
+
+253
+00:12:37,158 --> 00:12:40,079
+However, this leads to a precision loss
+
+254
+00:12:40,119 --> 00:12:44,480
+if you always pick W as the, oh sorry, skipping ahead.
+
+255
+00:12:46,155 --> 00:12:47,816
+So we know that from the previous slide,
+
+256
+00:12:47,836 --> 00:12:50,676
+you can see that W will always result in a positive value.
+
+257
+00:12:51,337 --> 00:12:52,917
+Of course, using another quaternion identity,
+
+258
+00:12:54,597 --> 00:12:56,858
+we extract the positive, or the inverse quaternion
+
+259
+00:12:57,378 --> 00:12:59,199
+in case W ends up being so.
+
+260
+00:13:00,399 --> 00:13:02,319
+However, that leads to precision loss
+
+261
+00:13:02,359 --> 00:13:04,360
+if you always drop the W component, right?
+
+262
+00:13:04,720 --> 00:13:07,541
+So we can store off exactly which component
+
+263
+00:13:07,681 --> 00:13:10,301
+we are going to drop, and we drop the maximum value
+
+264
+00:13:10,341 --> 00:13:11,521
+between X, Y, Z, and W.
+
+265
+00:13:12,202 --> 00:13:14,242
+This allows us to, again, retain more precision.
+
+266
+00:13:15,937 --> 00:13:19,919
+Since we also know that we've dropped the largest
+
+267
+00:13:20,259 --> 00:13:23,140
+quaternion value, we want to renormalize
+
+268
+00:13:23,721 --> 00:13:24,601
+the remaining values.
+
+269
+00:13:24,921 --> 00:13:28,663
+The remaining values being renormalized remaps to 0 to 1.
+
+270
+00:13:30,544 --> 00:13:34,146
+So essentially, we're storing three components at 30 bits,
+
+271
+00:13:34,666 --> 00:13:37,588
+and we store which component we actually dropped in two bits.
+
+272
+00:13:39,241 --> 00:13:41,601
+Scale was very simple quantization,
+
+273
+00:13:42,362 --> 00:13:44,222
+and this was quantized between zero and one.
+
+274
+00:13:44,942 --> 00:13:47,703
+What we did is, during the import stage,
+
+275
+00:13:48,303 --> 00:13:50,823
+the entire scaling, entire scale,
+
+276
+00:13:51,243 --> 00:13:52,724
+the maximum scale that we could see
+
+277
+00:13:53,404 --> 00:13:55,164
+was renormalized between zero and one,
+
+278
+00:13:55,244 --> 00:13:56,625
+and the geometry was expanded
+
+279
+00:13:57,205 --> 00:13:59,325
+so that scaling was always between zero and one.
+
+280
+00:13:59,605 --> 00:14:02,126
+This allowed us to only shrink the geometry as necessary,
+
+281
+00:14:02,726 --> 00:14:05,547
+not actually grow it, and this was quite helpful.
+
+282
+00:14:05,947 --> 00:14:08,591
+Also, being able to scale by zero is quite important
+
+283
+00:14:08,972 --> 00:14:12,959
+as that's how we deleted parts out of our actual simulation.
+
+284
+00:14:12,999 --> 00:14:13,820
+We'll touch on that later.
+
+285
+00:14:15,443 --> 00:14:17,246
+So, let's talk about the geometry representation
+
+286
+00:14:17,266 --> 00:14:18,769
+and what actual, what that meant.
+
+287
+00:14:19,890 --> 00:14:22,291
+So we have to remember that this is going to involve
+
+288
+00:14:22,331 --> 00:14:24,212
+two different geometry representations,
+
+289
+00:14:24,332 --> 00:14:28,674
+one pre-geometry cache transform and one post-transform.
+
+290
+00:14:29,654 --> 00:14:32,275
+You want to integrate this into your existing rendering pipeline.
+
+291
+00:14:32,295 --> 00:14:35,356
+You probably do not want to build a whole new rendering system
+
+292
+00:14:35,397 --> 00:14:37,637
+just to render this. You kind of want to do the transforms
+
+293
+00:14:37,678 --> 00:14:39,698
+and integrate it into exactly how you are doing it.
+
+294
+00:14:40,119 --> 00:14:43,320
+And you want to try and look for the fastest way
+
+295
+00:14:43,420 --> 00:14:45,501
+in which you render static geometry in your Engine.
+
+296
+00:14:46,748 --> 00:14:50,298
+uh... for us uh... this is roughly kind of the vertex format that we had in the
+
+297
+00:14:50,319 --> 00:14:51,903
+vertex target that we wanted to go to
+
+298
+00:14:53,626 --> 00:14:55,927
+Again, so position we needed to transform,
+
+299
+00:14:56,067 --> 00:14:57,368
+UVs were kind of a pass through.
+
+300
+00:14:57,989 --> 00:15:00,010
+Normal and tangent, of course, we needed to transform
+
+301
+00:15:00,050 --> 00:15:01,891
+since the target is a world vertex.
+
+302
+00:15:02,351 --> 00:15:05,413
+And the XForm ID was again used as a lookup
+
+303
+00:15:05,473 --> 00:15:06,393
+to try and feed the color.
+
+304
+00:15:08,014 --> 00:15:09,916
+The reason this geometry format was picked
+
+305
+00:15:10,136 --> 00:15:13,458
+is Halo's engine didn't have a super flexible vertex format
+
+306
+00:15:13,498 --> 00:15:15,299
+in that you could arbitrarily pick whatever.
+
+307
+00:15:15,379 --> 00:15:17,920
+We had a set of vertex formats we were choosing between.
+
+308
+00:15:18,401 --> 00:15:21,443
+and the world vertex format was essentially the fastest
+
+309
+00:15:21,463 --> 00:15:24,265
+that we could render objects with dynamic lighting.
+
+310
+00:15:25,326 --> 00:15:28,649
+For shadowing, we just rendered the geometry
+
+311
+00:15:28,689 --> 00:15:31,291
+into a cascaded shadow map, and the geometry,
+
+312
+00:15:32,151 --> 00:15:34,673
+again, this was the fastest pipeline through our engine,
+
+313
+00:15:34,713 --> 00:15:36,215
+so this is the vertex format we chose.
+
+314
+00:15:38,677 --> 00:15:41,839
+So, the vertex and index buffers, I'll touch on this very quickly.
+
+315
+00:15:42,419 --> 00:15:47,282
+The vertex buffers we were able to limit to 65,000 parts and therefore we were able to
+
+316
+00:15:47,302 --> 00:15:48,702
+get away with 16-bit vertices.
+
+317
+00:15:49,122 --> 00:15:54,625
+The way we were packing the vertex buffers, initially we stored them as 32-bit vertex
+
+318
+00:15:55,726 --> 00:15:56,106
+indices.
+
+319
+00:15:57,066 --> 00:16:01,889
+This is quite slow on the Xbox One, so if you are considering doing this, it's really
+
+320
+00:16:01,929 --> 00:16:02,769
+worth your time to...
+
+321
+00:16:04,150 --> 00:16:06,231
+chunk up your assets so they can be split
+
+322
+00:16:06,312 --> 00:16:07,112
+into 16-bit indices.
+
+323
+00:16:07,813 --> 00:16:09,995
+We didn't end up being able to make this optimization,
+
+324
+00:16:10,035 --> 00:16:12,296
+just ran out of time, but this is definitely
+
+325
+00:16:12,336 --> 00:16:13,117
+something you should consider.
+
+326
+00:16:14,752 --> 00:16:16,232
+So I want to touch on implicit surfaces.
+
+327
+00:16:17,133 --> 00:16:19,814
+There were some types of surfaces that we used in the engine
+
+328
+00:16:19,834 --> 00:16:20,895
+that were very uniform.
+
+329
+00:16:21,335 --> 00:16:22,536
+It was just like a flat plane,
+
+330
+00:16:22,616 --> 00:16:23,937
+so you can imagine like a flag,
+
+331
+00:16:24,077 --> 00:16:25,758
+which has a very uniform topology.
+
+332
+00:16:26,278 --> 00:16:28,379
+You don't actually need to store geometry data for this.
+
+333
+00:16:28,779 --> 00:16:30,380
+Given a width and height,
+
+334
+00:16:30,701 --> 00:16:33,222
+you can actually derive where the vertices would be
+
+335
+00:16:33,842 --> 00:16:34,783
+on this particular shape.
+
+336
+00:16:35,883 --> 00:16:37,224
+And you can use the vertex shader
+
+337
+00:16:37,724 --> 00:16:40,206
+and the SV vertex ID attribute.
+
+338
+00:16:40,586 --> 00:16:43,869
+to derive where all the positions are of this actual shape.
+
+339
+00:16:43,889 --> 00:16:46,251
+So all you need to compute is the transforms.
+
+340
+00:16:46,992 --> 00:16:48,833
+This is particularly useful for soft bodies.
+
+341
+00:16:49,173 --> 00:16:51,756
+Now, I'll touch on how we used LDS later,
+
+342
+00:16:51,796 --> 00:16:53,757
+but in this case, each vertex is carrying
+
+343
+00:16:53,797 --> 00:16:55,799
+a unique transform, so the LDS memory
+
+344
+00:16:55,859 --> 00:16:59,202
+where you would potentially share computations
+
+345
+00:16:59,322 --> 00:17:02,165
+between threads wasn't actually necessary.
+
+346
+00:17:02,245 --> 00:17:04,086
+So this turned out to be a good way
+
+347
+00:17:04,146 --> 00:17:06,348
+to handle implicit soft surfaces.
+
+348
+00:17:08,701 --> 00:17:11,923
+We also had initially talked about the idea
+
+349
+00:17:11,963 --> 00:17:13,184
+of additional vertex attributes.
+
+350
+00:17:13,464 --> 00:17:15,405
+The transforms are essentially what's driving
+
+351
+00:17:15,706 --> 00:17:17,627
+the dynamics of the whole simulation.
+
+352
+00:17:18,327 --> 00:17:20,129
+However, there could be additional attributes
+
+353
+00:17:20,149 --> 00:17:22,070
+like temperature and viscosity and things like that
+
+354
+00:17:22,370 --> 00:17:26,633
+to drive the color and the shading of the object itself.
+
+355
+00:17:27,173 --> 00:17:29,515
+Ben will touch on the pros and cons of this approach.
+
+356
+00:17:30,075 --> 00:17:32,236
+We ended up not making a whole lot of use for it.
+
+357
+00:17:33,137 --> 00:17:35,699
+But yeah, he'll touch on exactly from the authoring story
+
+358
+00:17:35,759 --> 00:17:37,980
+on why you would want to prefer one versus the other.
+
+359
+00:17:39,697 --> 00:17:42,798
+Okay, so let's move on to the import pipeline.
+
+360
+00:17:43,218 --> 00:17:45,638
+We used Alembic heavily,
+
+361
+00:17:46,119 --> 00:17:47,939
+and from our DCC we would go into Alembic.
+
+362
+00:17:48,459 --> 00:17:51,620
+However, you do not wanna use Alembic as your format
+
+363
+00:17:51,660 --> 00:17:53,660
+that your runtime is actually using.
+
+364
+00:17:53,680 --> 00:17:54,680
+You wanna pre-process this
+
+365
+00:17:54,760 --> 00:17:58,101
+into a specific engine optimized format.
+
+366
+00:17:58,681 --> 00:18:02,722
+Because Alembic generally represents a full frame geometry.
+
+367
+00:18:02,822 --> 00:18:06,183
+Every frame you're getting essentially the entire stack.
+
+368
+00:18:08,411 --> 00:18:14,894
+The initial implementation that we had for this was an analytic part extraction where
+
+369
+00:18:14,994 --> 00:18:18,735
+we were trying to find temporal coherence between a rigid part that appeared on one
+
+370
+00:18:18,795 --> 00:18:21,436
+frame and then rediscover that part in a later frame.
+
+371
+00:18:26,538 --> 00:18:29,119
+was a complicated mathematical process
+
+372
+00:18:29,799 --> 00:18:31,940
+to try and discover this coherency.
+
+373
+00:18:33,001 --> 00:18:35,422
+Based on the tolerance levels we used,
+
+374
+00:18:36,342 --> 00:18:37,963
+we could either get higher accuracy,
+
+375
+00:18:38,103 --> 00:18:40,044
+but it led to a huge import time,
+
+376
+00:18:41,284 --> 00:18:42,785
+or if you reduce the tolerance,
+
+377
+00:18:43,085 --> 00:18:44,465
+you would get either false positives.
+
+378
+00:18:45,146 --> 00:18:47,247
+So this ended up being very problematic,
+
+379
+00:18:47,287 --> 00:18:49,628
+especially how long it was taking us to import.
+
+380
+00:18:50,905 --> 00:18:56,728
+So, the next stage of it, I realized after working with Ben for a little bit, is a lot
+
+381
+00:18:56,748 --> 00:19:01,631
+of this inter-frame tracking that these rigid pieces were going through actually existed
+
+382
+00:19:01,651 --> 00:19:05,953
+in the limbic, or existed in Houdini, our program to begin with.
+
+383
+00:19:06,873 --> 00:19:09,774
+If Ben was just able to export this additional attribute data,
+
+384
+00:19:10,295 --> 00:19:11,855
+we could speed things up immensely.
+
+385
+00:19:11,895 --> 00:19:15,156
+And once we did, we saw an incredible speedup.
+
+386
+00:19:15,176 --> 00:19:17,616
+We went from things that used to take over 30 minutes
+
+387
+00:19:17,716 --> 00:19:20,477
+to 45 minutes down to maybe 30 seconds.
+
+388
+00:19:21,337 --> 00:19:24,317
+It was an incredible speedup that was very much worth it.
+
+389
+00:19:25,118 --> 00:19:28,238
+Also, this led to a really, really high accuracy,
+
+390
+00:19:28,958 --> 00:19:30,799
+unless the artist actually made an error
+
+391
+00:19:30,879 --> 00:19:31,599
+in the part tracking.
+
+392
+00:19:32,199 --> 00:19:33,639
+So this was overall a win.
+
+393
+00:19:33,719 --> 00:19:36,360
+Sometimes just a little bit of data
+
+394
+00:19:36,400 --> 00:19:38,060
+helps eliminate a lot of...
+
+395
+00:19:39,481 --> 00:19:46,551
+processing power. We didn't actually end up fully implementing this in the production
+
+396
+00:19:46,591 --> 00:19:50,196
+pipeline but after working with it for a little bit we realized...
+
+397
+00:19:51,585 --> 00:19:54,427
+The system can actually be split into two components.
+
+398
+00:19:55,027 --> 00:19:57,289
+You have the transform hierarchy and this transform cloud
+
+399
+00:19:57,970 --> 00:20:00,372
+that your dynamics artists are working on.
+
+400
+00:20:00,692 --> 00:20:02,913
+And then you have a palette of geometry
+
+401
+00:20:03,294 --> 00:20:05,596
+that a separate set of artists could potentially work on.
+
+402
+00:20:06,216 --> 00:20:07,317
+So for instance, if you wanted to do
+
+403
+00:20:07,337 --> 00:20:08,618
+an interesting flock of birds,
+
+404
+00:20:09,138 --> 00:20:11,220
+one artist could actually work on the bird model itself
+
+405
+00:20:11,320 --> 00:20:13,021
+and then the other artist can actually work on
+
+406
+00:20:13,462 --> 00:20:15,463
+the dynamics and the fly-through.
+
+407
+00:20:16,204 --> 00:20:18,225
+And then during the import stage, bind them together.
+
+408
+00:20:19,574 --> 00:20:23,654
+We ended up not quite having this nice separation
+
+409
+00:20:23,694 --> 00:20:25,655
+between the two teams, but this is something
+
+410
+00:20:25,695 --> 00:20:27,855
+that you guys should consider if you plan
+
+411
+00:20:27,895 --> 00:20:29,216
+on implementing something like this.
+
+412
+00:20:31,296 --> 00:20:33,316
+Just a quick note on mesh optimization.
+
+413
+00:20:33,836 --> 00:20:35,497
+We used the DX mesh optimizer,
+
+414
+00:20:35,537 --> 00:20:37,657
+and this saved about 3% GPU time.
+
+415
+00:20:38,417 --> 00:20:39,218
+Yeah, GPU time.
+
+416
+00:20:40,298 --> 00:20:42,378
+This added very little to the import stage,
+
+417
+00:20:42,418 --> 00:20:44,619
+so it's definitely worth adding in.
+
+418
+00:20:46,459 --> 00:20:46,819
+So let's.
+
+419
+00:20:47,200 --> 00:20:49,001
+So let's talk about packing for the runtime.
+
+420
+00:20:49,401 --> 00:20:54,562
+So far we know that the import stage generated a palette of geometry pieces that we want
+
+421
+00:20:54,602 --> 00:21:00,983
+to pack together and we have a set of transforms that are per part per frame while the part
+
+422
+00:21:01,043 --> 00:21:01,943
+is actually alive.
+
+423
+00:21:02,644 --> 00:21:04,364
+So what's the optimal strategy?
+
+424
+00:21:05,024 --> 00:21:07,505
+The entire time we were bandwidth bound on the GPU.
+
+425
+00:21:08,125 --> 00:21:10,445
+So bandwidth is the key thing you want to minimize.
+
+426
+00:21:12,382 --> 00:21:14,743
+So the way you want to kind of pack this,
+
+427
+00:21:14,763 --> 00:21:17,404
+and we'll go through an example to kind of show you,
+
+428
+00:21:18,084 --> 00:21:20,344
+is you want to sort everything that's first born
+
+429
+00:21:20,384 --> 00:21:22,505
+to the front of the list, all the vertices,
+
+430
+00:21:22,625 --> 00:21:24,766
+and then all the parts within that frame,
+
+431
+00:21:24,826 --> 00:21:27,806
+you want to sort the thing that dies the first
+
+432
+00:21:28,587 --> 00:21:29,187
+towards the front.
+
+433
+00:21:29,727 --> 00:21:31,267
+And what you end up with is essentially
+
+434
+00:21:31,327 --> 00:21:34,248
+the right edge moving ahead as parts are born
+
+435
+00:21:34,288 --> 00:21:37,129
+and the left edge moves ahead as parts die.
+
+436
+00:21:37,730 --> 00:21:39,593
+And you want to pack this into one big buffer.
+
+437
+00:21:40,695 --> 00:21:43,179
+We were specifically shipping just on the Xbox One, so we
+
+438
+00:21:43,239 --> 00:21:45,303
+really wanted to optimize for the minimum number of
+
+439
+00:21:45,363 --> 00:21:49,991
+allocations and pack the data together and offset into the
+
+440
+00:21:50,031 --> 00:21:51,513
+buffer when actually binding it.
+
+441
+00:21:52,795 --> 00:21:54,717
+And also null transforms are important here
+
+442
+00:21:54,777 --> 00:21:57,520
+in order to eliminate some of these transforms.
+
+443
+00:21:58,160 --> 00:22:01,684
+So to give you an example, here we have four parts.
+
+444
+00:22:02,685 --> 00:22:04,787
+One's born on frame zero, the first one,
+
+445
+00:22:05,528 --> 00:22:07,250
+and dies on frame three, right?
+
+446
+00:22:07,310 --> 00:22:08,691
+So the active range for this,
+
+447
+00:22:09,051 --> 00:22:11,594
+when you're rendering frame one, is just this object here.
+
+448
+00:22:12,755 --> 00:22:15,477
+When we start rendering frame two, the next part is born
+
+449
+00:22:16,318 --> 00:22:18,399
+and we're still rendering the previous part that's alive.
+
+450
+00:22:19,620 --> 00:22:22,763
+In frame three, obviously, the first part dies,
+
+451
+00:22:23,423 --> 00:22:25,385
+in which case now the active range shrinks again.
+
+452
+00:22:25,485 --> 00:22:26,425
+The left edge moves ahead.
+
+453
+00:22:27,326 --> 00:22:29,187
+When we render frame four, another part is born
+
+454
+00:22:29,207 --> 00:22:30,468
+and the active range expands.
+
+455
+00:22:31,149 --> 00:22:32,670
+And this is kind of the way you want to bind
+
+456
+00:22:32,890 --> 00:22:35,472
+into the, onto the GPU,
+
+457
+00:22:35,612 --> 00:22:37,373
+the active range of the vertex buffer.
+
+458
+00:22:38,630 --> 00:22:44,435
+Now on frame 7, you notice that a new part is born, however, a part that's stuck in the
+
+459
+00:22:44,455 --> 00:22:45,516
+middle has actually died.
+
+460
+00:22:46,417 --> 00:22:50,801
+In this case, the way our pipeline was set up, we shipped on DX11 Halo 5, so we didn't
+
+461
+00:22:50,901 --> 00:22:55,004
+quite have some of the more, I guess, advanced geometry.
+
+462
+00:22:57,254 --> 00:23:00,435
+vertex generation on the GPU that we're starting to see
+
+463
+00:23:00,555 --> 00:23:04,217
+kind of like in Frostbite and also in Assassin's Creed.
+
+464
+00:23:05,178 --> 00:23:06,478
+But this is essentially the idea.
+
+465
+00:23:09,540 --> 00:23:11,261
+You might be able to do some interesting things with there
+
+466
+00:23:11,741 --> 00:23:13,942
+and not have to rely on the fact that you need to delete
+
+467
+00:23:14,042 --> 00:23:16,223
+a part in the middle in this case.
+
+468
+00:23:18,567 --> 00:23:19,968
+Now, when it comes to transform packing,
+
+469
+00:23:20,008 --> 00:23:21,209
+you kind of want to do the same thing.
+
+470
+00:23:21,950 --> 00:23:24,712
+Pack all the transforms into a single giant buffer,
+
+471
+00:23:25,052 --> 00:23:26,593
+and we want them packed right next to each other,
+
+472
+00:23:26,613 --> 00:23:28,655
+and we offset into the buffer to actually render it.
+
+473
+00:23:29,336 --> 00:23:31,938
+In this case, you can kind of see that on frame zero,
+
+474
+00:23:32,178 --> 00:23:34,359
+there's only one part that's actually active and alive,
+
+475
+00:23:34,399 --> 00:23:35,961
+and therefore, that gets packed first.
+
+476
+00:23:36,561 --> 00:23:37,121
+The next frame.
+
+477
+00:23:37,662 --> 00:23:40,023
+Again, just only a single part, so that's what gets packed.
+
+478
+00:23:40,063 --> 00:23:42,464
+In the next frame, there's two parts, and so on and so forth.
+
+479
+00:23:43,144 --> 00:23:47,886
+This ideal packing, again, tracks to what your actual active range is, and you're binding
+
+480
+00:23:47,906 --> 00:23:53,749
+the minimal set to the GPU, and essentially transferring the minimal amount of data to
+
+481
+00:23:53,769 --> 00:23:54,429
+the actual GPU.
+
+482
+00:23:58,101 --> 00:24:00,843
+One thing, yeah, so pack into a single buffer.
+
+483
+00:24:00,863 --> 00:24:03,464
+This ended up being much more efficient
+
+484
+00:24:03,504 --> 00:24:05,205
+in terms of minimizing the number of allocations
+
+485
+00:24:05,225 --> 00:24:06,226
+that D3D is going to do.
+
+486
+00:24:06,706 --> 00:24:08,767
+One thing to note is because of the packing structure
+
+487
+00:24:08,787 --> 00:24:10,108
+that we talked about earlier,
+
+488
+00:24:10,768 --> 00:24:11,869
+if you use structured buffers,
+
+489
+00:24:11,949 --> 00:24:14,190
+this is going to lead to byte swapping.
+
+490
+00:24:14,330 --> 00:24:16,091
+That's gonna occur between the CPU and GPU.
+
+491
+00:24:16,431 --> 00:24:17,532
+So you wanna be aware of this.
+
+492
+00:24:18,252 --> 00:24:19,813
+We ended up using the byte address buffer,
+
+493
+00:24:19,913 --> 00:24:21,194
+which is quite handy.
+
+494
+00:24:21,775 --> 00:24:23,600
+Not a lot of engines necessarily support it,
+
+495
+00:24:24,081 --> 00:24:25,945
+but this is something that you need to consider
+
+496
+00:24:25,986 --> 00:24:28,752
+if you're doing bit packing on the GPU and CPU.
+
+497
+00:24:30,573 --> 00:24:32,674
+Okay, so let's talk about the runtime now.
+
+498
+00:24:33,654 --> 00:24:35,015
+So the first thing that we implemented
+
+499
+00:24:35,495 --> 00:24:37,936
+was interpolation and lerping for everything,
+
+500
+00:24:38,076 --> 00:24:38,856
+even the quaternions.
+
+501
+00:24:39,476 --> 00:24:40,797
+We were able to drop something from,
+
+502
+00:24:41,197 --> 00:24:43,278
+most of their animations from 60 frames per second
+
+503
+00:24:43,338 --> 00:24:45,019
+down to 30 frames per second.
+
+504
+00:24:45,819 --> 00:24:48,680
+This allowed us to obviously cut the bandwidth
+
+505
+00:24:48,720 --> 00:24:49,440
+in half right away.
+
+506
+00:24:50,221 --> 00:24:53,722
+For far distant objects, you can interpolate even more
+
+507
+00:24:53,842 --> 00:24:54,783
+and kind of get away with it
+
+508
+00:24:54,863 --> 00:24:56,743
+because they're obviously not so big in screen.
+
+509
+00:24:58,164 --> 00:25:01,586
+Thing to note is deletion and creation rules can kind of get hairy here.
+
+510
+00:25:02,927 --> 00:25:07,329
+When you're interpolating, you need to come up with a defined set of rules that make sense
+
+511
+00:25:07,549 --> 00:25:13,112
+of when is a part actually born and when does a part actually die when you're in between
+
+512
+00:25:13,152 --> 00:25:13,432
+frames.
+
+513
+00:25:13,973 --> 00:25:18,175
+We weren't super happy with the rules we came up with because it always led to some inconsistency
+
+514
+00:25:18,215 --> 00:25:19,275
+in one animation or another.
+
+515
+00:25:19,936 --> 00:25:22,277
+So experiment with this and find something that you're happy with.
+
+516
+00:25:24,128 --> 00:25:26,030
+Also interpolation is obviously not an option
+
+517
+00:25:26,070 --> 00:25:26,891
+for fluid assets.
+
+518
+00:25:27,371 --> 00:25:28,833
+This is changing topology every frame.
+
+519
+00:25:28,873 --> 00:25:32,196
+There's no inner frame coherency between the vertices.
+
+520
+00:25:34,383 --> 00:25:36,605
+So the first approach that we had for the GPU pipeline
+
+521
+00:25:36,645 --> 00:25:39,266
+was a series of compute shaders where we would decompress
+
+522
+00:25:39,306 --> 00:25:41,247
+and blend transforms in one compute shader,
+
+523
+00:25:41,307 --> 00:25:42,608
+transform the vertices in another,
+
+524
+00:25:42,988 --> 00:25:45,350
+and then another compute shader to compact
+
+525
+00:25:45,390 --> 00:25:46,610
+and feed into the render pipeline.
+
+526
+00:25:47,531 --> 00:25:50,753
+This obviously continually round-tripped to the main memory
+
+527
+00:25:50,813 --> 00:25:52,474
+and completely killed our bandwidth.
+
+528
+00:25:53,094 --> 00:25:54,935
+So this approach was not going to work.
+
+529
+00:25:55,835 --> 00:26:00,756
+The second attempt was to have an uber compute shader where we perform all the stages in
+
+530
+00:26:00,776 --> 00:26:01,837
+a single compute shader.
+
+531
+00:26:02,577 --> 00:26:10,738
+We used group syncs to try and synchronise data caches and we utilised LDS to synchronise
+
+532
+00:26:10,758 --> 00:26:13,099
+between or within the wave itself.
+
+533
+00:26:13,619 --> 00:26:17,520
+This was about a 3x speed up and so we were pretty happy with this.
+
+534
+00:26:18,780 --> 00:26:24,181
+A note on the decompression, obviously you have a limited amount of LDS memory.
+
+535
+00:26:25,065 --> 00:26:28,966
+when you're actually sharing your blended
+
+536
+00:26:29,147 --> 00:26:30,487
+and uncompressed transforms.
+
+537
+00:26:31,568 --> 00:26:34,909
+So your active number of transforms that you can write
+
+538
+00:26:34,929 --> 00:26:37,950
+to LDS has to, we limited it to 64 in order
+
+539
+00:26:37,970 --> 00:26:40,071
+to make sure we had enough occupancy on the GPU.
+
+540
+00:26:41,271 --> 00:26:42,952
+This was enforced in the importer.
+
+541
+00:26:42,992 --> 00:26:45,473
+When the importer detected that you were going to end up with more
+
+542
+00:26:45,513 --> 00:26:50,635
+than 64 transforms per wave, or it limited the wave size
+
+543
+00:26:50,775 --> 00:26:52,916
+to only a maximum of 64 transforms.
+
+544
+00:26:58,009 --> 00:27:00,031
+So when actually selecting the dispatch size,
+
+545
+00:27:00,611 --> 00:27:02,293
+this is essentially what you want to keep in mind.
+
+546
+00:27:02,313 --> 00:27:06,076
+You want to select the largest dispatch size you can find,
+
+547
+00:27:06,817 --> 00:27:09,939
+but only up to 64 transforms per wave.
+
+548
+00:27:10,880 --> 00:27:15,184
+You don't want to, if you schedule any more than that
+
+549
+00:27:15,284 --> 00:27:19,908
+onto the LDS, you will start to suffer occupancy issues.
+
+550
+00:27:20,589 --> 00:27:21,029
+For us, this.
+
+551
+00:27:21,830 --> 00:27:26,735
+Almost all the time we were still able to run the maximum 1024 lanes, except for the
+
+552
+00:27:26,775 --> 00:27:32,341
+last wave which usually was whatever leftover number of vertices needed to be processed.
+
+553
+00:27:36,194 --> 00:27:39,175
+The next big optimization came is when we moved everything
+
+554
+00:27:39,216 --> 00:27:40,857
+over to async compute.
+
+555
+00:27:41,837 --> 00:27:44,759
+This is a fixed animation, so you know what's going to
+
+556
+00:27:44,779 --> 00:27:45,520
+happen ahead of time.
+
+557
+00:27:45,600 --> 00:27:48,121
+You can prepare future frames in previous frames.
+
+558
+00:27:48,822 --> 00:27:52,704
+We had quite a few occasions in our pipeline where the GPU
+
+559
+00:27:52,724 --> 00:27:53,085
+was idle.
+
+560
+00:27:53,665 --> 00:27:56,349
+and this is a great thing to pair with things
+
+561
+00:27:56,429 --> 00:27:58,092
+that are ALU heavy.
+
+562
+00:27:58,672 --> 00:28:01,116
+Essentially this process is almost entirely bandwidth bound
+
+563
+00:28:01,136 --> 00:28:03,639
+and so if you have ALU heavy sections of the GPU,
+
+564
+00:28:03,920 --> 00:28:05,121
+this is when you want to layer this in.
+
+565
+00:28:06,083 --> 00:28:07,585
+Also at the end of the project,
+
+566
+00:28:07,625 --> 00:28:08,866
+we started to play around with
+
+567
+00:28:10,008 --> 00:28:12,530
+how to integrate physics more into this.
+
+568
+00:28:13,571 --> 00:28:16,194
+We were able to generate physics collision data
+
+569
+00:28:16,234 --> 00:28:19,277
+just in time, and especially on a shared memory system,
+
+570
+00:28:19,297 --> 00:28:20,258
+this works out pretty well.
+
+571
+00:28:20,558 --> 00:28:22,340
+You can feed this back into Havoc using,
+
+572
+00:28:22,841 --> 00:28:25,063
+we were experimenting with those two physics types
+
+573
+00:28:25,964 --> 00:28:27,825
+to try and feed the geometry back into Havoc
+
+574
+00:28:27,906 --> 00:28:29,447
+and actually have collision responses on them.
+
+575
+00:28:29,787 --> 00:28:32,768
+There are several variants here that you can play with.
+
+576
+00:28:33,389 --> 00:28:34,889
+For instance, you can have on-off states,
+
+577
+00:28:35,309 --> 00:28:36,770
+which is obviously pretty easy.
+
+578
+00:28:36,850 --> 00:28:38,370
+So if the player can't get to a bridge,
+
+579
+00:28:38,510 --> 00:28:39,371
+you want to blow up the bridge,
+
+580
+00:28:39,431 --> 00:28:41,932
+and then so the on state is the bridge is there,
+
+581
+00:28:41,972 --> 00:28:43,832
+and the off state is the bridge is gone.
+
+582
+00:28:44,373 --> 00:28:47,534
+And then a more fine-grained approach is
+
+583
+00:28:48,594 --> 00:28:50,375
+the player might be on the bridge while it's collapsing,
+
+584
+00:28:50,395 --> 00:28:51,775
+in which case a physics geometry
+
+585
+00:28:51,795 --> 00:28:53,076
+needs to be generated every frame.
+
+586
+00:28:53,716 --> 00:28:55,717
+So those are the two kind of approaches
+
+587
+00:28:55,877 --> 00:28:56,617
+we started to look at.
+
+588
+00:29:00,379 --> 00:29:02,400
+And the last thing I'll point out is,
+
+589
+00:29:02,840 --> 00:29:04,181
+the slides will be available offline,
+
+590
+00:29:04,221 --> 00:29:05,962
+so you can read through the shader exactly.
+
+591
+00:29:06,502 --> 00:29:07,983
+But the key thing to remember is you wanna try
+
+592
+00:29:08,003 --> 00:29:11,704
+and hoist as many of the processing into the scalar unit
+
+593
+00:29:11,764 --> 00:29:13,785
+from vector units as you possibly can.
+
+594
+00:29:14,325 --> 00:29:16,686
+For the Xbox, this was make uniform call.
+
+595
+00:29:17,427 --> 00:29:20,028
+This is now available in shader model six as more of a,
+
+596
+00:29:21,608 --> 00:29:25,109
+cross-platform ability, but it's definitely worth
+
+597
+00:29:25,589 --> 00:29:29,030
+optimizing to move as much of the work from vector units
+
+598
+00:29:29,090 --> 00:29:30,310
+into scalar units as you can.
+
+599
+00:29:31,511 --> 00:29:34,651
+The next thing is also be sparing with your group syncs.
+
+600
+00:29:35,211 --> 00:29:37,112
+They can be costly, and if you have too many of them,
+
+601
+00:29:37,812 --> 00:29:40,733
+they will end up slowing down perf quite a bit.
+
+602
+00:29:40,833 --> 00:29:42,373
+So we only ended up needing one,
+
+603
+00:29:42,553 --> 00:29:43,873
+and this is the rough structure
+
+604
+00:29:43,913 --> 00:29:45,474
+and how we decompressed everything.
+
+605
+00:29:46,114 --> 00:29:48,974
+Again, just to remind you on some of the things you can do,
+
+606
+00:29:49,374 --> 00:29:49,775
+here's another.
+
+607
+00:29:53,833 --> 00:29:56,207
+Bearly's in the air, Osiris. Focus fire on ground forces.
+
+608
+00:30:26,468 --> 00:30:29,009
+Our British people have the Kraken distracted.
+
+609
+00:30:29,029 --> 00:30:32,110
+You're clear to advance on the constructor's coordinates.
+
+610
+00:30:32,190 --> 00:30:36,030
+Affirmative, Commander.
+
+611
+00:30:36,090 --> 00:30:40,111
+Let's go.
+
+612
+00:30:40,351 --> 00:30:42,251
+That Kraken reveal sequence from Halo 5
+
+613
+00:30:42,672 --> 00:30:45,592
+and the plateau section of the game
+
+614
+00:30:45,872 --> 00:30:48,473
+was one of our first levels that we actually worked on.
+
+615
+00:30:48,533 --> 00:30:49,613
+So it's one of the first things that we
+
+616
+00:30:49,653 --> 00:30:51,153
+learned a lot about the game and how
+
+617
+00:30:51,173 --> 00:30:52,253
+the geometry caching worked.
+
+618
+00:30:52,313 --> 00:30:53,634
+It's also the one that kind of carried us
+
+619
+00:30:53,674 --> 00:30:55,754
+through the whole production as we had to optimize and change
+
+620
+00:30:55,794 --> 00:30:56,034
+things.
+
+621
+00:30:58,200 --> 00:31:02,523
+So I'm going to jump into more of the authoring side for the rest of the talk and kind of
+
+622
+00:31:02,563 --> 00:31:04,865
+go in lessons we learned from the artist side.
+
+623
+00:31:07,046 --> 00:31:10,609
+So you can use any content creation package you want.
+
+624
+00:31:10,669 --> 00:31:14,632
+One good thing about using Alembic is that intermediately we could use Max, Maya, any
+
+625
+00:31:14,672 --> 00:31:17,855
+package and write to Alembic and then we could import that.
+
+626
+00:31:19,868 --> 00:31:25,511
+import that data into the engine so that way we won't be limited by whatever software our artists were.
+
+627
+00:31:25,831 --> 00:31:27,351
+But a few things to keep in mind though.
+
+628
+00:31:28,632 --> 00:31:34,834
+When you're authoring for these different types, static needs a relative mesh for each frame, so that's like camera culling.
+
+629
+00:31:34,854 --> 00:31:37,876
+So you need to have components in that in your DCC.
+
+630
+00:31:38,956 --> 00:31:42,377
+Rigid needs an identifier per part. In Houdini we use name.
+
+631
+00:31:43,118 --> 00:31:46,719
+In Maya you can use the shape nodes or you can put an ID per each bone.
+
+632
+00:31:47,826 --> 00:31:54,610
+Soft needs a wide range of deformers, so whether you're doing cloth, fluids, lavas, or ray projection.
+
+633
+00:31:55,891 --> 00:32:01,595
+Skin needs the whole character pipeline, so the more automating you can do of a character pipeline is a little bit better.
+
+634
+00:32:02,396 --> 00:32:07,139
+You try to avoid as much of that character authoring when we're doing geometry caching.
+
+635
+00:32:08,240 --> 00:32:09,561
+And fluid needs to be able to...
+
+636
+00:32:10,480 --> 00:32:12,021
+allow the package to do anything.
+
+637
+00:32:12,061 --> 00:32:14,123
+So you can switch from bears to dogs to cats,
+
+638
+00:32:14,263 --> 00:32:15,685
+all in the same geometry sequence,
+
+639
+00:32:16,045 --> 00:32:17,146
+and pick any frame you want.
+
+640
+00:32:17,406 --> 00:32:19,869
+It's not just necessarily VDB remeshing.
+
+641
+00:32:20,169 --> 00:32:22,511
+You literally need to be artistically allowed
+
+642
+00:32:22,551 --> 00:32:23,372
+to do whatever you want.
+
+643
+00:32:25,374 --> 00:32:27,095
+One of the things to keep in mind
+
+644
+00:32:27,576 --> 00:32:30,498
+is the lexicon for each software package is different.
+
+645
+00:32:30,559 --> 00:32:32,200
+We actually ran into this issue a lot.
+
+646
+00:32:34,503 --> 00:32:37,244
+Limbic Houdini and Maya all use different terminologies
+
+647
+00:32:37,304 --> 00:32:39,565
+and across the studio, not everybody's really familiar
+
+648
+00:32:39,585 --> 00:32:40,525
+where data is stored.
+
+649
+00:32:42,026 --> 00:32:43,246
+So you can look at this offline,
+
+650
+00:32:43,286 --> 00:32:45,187
+but like places where UVs are stored,
+
+651
+00:32:45,907 --> 00:32:48,848
+is vertex level in Houdini,
+
+652
+00:32:48,908 --> 00:32:50,949
+but in Maya it's like the face vertex level.
+
+653
+00:32:52,069 --> 00:32:54,470
+This actually becomes a big lingo issue
+
+654
+00:32:54,490 --> 00:32:56,491
+when you're going back and forth with your software.
+
+655
+00:32:59,570 --> 00:33:04,054
+And these are the additional attributes that we had to store for each level of the data.
+
+656
+00:33:04,454 --> 00:33:06,856
+I'm using the Houdini terms on the left because I'm more familiar with them.
+
+657
+00:33:07,776 --> 00:33:09,617
+With the point, that's just your raw position data.
+
+658
+00:33:10,018 --> 00:33:16,062
+And you also need your DCC additional attributes that you don't really export, and that's usually
+
+659
+00:33:16,082 --> 00:33:16,763
+your rest position.
+
+660
+00:33:16,803 --> 00:33:19,484
+This is usually your T-pose on your geometry caches.
+
+661
+00:33:20,245 --> 00:33:23,928
+You use this to blend back and forth and to maintain the geometry as it goes through.
+
+662
+00:33:24,888 --> 00:33:33,354
+Traditional stuff like your vertex, as your normals, UVs, CDs, and colors, and skinning weights, that's where you normally maintain them.
+
+663
+00:33:33,734 --> 00:33:37,516
+And then on the primitive level, you have to maintain your part IDs and materials.
+
+664
+00:33:38,397 --> 00:33:42,119
+The other things to keep in count is point list and primitive list.
+
+665
+00:33:42,139 --> 00:33:50,585
+This might seem a little bit weird, but as you have a geometry frequency over time, it's very easy to manipulate the data and have points in the geometry get in a different array.
+
+666
+00:33:51,119 --> 00:33:54,021
+And as artists come and merge and blend geometry sequences
+
+667
+00:33:54,061 --> 00:33:55,942
+together, you can get the data stack
+
+668
+00:33:56,123 --> 00:33:58,684
+of all the different point listings arbitrarily
+
+669
+00:33:58,704 --> 00:33:59,485
+out of focus.
+
+670
+00:33:59,765 --> 00:34:01,346
+And it becomes really hard to track the data.
+
+671
+00:34:01,727 --> 00:34:03,828
+So we actually put a list at the very beginning
+
+672
+00:34:03,908 --> 00:34:06,970
+of our content import.
+
+673
+00:34:07,310 --> 00:34:08,471
+So as soon as the geometry came in,
+
+674
+00:34:08,511 --> 00:34:10,433
+we assigned each point a list number.
+
+675
+00:34:10,473 --> 00:34:11,774
+So that wouldn't go to export it.
+
+676
+00:34:12,094 --> 00:34:16,076
+It came out the same list as it goes through the whole sequence.
+
+677
+00:34:19,902 --> 00:34:21,703
+Also, the Olympic Intermediate Format,
+
+678
+00:34:21,763 --> 00:34:23,084
+one of the reasons why we're using it,
+
+679
+00:34:23,544 --> 00:34:26,065
+is it's supported in a host of DCC formats.
+
+680
+00:34:26,826 --> 00:34:30,248
+And it's also actually implemented in a lot of the engines
+
+681
+00:34:30,308 --> 00:34:31,549
+at different varying levels.
+
+682
+00:34:32,589 --> 00:34:34,731
+One of the things was we originally got this concept
+
+683
+00:34:34,791 --> 00:34:36,272
+of geometry caching from the CryEngine.
+
+684
+00:34:36,312 --> 00:34:38,513
+So we know in a lot of the derivatives of it
+
+685
+00:34:38,553 --> 00:34:40,254
+that this geometry caching text exists
+
+686
+00:34:40,294 --> 00:34:43,216
+at a lower level state across a lot of the engines right now.
+
+687
+00:34:45,403 --> 00:34:47,865
+Also, the one thing we also want to talk about, the Alembic versatility.
+
+688
+00:34:47,925 --> 00:34:49,486
+As you're using it as an authoring source,
+
+689
+00:34:50,307 --> 00:34:52,769
+the best thing about Alembic is it allows you to read
+
+690
+00:34:53,289 --> 00:34:56,532
+any line of data at any frame without having to slurp up the whole thing.
+
+691
+00:34:56,892 --> 00:34:59,254
+If you use FBX and you have a 3000 frame sequence,
+
+692
+00:34:59,274 --> 00:35:01,136
+you have to literally load up the whole FBX sequence
+
+693
+00:35:01,156 --> 00:35:02,617
+in order to pull lines of data out of it.
+
+694
+00:35:02,937 --> 00:35:06,380
+Whereas Alembic, it's really easy in Python or in different seed bindings
+
+695
+00:35:06,720 --> 00:35:09,022
+to be able to pull the one exact piece of data you need.
+
+696
+00:35:09,362 --> 00:35:11,363
+And when you're writing out big, large sequences of 3,000
+
+697
+00:35:12,023 --> 00:35:14,445
+frames, 100 frames of geometry, you don't want to
+
+698
+00:35:14,465 --> 00:35:17,406
+kind of have to pull in and consume all your memory on
+
+699
+00:35:17,426 --> 00:35:18,726
+your computer just to reread it.
+
+700
+00:35:21,468 --> 00:35:23,209
+The one other thing, though, to describe, though, is
+
+701
+00:35:23,549 --> 00:35:26,630
+Olympic is not a universal scene description format, like
+
+702
+00:35:26,750 --> 00:35:28,311
+FBX and Collada and stuff like that.
+
+703
+00:35:30,652 --> 00:35:32,713
+But what it does really well is handle geometry.
+
+704
+00:35:32,753 --> 00:35:34,414
+And that's all we really want the intermediate
+
+705
+00:35:34,454 --> 00:35:35,234
+file format to do.
+
+706
+00:35:38,519 --> 00:35:42,201
+Another thing that we kind of ran into a lot is integration and performance testing.
+
+707
+00:35:42,461 --> 00:35:44,783
+Geometry hashing is going to be really a small part of your pipeline.
+
+708
+00:35:45,043 --> 00:35:47,965
+So as you implement it, you should take in these things to note.
+
+709
+00:35:48,405 --> 00:35:49,306
+Build in a kill switch.
+
+710
+00:35:49,906 --> 00:35:52,788
+We were working on some of the biggest events throughout Halo 5,
+
+711
+00:35:53,208 --> 00:35:55,710
+and we got kind of the eyes sore on throughout the whole project
+
+712
+00:35:55,930 --> 00:35:58,792
+just because they're the biggest things everybody has really focused on.
+
+713
+00:35:59,792 --> 00:36:02,414
+So in order to prove that our system wasn't the culprit,
+
+714
+00:36:02,974 --> 00:36:04,155
+you can just easily kill it.
+
+715
+00:36:04,736 --> 00:36:10,357
+and then see the perf cost of other systems, whether it's your effects, your lighting, or stuff like that, are actually...
+
+716
+00:36:11,996 --> 00:36:14,638
+baseline for our system was under 2 microseconds.
+
+717
+00:36:15,879 --> 00:36:18,200
+Whereas the other effects systems and animation systems
+
+718
+00:36:18,260 --> 00:36:20,401
+usually have a higher level need because they have to do a
+
+719
+00:36:20,442 --> 00:36:22,123
+lot more CPU, GPU bound work.
+
+720
+00:36:22,723 --> 00:36:24,444
+Whereas ours, if you just turn on the system,
+
+721
+00:36:24,564 --> 00:36:25,845
+is 2 microseconds.
+
+722
+00:36:26,826 --> 00:36:29,007
+The other things to keep in mind is it's a geometry
+
+723
+00:36:29,027 --> 00:36:30,828
+sequence, so when you actually want to put it into a
+
+724
+00:36:30,888 --> 00:36:33,990
+sequencer or do testing, have start, stop,
+
+725
+00:36:34,030 --> 00:36:35,211
+resets, and go to frames.
+
+726
+00:36:36,112 --> 00:36:38,894
+And also, make sure you do test for a limb bit because it
+
+727
+00:36:38,934 --> 00:36:40,335
+does different varying types.
+
+728
+00:36:40,735 --> 00:36:43,736
+of storage format so it's kind of dynamically compressible.
+
+729
+00:36:44,737 --> 00:36:48,659
+So make sure that the, when you have just like say a static piece of geometry, the whole
+
+730
+00:36:48,699 --> 00:36:51,680
+format will change itself to be the best optimized.
+
+731
+00:36:52,301 --> 00:36:56,423
+And then also with the, as Sibir mentioned earlier.
+
+732
+00:36:56,940 --> 00:36:58,981
+with deletion and creation, it can get really hairy.
+
+733
+00:36:59,362 --> 00:37:01,543
+So we listed out a list of tests to do.
+
+734
+00:37:02,023 --> 00:37:04,804
+These were very, seems like silly tests,
+
+735
+00:37:05,125 --> 00:37:07,026
+but they became very unique and different for us.
+
+736
+00:37:07,406 --> 00:37:09,207
+And then, depending on how you write the code,
+
+737
+00:37:09,267 --> 00:37:12,588
+they can actually cause some pretty interesting gaffes,
+
+738
+00:37:12,869 --> 00:37:13,549
+to say the least.
+
+739
+00:37:14,529 --> 00:37:17,031
+We actually lost our whole fluid caching pipeline
+
+740
+00:37:17,071 --> 00:37:18,752
+because of deletion and creation at one point.
+
+741
+00:37:21,561 --> 00:37:23,382
+So now I'm going to dive into the component system.
+
+742
+00:37:25,163 --> 00:37:28,206
+So for fluid, to kind of give you a little better idea of
+
+743
+00:37:28,246 --> 00:37:32,368
+what it is, if you ever have seen a 3D zoetrope, it's just
+
+744
+00:37:32,549 --> 00:37:33,409
+static models.
+
+745
+00:37:33,529 --> 00:37:36,531
+And as you spin this around, you look through the slit,
+
+746
+00:37:36,571 --> 00:37:37,772
+you'll see the birds in motion.
+
+747
+00:37:38,453 --> 00:37:41,675
+This was thought of over 130 years ago.
+
+748
+00:37:42,976 --> 00:37:45,638
+But we use it a lot for VDB remeshing nowadays.
+
+749
+00:37:46,897 --> 00:37:49,158
+I'm going to talk about the pros and cons of Fluid,
+
+750
+00:37:49,798 --> 00:37:52,439
+some additional optimizing, and some topology examples.
+
+751
+00:37:54,620 --> 00:37:55,861
+Fluids were kind of like our first love.
+
+752
+00:37:56,121 --> 00:37:58,082
+We thought it was going to be the only thing that we needed.
+
+753
+00:37:58,462 --> 00:38:00,083
+And that's one of the reasons it actually almost
+
+754
+00:38:00,563 --> 00:38:02,764
+got the whole system cut from Halo 5,
+
+755
+00:38:02,804 --> 00:38:06,606
+because it's not really a great experience.
+
+756
+00:38:07,266 --> 00:38:08,306
+It's really easy to author.
+
+757
+00:38:08,346 --> 00:38:09,527
+It's easy to get into the game.
+
+758
+00:38:10,708 --> 00:38:13,089
+You can rapidly prototype and you can do any art asset.
+
+759
+00:38:13,129 --> 00:38:14,950
+There's really no minimum bandwidth.
+
+760
+00:38:15,290 --> 00:38:17,231
+You can just pump geometry into the game.
+
+761
+00:38:17,571 --> 00:38:20,552
+However, it becomes very expensive in there.
+
+762
+00:38:20,592 --> 00:38:22,593
+It's the same reason you don't want to put an Olympic file
+
+763
+00:38:22,633 --> 00:38:23,234
+straight in there.
+
+764
+00:38:24,014 --> 00:38:26,135
+It becomes really large data sizes.
+
+765
+00:38:27,856 --> 00:38:29,897
+But it's not really a reason to discount Fluid.
+
+766
+00:38:29,917 --> 00:38:32,138
+There's a lot of times where you just need to do pure art
+
+767
+00:38:32,498 --> 00:38:37,240
+and rapid prototype, so Fluid is a really good test case for that.
+
+768
+00:38:39,107 --> 00:38:45,731
+As Zubair was mentioning, the optimization that doesn't require transforms, the geometry
+
+769
+00:38:45,751 --> 00:38:49,613
+you know is a constant load to the GPU, so if you have a really good streaming system,
+
+770
+00:38:50,373 --> 00:38:51,794
+it makes the process a lot faster.
+
+771
+00:38:53,035 --> 00:38:54,796
+You can always balance for the constant memory load.
+
+772
+00:38:57,777 --> 00:38:57,998
+Sorry.
+
+773
+00:38:58,018 --> 00:39:02,080
+Yeah, go on.
+
+774
+00:39:03,317 --> 00:39:07,978
+So this is a quick topology example for those aren't familiar with the dynamically changing polys.
+
+775
+00:39:08,818 --> 00:39:09,999
+This is what fluid really is.
+
+776
+00:39:10,019 --> 00:39:14,619
+I'm going to move on to rigid now.
+
+777
+00:39:15,740 --> 00:39:18,340
+This is used really heavily at the very end state of our game.
+
+778
+00:39:19,340 --> 00:39:25,982
+We actually, when you see this next sequence, we actually had over like 10,000, close to 20,000 swarms going for.
+
+779
+00:39:26,442 --> 00:39:31,483
+But at the end of the sequence, we passed it off to an outsource vendor and
+
+780
+00:39:32,163 --> 00:39:39,265
+they did the assumption that we could only have about 20 of these constructors in the swarm afterwards.
+
+781
+00:39:39,585 --> 00:39:46,126
+So we actually had to cut out over 75% of the swarm down in order to meet the outsource vendor's expectations.
+
+782
+00:39:49,127 --> 00:39:51,988
+...activated. You can't...
+
+783
+00:39:52,028 --> 00:39:58,030
+Exoberant, what instructors? This is a builder facility after all.
+
+784
+00:39:58,090 --> 00:40:00,690
+I was installed by the builders. I serve the builders.
+
+785
+00:40:02,933 --> 00:40:04,835
+Stop it!
+
+786
+00:40:04,855 --> 00:40:11,340
+You took my installation.
+
+787
+00:40:11,640 --> 00:40:13,562
+I will take something of yours.
+
+788
+00:40:32,721 --> 00:40:37,765
+So rigid really was our golden child. It was how we shipped a majority of all of our assets across the whole game.
+
+789
+00:40:39,527 --> 00:40:44,572
+Soft and fluid and skinned are really important, but rigid's really where you're going to use 90% of your assets.
+
+790
+00:40:44,592 --> 00:40:51,058
+When you can access tens of thousands, hundreds of thousands, transform very cheaply and efficiently, it's easy to make anything a rigid body.
+
+791
+00:40:52,772 --> 00:40:56,294
+So we're going to kind of go over some of the different benefits and pros and cons of this.
+
+792
+00:40:57,254 --> 00:40:59,095
+Aliasing issues, subsidizing issues,
+
+793
+00:40:59,916 --> 00:41:02,997
+some of the reasons why we actually had art-defined limits on the asset types,
+
+794
+00:41:03,658 --> 00:41:06,519
+and then some more improvements with instancing LODs and sprites.
+
+795
+00:41:09,021 --> 00:41:12,402
+So with Rigid, it's really any kinematic motion.
+
+796
+00:41:13,163 --> 00:41:15,704
+It becomes really just a transform cloud in the end.
+
+797
+00:41:16,004 --> 00:41:18,726
+And you can put on this transform cloud pretty much anything you want.
+
+798
+00:41:21,976 --> 00:41:24,797
+though, since it is kinematic, it means it's baked animation.
+
+799
+00:41:25,337 --> 00:41:27,598
+But the good thing is, you still want
+
+800
+00:41:27,618 --> 00:41:30,198
+to put lots of life in your engine and in your game.
+
+801
+00:41:30,638 --> 00:41:32,459
+So if you have all these interactive systems,
+
+802
+00:41:32,479 --> 00:41:34,399
+we're not trying to observe them or replace them.
+
+803
+00:41:35,820 --> 00:41:37,840
+You can actually use those where it matters,
+
+804
+00:41:37,920 --> 00:41:39,221
+really up close and in your face.
+
+805
+00:41:39,521 --> 00:41:41,902
+So if you have a nice animation system or flocking system,
+
+806
+00:41:42,182 --> 00:41:43,562
+you can have that right up in your face.
+
+807
+00:41:43,662 --> 00:41:46,023
+Whereas this geometry caching can be off to the side
+
+808
+00:41:46,083 --> 00:41:48,323
+and cyclical cycles or flags off to the side.
+
+809
+00:41:50,605 --> 00:41:53,806
+It's a trade-off in memory and stuff like that,
+
+810
+00:41:53,846 --> 00:41:55,827
+but you're reducing all the runtime costs
+
+811
+00:41:55,867 --> 00:41:57,647
+associated with running a simulation
+
+812
+00:41:57,667 --> 00:42:00,348
+or a whole character-based animation pipeline.
+
+813
+00:42:01,568 --> 00:42:03,949
+And you can also componentize this code
+
+814
+00:42:04,469 --> 00:42:06,470
+so that you use it in your GPU
+
+815
+00:42:06,510 --> 00:42:08,050
+in different sections of these systems,
+
+816
+00:42:08,150 --> 00:42:10,251
+like your flocking, your particle, your crowd system.
+
+817
+00:42:11,491 --> 00:42:13,992
+You can kind of spread it depending on how you cut up the code
+
+818
+00:42:14,052 --> 00:42:14,992
+and share it in your system.
+
+819
+00:42:17,528 --> 00:42:19,750
+So one of the things that we actually found out, we actually
+
+820
+00:42:19,790 --> 00:42:21,192
+don't have anything with a million
+
+821
+00:42:21,232 --> 00:42:22,873
+transforms in Halo 5.
+
+822
+00:42:23,453 --> 00:42:25,155
+This was actually a system test that we did.
+
+823
+00:42:25,675 --> 00:42:28,518
+When you actually put a million things in the game at
+
+824
+00:42:28,578 --> 00:42:31,220
+only 1080p, you don't actually have enough
+
+825
+00:42:31,260 --> 00:42:32,081
+pixels on the screen.
+
+826
+00:42:32,101 --> 00:42:33,862
+This creates a noise problem.
+
+827
+00:42:34,543 --> 00:42:36,104
+You actually get true aliasing, because you don't
+
+828
+00:42:36,124 --> 00:42:37,185
+have enough pixels on the screen.
+
+829
+00:42:37,465 --> 00:42:39,867
+Only until you really get to 4K do you actually notice that
+
+830
+00:42:39,887 --> 00:42:41,949
+you can actually have a million points flying around.
+
+831
+00:42:43,742 --> 00:42:45,782
+So we're not really trying to compete with Krakatoa.
+
+832
+00:42:46,202 --> 00:42:48,903
+We're trying to just do simple assets.
+
+833
+00:42:49,283 --> 00:42:51,924
+And usually, when you're getting that complex,
+
+834
+00:42:54,345 --> 00:42:57,806
+it doesn't actually have the intended visual objective
+
+835
+00:42:57,846 --> 00:42:58,786
+that you're trying to achieve.
+
+836
+00:42:59,326 --> 00:43:01,607
+Just because you can be more approving things on the screen
+
+837
+00:43:01,927 --> 00:43:03,448
+doesn't necessarily mean you should.
+
+838
+00:43:05,538 --> 00:43:09,442
+But one of the things to do if you are trying to put that many points on screen, use just
+
+839
+00:43:09,522 --> 00:43:10,443
+a simple pixel shader.
+
+840
+00:43:10,463 --> 00:43:12,886
+You don't need to do any expensive textures or anything like that.
+
+841
+00:43:13,306 --> 00:43:14,748
+It causes a lot of aliasing.
+
+842
+00:43:15,309 --> 00:43:15,889
+And also...
+
+843
+00:43:19,480 --> 00:43:22,360
+So you don't even actually have to really do geometry or anything like that.
+
+844
+00:43:22,740 --> 00:43:27,061
+When you really get to a million points on most of the screens resolutions for the next couple generations,
+
+845
+00:43:27,321 --> 00:43:30,362
+you can really just use a ribbon with points on it in a regular effects pipeline.
+
+846
+00:43:31,662 --> 00:43:36,903
+It's useful up to a point, but what it really means when you can push a million transforms around is it's really efficient,
+
+847
+00:43:37,223 --> 00:43:40,404
+and that you can share the load across the whole system with your effects and your lighting teams,
+
+848
+00:43:40,764 --> 00:43:42,805
+and your footprint is generally extremely small.
+
+849
+00:43:44,924 --> 00:43:48,367
+One of the methods we actually used is called subsidizing.
+
+850
+00:43:49,047 --> 00:43:51,269
+It limits the amount of pieces that you actually have to author.
+
+851
+00:43:51,289 --> 00:43:53,210
+You don't have to author a hundred different objects.
+
+852
+00:43:53,571 --> 00:43:55,432
+People have a hard time counting objects.
+
+853
+00:43:55,492 --> 00:43:58,234
+If you really want, try to count all the stars real quickly.
+
+854
+00:43:58,254 --> 00:44:03,218
+It should take you only a second, but it's actually ten stars in there.
+
+855
+00:44:03,578 --> 00:44:07,360
+But the way your brain processes it, the same reason we cut phone numbers down to about
+
+856
+00:44:07,401 --> 00:44:12,204
+seven digits, it's about the max limit that humans can perceive real quickly at a glance.
+
+857
+00:44:14,796 --> 00:44:16,878
+So when you're building a crowd system, especially, usually
+
+858
+00:44:16,898 --> 00:44:18,939
+you only do three to eight variations.
+
+859
+00:44:18,959 --> 00:44:20,460
+You don't really need to do more than that.
+
+860
+00:44:21,201 --> 00:44:23,222
+It simplifies the authoring story, because you don't have
+
+861
+00:44:23,242 --> 00:44:25,224
+to make hundreds and hundreds of unique objects.
+
+862
+00:44:26,205 --> 00:44:28,326
+The beauty really is in the motion, not really in all the
+
+863
+00:44:28,366 --> 00:44:29,327
+different unique geometry.
+
+864
+00:44:29,367 --> 00:44:30,508
+It's not really your environment.
+
+865
+00:44:32,793 --> 00:44:36,377
+In order to actually make the system even go further, we didn't carry this out fully,
+
+866
+00:44:36,437 --> 00:44:41,303
+but since it is really just a true transform cloud, you can actually just use instancing
+
+867
+00:44:41,343 --> 00:44:42,404
+for a lot of this geometry.
+
+868
+00:44:42,424 --> 00:44:46,109
+If you're only using three to eight objects, you can actually just instance across the
+
+869
+00:44:46,149 --> 00:44:46,549
+whole thing.
+
+870
+00:44:46,569 --> 00:44:50,574
+One of the things that we actually didn't do correctly was on those swarms, we actually
+
+871
+00:44:50,614 --> 00:44:50,814
+had...
+
+872
+00:44:51,475 --> 00:44:53,957
+at one point, 30,000 unique pieces of geometry.
+
+873
+00:44:54,218 --> 00:44:55,559
+This created a bigger disk space.
+
+874
+00:44:55,839 --> 00:44:58,122
+If we literally just used one instance piece of geometry,
+
+875
+00:44:58,142 --> 00:44:59,844
+it would have cut down the disk load.
+
+876
+00:45:00,665 --> 00:45:02,086
+The render time is still the same
+
+877
+00:45:02,206 --> 00:45:06,170
+in order to render that many constructor swarms.
+
+878
+00:45:08,070 --> 00:45:10,292
+the actually on disk footprint, which kind of really
+
+879
+00:45:11,033 --> 00:45:13,195
+fights you when you're actually doing downloadable content,
+
+880
+00:45:13,975 --> 00:45:15,217
+that's significantly reduced.
+
+881
+00:45:16,478 --> 00:45:18,579
+Additionally, using LODs, what you can do,
+
+882
+00:45:18,600 --> 00:45:20,281
+you can keep this completely in the GPU.
+
+883
+00:45:20,321 --> 00:45:21,182
+You don't have to do anything.
+
+884
+00:45:21,462 --> 00:45:22,963
+The same deletion and scaling method
+
+885
+00:45:23,003 --> 00:45:25,045
+you can just do with the z-depth and just
+
+886
+00:45:25,065 --> 00:45:27,707
+pick different models to scale in and scale out on.
+
+887
+00:45:27,727 --> 00:45:27,767
+So.
+
+888
+00:45:30,595 --> 00:45:35,579
+I'm going to actually leave you with a reference from Alfred Hitchcock's The Bird.
+
+889
+00:45:35,820 --> 00:45:37,301
+It was actually filmed not too far from here.
+
+890
+00:45:38,902 --> 00:45:41,764
+Only a few of these birds are actually alive on the set.
+
+891
+00:45:41,825 --> 00:45:42,925
+Most of them are just static.
+
+892
+00:45:43,346 --> 00:45:46,048
+So you only need to animate what you want to see.
+
+893
+00:45:46,068 --> 00:45:47,990
+You don't have to animate everything just because.
+
+894
+00:45:51,281 --> 00:45:54,543
+Some of the art-defined limits that we did is from our bigger towers.
+
+895
+00:45:56,144 --> 00:45:59,427
+They came up to around 32k in transforms.
+
+896
+00:45:59,707 --> 00:46:01,869
+You don't really need to have more than that.
+
+897
+00:46:02,389 --> 00:46:05,571
+We actually found that half of our assets actually worked at about half that rate.
+
+898
+00:46:06,632 --> 00:46:11,155
+This is kind of up to your studio and what your game is doing, but we recommend anywhere
+
+899
+00:46:11,175 --> 00:46:14,096
+between 4K to 65K for each asset.
+
+900
+00:46:14,797 --> 00:46:17,498
+Since your artists are authoring this, they know what the asset's best.
+
+901
+00:46:17,899 --> 00:46:20,040
+You don't want to put more transforms in just because.
+
+902
+00:46:20,520 --> 00:46:22,741
+So if they know what the limit is, it's easier to cull.
+
+903
+00:46:24,977 --> 00:46:27,678
+The other one we had, it was a 3,000 frame limit
+
+904
+00:46:27,718 --> 00:46:28,659
+per each animation.
+
+905
+00:46:29,299 --> 00:46:31,080
+This roughly, depending on your frame rate,
+
+906
+00:46:31,520 --> 00:46:33,261
+equals anywhere from 25 seconds
+
+907
+00:46:33,301 --> 00:46:35,602
+to over 100 seconds of animation.
+
+908
+00:46:35,922 --> 00:46:37,823
+And you can even actually go down to five frames
+
+909
+00:46:37,843 --> 00:46:39,704
+per second if you want with these exports,
+
+910
+00:46:39,764 --> 00:46:41,665
+if you're just going slow motion across the screen.
+
+911
+00:46:42,886 --> 00:46:44,567
+What we found out is it doesn't really need
+
+912
+00:46:44,587 --> 00:46:46,468
+to be a long sequence of geometry.
+
+913
+00:46:47,748 --> 00:46:50,450
+Most of the time, it's just culling something
+
+914
+00:46:50,490 --> 00:46:53,111
+like a bird flock flying across the whole level.
+
+915
+00:46:54,072 --> 00:46:57,473
+The issue wasn't really that the flock was flying for a minute and a half in the screen,
+
+916
+00:46:57,733 --> 00:47:01,874
+it was the bounding volume across the whole object was becoming a problem.
+
+917
+00:47:01,894 --> 00:47:06,196
+So I call it the centipede thing, where we just take the asset and then you cut it off,
+
+918
+00:47:06,296 --> 00:47:09,657
+you delete scale, even though you author one animation asset,
+
+919
+00:47:09,937 --> 00:47:13,938
+you're just shrinking the bounding sphere for each section of it as the flock flies across the screen.
+
+920
+00:47:14,839 --> 00:47:17,321
+This actually significantly reduces the load time too,
+
+921
+00:47:17,341 --> 00:47:22,584
+because you don't always have to have a constant 3000 frame geometry sequence in memory,
+
+922
+00:47:22,884 --> 00:47:24,325
+just because of the sheer scale of it,
+
+923
+00:47:26,247 --> 00:47:27,948
+when the whole bird's flocks are flying across.
+
+924
+00:47:27,988 --> 00:47:29,649
+That way it's easy if the player looks at it,
+
+925
+00:47:31,330 --> 00:47:33,312
+you can cull and drop that from the memory really quick.
+
+926
+00:47:36,244 --> 00:47:38,027
+A few other random authoring notes.
+
+927
+00:47:39,208 --> 00:47:43,113
+When you're doing Rigid, you pretty much need any particle, rigid body, motion graphics,
+
+928
+00:47:43,534 --> 00:47:46,718
+any mechanical motion methods you can use to author with Rigid.
+
+929
+00:47:47,559 --> 00:47:52,306
+But you always have to do IDs on any object, so that's the most important thing to maintain.
+
+930
+00:47:53,407 --> 00:47:57,849
+And then also when you're separating the parts, we used a connectivity-based dictionary
+
+931
+00:47:58,769 --> 00:48:02,511
+so that we could identify which piece was associated with each other.
+
+932
+00:48:02,531 --> 00:48:05,933
+In Houdini, this is usually like the Assemble software or something like that.
+
+933
+00:48:06,773 --> 00:48:10,375
+But the one thing to do is, once you actually export the whole Transform cloud,
+
+934
+00:48:10,695 --> 00:48:14,577
+if you have 20 pieces all doing the same motion, to reduce...
+
+935
+00:48:15,678 --> 00:48:19,523
+them as being 20 different exports and just have a single export with a single transform.
+
+936
+00:48:20,183 --> 00:48:21,825
+This will reduce a lot of your overhead.
+
+937
+00:48:22,306 --> 00:48:24,849
+Even though we have simplified explosions or bird flockings,
+
+938
+00:48:25,230 --> 00:48:27,753
+we can actually put five birds on the same transform.
+
+939
+00:48:27,873 --> 00:48:31,237
+When you have 100 birds, you're not going to notice that five birds are all traveling together.
+
+940
+00:48:34,870 --> 00:48:36,231
+I'm going to move on to static.
+
+941
+00:48:36,291 --> 00:48:40,492
+This is actually something we didn't actually focus on enough, and most of the unaccounted
+
+942
+00:48:40,512 --> 00:48:45,114
+for time in the whole game was just cleaning up the static geometry, the end states.
+
+943
+00:48:47,214 --> 00:48:49,935
+So it's really kind of a story of state changes and sequencers.
+
+944
+00:48:50,855 --> 00:48:54,397
+Seems really silly because geometry caching is supposed to be moving geometry, but this
+
+945
+00:48:54,457 --> 00:48:55,397
+is where it actually hits you.
+
+946
+00:48:55,417 --> 00:48:58,178
+You don't want to have these expensive moving geometry being static.
+
+947
+00:48:58,198 --> 00:49:01,779
+That's why we have so many optimizations for environment geometry.
+
+948
+00:49:05,585 --> 00:49:08,508
+One of the things is also to minimize duration on these geometry classes.
+
+949
+00:49:08,568 --> 00:49:14,074
+For the E3 headliner, we had 12 towers all going off in different sequences.
+
+950
+00:49:14,374 --> 00:49:18,659
+When we initially exported those things, they all went off and triggered at the same time.
+
+951
+00:49:18,939 --> 00:49:26,166
+This created a giant spike in the memory that was pretty drastic, but the only thing we
+
+952
+00:49:26,206 --> 00:49:26,747
+had to do to...
+
+953
+00:49:27,989 --> 00:49:31,230
+clean it up was the start of each beat in the sequencer,
+
+954
+00:49:31,591 --> 00:49:33,371
+is that's when we triggered the exact moment
+
+955
+00:49:33,411 --> 00:49:34,832
+for each one of those towers to collapse.
+
+956
+00:49:35,212 --> 00:49:37,633
+It came to mind silly, but the fact that
+
+957
+00:49:37,753 --> 00:49:39,113
+every single one of those towers were all
+
+958
+00:49:39,153 --> 00:49:41,014
+drawing from the memory at the exact same moment
+
+959
+00:49:42,174 --> 00:49:44,435
+increased the spike time so dramatically
+
+960
+00:49:45,195 --> 00:49:47,836
+that we had a lot of people running around chasing us down.
+
+961
+00:49:50,457 --> 00:49:54,081
+So if you kind of think of like the 1812 Overture for V from Vendetta,
+
+962
+00:49:54,421 --> 00:49:57,085
+where each explosion is going off, as soon as the explosion happens,
+
+963
+00:49:57,145 --> 00:49:58,426
+or as soon as one of those towers happens,
+
+964
+00:49:58,486 --> 00:50:00,689
+if you just trigger it for just that amount of time,
+
+965
+00:50:01,410 --> 00:50:04,273
+you reduce the overhead so very dramatically.
+
+966
+00:50:06,506 --> 00:50:10,349
+The other thing is, it might seem a little bit weird, but perspective culling, and over
+
+967
+00:50:10,389 --> 00:50:14,612
+in a game environment, and camera culling doesn't seem like a native intuitive thing,
+
+968
+00:50:14,932 --> 00:50:18,594
+but if you have, say, like a small simple explosion, pieces go flying.
+
+969
+00:50:18,754 --> 00:50:21,956
+The initial state, you only want the outside shell, you don't want to see inside pieces.
+
+970
+00:50:22,336 --> 00:50:26,399
+But as soon as something explodes, you need to see that inside pieces as it twirls around.
+
+971
+00:50:26,419 --> 00:50:29,601
+And as soon as that piece lands, you don't want to see the side that...
+
+972
+00:50:30,743 --> 00:50:34,088
+It lands on you can call that side or if it goes off the side of a cliff
+
+973
+00:50:34,448 --> 00:50:37,131
+You don't want that piece of geometry to continue and fall off the cliff
+
+974
+00:50:37,191 --> 00:50:39,394
+So you want a camera call based on what the characters can see?
+
+975
+00:50:41,307 --> 00:50:43,710
+Some of these assets depends on what you're kind of doing.
+
+976
+00:50:43,730 --> 00:50:45,171
+If you're doing a simple jersey barrier
+
+977
+00:50:45,191 --> 00:50:47,654
+and where the player can play everywhere,
+
+978
+00:50:47,694 --> 00:50:50,457
+this might still seem kind of strange,
+
+979
+00:50:50,917 --> 00:50:53,139
+but it helps reduce the cost overhead
+
+980
+00:50:53,159 --> 00:50:54,481
+of all the additional polygons
+
+981
+00:50:54,821 --> 00:50:56,663
+because if you can't see it, don't render it.
+
+982
+00:50:57,023 --> 00:50:58,305
+But when you're doing with geometry
+
+983
+00:50:58,345 --> 00:50:59,846
+where you always see the inside of this,
+
+984
+00:50:59,926 --> 00:51:01,268
+it becomes a severe problem.
+
+985
+00:51:03,226 --> 00:51:06,228
+Oh yeah, the other thing is it becomes also a handoff issue too.
+
+986
+00:51:06,248 --> 00:51:07,749
+When you're doing something as big as the towers,
+
+987
+00:51:09,050 --> 00:51:12,693
+the end states we actually just built into the actual environment geometry.
+
+988
+00:51:12,713 --> 00:51:15,896
+Instead of actually loading that whole thing in the GPU process
+
+989
+00:51:15,996 --> 00:51:17,917
+just for those geometry caches,
+
+990
+00:51:18,257 --> 00:51:20,859
+we just built in half the towers into the sequences.
+
+991
+00:51:21,180 --> 00:51:22,741
+Even though we were simulating those towers,
+
+992
+00:51:22,781 --> 00:51:24,923
+we just picked a random point where it looked really good,
+
+993
+00:51:24,943 --> 00:51:27,024
+and then we passed that off to the environment team.
+
+994
+00:51:27,064 --> 00:51:28,686
+So it built it right into the environment pipeline.
+
+995
+00:51:29,286 --> 00:51:31,588
+all your environment geometry is always going to be the most efficient.
+
+996
+00:51:31,608 --> 00:51:33,170
+That's kind of what you always focus on.
+
+997
+00:51:33,450 --> 00:51:35,432
+But with moving geometry, you kind of don't think about,
+
+998
+00:51:35,653 --> 00:51:37,414
+oh, the geometry is static.
+
+999
+00:51:37,735 --> 00:51:40,357
+I should probably not have this in a moving geometry sequence
+
+1000
+00:51:40,638 --> 00:51:42,560
+because we'd actually have the whole base of the tower,
+
+1001
+00:51:42,660 --> 00:51:44,822
+even though it's not moving, just continuously stay there.
+
+1002
+00:51:44,842 --> 00:51:47,505
+As soon as we cut that off, all the assets for all those towers
+
+1003
+00:51:47,985 --> 00:51:49,927
+got reduced in half because all of a sudden,
+
+1004
+00:51:50,107 --> 00:51:51,769
+if it's not moving, you don't have to play it.
+
+1005
+00:51:54,605 --> 00:51:56,206
+As far as an additional collision method,
+
+1006
+00:51:56,566 --> 00:51:58,186
+Zubir was talking about just-in-time collision.
+
+1007
+00:51:58,766 --> 00:52:00,787
+One of the things that we found out is,
+
+1008
+00:52:01,327 --> 00:52:03,027
+like, especially for that crack and reveal,
+
+1009
+00:52:04,247 --> 00:52:06,268
+players were never supposed to go up and touch that geometry,
+
+1010
+00:52:06,288 --> 00:52:07,928
+so we never bothered to even put collision there.
+
+1011
+00:52:08,688 --> 00:52:11,429
+But an alternative method is to actually do state machines
+
+1012
+00:52:11,509 --> 00:52:12,409
+or sequencers.
+
+1013
+00:52:12,789 --> 00:52:15,009
+You just put the geometry either in the environment
+
+1014
+00:52:15,109 --> 00:52:15,890
+or in the state machine,
+
+1015
+00:52:15,910 --> 00:52:17,410
+and you just trigger them in parallel.
+
+1016
+00:52:18,310 --> 00:52:19,450
+This way, you don't have to put...
+
+1017
+00:52:20,815 --> 00:52:23,661
+collision into your geometry caching pipeline if you don't need to.
+
+1018
+00:52:24,643 --> 00:52:28,189
+You can, but we actually got away with the whole Halo 5 without actually needing to
+
+1019
+00:52:28,610 --> 00:52:30,193
+have this in there arbitrarily.
+
+1020
+00:52:34,080 --> 00:52:37,661
+So soft is the cool invention Sabir was working on
+
+1021
+00:52:37,681 --> 00:52:39,461
+where it's just implicitly defined geometry.
+
+1022
+00:52:39,922 --> 00:52:42,282
+In a DLC multiplayer level called Molten
+
+1023
+00:52:42,302 --> 00:52:43,483
+that came out this past summer,
+
+1024
+00:52:44,343 --> 00:52:47,844
+we got over to 82,000 transforms
+
+1025
+00:52:48,144 --> 00:52:49,805
+playing in a multiplayer level
+
+1026
+00:52:49,825 --> 00:52:51,145
+where everybody was running around and shooting.
+
+1027
+00:52:51,165 --> 00:52:55,947
+So we're going to talk a little bit about the pros and cons of this,
+
+1028
+00:52:56,547 --> 00:52:57,667
+a little bit about the topology,
+
+1029
+00:52:57,907 --> 00:53:00,988
+and some lessons that we learned in extra vertex attributes.
+
+1030
+00:53:03,080 --> 00:53:04,501
+Soft is relatively expensive.
+
+1031
+00:53:04,521 --> 00:53:05,662
+If you have a character pipeline,
+
+1032
+00:53:05,682 --> 00:53:07,603
+there's a reason why you built that character pipeline.
+
+1033
+00:53:08,083 --> 00:53:10,144
+It's a lot more efficient means of transfer for this.
+
+1034
+00:53:10,504 --> 00:53:12,705
+But the offering for soft is extremely easy.
+
+1035
+00:53:12,825 --> 00:53:13,806
+Think of all the stuff you have to do
+
+1036
+00:53:13,846 --> 00:53:14,646
+for a character pipeline,
+
+1037
+00:53:14,666 --> 00:53:15,727
+all the rigging and stuff like that.
+
+1038
+00:53:16,367 --> 00:53:17,448
+You don't have to do that for soft.
+
+1039
+00:53:17,468 --> 00:53:19,009
+You can use any type of deformer you want.
+
+1040
+00:53:19,049 --> 00:53:20,049
+You can do ray projections.
+
+1041
+00:53:20,209 --> 00:53:21,830
+It's really easy to export.
+
+1042
+00:53:22,411 --> 00:53:27,016
+You don't need a whole team to build the character for you, rig it, animate it.
+
+1043
+00:53:27,376 --> 00:53:32,722
+I can just do a fluid particle sim, ray project on top of it and capture all the simulation
+
+1044
+00:53:32,762 --> 00:53:33,022
+data.
+
+1045
+00:53:35,405 --> 00:53:37,848
+It's also really kind of nice because you don't actually have to worry about the geometry
+
+1046
+00:53:37,868 --> 00:53:40,631
+at run time, so it becomes actually extremely cheap.
+
+1047
+00:53:42,194 --> 00:53:46,799
+The one thing we did learn though is vertex density, even though we could put 82,000 transforms
+
+1048
+00:53:46,859 --> 00:53:48,120
+in there, it was kind of silly.
+
+1049
+00:53:49,301 --> 00:53:52,424
+The texture density for UV space is always going to be a little bit bigger.
+
+1050
+00:53:52,884 --> 00:53:58,189
+So even though we could put color in there, it didn't actually express itself as best
+
+1051
+00:53:58,209 --> 00:53:58,629
+as it could.
+
+1052
+00:53:59,030 --> 00:54:03,113
+If we could go back and redo those assets, we would have just done a render of the texture
+
+1053
+00:54:03,153 --> 00:54:03,313
+sim.
+
+1054
+00:54:04,094 --> 00:54:07,738
+put that into a tessellator and put in a little bit nicer shader, I wouldn't have done it
+
+1055
+00:54:07,758 --> 00:54:09,660
+with the geometry caching method that we did.
+
+1056
+00:54:10,000 --> 00:54:12,943
+We would have used the same sim data, but it would have been a lot more optimized format
+
+1057
+00:54:12,963 --> 00:54:14,285
+and you could have got higher detail.
+
+1058
+00:54:15,105 --> 00:54:18,069
+So you kind of just want to use the geometry caching where it could be best optimized.
+
+1059
+00:54:18,109 --> 00:54:21,892
+And actually doing color transfer and showing that much detail wasn't really the best method
+
+1060
+00:54:21,933 --> 00:54:22,193
+for it.
+
+1061
+00:54:24,224 --> 00:54:27,506
+Additionally, any other additional vertex attributes, make it an option.
+
+1062
+00:54:28,047 --> 00:54:31,268
+Effects people will always be like, I need that one extra channel, I need that one extra channel.
+
+1063
+00:54:31,729 --> 00:54:35,571
+But when you're starting to push around a lot of geometry, it's not really as important.
+
+1064
+00:54:35,591 --> 00:54:39,073
+You're really the beauties in the motion. It's not really in whether that color goes off.
+
+1065
+00:54:39,413 --> 00:54:43,615
+So when you build the pipeline up, do the extra additional attributes as a secondary thing.
+
+1066
+00:54:43,695 --> 00:54:47,057
+Don't put it as the first thing that goes in there, because it's just going to be a lot of dead overhead for you.
+
+1067
+00:54:49,203 --> 00:54:54,433
+This is another topology example. If you remember the fluid before, this is a simple ray projection on top of it.
+
+1068
+00:54:54,453 --> 00:55:01,064
+It kind of looks silly, but all of a sudden this reduces a very expensive asset down to an extremely simple asset.
+
+1069
+00:55:02,602 --> 00:55:03,642
+Go a little bit faster now.
+
+1070
+00:55:04,162 --> 00:55:06,922
+So one of the things you can also do is optimize the
+
+1071
+00:55:06,942 --> 00:55:07,603
+topology for it.
+
+1072
+00:55:07,783 --> 00:55:12,444
+This is a simple grid, but when you drape it on a table,
+
+1073
+00:55:13,224 --> 00:55:14,824
+the way the triangles lay out, it actually
+
+1074
+00:55:14,864 --> 00:55:15,664
+folds really funny.
+
+1075
+00:55:16,064 --> 00:55:18,405
+So if you just do the same thing like character topology
+
+1076
+00:55:18,685 --> 00:55:21,625
+and you put the edges where it matters, the one on the right
+
+1077
+00:55:21,645 --> 00:55:24,786
+will actually accordion very appropriately, whereas the one
+
+1078
+00:55:24,826 --> 00:55:27,486
+on the left will just be a lot of wasted vertices on the top
+
+1079
+00:55:27,526 --> 00:55:28,027
+and in the middle.
+
+1080
+00:55:30,775 --> 00:55:32,597
+Finally, we're getting into skinned.
+
+1081
+00:55:33,938 --> 00:55:36,600
+This is where like HIK territory.
+
+1082
+00:55:36,660 --> 00:55:38,782
+This is when you're doing character rigs and motions.
+
+1083
+00:55:40,764 --> 00:55:43,827
+So it usually represents a very complex pipeline, a very
+
+1084
+00:55:43,867 --> 00:55:45,088
+complex authoring story.
+
+1085
+00:55:45,429 --> 00:55:48,191
+And up until this point, all we did was basic sims to form
+
+1086
+00:55:48,231 --> 00:55:51,455
+our wrappers, something simple that one artist could create.
+
+1087
+00:55:51,475 --> 00:55:51,515
+So.
+
+1088
+00:55:55,240 --> 00:55:57,042
+We didn't even actually implement this.
+
+1089
+00:55:57,082 --> 00:55:58,604
+We just theorized that this was it.
+
+1090
+00:55:59,484 --> 00:56:00,906
+There's a good talk the other day
+
+1091
+00:56:01,226 --> 00:56:03,228
+that we've been talking with, Delusion of Motion,
+
+1092
+00:56:04,089 --> 00:56:06,171
+by Mario Palmerio and Norm Schaefer.
+
+1093
+00:56:06,752 --> 00:56:08,954
+They actually implemented the skinning method,
+
+1094
+00:56:08,994 --> 00:56:09,794
+which was kind of cool.
+
+1095
+00:56:09,855 --> 00:56:11,716
+It actually saves the most amount of memory
+
+1096
+00:56:12,097 --> 00:56:14,139
+if you actually need to do GPU runtime.
+
+1097
+00:56:15,207 --> 00:56:17,248
+deformation, it's an extremely efficient method.
+
+1098
+00:56:17,268 --> 00:56:22,931
+You can get up to like 166 minutes in two 4k textures,
+
+1099
+00:56:23,852 --> 00:56:25,933
+which is cool, but we never bothered to focus on that
+
+1100
+00:56:25,953 --> 00:56:27,594
+just because the authoring story for something,
+
+1101
+00:56:27,634 --> 00:56:31,676
+say like a tower was very complex.
+
+1102
+00:56:32,577 --> 00:56:35,339
+And there's no sense in putting a character rig
+
+1103
+00:56:35,399 --> 00:56:37,500
+on a giant building that's gonna get continuously simmed
+
+1104
+00:56:37,560 --> 00:56:39,201
+and changed every single authoring moment.
+
+1105
+00:56:40,574 --> 00:56:42,595
+So this kind of led us to not even develop those things.
+
+1106
+00:56:43,015 --> 00:56:45,015
+But on the alternative, if you're doing something
+
+1107
+00:56:45,095 --> 00:56:47,436
+as simple as procedural rigging like a snake,
+
+1108
+00:56:49,436 --> 00:56:51,857
+this can be actually authored extremely quick and easy.
+
+1109
+00:56:52,837 --> 00:56:54,878
+This is something that we really didn't do a lot,
+
+1110
+00:56:54,898 --> 00:56:56,938
+but we actually had a lot of assets like this in the game.
+
+1111
+00:56:57,478 --> 00:56:58,798
+These would be like cables switching
+
+1112
+00:56:58,838 --> 00:57:02,059
+between buildings to buildings, cables, vines.
+
+1113
+00:57:02,119 --> 00:57:04,900
+We had so many vines that were put into random DLC content
+
+1114
+00:57:04,920 --> 00:57:06,900
+just because it was cheap overhead for us to put in.
+
+1115
+00:57:09,517 --> 00:57:11,059
+So now wrapping into the conclusion.
+
+1116
+00:57:11,600 --> 00:57:13,542
+So we talked about the core architecture.
+
+1117
+00:57:13,843 --> 00:57:15,785
+Sabir went really in-depth on the engine side.
+
+1118
+00:57:16,146 --> 00:57:19,851
+But we also got the static, the rigid, skinned, soft, and fluid.
+
+1119
+00:57:20,933 --> 00:57:24,878
+When you build based on these kind of like base definitions,
+
+1120
+00:57:24,938 --> 00:57:26,320
+and you kind of allow the author for it.
+
+1121
+00:57:27,839 --> 00:57:32,141
+It kind of separates out the technology for you and it comes easier to optimize.
+
+1122
+00:57:33,222 --> 00:57:37,985
+Now we know originally that everybody was just using fluid and then kind of moved on
+
+1123
+00:57:38,005 --> 00:57:38,425
+to rigid.
+
+1124
+00:57:38,746 --> 00:57:42,708
+But if everybody kind of starts moving on to soft and skin and as you guys go out and
+
+1125
+00:57:42,868 --> 00:57:46,411
+develop these systems further, you can further optimize them.
+
+1126
+00:57:48,692 --> 00:57:53,975
+So the people that you should reference is actually a real-time caches for CryEngine.
+
+1127
+00:57:54,436 --> 00:57:54,856
+This was...
+
+1128
+00:57:54,876 --> 00:57:55,857
+Sorry.
+
+1129
+00:57:55,877 --> 00:57:56,597
+I'm sorry.
+
+1130
+00:57:59,112 --> 00:58:02,414
+done by Axel Gneding in 2014 at SIGGRAPH.
+
+1131
+00:58:02,794 --> 00:58:04,295
+He was the forefather of our talk,
+
+1132
+00:58:04,335 --> 00:58:06,416
+so that's how we actually originally based
+
+1133
+00:58:06,456 --> 00:58:07,756
+all of our technology off of.
+
+1134
+00:58:08,517 --> 00:58:10,197
+Then we further improved it after we learned
+
+1135
+00:58:10,217 --> 00:58:11,658
+all of our life lessons in Halo 5,
+
+1136
+00:58:12,338 --> 00:58:13,579
+but also do the illusion of motion.
+
+1137
+00:58:13,619 --> 00:58:15,580
+It's kind of more of an intro to what we were doing.
+
+1138
+00:58:16,220 --> 00:58:18,541
+They used textures where we used a little bit
+
+1139
+00:58:18,581 --> 00:58:19,762
+of different streaming of data,
+
+1140
+00:58:20,062 --> 00:58:21,303
+but if you're just going off the shelf,
+
+1141
+00:58:21,363 --> 00:58:22,263
+it's a really good method,
+
+1142
+00:58:22,563 --> 00:58:24,364
+as opposed to going for the whole hardware engine
+
+1143
+00:58:24,544 --> 00:58:25,205
+that we need to do,
+
+1144
+00:58:25,225 --> 00:58:28,046
+because you have to implement that directly into your engine.
+
+1145
+00:58:29,258 --> 00:58:31,359
+Well, Houdini has also done some of the authoring side,
+
+1146
+00:58:31,399 --> 00:58:33,699
+and Unreal's doing some more on the engine side.
+
+1147
+00:58:34,899 --> 00:58:37,560
+We used our own engine, so not all these systems
+
+1148
+00:58:37,580 --> 00:58:39,540
+are going to be available in all off-the-shelf packages
+
+1149
+00:58:39,660 --> 00:58:40,680
+at the current point in time.
+
+1150
+00:58:42,461 --> 00:58:44,721
+If you have any questions, feel free to step up to the mic.
+
+1151
+00:58:45,041 --> 00:58:46,542
+If you don't want to step up to the mic,
+
+1152
+00:58:46,582 --> 00:58:48,702
+you can email me and Zabir afterwards.
+
+1153
+00:58:49,802 --> 00:58:52,063
+We'll be around for a little while in the wrap-up room, too,
+
+1154
+00:58:52,143 --> 00:58:52,523
+after this.
+
+1155
+00:58:53,303 --> 00:58:55,103
+So thank you guys all for coming,
+
+1156
+00:58:55,163 --> 00:58:56,183
+and please fill out the survey.
+
+1157
+00:58:56,203 --> 00:58:57,123
+We appreciate it very much.
+
+1158
+00:59:18,480 --> 00:59:18,760
+Hey, is this on?
+
+1159
+00:59:18,780 --> 00:59:19,800
+I just wanted to ask, did you guys do any blended
+
+1160
+00:59:19,900 --> 00:59:21,341
+looping simulations for like that model you had done there?
+
+1161
+00:59:21,361 --> 00:59:24,121
+That was going to be a repeatable sequence or something like that,
+
+1162
+00:59:24,141 --> 00:59:26,022
+or was there any other missing in there?
+
+1163
+00:59:26,222 --> 00:59:32,584
+Did you guys experiment with any of that?
+
+1164
+00:59:32,604 --> 00:59:34,425
+Yeah, so Ben can probably talk more about it,
+
+1165
+00:59:34,465 --> 00:59:37,166
+but we did have some looping sequences, right?
+
+1166
+00:59:37,206 --> 00:59:40,707
+So essentially you interpolate some of your ending frames
+
+1167
+00:59:41,127 --> 00:59:43,448
+back into your beginning frames, and yeah, you're able to do that.
+
+1168
+00:59:44,008 --> 00:59:46,649
+For all the flags, the bird flights, and cyclical things,
+
+1169
+00:59:46,749 --> 00:59:47,749
+we actually had a lot of those.
+
+1170
+00:59:48,970 --> 00:59:51,712
+It actually became kind of a trick, because depending on what you're doing, like a flag
+
+1171
+00:59:51,732 --> 00:59:54,474
+or something like that, it might become a staggered blend frame.
+
+1172
+00:59:54,935 --> 00:59:58,478
+So just like tileable textures, in order to get a tileable texture, you overlay the two
+
+1173
+00:59:58,598 --> 01:00:00,119
+ends and then you kind of stamp between that.
+
+1174
+01:00:00,379 --> 01:00:05,163
+So you actually time warp the geometry sequence so that the two ends actually come back onto
+
+1175
+01:00:05,203 --> 01:00:07,585
+each other, so that you get a pure, better blending.
+
+1176
+01:00:07,645 --> 01:00:10,708
+You can actually meet the geometry sequence at the end, but that means your end state
+
+1177
+01:00:10,728 --> 01:00:13,990
+and your first state have to match, and that's actually really hard to author.
+
+1178
+01:00:14,291 --> 01:00:16,933
+But what if you just drag the two pieces of geometry around?
+
+1179
+01:00:17,233 --> 01:00:19,614
+You can actually blend between them and it's pretty seamless.
+
+1180
+01:00:19,894 --> 01:00:24,117
+Every once in a while you'll notice a hitch, but you can just put a little bit of noise into that blend sequence
+
+1181
+01:00:24,477 --> 01:00:28,079
+and it actually messes it up just enough where you don't even notice that's the blend point.
+
+1182
+01:00:34,903 --> 01:00:37,585
+Okay, yeah, we might be out of time. We'll see you in the wrap-up.
+
