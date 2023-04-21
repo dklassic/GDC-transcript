@@ -1,0 +1,304 @@
+So I'm Dave Churchill. Today I'll be talking about the hierarchical portfolio search system that I created to make the AI for Prismata. It's a complex name, but that was just to sell the paper. It's really simple, I promise.
+So I made this game with Lunark Studios, but now I'm a faculty member in the computer science department at Memorial University in Newfoundland, which is the easternmost rock in North America.
+So, Prismata.
+Prismata is a hybrid strategy game that we've been working on.
+Two-player game, alternating turns.
+You can think of it as sort of Hearthstone or Magic the Gathering meets StarCraft.
+So it's a card game without cards, and it's a real-time strategy game without the real time.
+So it's a really interesting strategic game.
+So before I get into the AI system for the game, I'm going to explain, like, just some basic properties about the game.
+So...
+The game has two players.
+Here we have the AI up on the top and the player, who's me, down on the bottom.
+And it's alternating turns.
+So that means I'll take my complete turn, and then the opponent will take their complete turn.
+So on the bottom half of the screen, you see my units, player one's units.
+And on the top half of the screen, you see player two's units.
+Also, each player has a certain number of resources.
+So there are five different resources in the game.
+Each of these can purchase a certain number of units.
+So certain technologies can only be purchased by certain resources.
+Each player has their own resource pool.
+Many of your units can be clicked to activate abilities.
+So for example here, I have the drone unit, which is sort of a worker type unit with an RTS flavor.
+And when I click on the drone unit, I get some gold.
+So each drone click gives me a gold, and each unit can only be clicked once per turn.
+So once I have some resources, you see over here on the left side is some purchasable units.
+So unlike most strategy card games, there's no hands or decks in Prismata.
+Instead, it's more like Dominion, if you've ever played the Dominion card game, where you have a shared pool of cards that you can purchase from, which are randomized at the start of the game.
+So unlike an AI for a game maybe like StarCraft, where we could hard code some build orders or something into the AI system, the starting state of this game is actually randomized, which leads to a lot of replayability.
+But it's actually really difficult to build an AI when your starting states are randomized.
+So in the game, we click to purchase some units.
+And then these units appear directly on the battlefield.
+So they don't go into our hand.
+They're right on the battlefield.
+And then we can attack with our units and defend with some of our units, and then we pass the turn to our opponent.
+So that's basically what a turn is in Prismata.
+And knowing the basic rules of the game helps with explaining the AI system that we're going to create for it.
+So two really interesting things about Prismata, which are different than many other strategy games, is that Prismata is perfect information, which means that there's nothing hidden by either player.
+So like I said, there's no fog of war, there's no decks, there's...
+there's no cards in hand.
+Also, it's completely deterministic.
+And so what this means is there's no randomness in the gameplay.
+So I'm not going to lay a Ragnaros and hope it hits my opponent's face instead of my own.
+Everything I do in the game, there's no randomness, beyond the initial starting state, which is randomized.
+So.
+excuse me, some of the A.I. design goals that we had in Prismata, you know, before you write the A.I. system, you should have some goals in mind.
+So the first and most important was that the game has some complex rules.
+And we wanted to create a really good new player tutorial.
+And so the main point of the A.I. was to sort of transition people through the rules of the game and make a really nice new user experience for the game.
+Secondary to that was to have an AI that is strong enough so that it can pose a challenge against experienced players.
+So we have some experienced players, they want to practice new strategies or build orders, et cetera.
+And maybe their friends aren't online and they don't want to play ranked ladder right now.
+So they want to be able to practice against an opponent that's good enough to put up some sort of fight.
+Next also is we just want an enjoyable single player experience, right?
+So we want to have some replay value.
+We don't want the AI to do the same thing every single time you play against it.
+And finally, we want as modular a design as possible for a number of reasons.
+So the first is we'd like to have different AI difficulty settings.
+So we want an easy version of the AI, a really hard version of the AI, and a bunch of things in between.
+And also because this is a competitive strategy online video game, unlike a game like chess, which hasn't been balanced patched since like 940 AD, this game is going to be constantly changing as users find like overpowered units or new build orders.
+And so the AI system, we don't want to have to recode the whole thing if a unit changes, right? Because if we had a hard-coded build order and now the cost changes, we would have to reprogram the whole AI.
+and really we really don't want that.
+So coming from academia, I naively said, okay, let's try and use some search.
+So, you know, Deep Blue played chess really well and some Monte Carlo tree search systems have played the game of Go really well.
+And so let's take this huge academic literature of really smart algorithms and try and apply it to a retail video game and see how that works out.
+So.
+Why is using heuristic search difficult for strategy games?
+There's a number of reasons.
+I'll just go over a couple really quickly.
+So first of all it's hugely complex.
+So there's a really large number of states that are possible in this game.
+For example, units can have different numbers of hit points, status effects, they can have different abilities, build times, et cetera.
+And all this leads to a gigantic state space.
+So we can't just search every possible state in the game, because as you may know, there's about 10 to the 80 atoms in the universe.
+So even if each of those were doing a billion calculations a second.
+you know, we'd never solve this.
+Also, and probably more importantly, is the multi-unit control problem that a lot of strategy games face.
+So in a game like chess, we're only moving one piece at a time.
+So we may only need to consider maybe 40 different moves that we can do at any time.
+But in a strategy game, a player move is actually a combination of actions for each unit that the player controls.
+So in a strategy game, if we have U units and A actions per unit, we actually have an exponential number of actions at any given time that we have to consider.
+So we're trying to do search.
+We have some high-level search algorithm.
+But we have so many actions that we can't even escape depth one of this alpha beta search, for example.
+And so that's no good.
+So we need to reduce the number of actions somehow.
+But how do we do this?
+People have been trying to do this for a really long time.
+And so my pseudo answer to this question, unlike Dave, I don't claim to be solving all of your NP-hard problems.
+But I can certainly help.
+So.
+The idea of hierarchical portfolio search, I'll call it HPS because it's a bit of a mouthful, is just two steps. So first, we, instead of searching over an exponential number of moves, we're going to generate a smaller subset of hopefully intelligent moves using what I'll describe in the future, which is a portfolio, and then we'll apply some high-level search algorithm to those subset of moves that we've generated, rather than over everything.
+So what are the components of this system so first of all we need a game state right so this is the current state of the game that we're trying to decide on a move for for the eye.
+We have some actions which in prismata are clicking a unit for example or purchasing a unit and star craft for example, you'd have you know movement of a unit or building or training unit cetera.
+And then we have a move, which I'm describing as this is the thing that AI will do to complete its whole turn.
+And so a move here is an ordered sequence of actions.
+So click this unit, click this unit, click this unit.
+And our goal here is to pass in a game state to our AI, and it will spit out a move that it should do.
+And hopefully that move will be good.
+Two other components of HPS.
+First, we have this player function, I'm going to call it.
+And the player function is essentially doing all the logic of the AI system.
+So this player function, it takes in a state s, it performs the move decision logic, and it returns the move that it thinks it should do at that state.
+And the key part here is that a lot of AI systems have this player function.
+But in addition to the player function, we have what I call a partial player function.
+So the difference between a partial player is that it will generate a tactical move for a specific phase of the game or for a specific type of unit in the game.
+So you as the game designer, if you want to implement HPS, are going to tactically decompose your game somehow.
+And I'll give some examples of that.
+So in Prismata, the game has a number of phases to it.
+If you've played a lot of strategic card games, like Magic the Gathering has an untap, you draw cards, you have a main phase.
+In Prismata, you have a defensive phase where you assign damage to units in order to block the damage.
+You have an ability phase where you click your units.
+You have a purchasing phase where you buy new units.
+And you have a breaching phase where you assign damage to your opponent's units.
+So the names of these aren't super important.
+But the partial players here are tactical sub-algorithms which generate moves for individual phases.
+So if you look under defense here, for example, I have two partial players that play the defense phase of Prismata.
+One of them might be some optimization algorithm that says, try to assign damage to our blockers that minimizes the resource cost lost after my damage is done.
+Or another one might be, assign damage to my blockers such that I save the most attackers for the next turn.
+Similarly, an ability partial player may say, just attack with everything, or leave back the most blockers that I can.
+So what you do is you create this collection of tactical algorithms, and this is the portfolio that I was talking about.
+Then from this portfolio, a player move that we're interested in the AI doing for a turn is just one selection from each of those decompositions.
+So you take one player, a partial player from the defense, one from the ability, one from the buy, and one from breach, and this is a player move from the turn.
+You just concatenate those moves.
+What about other games?
+So let's say we're talking about real-time strategy games.
+So you can also create portfolios based on the unit type, for example.
+So again, if I'm playing a game like StarCraft, I have a number of different unit types that are really good at specific parts of the game.
+So my Dragoon unit here is a ranged unit.
+So I might have tactical algorithms like attack the closest thing.
+or since it's a relatively fast and long-range unit i could say take the enemy so attack the closest thing and then back up or maybe i just a runaway So I have a number of different tactical algorithms for each of the unit types in the game.
+Similarly, if you're playing something like League of Legends or another MOBA game, you could have these algorithms on a champion by champion basis.
+And you can also reuse them between champions.
+Like, I could have the same script doing attack closest for the dragoons, or the tanks, or the mutalisks, etc.
+And again...
+A player move for a turn is just a selection of one of these for each of the unit types.
+So a really good takeaway here is that you can use existing scripts or algorithms to generate a portfolio.
+So if you're saying, oh Dave, we're not going to rewrite our whole AI system just because you say it's good, well, if you have a bunch of stuff already in place, you can just drop search on top of all that and hopefully make it more intelligent.
+And this is one way of doing that.
+So how do we tie everything together so the HPS algorithm you're going to decide on 3 things so you have a portfolio that you've decided on which is you know some again some tactical decomposition within your game.
+You have a game state and you have a high level search algorithm so again what's going to happen is we're going to first generate the moves using the portfolio.
+and then apply the high-level search to that.
+And so the real, I guess, novelty of HPS is in the move generation.
+So I'm not going to go into the details here of any particular high-level search algorithm.
+You could use a Monte Carlo tree search, or alpha beta, or a greedy search, et cetera.
+I'm just going to go into the HPS-specific stuff.
+For example, in Prismata, how are we doing the move generation using this portfolio?
+So this is a sample of a portfolio that we're using in Prismata, which, you know, myself and the designers collaborate and come up with a set of behaviors.
+So we may have a lot of different behaviors for purchasing cards.
+So for example, we may say, OK, buy the most attack you can on this turn or buy the most defense.
+So what you do is you create a portfolio.
+that is really broad.
+So it can do everything that you would want it to do.
+It can be aggressive, it can be economic, it can be defensive.
+And then what we do is, the way we're going to generate moves from this is to take all possible permutations of this list.
+So, for example, here with this portfolio, the first move I'll generate is just the concatenation of all the first elements in this set.
+The second move is this one.
+Then the third move, the fourth move, et cetera.
+And so we're just taking all possible permutations of these, and then we use these moves as the moves that the high-level search is going to search over.
+So for example, back here, when I had this portfolio with 2 times 3 times 4 times 2, what's that?
+2 times 3 is 6, 6 times, we have 48.
+So here we've reduced the branching factor of our search from possibly millions down to 48.
+Now the optimal move may not be part of this 48, but hey, at least you're doing something.
+And at least the different types of behaviors that you want are being represented here.
+And like I said before, you can use any high level search algorithm you want.
+So in Prismata, we use Monte Carlo tree search, we use alpha beta, and we also use random selection.
+So in sometimes, maybe the easier AI, you don't want to spend time on search, you just want to select a random move.
+Other possibilities, you could do, maybe you don't have time for search, so you could do something like hill climbing.
+Or if you're really cool, you could use a genetic algorithm.
+or you know you can use machine learning or reinforcement learning the choices up to you so whatever really cool state of the art algorithm you want to put on top of this you can uh... so another one of our goals was modular design because we really wanted to have a lot of different AI difficulties but with if you're using something like a behavior tree uh... it may be it's hard to sort of tune that to be easier uh... or more difficult but The system we have for Prismata is really, really modular and really easy to create different AI settings.
+So this is the portfolio that we had for Prismata.
+And the high level search algorithm that we used for the hardest difficulty setting in the game was a Monte Carlo tree search.
+So we gave this Monte Carlo tree search three or seven seconds.
+You can change the settings.
+But just imagine a three-second Monte Carlo tree search where the AI starts thinking, and three seconds later, it gives you a move.
+Now, that's a long time.
+And we were actually worried initially that users wouldn't want to wait three seconds to get a move back.
+But almost immediately, we had feedback coming in saying, can I turn the slider up to a minute?
+Like, I don't care how long it takes.
+I just want the AI to be as good as possible.
+And of course, this is possible in a turn-based strategy game.
+It may not be possible in a real-time strategy game to give it this time.
+But if you do have that luxury, then you can give it as much time as you want, and hopefully it gets better.
+So one difficulty down from that was the expert bot, we called it, which just did a depth 2 alpha beta search.
+So it looked maybe, you know, 200 moves, um, 2 depth into the future, and then returned something.
+So rather than wait for 3 seconds, the expert bot returns a move almost instantaneously, but it's still, it's still doing search, right?
+So it's still saying, for whatever I can do, and then whatever you can do, we'll do minimax in there, and return something intelligent.
+The medium AI, instead of doing search here, it just returns a random, one of the random permutations.
+And so, even though it's random, it's not a random move, it's random from within, hopefully, intelligent things.
+So it may make mistakes sometimes, but that's what we want for a medium difficulty.
+Okay?
+And the easy bot, we just took a lot of these tactical algorithms out.
+So for example, the hardest AI will have like solvers running, like knapsack solvers trying to minimize the loss when it's defending, but the easy bot will just say, just block from left to right with all of my units.
+And so you can plug in these tactical algorithms and make different difficulty settings just with these different building blocks.
+And the last difficulty that we have is called the pacifist bot, where we wanted something to play.
+We wanted it to play really well, but we didn't want it to ever attack.
+We just wanted something for users to be able to sort of beat up on and feel really special.
+And so it has the same portfolio as our hardest difficulty, except it never attacks.
+And that's it.
+So you just plug in the don't attack tactical algorithm instead of all the different attacking ones that we were using before.
+So what are some of the benefits of this system?
+So the really big benefit here is that search adapts to dynamic scenarios, okay?
+So your AI, when you're using search, it can do things like rush your opponent really aggressively, it can do economic builds, it can do defensive, and you don't have to hard code any of this.
+Like, based on the units that are in our sets, it. So if if there's a lot of aggressive units in the set the A. I. You'll see it actually start rushing the opponent or if there's a bunch of like huge defenders it will take a more economic stance and this is all just comes out of the search.
+Also something that I've learned from watching these sessions up here is that emergent behavior is scary. Designers do not like emergent behavior because for example, I think one example someone said was.
+they had some sort of dynamic, you know, search-based system for a first-person shooter and the AI ended up, like, doing a backflip and throwing a grenade which bounced off four walls and perfectly hit the guy in the face.
+And it just feels unfair and yes it was intelligent but the designer didn't want that to happen.
+And so with HPS, you can easily take those sort of things out of the game.
+So you can, it only selects from a known set of moves.
+So you're telling it, hey, I only want it to be able to do one of these certain things, but then it uses the search to optimize which of those certain things are really beneficial.
+And it's also really designer friendly.
+So once you give someone a really nice configuration file, for example, about two months ago, the designers of the game said, OK, Dave, time to crawl out of your AI hole.
+and your black box and just tell us how the configuration file works.
+And within about two weeks, the AI had gotten almost twice as strong.
+So they are really good at the game.
+I'm kind of good at AI.
+And so they take the AI system that was completely generalized without any hard-coded information and put in a couple of little build orders here and there.
+And it really did improve the strength of the AI and they didn't have to touch a line of code.
+So I think that was pretty cool.
+uh... so we did some experiments because i wanted to know whether or not this stuff was actually working So the first experiment was to test whether or not my intuition about these difficulty settings, whether or not it was actually true.
+And so from left to right here, I played a bunch of round robin matches, maybe like a million games of the master bot versus the easy bot, et cetera.
+And yes, it does turn out that the intuition was correct.
+And the more difficult AIs with the search-based solutions do beat up on the easier AIs.
+Similarly, if you're going to use search, you need to know, OK, well, the whole point of using search is that if I give it more time, it should produce better moves.
+And so what I did was an experiment where we just give it, say, 100 milliseconds versus a second versus 3 seconds versus 10 seconds, et cetera.
+And yes, this system, the more time you give it, the more intelligent the move that it will produce.
+I also did a really sneaky experiment, which I was really proud of.
+So I created, I took the code from our GitHub and made a secret version of the client.
+And what this did was it actually queued up on the ranked ladder automatically, played a game using the AI, and then recorded the results.
+And humans, like, not even, you know, the bosses didn't even know I was doing this.
+So it was successful, luckily.
+I wouldn't have told anyone if it wasn't, right?
+So I used the master bot, which is the hardest bot, and I put it on a three-second time setting, and I put a random delay on all the actions.
+So it wasn't just selecting things and then clicking everything like, you know, it was actually clicking slowly.
+So it, trying to pass some sort of prismata turning test.
+and nobody e-mailed or said anything.
+So it's good.
+I think that it passed the Prisma auditory test.
+And after all that was said and done, the AI achieved a rank of 6.5 out of 10 on the ladder.
+So I'll tell you what that means in a second, because that number doesn't matter.
+But what you see when you're trying to test the strength of your AI.
+If the people who have been playing against the AI a lot know they're playing against the AI, they can opponent model it and do things against it that it's weak to.
+But when you secretly play against the AI, they don't know the weakness of the player.
+And so they're playing a more standard game where they're not trying to exploit an AI.
+So I think that this is a more, a better test of sort of where the AI ranks.
+So at the time this was done.
+This is the ranking distribution of players on our ladder.
+And so the AI came about tier 6.5, which meant that at the time, it was within the top 25% of people playing the game in terms of playing strength.
+And since then, this experiment was done like a year and a half ago, we've been in closed beta for a little while.
+And we think that the AI is actually now maybe within the top 10% of people playing.
+And so it's pretty strong, I think.
+So were our goals achieved?
+I think that it's been really great.
+We did a survey of our users.
+I don't have the results on the slides.
+But they thought that it was really, really great as a new user experience, especially with the different difficulty settings.
+Whether or not it's good for experienced player training, it's our top few people, of which we have a few in the crowd, can really trash the bot.
+But if you're a new player learning the game it takes you maybe a couple of hundred games to be able to beat the AI and so it's kind of strong but it's it's not you know it's not a deep blue or AlphaGo level just yet I think it users said that it had a lot of replay value so based on the different if you have a random assortment of cards the AI can play them all these random assortments fairly well and so you can keep playing against the AI without a lot of repetition And the modular design, I have no metric to really measure this, but I did think that the designers, their ability to pick up this system and modify it without any AI knowledge was sort of a testament to that.
+And also, we've undergone maybe two or three dozen balance changes where we've changed the costs of units in the game and changed a couple of game rules even, and the AI system has held up to that and hasn't needed to be changed in any way.
+So.
+One final thought.
+Everything I hear from everybody in the video game industry, we can't spare the cycles.
+We'd love to be able to do search.
+But I'm not running Monte Carlo tree search on a PS4 or something like that.
+We have two milliseconds to do AI, or one millisecond.
+We can't run this.
+But my counter to that is that search isn't limited to in game behavior.
+So what does that mean?
+Try offline search.
+You probably hired 100 people to QA test your game.
+But if you can replace people with robots, which is, you know, maybe a way of the future, maybe you're not allowed, maybe not a lot of people are in on this idea, but this AI, if it's strong enough, maybe it can't run in real time in your game, but it can be used for bug testing, or for balance testing, or for stress testing, et cetera.
+So I think that even if you don't want to implement this as the decision logic for your game engine, you can still use these techniques in an offline manner.
+Thank you very much.
+Apparently there's two minutes for questions if anyone has questions.
+In the examples you gave, the portfolios were for individual components or parts of the game.
+And one of the examples you gave was an RTS.
+You have a particular unit having three different models, which uses its logic.
+But you didn't recover in that specific case, because this is clearly a different type of game.
+But what happens when a good play is based on those individual parts kind of working together?
+Because an optimal move for one unit.
+while it ended up to move for another unit at the same time So the good thing about the portfolio system is that I gave examples where you're passing in like algorithms here, right?
+But you can also pass in, say, all the individual actions that a unit could do.
+So in general, this could search over a wider range of collaborative behaviors.
+And since you are searching over all possible permutations of those, then you will get collaborative behavior out of that.
+But if you're using this sort of, you know, passing in scripts or algorithms and you're missing some of that collaborative behavior, so there's definitely a trade-off between how many nodes you're willing to generate and the level of collaborative behavior that you want to achieve.
+Thank you.
+I was just going to ask, if you're using alpha beta, implicitly you have some sort of value function as well as the portfolio of strategies.
+What sort of value function did you use here?
+Sure.
+So Peter's asking about, you know, you can't search the whole game tree when you're doing alpha beta or Monte Carlo tree search.
+And so you need a way to evaluate a node.
+So you need to know, or a game state.
+So if you look at a game state, a human can come along and probably say, oh, this person is winning, and this person is probably losing.
+And so we need some sort of evaluation for that.
+And what I did, and I didn't want to get into the details here.
+They're all in the paper.
+If you go to my website, there's lots of details.
+But we tried at first a formula-based evaluation, sort of like chess, where you give the queen nine points and a pawn one point, and then sum them up.
+But that didn't really end up working very well.
+So what I went with was I took a player that I had constructed, a really simple player, and then did a playout from a given state.
+So if you have a state and you have really dumb behaviors, even though they're dumb, if both people follow this behavior and one person wins, it probably means that they were winning at that state.
+And so we did this playout evaluation rather than a formula-based evaluation.
+It's cool, it sounds rather like some of the stuff that Mark Winans is doing.
+It's, yeah, it's an interesting idea.

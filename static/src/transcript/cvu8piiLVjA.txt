@@ -1,0 +1,304 @@
+My name is John Austin. I'm a lead engineer at Phenomena.
+So we build a lot of AR and VR projects, among others.
+Also, Wattam is coming out soon.
+In the past, I worked at Google, so on the Google Lens project.
+So our team was responsible for largely taking these big computer vision models and crunching them down and fitting them onto smartphones.
+So that's kind of how I got into AR and VR stuff, because a lot of the computer vision algorithms are very similar.
+On the side, I work for a game development collective called A Stranger Graffiti, and so we do a little bit of consulting work and some personal project work as well.
+So for Phenomena, we released Luna Moondust Garden rather recently, and this was a Magic Leap project.
+It was a reinterpretation of our virtual reality game, Luna, for the Magic Leap.
+And just in case you're not familiar with it, here's a quick little teaser trailer we released just so you have a sense of what it looks like.
+On screen text Wildlife programs are created using differentánatinom MetroArch software.
+On screen text Wildlife programs are created using differentánatinom MetroArch software.
+So it's sort of a storybook adventure about helping Fox find his garden.
+So at Phenomena, we work on a lot of experimental platforms.
+And this was kind of not unlike any of the others.
+And one of the biggest problems we face with these platforms is iteration time.
+So there we go.
+So, iteration time.
+So, on experimental platforms, one of the big problems is that they're generally a separate piece of hardware.
+So you might have, like, the Quest or the Magic Leap, and it's a separate device.
+So if you want to build and design a game to that device, you really have to play it on the device.
+You can't really use a mouse and keyboard to try out something that needs controllers or augmented reality.
+And so because of that, because Phenomena practices a very iterative style of design, iteration time becomes one of our biggest workflow bottlenecks.
+And so for the Magic Leap project, we designed a simulator for the Magic Leap in virtual reality to solve this issue.
+So we sort of reconstructed the experience of playing the Magic Leap on the Rift.
+So this clip here is all being rendered in virtual reality.
+The background and all of the compositing is all happening on the Rift.
+And so this is a big benefit for us because it not only did it cut down the iteration time from minutes that it might take to deploy all the way to the magic leap to just playing it in editor in Unity, but it also allowed us a lot more freedom and flexibility about how we worked because we didn't necessarily need to have a headset for everyone or it allowed us to work from home, for instance.
+So it was a benefit in a number of different ways.
+And so what I wanted to talk about today a little bit was how we technically implemented this simulator and some of the design decisions we went through along the way.
+And hopefully you should have a good idea of how you can make a simulator and also how you can design it for your custom platform, whether it's the Magic Leap or something else.
+So I kind of want to start off and think a little bit about what makes a good simulator.
+So, in my opinion, the most important thing a simulator can do, especially as an engineer, is give you confidence in the changes you're making.
+What you really want is to be able to work in the simulator, and it's never going to be perfect.
+It's not going to be a one-to-one match.
+But you want to have the confidence that when you make a change, that that change is going to reflect itself in the way you expect on the target platform.
+And so that's what I think a really good simulator should do.
+And that means we want to match the visuals, because for our artists and designers, we want them to put in their art assets and know that it's going to be fairly representative of what the final look is going to look like.
+We also want to match input for our gameplay designers and the engineers, so that when they're designing interactions and making them feel really juicy, and they go take them onto the device, it still feels the same.
+And then lastly, and maybe counterintuitively, we actually want our simulators to incorporate bugs and quirks of the target platform.
+You really want it to match as closely as possible.
+So a good example of this is on the magic leap, sometimes the controller doesn't connect for the first frame or two.
+And so, this was a big issue because a lot of our gameplay engineers would set up a little bit of gameplay and assume that they had input on frame one right at the beginning.
+And so it worked fine in the simulator, and then a week later we'd drop it on the device and everything would break and we'd spend hours trying to use the platform-specific tools to track down the bug.
+And we ended up actually incorporating this quirk back into our simulator and just had the simulator delay the input a little bit when it started up.
+And this allowed us to move the sort of bug workload from the end of the line up front to the engineer that's actually implementing it.
+And so this is a huge workflow issue for us, and it really helps give you that confidence that I'm talking about.
+So before we get into too many of the technical details, I kind of want to give a brief overview of how the Magic Leap works, because I'm not assuming that everyone necessarily knows kind of the pipeline.
+And we need to kind of know what we want to simulate when we're building our simulator.
+So, at a base layer, when you put on the magic leaf, you see the real world, which is really, you know, that's the thing that Augmented Reality is trying to do.
+It gives you the real world and your virtual world.
+So, we need some way to simulate the real world, because...
+There have been simulators for augmented reality that have been built before, and a lot of them use sort of stand-in geometry, IKEA furniture models, and it just doesn't feel like the experience of putting things in your world.
+And so it's important if we're going to be designing in this simulator to actually recreate something that's going to match the actual experience of playing.
+So that's sort of the real world layer when you want to simulate that.
+On the Magic Leap, there's a system of scanning the world.
+So all of these augmented reality platforms kind of create a mesh of the world as you're looking around.
+So it's constantly building a geometry.
+And this is really crucial for a couple of reasons, because it provides the ability to occlude objects.
+So unless you have this mesh, it doesn't know where the table is and how to block the rendering from the table, for instance.
+So we want to find some way to simulate this in our simulator, and I'll simulate some of the quirks of it too, because if we make a perfect scanned mesh, that's not really gonna be great.
+And then the last thing we want to simulate is just the virtual world.
+So this is just your normal gameplay kind of flow and rendering, but with a couple of considerations to make it feel a little bit more like the Magic Leap, because it's a fairly unique device in the way that it renders to your eyes.
+So that's the kind of broad overview of kind of where we'll be going.
+So let's start with the real world.
+So naturally, when we talk about wanting to simulate the real world, we probably think of photogrammetry.
+And so that's what I ended up doing.
+But I wasn't about to go buy a professional photogrammetry rig.
+I don't have a DSLR camera.
+So I kind of came up with a workflow that is kind of unique, but I think it's pretty interesting to talk about.
+So I ended up just using my phone, just my smartphone, my Pixel 2, to take all the images I needed for the scan.
+And so essentially what I did was rather than, so normally when you're doing photogrammetry, you want a couple of really nice high resolution images.
+But my phone's not gonna give me that really, so instead of quality, I opted for quantity.
+So I took this, basically this long video of our office, just sort of panning slowly around, and then I brought that into VLC and chopped it down to one frame a second or so.
+And the nice thing about that is it results in a very evenly distributed set of images around the room.
+So what you really want in photogrammetry is a nice uniform distribution so you can get a lot of different angles.
+I actually tried this manually at first by just kind of walking around and taking singular images.
+But while that kind of works if you're...
+taking a scan of something that's central and you can walk around and be very careful about.
+When you're taking a scan of an office, you really need to get into every nook and cranny, and so it's a lot harder to figure out where to take the images from.
+And so this technique actually worked really well because I could just sort of quickly wipe my phone around and get a bunch of great images.
+At the end I actually had 2,500 images from this process, which sounds like a lot.
+But luckily, the tool I chose to use for the photogrammetry was RealityCapture.
+And RealityCapture is a little bit different than maybe a more standard photogrammetry tool.
+So Agisoft is probably, I think, the front runner for photogrammetry.
+But RealityCapture runs on the GPU.
+So it can handle just an order of magnitude more photos.
+And so, This paired really nicely with my quantity over quality technique because I could just pump in 2,500 images and it would churn through it on the GPU.
+And after a couple of hours of tweaking the constraints and munging with the settings, I got to something that was...
+It looked like this, which, ugh, rough.
+So I kind of fell into the trap, well, the phone technique was maybe a little questionable, but I also fell into the trap of kind of blank walls and desks.
+The way that photogrammetry works is that it's looking at these images and it's finding feature points on each of the images.
+They're areas of high detail that it can then correlate with other images.
+And then you can use trigonometry to position those points in 3D space.
+But on a big white wall, you don't have any points for it to find.
+It can't find any detail points for it to use.
+And so these are actually really hard situations for photogrammetry.
+Really you want to use a depth sensor at this point.
+I didn't have that. My mesh really looked like a mess.
+But luckily I stumbled upon this technique from a guy on YouTube who's a photogrammetry person around San Francisco, which is, it sounds crazy, but you take your mesh back into Oculus Medium, which...
+happens to be the perfect tool for this job.
+And I basically spent a couple of hours reconstructing and patching up my mesh.
+I sort of built out some computer monitors and I filled in the desks and tables.
+And at the end you kind of get this sort of, it kind of looks like you went to the dentist maybe.
+I kind of filled in the cavities.
+But the nice thing is you can then send this back into RealityCapture and it will happily reproject the textures onto it.
+So after I've kind of done all these sort of fill-in steps, we get something that looks like this.
+So this is the final mesh coming out of RealityCapture.
+And it's interesting to note because we weren't really going for a perfect scan.
+We wanted something that was close enough to reality that's going to give us a good simulation, but we weren't going to use this as a production asset.
+But I think it's interesting to note that even though the geometry is not perfect for this scan, it still feels pretty real because it's really the textural aspects that make it feel real.
+You need the depth to kind of give you the groundedness.
+But it's really the texture, being able to read the writing on the walls that makes it kind of just feel like an actual office.
+And here's a shot of the full thing kind of in Unity.
+I sent it through a couple of poly reduction steps just to kind of clean it up and get it something that could be rendered.
+Yeah, and all the textures came out as 8K, which is high, but it's not production again, and it renders on the Rift fine, so it wasn't a problem.
+So, we've kind of got our real world set up, which is good enough for us.
+The next step is, okay, well, we have the real world, but that's not really Magic Leap yet.
+Next step is the Scander Room.
+So, as it's looking around, it's making this mesh like I was mentioning.
+And luckily, we already have a mesh that we just made, so this step is a little bit easier.
+The only key consideration is the mesh that's being generated is not perfectly one-to-one with the real world, right?
+When you're using augmented reality platforms, it's pretty accurate, but there's always some holes or some geometry weirdness, especially around the corners of objects.
+And we want to simulate that, because if we just give you a perfect scan, you're going to be building your game assuming you have a perfect scan.
+And then when you go into the real device and realize it's not a perfect scan, that's going to be a problem.
+So basically what I did was I took the full mesh here, which you can see, and then applied another further poly reduction and added a little bit of noise on top of it.
+And that ends up with something that looks like this.
+Which, in my opinion, having seen some of these scans that come out of these devices, is actually fairly accurate.
+You can actually see sort of if you trace along the edge of the desk there.
+It doesn't quite line up with it, and that's what we want.
+You can see, I've overlaid it here just a little bit more opaquely so you can see how it sort of penetrates and kind of almost like has this spiderweb effect that you can sometimes see with scanning behavior.
+So this actually worked really well and was pretty simple.
+But the last thing for the scan mesh that is really important for gameplay reasons is that the mesh doesn't actually come in all at once.
+So this is a common assumption by people who start working on inaugural virtual reality.
+They're like, oh, my mesh is all here, but then they put their physics objects in the world and it just falls through the floor.
+So what actually happens is the mesh comes in in chunks.
+So as you're looking around, it'll load in a chunk, and then you sort of look over here, and then it'll pop in, and it'll sort of keep updating them over time.
+And we really want to simulate this behavior, because if you don't, you start designing lots of physics things that don't have backups and backdoors and things like that, because you need to handle these cases when, for instance, in Luna Moon Dust Garden, when any of the seeds fall through the floor, we have a custom animation that pops them back up and makes sure that they're in a good place.
+So in order to simulate this in our simulator, I basically threw this through like a fracturing operation.
+So I use Houdini because I'm an engineer and so that's the natural, for me it's a natural artist tool but there's a Voronoi node and I just threw it through that and it was pretty effective.
+So this, not exactly the way that it chunks in Magic Leap but it was enough for our gameplay to match up with the Magic Leap.
+And when we load this into the editor, we basically sort of stream these chunks in one at a time with a couple of heuristics about where you're looking and which ones might pop in.
+So you kind of get this nice chunky behavior, which is pretty close to the way the Magic Leap would work.
+So now we have our scan mesh.
+We've got our real world.
+The last thing we do is you need to figure out how to composite all of the game on top of it and make sure that looks accurate.
+So the biggest trick with the rendering of the Magic Leap is that the Magic Leap actually renders in an additive manner.
+So it's not like a screen, it's more like a series of projectors that use mirrors and lenses to beam light into your eyes.
+So we want to simulate this in our simulator.
+And it's important for our artists because the way that additive rendering looks is going to be very different than a normal virtual world.
+If you have a little bit of darkness or shadows, it's going to be almost transparent in the Magic Leap.
+And so we want to make sure that the simulator is useful for our artists to do art tests and things like that.
+So basically, we split our rendering into two layers.
+So we rendered the game in one layer, and then we render our 3D scan in a different layer, and then composite them on top of each other.
+Which also gives us a nice spot to add some post-processing for things like the field of view.
+So one thing to note on the Magic Leap is that the field of view is fairly small.
+And because of that, you need to make sure your gameplay is all within those sort of boundaries.
+If you start putting your gameplay all out here, it's going to feel very different than when you then drop it on the device and it's all in this kind of box.
+So we actually simulate the Magic Leap's field of view in our simulator.
+So in VR, you kind of see this square you're looking through, which is, I think, pretty accurate.
+And then sort of the last kind of consideration and the side benefit of splitting it off into layers is that one of the sort of the subtle quirks about the Magic Leap is that the real world can't really interact with the virtual world. So the whole purpose of having this sort of scanned mesh layer is that that's the layer that the virtual world interacts with and understands.
+But If you disable the scan mesh and you take your Magic Leap and you look straight at a blank wall, and then you render a sphere five feet into the wall, the Magic Leap will happily render that sphere and give you a fantastic headache because your eyes think there's a wall but there's also a sphere rendering there and it's very disorienting.
+So this is sort of a property of the way that this device works because it's basically just rendering something on top of the world as it exists.
+But we kind of want to recreate this because, like I was mentioning earlier, when the scanned mesh has holes in it, you can kind of have some of these artifacts where objects that are virtually under the table will actually sort of show through the table if there's not scanned mesh there to block it.
+So the nice thing about doing this compositing layer is we just ignore depth, and so we get these behaviors as well, which is really good.
+And then just to sort of show how it looks overall, this is sort of the same clip as earlier, and we can see how it kind of comes together.
+So we have the scanned mesh as a base layer, and you can see how the additive compositing and sort of the field of view ends up looking.
+And if you look closely, you can see some of the grass there as it conforms to the scanned mesh.
+But overall, this was a huge benefit for us.
+It really worked out well.
+So one of the things I wanted to talk about as well was the input layer.
+So that's to talk about the rendering, but we also want to make sure that the input is simulated so that when our gameplay designers are playing, they can make juicy things that feel good on the device.
+And kind of over the course of development of the Magic Leap, it went through a couple of phases of input.
+So early on, it actually only had three degrees of freedom.
+So it was more like a laser pointer than a fully tracked controller.
+And it was important to us that even though we were running the simulator on the Rift, that you only have that level of fidelity, so that when you're designing interactions, you keep in mind that you really only have three degrees of freedom.
+So by having a simulator, it allowed us to sort of like pick and choose and kind of closely match the properties of the Magic Leap as it sort of evolved.
+And when they developed Six Degrees of Freedom, we just enabled that on the Rift.
+We also did a little bit of things to add a little bit of noise, especially early on there was more noise in the tracking.
+And it meant that you couldn't do very precise interactions.
+And so we really wanted to actually, the noise was really important because otherwise you'd design these really precise VR sort of interactions and you'd take it to the leap and then it just doesn't really work because of the noise.
+And they've improved a lot of the input now, but it really helped us in the development process to make sure we weren't getting ahead of ourselves.
+Then the last thing I kind of want to talk about on the technical side is just sort of like the way we structure our API.
+And I think this is an important point because it helps kind of rein in the scope of what we were trying to work on.
+We didn't try to make like a general simulator framework like we were in.
+We didn't try to design it that way.
+We basically took the Magic Leap API and we one-to-one built an abstraction layer over top of it.
+And that meant that as the Magic Leap API churned and moved, it was very obvious to us what functions needed to change.
+So we just needed to go implement their new mapping framework, as opposed to have to recalibrate our own design framework and make sure it fits into our simulator.
+So it really made the maintenance work of keeping up with an experimental platform much, much better.
+So, kind of at the end, this was an extremely useful tool for us.
+We had a very short timeline on this project.
+It was like six to eight months with a fairly small team.
+And on experimental hardware, that's pretty crazy.
+We wanted to reuse a lot of the assets from Luna, but we actually ended up making them from scratch anyway, just for a variety of other reasons.
+So, being able to ship this in six to eight months was pretty incredible.
+A big point I think I'd like to make also is that having a simulator lets you insulate yourselves from an experimental platform.
+So one of the tricks of dealing with an experimental platform is that it's moving really fast.
+And that means that if it hits a bug or even just like a software update, that is kind of incompatible with what you're working on, that can just totally tank your workflow because you have all these artists who are working and then all the headsets now need to update and like, okay, they don't work because now we're hitting this bug because of the new OS.
+So having a simulation layer means that everyone who's not working directly on the device can work in the simulator and even if the device hits a hot reload or gets a new OS, you can keep working in your simulator until the engineers have time to fix it.
+And so this is a huge deal for us because basically it allowed us to push a lot of these bugs that you'd have to, that would have been critical bugs otherwise, kind of later in our development to sort of clean it up, especially after the platform has maybe moved on from some of those issues.
+So that installation was a really big deal for us.
+Another big deal was that it really allowed us flexibility about how we worked.
+So, especially with a lot of these platforms, they're heavily restricted, and you may only have like a couple of headsets.
+So this meant that we could work from home on our Oculus Rifts, and our audio folks in LA didn't need a Magic Leap to do all the audio juice that they were kind of working on.
+And this was just a huge quality of life improvement.
+Before we had this simulator, everyone who was working on the device had to be in a very small room with 24-hour security.
+And it was...
+Sad is the wrong word, but, you know, it wasn't that great.
+So this allowed us to basically kind of integrate it more into a normal development workflow that you'd be used to with Unity and your debuggers, and it's just vastly more comfortable.
+So then I kind of just want to wrap up with a couple of more design thoughts.
+So I think one of the tricks, having seen a lot of different types of simulators that people have built, and actually Magic Leap even has a couple of theirs as well, but one of the tricks of working with a simulator is making sure not to design to the simulator.
+We spent a lot of time trying to make our simulator accurate so that when we design these very iterative gameplay mechanics that the people designing them wouldn't fall prey to designing to the simulator.
+One of the big issues we faced, just as an example, was when we were trying to figure out the scale of all the assets.
+So we wanted, we were trying to decide, okay, do we want all these things to be 6 inches or 12 inches?
+Like, how big should the trees be?
+And we found that people would put things in virtual reality and be like, oh yeah, that's 2 feet tall.
+And then we'd drop it on the headset and it would be like 6 inches because you could actually have a ruler and you'd be like, well, that's much smaller.
+And we were very careful in virtual reality to make sure everything was measured precisely.
+Like, I don't think this is a technical issue, it's just that in virtual reality, it's just kinda hard to judge the scale of things.
+It's great, but it's not perfect.
+And so we had this issue where they would design the scale to virtual reality and then it just didn't really work in the headset.
+And so it's very important that your simulator is accurate in the right ways.
+Another example is kind of input.
+And I sort of already touched on this already, but if you allow yourself full RIFT input, that's a very different experience than the way that the Magic Leap works.
+It's just like a slightly different set of behaviors and affordances.
+So, and especially to me, as the project goes on longer, the simulator becomes more useful.
+You run into less of these pitfalls because you're not doing as much design at that point.
+But yeah, anyway, that's about it.
+If you have any questions, feel free to ask, or I'll probably be in the wrap-up room hanging out.
+So, thanks.
+Oh, and fill out your surveys.
+Hi.
+So it seems like a simulator is just sort of a really useful thing for someone developing a product.
+Was it something that the Magic Leap didn't provide or the one they provided wasn't good enough?
+No, that's a really good question and I have a slide on it, but I ended up cutting it for time.
+So, the Magic Leap comes with two simulators.
+It comes with one that's basically more, you have some like handles, you can sort of be like, okay I want the camera here, and I want the controllers here, but it's not really something you can play in real time, it's like sort of number input.
+But the more interesting simulator they have is Zero Iteration mode.
+So Zero Iteration mode is actually quite good.
+It renders everything on the computer and streams it to the device.
+The only problems with that is that the streaming is at about 10 frames per second.
+So it's usable for debugging.
+And that's what we used it most for, but it's not that great for gameplay design.
+The other problem is that you still need the device.
+And so we had a team of like 10 folks and we didn't have 10 devices.
+So having a simulator for the Rift meant that everyone could work all at once.
+So that was a lot of the big reason we built one.
+Oops. So I guess that, there we go.
+This is more of a funny quirk of the Magic Leap comment than a question.
+I was building an augmented reality lab application so you could do chemistry experiments.
+Worked perfectly at home, never worked in my office.
+And that's because my office has metal tables.
+Yes.
+So it's a magnetic controller and it completely loses tracking.
+Yeah, exactly. Yeah.
+Took me a while to figure that out, so if any of you see your controller just hanging in the air, make sure you're not...
+Yeah, that's one of those things that I would totally integrate into it, just randomly cause some dropouts, you know?
+Hey.
+So, Magic Leap does dynamic remeshing, right?
+Like, so as you're going along, it's changing the mesh.
+Did you incorporate that into your simulator at all?
+And how did that, because you could probably drop some seeds through as it remeshes, right?
+Right, yeah, that's a good point.
+And we didn't consider, or we didn't implement that directly, probably could have had like a couple of variations of the mesh and then swapped out those chunks.
+It was basically a pragmatic time versus how accurate can we make this trade-off.
+But yeah, that's definitely a good suggestion.
+Yeah, great, thanks.
+Great presentation.
+Thank you.
+Hi, great talk, thank you very much.
+Quick question, you said the project itself took eight months.
+How long did it take you to build the simulator, or was that an ongoing thing?
+So the simulator, it's a little hard to estimate.
+I would say we had it at a usable state after month one.
+It wasn't honestly that much work.
+This sounds like it's a lot more work, but the main amount of work was in the scanning.
+And if I had bought a proper rig, maybe that would have been a lot quicker.
+Okay, so it was just you building that?
+Yeah, pretty much.
+Okay, awesome, thanks.
+Yeah, it was, basically the longest part was just like matching the Magic Leap API, so we just kind of went through it and was like, okay, for input, we'll map that to the Rift.
+And for, you know.
+Gotcha, okay, thank you.
+Yep.
+Cool.
+Hey.
+Hey.
+So I just want to check.
+So how did you make sure, because Oculus Rift has their own specs for the hardware side, and same with the Magic Leap.
+So how did you make sure that things that would run on the Oculus Rift would run well on the Magic Leap?
+Performance-wise, especially?
+Yeah.
+Yeah, that was definitely a trick.
+We definitely fell a little bit prey to over, yeah.
+Yeah, not being careful enough with what will perform well in the magic leap.
+We were definitely still using the device every day and testing it.
+So it's not like we had really big performance issues.
+But it did mean that if you were an artist and you were working on something, you didn't necessarily have that immediate feedback that it was going to be laggy.
+And so we had to do a couple of passes at the end on performance, just to sort of go back and be like, okay, this mesh is too big or whatnot.
+Yeah.
+Cool. Good job.
+Thanks.
+Great, well, thank you very much. I'll be around.

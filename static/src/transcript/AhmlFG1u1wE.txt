@@ -1,0 +1,562 @@
+Okay, let's get started.
+Good morning, everyone.
+So my name is Remy Canin.
+I'm an engine architect on Far Cry 3 and Far Cry 4, working at Ubisoft Montreal.
+And we're here today to talk about Pipeline.
+You probably already experienced this situation in the past where you're coming in at work in the morning, getting the latest code, starting compiling, copying from the network the latest data build.
+And then you have plenty of time to enjoy your coffee break while everything is copying and compiling.
+So on Far Cry 3, all team members have plenty of time to enjoy that coffee break.
+But on Far Cry 4, we made ourselves a lot of enemies because all those operations could be performed in under two minutes.
+So maybe I could have named my talk how to get rid of coffee break on your project.
+But anyway, before getting to optimization, we have applied to our pipeline.
+I'd like to describe it a little bit so you know actually how it works and what our workflow and what we wanted to improve.
+So I'll start with a few numbers.
+And the first number is the amount of data we're generating every day for every package.
+We are generating for each nightly about 250 gig of data.
+That's for every nightly, and actually sometimes we're generating more than one package a day.
+So some day we have half a terabyte worth of data generated.
+We also have a huge amount of data, about 3.7 million lines of code.
+That's for the game and the tools, the editor.
+2.5 million out of those lines are for the runtime, the actual game.
+We've been a lot of people working on the game.
+We have been six studios, and Montreal being the lead one.
+450 people working in Montreal in the studios.
+That's the amount of people getting the data every day.
+We have several Perforce instance, but at the end of the project, we had about 500 check-ins per day, 350 for data, 150 for the code.
+And this doesn't take into account the sound, which has a separate Perforce instance.
+So talking about Perforce, we have our artists are working in some asset creation tools such as Max Motion Builder or Photoshop and they're saving their work on the Perforce instance and we're providing them some plugins so they can actually export their assets into a platform agnostic state that is saved on another Perforce instance.
+alongside the world definition and the design definition properties, that kind of stuff.
+And out of this, on a PC, when you have a copy of this second-per-first instance, you can run our editor, and the editor is compiling just in time the resource required to actually put some stuff on the screen.
+So let's take the example of texture.
+The texture will be changed into, let's say, DDS for being shown on PC.
+And all those compilations of transformation are done just in time when the editor requires it.
+and are saved on disk as a temporary file that can be reused later.
+So the important preference instance here is the one in the middle.
+Because out of this preference instance, we can also produce a package that can be run on the game, run on console.
+So to do so, we are running our editor, an extraction path that is actually listing all the resources used by a given world.
+And then out of this resource list, we can then follow all the dependencies, compile all the assets that are referenced, and then compress everything together and build a package that can be run on console.
+This process, actually the extraction process with the editor is quite long.
+It can take between five and 15 minutes per square kilometer of the world.
+But we are a world that are 10 kilometers per 10 kilometers, so it can take a huge amount of time to actually do this extraction pass for the entire world.
+So what we do at night, we are actually distributing this work over a cluster of PCs.
+So each of these PCs doing one extraction pass.
+Then we gather all those results onto another machine, do the compilation pass following the dependencies, compressing everything, and then packaging everything to be run by the game on console.
+So this entire process is known as the binarization process, and the binarization process is at the heart of the pipeline because it's what produces the actual game for console.
+So we want this process to be maintained in any time, so we have some tests to make sure it never breaks.
+So whenever a programmer submits some source code, we have a form of build machine that retrieves the change list and compiles the change list for all the platform and targets that we support.
+And if this compilation succeeds, we can send those binaries to some machine that are going to perform some tests.
+And we're actually doing the binarization process, not entirely, just a square kilometer of the map, just to make sure it doesn't break.
+And we also have a few regression tests, just to make sure some basic features are not broken.
+So if we look now at the timing we had at the end of Far Cry 3.
+Let's consider the example when you have the code synced, but you have not compiled anything.
+So you want now to get the latest code and run the editor, let's say.
+So to get the latest code, depending on the amount of code that has changed since you have last synced, let's say somewhere between zero and one minute, then you have to compile the entire editor.
+A full rebuild of the editor at the end of Far Cry 3 was about 40 minutes for the full rebuild.
+Then you have to get the latest data, depending on when you have last synced.
+Let's say it's between zero and five minutes.
+And then with that, you can run the editor.
+As I mentioned before, the editor is compiling just in time all the required resources to actually run.
+So the very first time, you have to compile a lot of resources to just run the editor the first time.
+So the very first run could take up to 15 minutes.
+And if you want to binarize locally, you still have to do the extraction pass with the editors.
+You have to paste it 15 minutes, plus all the compilation, the compression, and packaging everything together, was taking about 45 minutes to produce a local version on your local PC.
+If now, if you want to run the game on console, you have to get the code, same thing.
+Then you have to compile it.
+You don't have to compile all the tools in that case, it's just the game.
+So it's less source code, it was taking about 25 minutes.
+Then you have to copy the package from the network to get the latest nightly build.
+And then you can run the game on console.
+So as you see, we had a pretty bad timing at the end of Far Cry 6, so we had to take action and make sure we solved this problem for Far Cry 4.
+So I'm going to show you the few stuff that we've done on Far Cry 4.
+The first one being the compilation time, how we improve our compilation time.
+The second one, how we improve our nightly build, just to make sure we can produce a data build as fast as we can.
+The third one, how we can then deliver this data build to the team member.
+And finally, when you have this build, how you can iterate locally on console to test your change, your local change you have made on your local PC.
+So let's start with the compilation.
+Most of the improvements we've got are thanks to a build system called FastBuild.
+And I'll get to the features of FastBuild and how it improves our compilation, but let me start with a few of the history, actually, how we got there.
+So, as I told you, our editor DLL target, which was our main editor target, was taking up to 40 minutes for a full rebuild.
+That's for the 3.7 millionth line of code.
+We also add at this time, at the end of ArcWrite 3, some Unity or Blob build, depending on how you call them.
+So it was lowering this number to 20 minutes to do the entire build.
+But the Blob has some iteration problem because whenever you change a CPP file, the entire Blob needs to be rebuilt, so you build a lot more code that you need.
+or some other system just reshuffle the blobs to extract the file you have changed and then you have to recompile the entire library.
+So you have bad iteration time with blobs.
+So many people were actually not using the blob targets and were willing to prefer the 40 minutes build just to have good iteration time when everything is rebuilt.
+So at this time we had a new engine architect that joined the project called Franta Filin who is actually here today, Lufranta.
+He had a pet project at home.
+was a BL system.
+And so we tried this BL system on the Far Cry 4 code base and we had pretty good results.
+Everything was really in good shape.
+So after this early test, since we had good results, we said, okay, Aurelien, let's try it and use it on our project.
+So FastBL is actually improving our build time for four main reasons, actually four main features I'm going to present today.
+The first one being a proper parallelization, so you properly use your local machine.
+The second one is caching, so you can reuse object files between users.
+The third one is actually a good implementation of the blobbing of the Unity builds that lets you have good iteration time.
+And the last one is the distribution, when you can actually send some work on another machine, on some worker machine.
+So let's talk about the parallelization.
+Consider the case where you are building several dependent DLLs.
+What MSBuild does usually, if you have properly set up your project, it's going to compile all your source files, all the object files for the first project in parallel, and then it's going to link that together.
+Then it will start the dependent DLL, compiling, linking, then another dependent DLL, compiling, linking.
+All these dependencies are actually not necessary.
+You could start compiling any of the source files as soon as you can.
+The only real dependencies are between the link steps.
+So it's exactly what FastBuild does.
+It tries to compile everything as soon as it can.
+And so you actually have better time for compiling the entire stuff.
+If you take the Far Cry 4 build with MSBuild, that's what the kind of results you get if you look at your resource monitor with FastBuild, that's the kind of results you get.
+So you see it's pretty fast and actually have a good utilization of your PC.
+But the parallelization also have a...
+There is also some problems with the parallelization on static libraries within MSBuild.
+As I told you, if you correctly set up your project, all the source files are going to be compiled in parallel, so that's fine.
+But there is also another setting in Visual Studio where you can set up the amount, the number of projects that can compile in parallel.
+So if you set, for instance, this number to 3, Visual Studio is going to start 3 libraries at the same time.
+So you have all those tasks that are sent at the exact same time.
+So every... since you have more tasks that have been started, that you have some available CPUs, each task is going to take way longer than it should.
+So FastBuild is properly parallelizing that, so actually it goes faster.
+The main reason for that is when you start too many processes at the same time, you have excessive context switches and each process is trashing the cache of other processes, being the code cache, data cache, or file system cache.
+So every task is going to take longer.
+We actually had the opportunity to test our build with a 32-core machine and Visual Studio was happily spawning more than a thousand processes, which is completely ridiculous.
+In the contrary, fastbuild does what you expect and queue properly the task and start a new task when the core becomes available.
+So, we have improved utilization, so what's next?
+We want to eliminate redundant compilation, and this is where the caching helps.
+The idea behind the caching is you are going to share the build results between user.
+So whenever you compile a library, a DLL, whatever, you're going to store all the object files on a central cache and then link them together.
+If another user is compiling the same source code, it's going to retrieve the results directly from the cache so we don't have to compile it locally and then link them together.
+So if we take, and you have some win, if you take the example we had before, MSBuild building Far Cry 4 editor, and now building with FastBuild and the cache, that's the kind of results you get.
+But the third point is the blobbing.
+For those of you who are blobbing or Unity build, both names are used in the industry.
+For those of you who don't know, this IDBM-BLOB is just to include all the CPP files of your project into BLOB files, so it reduces the header compilation.
+So the idea here, you put all the files together into a CPP, and building the CPP is actually faster than the sum of each individual build together.
+So you have great win out of this and really speed up your builds.
+The problems comes when you want to iterate on that.
+Because whenever you change a file the entire blobs Then needs to be rebuilt So what Falbe will do then is we extract the modified files while maintaining all the blobs are stable And then you can iterate on your file without Paying for rebuilding all the the other blobs every time so you get good iteration time But still benefiting from the the blobbing and the speed improvement it brings And finally, the distribution, the idea behind the distribution is to separate the build of an object file into two steps.
+The first one being the preprocessing, and then the compilation of the preprocessed file.
+Then, when you have a preprocessed file, that means all the includence has been resolved, everything has been included, you can send this preprocessed file to some worker on another machine that will do the compilation for you, so you don't have to do it locally.
+And for sure, it helps you have a better build time.
+There are other few features that are worth mentioning.
+One is being the link dependencies.
+Usually when you change a CPP with MSBuild in a given DLL, so you're going to recompile your CPP, then re-link the DLL, but it also is going to re-link all the dependent DLL, even if you haven't changed your API, your export table for the DLL hasn't changed.
+So it doesn't require actually to rebuild all the DLL, dependent DLL.
+And FastBuild actually is doing that.
+If you don't change the API, it won't be relinking the entire chain of dependencies.
+We just relink your, the DLL in which you have changed the CPP.
+Another feature that worth mentioning is the batching.
+You can send several targets on the same command line.
+which in return, instead of doing each target one after each other, all the targets will be done at the same time, so you have better parallelization and better utilization of your PC for doing all the compilation at the same time.
+And this is pretty useful for the build machines, when you submit a change list testing several targets at the same time, it actually speeds up your build machines.
+Also, if you want to do some pre-submit check, you can build a lot of targets at the same time, making sure you're not going to break the build before submitting.
+So if we look at the real-life timing we got out of that, as I told you, our main target was 40 minutes.
+We had the blob one, was taking about 20 minutes.
+We did try some commercial products such as IncrediBuild, was bringing actually some improvements.
+We're able to rebuild our code base in 12 minutes.
+The problem with Incredible, that was about with 10 machines, if I remember correctly, for this number.
+The problem with Incredible is that it suffers the same dependency problem as MSBuild.
+That means you won't start a project until the previous project is done.
+So you're just waiting for stuff when you actually don't need to wait.
+So on the contrary, FastBuild, just on a local PC, gives us a 10-minute full rebuild.
+If you put on top of that the caching and the distribution, we're able to build our editor in 4 minutes.
+So that's 40 minutes to 4 minutes.
+And since the game has less code, actually we're able to rebuild our PC release target in less than a minute.
+58 seconds to be exact.
+Since I'm talking about compilation, I just want to mention a few words about edit and continue.
+We were using edit and continue in Far Cry 3, but at the end of the project, with the amount of code we had, it was just getting too slow.
+So it was not really usable.
+Whenever you did a change, it took several minutes to actually get inside the executable so you can actually continue executing your run.
+And plus Microsoft is dropping, actually they're dropping the support, I think Visual Studio 2012.
+Anyways, they're dropping the support, so we cannot use edit and continue anymore.
+So instead what we're using is a hot reloadable DLL.
+I won't get into the detail of that, could be an entire talk about that.
+But the basic idea are you can change some code into a DLL and this DLL can be loaded and unloaded dynamically.
+So you can have your editor running, unload the DLL, make some change in the code, reload the DLL, and debug and test your code right away.
+So we're using a lot of those.
+Most of our AI and gameplay code are actually in hot reloadable DLL.
+We're also using incremental linking, but not everywhere, actually.
+It was really a test and see approach.
+We are activating incremental linking on some projects.
+It gives us some win actually on some projects.
+On some others, it's actually not helping at all.
+So it's just, where it helps, we're using it.
+Where it doesn't help, we don't use it.
+So now that we can build executable fastly, we want also to build data builds as quick as we can.
+If we look at the number we had at the end of our query three.
+We were generating our walls For the three platforms we're shipping on in six hours But that's for all the official maps plus test maps, gym maps for all the users. So that's roughly six hours to build something about 45 walls. On Far Cry 4 we managed to get this number down to 1.5 hours but that's for five platforms.
+We had two more platforms.
+That's roughly for 75 worlds.
+So we got a great win on Far Cry 4.
+The main reason for that is the first one, the profiling, but that's not regular profiling.
+I get into that on the next slide.
+And the second one is resource caching, trying to share the results between user.
+So the profiling, I'm not talking about regular profiling here.
+As I told you in the beginning, we are sending some tasks on some remote machine to do all the extraction paths when we're building a package.
+We're also using some process isolation for the resource compilation.
+And it's whenever we compile a resource, we send that actually to another process, just to make sure it's completely isolated.
+It has its own memory, don't have multi-threading issue, we don't have memory issue.
+So that's the way we actually our pipeline work.
+Every single resource is built in process isolation.
+The problem with that is it's really hard to actually understand what's going on because there is some interaction between different machines, different processes.
+You don't have a clear picture that you usually have when you have a single process with multi-thread.
+We can just put some profile points in your code and just profile this stuff.
+You cannot do that actually with that kind of setup.
+So the real problem is you don't see the interactions, you don't see how those processes are actually interacting with each other, and you don't have the big picture of what's going on.
+So that's where the remote profiling is actually helping us and I explain what it is.
+So let's consider the case when you are running a process on a given machine.
+If you want to profile this process, usually what you do is you add some profile points in your code, you instrument your code.
+and then this code is actually generating some profiling data that you save in a buffer into RAM.
+At some point you can dump this buffer onto disk and analyze the results with the profiling tool.
+That's pretty regular profiling here.
+So when you have subprocesses, how do you do that?
+The idea here is just simply to open a socket on your main process and have all your subprocesses report the profiling data directly on that socket and then you just save this information into the same regular buffer that you have in your main process and then you can dump the results on disk and analyze them.
+So what's good with this approach is at the end you just have...
+a profile dump, which is exactly the same I used to have.
+So you can actually analyze your run with subprocesses with your regular tool and you just see the subprocesses.
+as being sub-threads.
+It just shows a thread in your profiling tool.
+So that's pretty cool because then you can see exactly what are interactions, when you send a command, when it's actually processed by the sub-process, when you read span, what it's exactly doing in just a single view.
+You have all the information.
+When you get that, actually, now you can start to understand what's going on.
+You can start to fix.
+And we found tons of problems using that, some stuff that are repeated into each of processes, some useless steps that were done, the sync point and the scheduling were actually badly implemented, but a lot of inefficiency in there.
+So we saw all those problems, we were then able to fix them.
+And when actually we got that, we were able to have that kind of CPU utilization when you're actually compiling a lot of resources at the same time.
+when you see here my 12 core PC hard at work.
+Actually compiling texture in this case.
+So when you get to that kind of results, you say now the next step is actually trying to do less work would actually improve my build time.
+And this is where the resource caching helps.
+The idea is pretty simple behind the resource caching.
+Is whenever you are actually generating some compiling some assets for a given platform, going to store all those assets onto a central cache.
+Then when another user requires the asset, he can find it.
+So let's consider this example.
+You want to use a texture.
+You are going to ask the central cache, do you already have the results, the compiled asset for this texture?
+If it doesn't, you just compile it locally.
+and then store it into the cache and provide the results to whoever asked for the texture.
+But if another user is doing the same call, we'd be actually able to retrieve the results directly from the cache.
+So the caching helps to share the results between users.
+We're populating the cache.
+It's not every user that is pushing stuff into the cache.
+It's actually the build machines at night that are populating the cache.
+We are sure on the cache we always have official assets.
+produced by an official build.
+We don't have an intermediate asset that could have been compiled by someone working on the compiler during the day, for instance.
+And actually what's pretty cool with that as I told you our editor is JIT compiling the resources Whenever it requires it so now it can the editor can use The cache as well So actually we have some benefits here because the editor can load really faster because it directly get the results out of the cache Instead of compiling stuff locally So what we can say about Onightly is there is not a lot of information in this section, but it was a complex system, so the key was really understanding what's going on, and here the remote profiling was a great help and a great tool to actually see what was going on in the process and the different processes interacting to this entire operation.
+And also the big win was actually from preventing doing useless work, thanks to the cache.
+But I have to raise a big warning here.
+Having a resource cache requires some really good hardware behind.
+Because if you are...
+If you have some bad hardware on which you put your cache, and you have a lot of users actually eating the cache at the same time, you can get to the situation when actually retrieving something from the cache is longer than compiling it locally.
+So you have to have a good balance to what you put on the cache and when you compile locally, because you don't want to actually make your build longer by getting stuff out of the cache when it's actually...
+faster to just compile it locally.
+So I'll get to that later, what kind of hardware we're using for our cache, but it's really a crucial point with bad hardware or something that cannot deliver, the cache is actually useless.
+We want actually to continue improving our nightly build.
+What we want to do, the first big step we want to do is just get rid of the editor, because running the editor, I told you, is kind of very long, and so we'd like to get rid of that.
+And the main reason also for that is that this is right now the only step in the build which is not incremental.
+And also I'd like to emphasize this on that having an incremental build, data build, is the best thing you can do to have a fast data build.
+What you want to do is just redo what has changed and not redo all the stuff all the time.
+And that's really actually what's more important stuff to have a fast data build is being totally incremental from the beginning to the end.
+So now we have a way to create executables quickly, we have a way to create data builds quickly, we want a way to deliver those builds as quickly as we can to the end user.
+Before getting to the detail of that, let me talk of what happens in the 2012 summer.
+We were shipping Far Cry 3 at this time. We shipped it at the end of 2012.
+But actually in the studio we were shipping another big AAA game, Assassin's Creed 3.
+So we had actually two major AAA games shipping from the same studio.
+And at some point, the network just could not handle it anymore.
+Having thousands of users just eating the network all the day.
+It was completely done and we could not work anymore.
+If you look at this graph, actually, for network usage during this period, we had double of the utilization in the 2012 summer compared to the regular release cycle that we have in the studio.
+So the network was completely down.
+So we had to actually take action on that, and we decided as a studio to take action on the software side in the project, just make sure we hit less the network, but also on the studio side, making sure that we have the proper...
+hardware to actually handle that kind of load.
+And this is what we've done with the asset store.
+I'm going to present both of those solutions.
+So the first one, a syncing package.
+We did that with a tool that we call RTPal for the runtime friend.
+But before getting to what exactly RTPal is, let me get back to the end of 2012 when we were shipping Far Cry 3.
+And we were actually submitting our builds to Steam.
+And to do that, our PC build to Steam, we're using a technology provided by Steam called Steam Pipe.
+The idea behind Steam Pipe is to do differential uploads.
+So it's going to slice your ISO into parts, and then you just send the part as a change between two builds.
+And this is giving grid saving, actually, up to 50% of our build.
+We could save up to 50% of the uploads for each build.
+So that's pretty good, and we want to leverage on that and try to actually apply that kind of ideas to our pipeline.
+But we have a great advantage over Steam.
+We actually know our data.
+We know that we're producing big files.
+We know where are the file boundaries within those big files.
+We also know that we have redundancy within our packages because we are actually distributing some official builds.
+alongside some test builds that are actually using the same assets.
+So the same assets are actually appearing at several places into the same package.
+We also can ask the question, what's the real amount of new data that we're actually generating every day out of a 20 gigabyte package?
+And the response to this question, we just looked at our data and What we get out of that is actually textures are clearly the main resources of our package It's using up to 80% of the actual storage of the package and if you look closely of how much texture change on a project you can see that most of the texture actually three revisions at most If you look at this screenshot, for instance, of the end of the project, you can see that several textures actually have never changed over the course of the project.
+But still, we are distributing those textures every time for every build, which is completely insane.
+So then the solution is pretty easy. We want to slice our package into parts and just distribute what has changed between projects.
+We need to slice our big file into parts, hash all of those parts using a hashM algorithm, in our case we're using the MD5 algorithm, and then produce a manifest file which describes the slicing, the file that took something like that, when you can see here that I have a big file, and here you see actually all the parts that are constituting this big file.
+So now when you want to get a package, you just retrieve the manifest, you look at all the parts that are referenced within this manifest, get all those parts.
+Then you get some kind of link process that puts all those parts together and you can rebuild your package.
+That's pretty cool.
+But what's cool is when you want to get another package and the second version of the package, so you're going to compare the manifest and then you'll see that just a few parts actually change between the two packages.
+So if you want to actually get the version 2, all you need to do is just download the parts that have changed and then you have everything locally.
+available to actually rebuild your package and have it on your disk.
+So you just downloaded just what I've changed between the two packages, so it's pretty light download.
+So the results we got out of that were actually mind-blowing.
+You have 95% of a package that actually doesn't change at all during two versions.
+That means you just need to get one gigabyte out of a 22 gigabyte package to get the new version.
+And actually a nice corollary of that is since we have redundancy within our package, just downloading one package is actually faster.
+We had up to 40% shrink on the same package because one part could be referenced several times within the package.
+So you just have to download it once and then rebuild everything.
+Another cool stuff about that is since the package is now smaller to keep, we can keep more of those.
+And actually we could keep up to a year of package history, and depending on the amount of storage you can afford to keep some packages, you can actually keep the entire production if you have enough storage for that.
+So for instance, on the Far Cry 3, we were able to keep a few weeks worth of packages, plus a few major milestones.
+On Far Cry 4, at the end of the project, we had more than 10,000 manifests available to just.
+was just the last past year worth of packages that were just here, ready to be used.
+So all those numbers are pretty cool, but we can actually do better than that.
+And the main reason for that is if you look at the regular workflow for programmers or people working on the team, they're not, they're actually not getting the entire package and playing the real game all the time.
+They usually run some test map or some environment that looks like that, pretty empty, you have nothing.
+That means most of the users are actually touching something like 20% of the data within the package.
+So, touching 20% out of the 5% that changed between one package, that means that the regular dude on the floor just needs to get 1% of the actual data that has changed between packages.
+So we want to leverage on that.
+Also, we still have to go through this link process, which is still 20 gigabytes to write on disk, so it can take some time.
+And then also you have to deploy this build onto your kit, for instance, if you're working on console.
+It's still also a long time, so we want to get rid of that.
+So the idea here to solve all this problem is to deliver the build on demand.
+The idea is to stream all the parts on demand when the game requires it.
+And if you think about it, it's really not a problem.
+We're making an open-world game, which actually already streams the content in background asynchronously.
+So we already have in the game all the required elements and code to actually deal with the data arriving asynchronously.
+And also, if you look more closely to the numbers, our network is actually faster than the hardware you find in the kits.
+usually they're pretty bad hard drive and our network can just go faster than this hard drive.
+So the idea here is to virtualize the file system. The idea, whenever we virtualize the file system, we can then have several implementations of that.
+One could be just accessing the regular disk, but you can have another implementation which is actually virtualizing the manifest content. So for the game, we just show the file tree.
+that is described by the manifest.
+So the game doesn't see anything, but that's the implementation of the file system that's actually virtualizing this content.
+So, that also means that the manifest file system needs to retrieve some parts some way, and this is where actually the file system stack solve this problem, but I'm going to go through an example here to show you what I mean.
+Let's consider the case where running the game on PS4.
+And we have the regular file system, this file system.
+So whenever the game requires a resource, let's say a texture, it's going to ask the file system, and the file system in return provides the file.
+So now that we have a virtualized file system, we can actually have another implementation that can be, for instance, a network file system.
+And you have a companion app on your PC.
+So that means whenever the game requires some kind of resource.
+this request can be forwarded to your PC and the companion app on your PC just provides the file and in return, you can provide this file to the game.
+So now consider the case when you have your manifest file system.
+So whenever the game requires some resources, the manifest file system is going to traduce this request into a part request.
+And it has to forward this part request to another file system and this is where we have the file system stack.
+So we can forward this request to the network file system, for instance.
+The file system can forward it to your PC.
+Then your PC can do whatever it wants with that.
+So we can have, let's say, a central part server on the network, shared between all the users.
+So we can get the part out of this server, and can provide this part to the network file system, which gives it back to the manifest file system.
+And then we can provide the file to the game.
+What's cool with this setup, now I can put in the middle, for instance, a cache file system that's going to store locally all the parts, so you don't have to go through all the network pipeline to get it back.
+So whenever you request your file, it becomes a part request, and you can get the parts directly out of the cache file system and provide it to the game.
+So I guess at this point, you get the idea behind the file system cache.
+So also what you see here, we have a companion app running on the PC, and this is what actually is RTPal.
+So RTPal is a companion app we have on the PC to run its own file system stack, and actually provides us several features, the main one being retrieving the manifest out of the manifest server, which is just a network folder where we store all the manifests, and retrieving the part on demand, so whenever the game asks for a part.
+It's going to get the part of the network, save it locally using the Cache file system and providing it to the game so we don't have to go through the cache to the part server all the time.
+Another cool feature you can see here is actually I said that the game was running on PS4, but we just don't care.
+It could be on PC, 360, Xbox One or whatever.
+It would be exactly the same so also what our t-pad is providing us is a way to unify the workflow for all the platforms You just work exactly the same way the idea. You just put on your game a command line thing. I want to run this version Using our t-pad which is running on this PC, and then the game connect to our t-pad and you're good to go So I t-pad actually I put some screenshot here Looks like that And here I'm going to show you some pretty cool stuff.
+I'm going to synchronize a version live in the video.
+So to synchronize a version, you just hit this button.
+Bam.
+I just synced five versions in one click.
+So now I'm able to actually run this version.
+If I want to change the version, let's say I want to run over the yesterday version, just open this drop-down.
+Bam.
+I just synced yesterday's version.
+That's that simple.
+Another video I want to show you is actually doing something completely useless. I'm going to actually download a build But doing so I'm just clicking this download button So it's starting to retrieve some some parts out of the part server But what you see here by getting the parts out of one manifest I'm actually getting those part on disk and since those parts are shared Between several builds you see all the builds progressing at the same time. This is the sharing in action So that's pretty cool. You see actually the sharing in action with that kind of downloads So RTPal is providing us transfer and storage reduction thanks to the slicing and the parts.
+It provides us also a unified workflow.
+We can just work exactly the same way on all platforms.
+It provides instant package synchronization in just one click.
+And what we can say actually, RTPal is reinventing package distribution by just getting rid of package distribution.
+That's pretty cool actually, working with that is just a breeze.
+You just put a command line, run your game, and you're good to go.
+And that's true for actually the latest build or last year that I built, it just works.
+So the next point is on the hardware side.
+So we wanted also to solve the problem at the same time, at the studio level, by making sure we have the proper hardware to deliver for all the projects if we had a situation where many projects were asking for hardware.
+some build at the same time.
+So what we wanted to do is have some system that have high performance for sure, in terms of high ups and throughput, but also something that was quickly scalable, so we can actually adapt depending on the state of production, at the beginning of the production, at the end of the production, you don't have the same needs.
+So we wanted something that can adapt to that kind of reality.
+and something that can be robust as well.
+So if we have some failure on the hardware, we can still have the service running so we don't paralyze the entire production.
+We looked at what was available at the end of 2012.
+And we looked at TEF, which was pretty good, but was not good enough for our taste in the IOPs field.
+It seems to have improved a lot since then, but in 2012, it was not good enough.
+We looked also at Hadoop HDFS, but this system was too centralized, it has a main server, so if this server gets down, you just lose the service, we don't want to use that.
+We looked also at OpenAFS, but this project was not mature enough, so we don't want to use that.
+And we looked at the cluster implementation of Red Hat, and this one was actually responding to all our needs, so we decided to go with that.
+So what is the cluster file system?
+You can see it as, for those of you who know the red file system within a disk, it's actually distributing the work on an array of disks.
+The cluster file system is kind of the same thing, but on a cluster of PCs.
+So it's a distributed file system on a cluster of PCs.
+It has, so we can do some replication between the nodes, so you can have several copies of the same file on different nodes of the cluster.
+And also, we can build it in a way when you put two network interfaces into each node.
+So actually, one network interface is used for the internal replication and the internal communication, while the other is used actually for servicing.
+So you don't have both communication interacting and making the service slow.
+So we did some tests, and we're pretty happy with the results.
+We decided to go all in with that and buy some hardware to build our own.
+Auglaster FS. So now it's the time for the IT guys, like porn IT.
+So we built actually eight high-end PCs, the best one at this time.
+And we added in those PCs eight SSDs plugged in red zero on a dedicated controller card directly into the PCI Express slot.
+And we added the best network card we can form at this time, some 10 gigabit second network card.
+And we put this 8-node cluster to the test.
+So we did some tests on the throughput side with a 14-gigabyte file with 30 users downloading it at the same time.
+And we compared to what we had at this time.
+Our NAS was built on top of SAN from EMC.
+It was a VNX EMC, for those of you who know at this time.
+So out of the EMC SAN, we were getting up to 18 MB per second.
+Out of the cluster, we were able to get 73 MB per second for the 30 concurrent users getting the deal at the same time.
+On the IOPS field, the test was 100,000 files downloaded at the same time by several small files by several users.
+So out of the SAN, we were able to have 250,000 IOPS.
+And out of the cluster, we were able to get more than half a million IOPS.
+For those of you who are familiar with those numbers, half a million IOPS is completely insane.
+And what's cool also about that, we are able to compare those results to another unit we got from Violin.
+It's another brand of high-end memory, and we were able to get 6,000 series.
+violin sound and we compared to what's pretty cool here we get the same results that the high-end violin memory but if you look at really the cost of do stuff it's you cannot compare that it's just another world that's pretty cool actually we've got some pretty good results out of that and it cost just a fraction of of what the high-end equipment actually a provider So we're using that for RTPAL, so we can get a build out of the asset store.
+We're also using that for the raw source caching.
+So as I told you, you need to have good hardware to provide a reliable cache.
+So now we have it.
+And we're also using that for the code compilation cache of FastBuild.
+So future work we want to do on the GlassRefi system is actually re-evaluate the CEPH.
+because that seems to have improved a lot since then, so it could be actually nice to re-evaluate that and see if today it would be a better choice than the Gluster. And the main reason about that is still the Gluster suffers from a problem, the healing process. Since we have millions of assets on those disks, whenever you have a problem with a node, the Gluster enters some healing mode, and while in healing mode, the entire service really gets degraded a lot.
+and that has been a problem several times on the project.
+So now we've seen how to build an executable quickly, to build a data build quickly, to deliver those builds as quickly as we can to the user.
+The last point I want to talk about is how we can iterate locally as quick as we can.
+And to explain that, let's get back again in 2012 summer when we're shipping Far Cry 3.
+And at the end of the project, we had several small bugs that required to change the settings into some XML file in the package.
+So, at this time, you had three solutions to actually solve that kind of problem, to fix your bug.
+The first one was to just make your change into the source file, submit, and wait for the next day, for the nightly.
+Not a pretty good workflow.
+The second one was to do the change, but re-binarize locally.
+As I told you at the beginning of this talk, it was also too long, it was not actually doable.
+And the third solution was to actually open the big file by hand, try to find your file, put your modified file into the big file, repackage the big file, then re-deploy the big file on console, and then you were good to go.
+So just to say it was just a nightmare to fix that kind of bug at the end of Far Cry 3.
+And so we wanted to improve on that.
+But still this last workflow, actually changing stuff by hand, was pretty efficient.
+It was just a pain because you had to do everything by hand, but it was pretty efficient.
+So we wanted to actually try to automate those stuff.
+a system that can actually detect the changes for you, compile the file if it requires some compilation or some transformation, and then handle the big file creation for you and the deployment if necessary.
+And these steps actually define a workflow that we could call the patching workflow.
+And this patching workflow has three stages.
+The first one being detecting those changes.
+We're doing that through what we call the compiled apps.
+Then packaging those changes together.
+We're doing that through the patch big file.
+And then applying those changes to a running build.
+And we're doing that through the big file stack.
+So detecting the changes.
+Consider the case when you have a texture that needs to be compiled to produce an output.
+What actually defines this output is the source file, but you have many other stuff that actually can change the output.
+You can have some settings applied to a compiler.
+telling him how you want to compile this texture.
+You can have some code version that can change and compile with the same setting, the same input file, producing another output file.
+So all those little things actually defining the inputs of your outputs.
+And what we do is creating a file, which we call a compile.dep, and just set all the inputs that have been used to produce an output.
+So now you have that.
+When we're doing our nightly build, we are compiling a bunch of textures, let's say.
+But we're going to come to a produce at the same time all the compiled EPs, and we're going to package the texture into the regular package, but package all the compiled EPs into a separate package.
+So now when you are on your local PC, you want to know if you have some local changes for a given texture.
+You don't have to actually get this texture. What you need to get is the compiled EPs.
+Once you have your compiled app, you can look at actually what it says.
+So it tells you what file has been used to produce the output, what version of the code, what settings.
+And then you can compare each of these inputs to what you have on your local disk.
+And if you have something that has changed, that means you have some local changes compared to what has been used to produce the official Nightly Build.
+And if you want to see your changes in your build, you need to actually recompile this texture.
+So recompile it.
+And then...
+you can package this texture into what we call the patch.b file.
+Then when you have this patch.b file, you can actually mount it into the game.
+So whenever the game will require the set texture, look into the patch.b file first.
+If the patch.b file has the texture, it can provide it directly.
+If it doesn't, we go through the regular workflow and get the texture out of the regular package.
+What's cool also with that is you can have your patch big file, so it applies all your can changes.
+But if you want to get back to the original package, you just have to get rid of the patch big file, and bam, you're back to the original build.
+So what's cool here, thanks to RTPAL, nothing gets downloaded.
+You just have to get the compiled app.
+And out of the compiled app, then, and thanks to the stack file system, You can, if you have a local change, it will come from the patch.big file.
+If you don't have local changes, it will go through the stack.file system, or tp everything, and will retrieve the actual asset from the part server.
+What's pretty cool with that is actually you can patch some asset that you have never downloaded.
+I find it pretty cool.
+So we've seen several stuff.
+We've seen how we improved our compilation time thanks to fast build mostly.
+We've seen how we improved our fast or nightly build thanks to the remote profiling and the resource caching.
+We've seen how we improved our package distribution thanks to our T-Pal and the Asset Store.
+We've seen how we improved our local iteration thanks to the Dev Patcher.
+There are many people that have been working on those subjects, so I'd like to give credits to a few key people that have been working on this stuff.
+And that's it.
+Thank you for coming.
+I think we have a few minutes if you have some questions.
+Hi, thank you for giving me the talk.
+I have a question about your FastBuild.
+Did you have any custom build steps, code generation, things of that nature, and was that difficult to configure with FastBuild?
+Well, a few of those, and actually, you can, in FastBuild, you can have some, the idea of FastBuild is it's like a graph node which every step within the compilation, will be executed when you have all the dependencies that have been already executed and some of those nodes can be just executing an external the external executable so you can actually plug whatever you want in the fastbuild dependency tree oh, thank you about fastbuild, how does it detect dependencies or how does it know when it needs to get a file from the cache or build it locally?
+The key for the cache is actually the preprocessed file plus the option that has been used, hash of the preprocessed file plus the option that has been used, and a few other settings.
+And we produce a key out of those that can be used to actually get the object file out of the cache.
+Thank you.
+Welcome.
+Hiya, thanks for the talk.
+So you said that when your engineers submit code to the Perforce store, then there are process that runs before their code can be submitted.
+And one of those is that you run a binarize on an area of the world.
+I was wondering, does that take a long time?
+Does it introduce a lot of latency for when the engineer wants to check their code in?
+The binarization is taking, we're not doing the entire wall for sure, so we're just doing actually two maps at the same time, what I call a map is a square kilometer of the wall, so we're just doing two maps at the same time and it takes between 10 and 15 minutes.
+So yeah, we have some latency and we cannot do all the change list, so when we do a change list and it's done, then we go to the next change list that have been combined and ready to be used, so yes, we are not doing all the change list and there is some latency.
+OK, but you are using the actual shipping world.
+It's not just some test world.
+No, that's the true real map of the real world.
+Thanks.
+Welcome.
+Hi.
+You said that you rebuilt the resource cache during the night, so does it mean that if I change something in the morning, like texture format, all the resource cache is broken for entire day?
+Sorry, excuse me?
+If I change something in the morning?
+In the editor, like?
+Textual format? Does it mean that resource cache is broken until the nightly build?
+Usually we try to ask our team member when we have big changes that are going to create some problems, wait until the evening, don't submit that in the morning.
+But it doesn't mean that it will break the build. The official build has the executable plus the version. If you make a change in the code that actually introduces some some...
+I don't mean breaking the build, just...
+the cache will be useless until you...
+Oh yeah, yeah, yeah, for sure, yeah.
+Yeah, so what you can do, you can prime the cache locally on your machine, for instance when you change the version of the texture compiler, for instance you can prime your cache on your PC, so just send a binarization with the command line cache write.
+But you can't manually rebuild the cache on the build machines like with central cache.
+It's build, whenever you submit, actually, since we're doing the binarization of this stuff, all the stuff that will be done will be pushed on the cache.
+No, I mean the resource cache, like?
+Yeah, yeah.
+Can you rebuild it manually, like in the morning?
+I'm not sure I get your question.
+You can run the cache locally, or you can let the blue machine do it.
+OK, yes.
+Fine, thanks.
+Hello, could you please clarify your comparison?
+So when you compared FastBuild with IncrediBuild, you said that on 10 machines, IncrediBuild was slower than on one machine.
+fast build work. And it was same machines? 32 cores?
+It was 12 cores. So actually our machines at our regular workstation, the local build was on a 12 core machine that we all have.
+So actually IncrediBuild was running on those same machines.
+Okay, so it's same machines?
+Yes, same machines.
+Okay, thank you.
+No, it's not. Yes, it's real numbers.
+Hello.
+Hi, so you were making comparisons to 2012 and where things were in 2012.
+How long did it take you to get this?
+You know, at what point in Far Cry 4 did this all sort of come together?
+And you thanked six people at the end about how many people total were working on this and was this like a full-time thing for them, like in terms of managing this project, how did that go?
+So how long does it take?
+It doesn't.
+took that, actually one of the most, actually FastBuild, how long does it take you?
+FastBuild, two months?
+So yeah, FastBuild switch, they took two months.
+The RT PAL, it looks like was running in two or three months.
+So having all the pipeline and slicing the stuff on the machines.
+Dev patcher took a bit more because you had to change a few stuff in our pipeline to make it work.
+And database improvements was like three or four months.
+For a fast build, actually, it was just one person.
+RTPAD was also just one person.
+Dev patcher was mostly from the system side, one person.
+And database also was one person.
+So it was not a big investment.
+It was just good ideas correctly applied.
+And it just worked.
+Thank you.
+Welcome.
+So I guess we're done.
+Thank you for coming.

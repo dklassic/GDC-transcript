@@ -1,0 +1,253 @@
+Hello everyone, thank you for coming.
+My name is Yuki Miyamae from SIA Japan Studio.
+I was the technical lead of Astro Bot Rescue Mission.
+Today I'm going to talk about what the most important technical goals were for this game and how we achieved those goals.
+For those who don't know, Astro Bot Rescue Mission is a VR platformer which was released in October 2018.
+It uses various features of PlayStation VR and the DualShock 4 controller.
+There are over 50 levels with many different visual themes.
+The game was developed by 26 people in 18 months.
+This is a photo of the team, Asobi, in Japan studio.
+During the development, these were the three biggest technical goals.
+Our target frame rate is 60, and it's scaled to 120 by reprojection.
+As frame rate drops are not allowed in VR games, we have to keep 60 fps at all times.
+And second, because it's VR, visuals are physically close to users, so they should be comfortable on your eyes, and at the same time convincing.
+The third one is smooth game flow, which means we have to pay much attention to game flow or game state transitions because they are repeated many times.
+If they are not implemented well, users will easily get tired in VR.
+The purpose of this talk is to share some of the techniques we used to work toward achieving these goals.
+So the first topic is rendering optimization.
+This has the biggest impact on the framework.
+I want to talk about some of the techniques which were effective to keep 60 FPS.
+As a first optimization, we kept the scene compact.
+We knew that optimization was really tough for VR games, so we started optimization at the game design level.
+We divided levels to small sections, and each section is roughly 30 meters by 30 meters.
+And depending on the player's position, some sections are not visible from the player, so we manually set the section visibilities.
+Players go almost straight from a start point to a goal, so manual control was manageable for our game.
+In the product, we had a maximum 2,500 draw calls at a time, including shadows and the stereo rendering.
+I think this is small enough.
+Our renderer spec is as follows.
+We used forward rendering with H-sample MSAA.
+As a small optimization here, we packed the depth value to the alpha channel of the color buffer.
+By doing so, we can skip the depth resolve, and when sampling background color buffer, we can get the depth value for free.
+We had some special effect shaders, but for most of the objects, we used basic single-layer PBR materials.
+The number of lights is also really small.
+We have max two blended IVLs, one directional, and 16 point and 16 spotlights.
+All of these lights are evaluated in every material with no tile or cluster cutting because it's much faster for this number of lights.
+So we kept the pipeline simple as much as possible for the GPU performance.
+As another GPU optimization, we implemented dynamic resolution system.
+We measured the GPU time of the previous frame and decide the resolution of the current frame.
+The good thing is dynamic resolution can handle emergency cases.
+For example, diving into fires or water, those kinds of extreme cases.
+And more importantly, it increases the resolution in most cases.
+Our resolution setting is shown in this table.
+1.0 scale is the display resolution of PSVR.
+And we have scales from 0.85 to 1.5.
+We have only four settings, but it greatly improves the image quality compared to just one setting.
+Here is how it works.
+It's simple.
+If the total GPU time of the previous frame is over 16.6 milliseconds, we immediately decrease the resolution.
+When we scale it up, it's more conservative.
+To estimate the GPU cost of the next resolution, we scale the still rendering time by the pixel count ratio.
+And if it's below 16.6 milliseconds for 30 frames, we increase that resolution.
+Some GPU jobs are not related to the resolution, such as shadows.
+So it's important to exclude those times from the estimation.
+And because the GPU time is not proportional to the pixel count, for example, it depends on whether it's vertex heavy or pixel heavy, we added a scale parameter S, and 0.85 worked well for our case.
+I played some levels and took statistics.
+On PS4, the resolution was over 1.25 scale on average.
+Before implementing dynamic resolution, we had been using 1.0 by default, so it's a big improvement.
+On PS4 Pro, 1.5 was used almost always.
+Although the quality was improved, sometimes we noticed resolution popping because we had only four settings.
+We prepared the four pipelines in advance and just switched them.
+But now, I think, fully dynamic approach, which has finer resolution granularity, for example, per two pixels, will be better as it produces smoother result.
+There is another problem in heavy scenes.
+We don't see any frame rate drops, even in heavy scenes.
+But the resolution decreases to the lowest quietly.
+It happened in many levels.
+Our QA team is very strict about frame rate, but not about resolution decrease.
+So it might be missed in the final QA process.
+Another problem is that even though the resolution is the lowest, the frame rate is keeping 60.
+So it's difficult to know how many milliseconds we should optimize to get higher resolution.
+This is an example.
+We show a performance indicator in the center of the view when the frame rate drops so everybody can see it.
+This is the zoom up.
+We show frame rate and GPU time in millisecond.
+Without the dynamic resolution system, the frame rate drops like this.
+QA team reports this issue, and also it's easy to see how many milliseconds we should cut to keep the frame rate.
+But if you turn on the dynamic resolution, there is no frame rate drops, but the resolution is too low.
+We want to get a higher resolution, but the GPU time information here is useless because it's impossible to know how many milliseconds we should cut in the next resolution because we are rendering in the lower resolution.
+So to control the quality with dynamic resolution system, we decided target resolution and emergency resolution.
+The target means we should achieve it at minimum, and the emergency resolution is only allowed in emergency cases, not everywhere.
+With this consensus, we didn't use the emergency resolutions until the very end of the production.
+We intentionally made the frame rate drops and encouraged the team to optimize the levels.
+I think this worked well.
+If we look at the graph again, you can see that the lowest resolution was really used in the product.
+It's less than 0.1%.
+Okay, the next is the CPU side optimization topic.
+Stereo rendering methods.
+We considered three methods for stereo rendering.
+The first one is to run the rendering pipeline twice.
+This is the easiest implementation, but has lots of CPU waste.
+The second one is resubmitting a command buffer.
+This saves the CPU cost to generate a command buffer, and it requires no shader modifications.
+But draw call count is still big.
+The last one is to use instance draw to double the geometry in a single pass.
+You draw the objects with double instance count and switch the render target with slice indexing vertex shaders.
+This can have the draw call count, so it's good for CPU and GPU.
+However, this requires vertex shader and some pipeline modifications.
+So, we chose resubmitting a command buffer because we also had to support non-stable rendering pipeline and we wanted to keep the code simple.
+On PS4, command buffers we build are processed directly on GPU, so resubmission has almost no CPU overhead.
+But because the command buffer is processed as it is, we need to care about synchronizations ourselves.
+For example, when we make GPU wait for rendering of the previous stage, we usually use labels allocated from a command buffer, and wait until the label is set by GPU to a certain value.
+But when the command buffer is processed a second time, labels are already filled.
+So you have to clear the labels after the first commands are finished.
+To do this, we allocated a memory block for the labels and put a memory copy command, a clear command, at the end of the commands.
+So the shared command buffer is created as follows.
+First, set up the left view constant buffer by CPU.
+View ID is also included in this buffer.
+Push scene draw calls as usual, which are for materials and post effects.
+Push output draw call that selects the render target.
+There are several ways here.
+We put two draw calls, one is for left and the other is for right, and called one by geometry shader, depending on the view ID.
+Or if render target array is available, you can just use slice index in vertex shaders.
+Finally, push memory copy commands at the end of the command buffer, which fills the view constant buffer with right eye and clears synchronization labels.
+Once you've created this command buffer, you can simply call submit twice.
+In this way, we can save much CPU time.
+Okay, now I want to move to the next topic, effects in VR.
+We implemented some effects and spent time to make it look good in VR.
+So I want to share what went well.
+I picked up three effects, water, clouds, and 3D text.
+The first effect is water.
+We have some water levels and as a gameplay, sorry, the player can go into the water.
+In VR, player's viewpoint is free, so we couldn't avoid to draw the boundary of the water and air.
+I think the unique point of our water rendering is that we seriously render the boundary rather than hiding it.
+In addition, the surface should be moving as a gameplay requirement.
+In this image, you can see two components of the water rendering.
+Water surface and a fog effect applied to the underwater area.
+I'll explain how to render each component.
+The surface is just a fine mesh, no dynamic tessellation, because pre-tessellated geometry was faster for our level size.
+We moved the vertices in Vertex Shader with three sine waves, which are tweaked by material attributes, and 16 wave sources controlled by a game code.
+The shading is not so special.
+We just calculated scattering and absorption using the distance to the background.
+But an interesting effect we added was surface tension effect.
+We bend normals at intersections to the background.
+It's exaggerated, but we felt it's realistic.
+We also bend normals at the camera intersection, which makes the boundary look nice.
+Underwater fog is just a post effect, but as shown in this figure, we needed to detect the underwater region in the screen and apply the fog only to that area.
+Actually, we used stencil buffer.
+The steps to create the stencil are first clear the stencil buffer with zero, draw the scene objects without stencil operations, and draw water area box, which covers the bottom of the water, and set the stencil value to 1.
+And next, draw the water surface with stencil operations.
+This is a bit complicated.
+When depth test passes, we set 3.
+And when depth test fails, use decrement for front face and increment for back face.
+Then, only the underwater area has stencil value one, so we apply the fog effect where the stencil is one.
+The reason why the step four is complicated is to handle any viewpoints like these figures above the water, inside the waves, and completely underwater.
+This might be hard to understand now, but if you take time to think later, you will be able to see this will work.
+Here is the final result.
+You can see that the player can dive into the water smoothly.
+The water drops on the screen are just distortion particles.
+This is another scene.
+You can see that the fog is only applied to the underwater area.
+And also you can see the boundary.
+Okay, the next effect is clouds.
+Clouds were used in many levels of the game, so the cloud rendering was important for us.
+Our clouds are close to the player, and artists want to control the shape freely, so we can't use the cloud layer approach, which was used in Horizon Zero Dawn, suited for situations where players look up at the sky.
+Also, they need to be lightweight, so we have to avoid lots of transparency.
+And of course, they need to be moving.
+So we took a mesh approach again.
+We draw the polygons, sample a 3D noise texture, and use it for the shading.
+We also used the noise for the vertex displacement.
+The noise texture is similar to the horizon method.
+R channel contains low frequency noise, and the GBA channels have higher frequency noises.
+The low frequency noise is eroded by the high frequency noises.
+The detail of how to use the noise was explained by Deshima Engine Team at SIGGRAPH 2017, so I'll skip it here.
+For shadows, because dynamic shadows on the clouds need many sample points to hide the polygon feeling, we just used baked shadows on the clouds, including cell shadows.
+So here is the shading steps.
+We take five samples along the view ray and accumulate the sun scattering.
+Precisely, at each sampling point, you also need to sample the noise in the sun direction several times to get occlusions.
+But we can't afford to sample many points.
+So instead, we just sample one point toward the sun direction from the last sampling point.
+We subtract the noise value A from B and use it as a multiplier.
+This produces detailed sound occlusions.
+And baked shadow map covers the static large scale occlusion.
+And finally, we add ambient by evaluating IBL diffuse with the surface normal and the accumulated noise value.
+This is a very rough approximation, but it can make the clouds fit the scene, and it's easy to implement.
+So I show the components by images.
+Clouds are made with fine meshes like this.
+With five samples, baked shadow map, and IBL ambient, you get this.
+Because five samples is too small, we don't get any volumetric feeling yet.
+So we move the vertices to Y direction according to the noise values.
+By adding one sample to the sun direction, you get more details like this.
+Like this.
+We wanted more details on the intersections, so we used the noise as alpha values when it's close to background.
+We reused the noise, so there is no additional sampling, but we used different frequency waves, usually higher frequency than the shading.
+Like in this code sample, with some magic numbers and a step function, we got nice details on the intersections.
+This is the in-game result.
+For this scene at a half of 1080p, it took around 1.2 milliseconds per eye on PS4.
+It looks a little bit cartoony due to the vertex displacement, but we think we've got interesting movements.
+Okay, the last effect is 3D text.
+This is just one slide, but what's worth mentioning is our texts are all made with polygons.
+Most of our texts have small extrusion, and that gives better 3D feeling than texture planes in VR.
+Another good thing is that it's resolution-free.
+We tweaked text positions many times, but we tweaked resolution setting only a few times.
+One more good thing is we didn't have to make special shaders, such as distance field shaders.
+We simply reused effect shaders.
+To generate the polygons from text, we built an automated system using TypeNode in Maya, and we finally supported 23 languages.
+This is the last topic, smooth game flow.
+This might sound like a game design topic, but I'd like to talk about techniques behind it.
+As you can imagine, unsmooth game flow in VR creates discomfort for users.
+For example, long loading time makes users tired.
+Device tracking interruption while displaying something leads to sickness.
+And if a black screen is displayed for a long time, the game loses immersion.
+So we do the opposite.
+We try to minimize the loading time, we keep the device tracking all the time, and we avoid black screens and show something that users can interact with.
+So this is our main game flow.
+We have a world select menu, a pause menu, and levels.
+When a user selects a level in the world select, the menu closes and the user moves to the level.
+And when the user clears the level, they go back to the world select.
+Users have to clear the levels one by one, and they always go back to the menu every time.
+And the pause menu can be opened any time.
+This is the spec, and it's a very simple design.
+To achieve this game design and make it smooth, we thought about memory management first.
+To minimize the loading, we load the word select and the pause menu as resident resources once we launch the game, and never unload them.
+Then, when a user selects a level, we load the level resources, everything fits in memory.
+In other words, we optimized every level to fit in memory.
+When the user cleared the level, we just unload the resources.
+We repeat this process.
+When the user moves to the next level, load the resources and unload them once the level is cleared.
+So with this strategy, because unloading is so fast, the only path that takes time is the transition from the world select to the level.
+So I will focus on how we manage this transition.
+First, I'd like to show the video of our final smooth result.
+This is the world select.
+You select a level.
+Astro comes to the controller and you can interact with an effect ball.
+Blue one.
+The loading has finished, you trigger a world revealing effect.
+And you can start the level.
+This figure explains what happened.
+The top row is what users see, and the bottom row is the loading process.
+When the user selects a level, we start an animation to close the word select.
+At the same time, we start loading meshes and animations.
+While loading those resources, we keep the rendering of the in-game controller.
+Also we show an effect ball that the user can interact with using the controller.
+So you feel you are still in the VR world, even in loading time.
+Once the loading is finished, we start loading textures.
+At this point, the user can start the level and the revealing effect creates the world.
+The point is we delay the texture loading and allow users to start levels before finishing the texture loading.
+This shortened the loading time and the time users think of as loading was less than five seconds.
+So how did we implement the delayed texture loading?
+The implementation is so easy.
+When we load meshes, we assign constant color textures.
+and we load texture files in order of distance from the player and switch the temporary texture with the actual texture once it's loaded.
+We rarely see any popping thanks to the world revealing effect.
+We also investigated other texture streaming techniques, but considering our level size and game design, I think this was the fastest way to achieve our goal.
+So to sum up, minimizing loading time, keeping device tracking, and keeping world interaction.
+These are so important, especially in VR.
+Okay, we covered these topics today.
+You might think there are no advanced technology or complicated techniques, and we always choose the easy path.
+It's partly true.
+We pay much attention to implementation cost.
+We choose easier ways if possible so that we can focus on other important things.
+I think this way of thinking is important, especially for small teams with limited amount of time.
+So I hope this talk will help you to cut implementation time and achieve great VR experiences.
+Thank you.
+I think we have almost no time for Q&A, but I will move to the wrap-up room, so if you have any questions, please come with me or just email me.
+Thank you very much.

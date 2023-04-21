@@ -1,0 +1,383 @@
+I'm Alex Silkin, I'm a co-founder and CTO at Servius, and today I'll be talking about porting your VR game to the Oculus Quest in the context of Creed.
+So the key takeaways of this talk, I'm going to talk about some common pitfalls that you'll probably fall into, like we did.
+Some recommended workflows for...
+Getting that thing squeezed onto the quest and just some examples of the tricks we had to do to get it running on the quest.
+And just a bit of an intro about the game.
+Are these videos playing?
+I'm sorry, I don't usually use Macs.
+So it's a boxing game, it's based on the Creed movie.
+It was originally launched last fall on the PC and PlayStation platforms.
+It was our third Unreal Engine game.
+PlayStation was the lead SKU for this game.
+This is because you really want to have your most constrained platform as your lead SKU.
+We learned this the hard way with Raw Data, our first Unreal Engine title that came out on the PlayStation. PlayStation VR came out while Raw Data was in early access, so we weren't really planning to initially release it on the platform, and we just learned the hard way that trying to downport an experience is just really, really tough.
+So I know this talk is Title porting a title to the quest, but I guess my first advice to you is don't do it.
+Just develop for the quest from the beginning.
+And unfortunately, we had to do this again for Creed, but that's because Docus Quest came out almost a year after Creed came out. But it was such an amazing opportunity for us because we got to ship Creed as a launch title for the quest. So we just couldn't pass it.
+But it was it was not easy.
+So Here, where the video is playing?
+OK.
+All right.
+Never mind.
+So you should really understand what you're developing for.
+So let's talk about what a Quest is, and what's special about it, what's different about it, than developing for a traditional console PC.
+So the Quest architecture is a little different than what you're probably used to.
+It has a tile-based renderer, also something called binning-based renderer.
+Essentially, PC and PSVR use immediate mode rendering.
+The entire screen is rendered together.
+But these mobile GPUs, what they do is they divide up the screen into tiles.
+The tiles are much smaller than what's demonstrated here on the screen.
+This is just for demonstrated purposes.
+And your draw calls are submitted as normal.
+You're not submitting them on a per-tile basis.
+You're still submitting them normally for the entire screen, but when the GPU goes through and divides up the tiles, this is called the binning process, it takes all the triangles, it sorts them, and it figures out which tiles are which.
+which tiles the triangles belong to. And then the GPU processes these tiles sequentially.
+So unlike the once again traditional graphics cards that you're probably used to, there's no VRAM, there's no dedicated RAM that the graphics card uses.
+It's actually a shared memory between CPU and GPU.
+This does mean that the GPU does not require as much memory because it's going through these small tiles, so it's much more efficient, so it's great for battery life, etc.
+But this is an important consideration for what things are just inefficient on this platform.
+So the rough target you should aim for is 300,000 verts for your entire scene, characters, etc.
+Creed shipped with around 200,000.
+You should aim for around 100 to 150 draw calls.
+Creed shipped with around 70.
+We were pretty aggressive with our environment optimization, merging a lot of things down to get those draw calls down.
+And something that you can't really change is I'm going to go ahead and run this.
+So, this is a demo.
+This is a demo of how Oculus Quest renders at 72 frames per second.
+That's the refresh rate of the screen.
+That is roughly equal to 13.8 milliseconds for a frame.
+This is how much, this is the time you have for your GPU and your CPU, all the threads to do all the work for the frame and submit it to the system to render.
+And this is non-negotiable and you have to understand because the system is, you know, it's like vertically...
+But as with VSync, you're really locked to this refresh rate.
+So if you miss, I like to call it like a train, if you miss this train, you have to wait for the next train.
+So you have to wait at the train station, waiting for the next train to arrive.
+So even if your frame took like 14 milliseconds, 15 milliseconds, you have to wait for the next time refresh rate.
+So essentially, if you keep missing that budget by even a little bit, now you're, essentially each one of your frames is actually taking like 27 milliseconds, so you're just halving your frame rate.
+So you're essentially now your game is only running at 36 FPS, which is pretty vomit-inducing in VR.
+So you have to be really careful and strict about these budgets.
+So the tools in the debug environment, you have OVR metrics tool.
+That's pretty useful for a heads-up display that gives you some stats, particularly FPS.
+So if you're running a shipping build, you don't have a lot of your tools available.
+This is a nice handy way to just get some data when you're validating one of those final shipping builds.
+RenderDoc is really vital.
+It will really let you inspect what is happening in your scene.
+So if you're using Unreal, using a material editor, like a graphical editor, for your materials, it's a graphical tool, you connect some nodes together, and then that outputs some shader code.
+Well...
+You don't really know what it's outputting unless you really look at it, and sometimes the results can surprise you and they can be less than efficient.
+And you can also look at your draw call costs.
+So you have to be really mindful of the fact that unlike the normal, you know, traditional architectures, your draw calls are impacted by this GPU binning process because your draw calls don't immediately go and render.
+They have to go through this binning process, which means all your draw call costs are a little...
+grow a little bit, but you do get a relative cost to your draw calls to understand what's expensive, because not all draw calls are equal.
+You have a budget of $100, $150, but some draw calls are more expensive than other draw calls.
+So it's just a rough target.
+Snapdragon is good for just seeing how your threads are lined up, so you can see if you have scheduling issues, if you're stalling on things.
+Then you have Android Studio.
+So.
+We really, even with PlayStation, we really advocate trying to develop as much as possible on the PC.
+The iteration time is so much faster.
+You just click play and you're there.
+You know, with a Quest, you have to deploy to the target platform.
+It's a long process.
+But every once in a while, you do have to debug on the target platform.
+So most of the time you're running gameplay code.
+If there's a bug in your gameplay code, it's not really platform specific.
+But every once in a while, there's something that shows up.
+So we advocate you to use Android Studio over Visual Studio, because with Visual Studio, we saw that sometimes even stepping a line of code could take like 20 seconds.
+It was just way slower.
+And on the topic of using PC to iterate, so I'm sorry if everything is kind of unreal.
+context because we're Unreal developers.
+Some of these things are still applicable to other engines.
+But with Unreal, you can basically launch the engine with these console parameters that essentially emulate the hardware rendering capabilities of the Quest, or at least the rendering hardware interface, so that you get a more accurate representation of how the scene will look on your PC.
+Of course, it's not as good, once again, as testing on a target platform, but really try to use as many...
+So, we got the thing to compile and deploy the device and very disappointingly the things just crashed on startup.
+So that's not fun, right?
+So what's going on with us?
+So we're running out of memory.
+So most likely, it's going to happen to you too.
+If you're developing for a much more powerful platform with a lot of memory, you're most likely going to start running out of memory as your first kind of.
+I'm going to show you how to do that.
+So, Quest only has 2.75 gigabytes of RAM for your application.
+That's pretty small in comparison to, like, desktops that have 16 gigabytes of RAM nowadays, easily.
+So, in Unreal, you can use a console command, memory port full.
+That would just give you a nice memory port of everything that's loaded in your scene.
+All the textures, et cetera.
+Static meshes, assets.
+You know, game game objects, actor instances, and for us textures were easily the thing that was blowing us way past the budget.
+So as a quick hack, we just like globally clamped all the textures to really small size just to let us launch.
+The game on the device just to start playing around with it.
+I mean, you can just clamp it to like 32 by 32.
+Everything will look like Doom from the 90s, but at least a launch.
+And definitely use ASDC compression.
+So this will shrink your texture sizes, which is great, obviously, for once again, managing the RAM applications.
+But it's also great for perf, because now the GPU doesn't have to.
+load the textures in the GPU.
+So smaller textures will mean the GPU can do its work faster.
+So after we got our mem report, we found that a lot of our assets were loaded that we didn't need to.
+This was the result of us being kind of sloppy because we could get away with it on PlayStation VR and we weren't… So, we're not quite hitting that memory limit.
+So, in Unreal, there's a console command that essentially allows you to get the reference paths to any asset.
+So, we essentially did a dive through, found textures that were questionable, like why is this UI texture loaded in the middle of the game that's normally from the main menu, things of that nature.
+So, for us, this has actually been still, I mean, to this day, often a...
+I should mention that the UMG is the usual culprit of a lot of stuff being loaded that shouldn't be loaded.
+A lot of different UMG widgets.
+UMG is the framework for UI in Unreal.
+Just referencing a bunch of things that it shouldn't reference.
+Referencing characters from different game modes, etc.
+And UI textures also do not stream.
+So that's an additional kind of gotcha in Unreal.
+So that really increases the problem.
+And then we had a lot of unnecessary hard references to assets.
+So for example, we'll have a data table for a system that refers to, say, character assets or audio for some system for every single map or for every single character.
+Well, in Creed, you're only ever in one ring, and you're only ever fighting one character.
+So instead of having those be as hard references, there should really be soft references, so dynamically loading them.
+And somewhat Unreal specific, but just in general, you should try to avoid blueprint dependencies.
+Blueprints are, you know, the essentially the archetypes, templates of an actor that is spawned or like a prefab if you use Unity.
+So sometimes people don't realize that casting a blueprint class to another class is a hard reference because you essentially need to...
+access its functions and properties etc. So it's better to use an interface potentially to break that up if you want to make a blueprint interface or just move the reference function or variable to C++ so you can just cast to a C++ base class because accessing the C++ class doesn't require you to load the blueprint class reference. So anyway so let's move on to optimization time so allegedly this is where the fun begins.
+Um so Let's find the bottleneck.
+You know, with optimization, you should really do it in a data-driven manner.
+Figure out what's actually costing you, you know, wasting your cycles and target that.
+And this is kind of potentially not a very scientific approach of trial and error.
+So in Unreal, there's a stat unit command.
+It's pretty standard to like get a...
+You can see the frame timing and see how much your threads are taking.
+But it's a little useless because, you know, as I mentioned, you're basically locked to 72 frames per second.
+So your frame time is always going to be like 14 milliseconds or whatever.
+and then your game thread is potentially going to be waiting on the draw thread to catch up.
+So really you want to be trying to isolate what it is that's causing you to go over the budget.
+So the trial and error here is if you think it's the CPU thread, just pause and unpause the game.
+That would just pause all your gameplay logic.
+And if your frame rate suddenly stabilizes, then you know that's your bottleneck.
+If you think it's your fill rate, so fill rate being the cost of shading every single pixel, we'll just decrease the screen resolution to like 10%.
+And if suddenly your frame rate stabilizes, then you know that's your bottleneck.
+Shaders in Unreal is a show materials console command, which essentially just turns off all the shaders.
+Everything is just shaded with like a standard gray shader.
+And draw calls, there's constant commands to toggle specific objects, like show static meshes, show skeleton meshes.
+Once again, if you just hide all your static meshes and your frame rate stabilizes, you know that's the thing that's bringing you over your budget.
+So once you kind of start isolating your general bottleneck, that's when you want to start drilling into the stats.
+So Unreal has a pretty complex stat system, essentially, and you type in stat space and the stat group name.
+So stat RHI, stat scene rendering, those are some good examples of stats that give you an idea of what's going on.
+StatRHI, for example, will tell you how many draw calls you're doing, like how much memory you have loaded for your GPU.
+StatSceneRendering lets you further drill into what your render thread is doing.
+So you might see that shadow or culling is taking a really long time.
+So one thing you have to keep in mind is that this stat system is really complex in Unreal, which means it also It really affects perf. It distorts the numbers it reports.
+I don't remember the numbers on the Quest, but just on PlayStation, just turning on any one of these stats just suddenly adds 2 milliseconds to your CPU.
+which can easily just kick you over your budget.
+So now all of a sudden you're waiting for an extra frame, your stats get distorted.
+So that's kind of useless.
+And on the other hand, kind of hilariously, the stat rendering is using this really antiquated UI rendering system called Canvas.
+So most of Unreal now uses Slate.
+And those, like each character is like adding like a draw call or something.
+So then once again, you use this system and it's just distorting your numbers.
+So as a kind of quick work around, of course, it's better to use RenderDoc if you really want to have a deep dive through. But it's convenient to be able to just have a glance at your stats so you can have QA running through all your maps and kind of record any bottlenecks, any hot areas. We created a lightweight slate widget that has some stats that we decided that are kind of useful that we show there.
+It's rendered using Slate, so it doesn't impact performance.
+And it's composed on the screen using this debug draw service.
+It shows the average and max values.
+So that's useful because I caught our world tick time.
+The average was good, but the tick time was like 10 milliseconds higher.
+And I realized just from there, then I did a profile.
+And I realized every like 幾 milliseconds. We had something taking 10 milliseconds. So we had these spikes causing irregular framerate. And we have Iionized defining the budget for text color coding, so green is good. Yellow is probably a danger zone. Red is definitely bad. That's convenient as well because we define different budgets for different platforms if you have different frame rate or etc.
+And so there's some existing cached engine values that are already there.
+So we can already read them ourselves.
+We also modified the engine for some additional values, specifically world tick time, because like I said, the game thread time that's reported by stat unit is kind of useless because that's affected by waiting on the rendering thread, etc.
+Most of the time we're really interested in what your world tick time is, which is where all your gameplay logic is.
+That's the thing you're going to be optimizing most of the time.
+So CPU in Unreal, it's pretty standard.
+We stat star files, stat star files.
+It's a constant command.
+Use session front end.
+So starting in 4.23, Unreal Insights is coming.
+It's a whole new profiler.
+It's way more powerful.
+It also does profiling for memory loading, et cetera.
+So that's going to make your life way easier.
+It's really standard across, really, PlayStation, et cetera.
+What we found is moving components is usually one of the most expensive things, especially if you have these really deep attachment hierarchies.
+Um, so the simplest is just detach your hidden and disabled scene components like audio components, effects components, especially if you have like designers working with you.
+Sometimes they can be pretty sloppy and they attach all these things that aren't even being used right now and it's just costing you cycles.
+I know it sounds kind of mundane, but honestly, when you're in a really constrained platform, you really can't get away with just being sloppy like that.
+Um.
+All right, that's a typo. I don't know what it says. Overlays. That's supposed to say overlaps. My bad.
+So overlaps, so it's when you detect that one trigger box is within another trigger box. So those are really expensive in Unreal. Every time you move a component, then they update the overlaps. On top of that, it's kind of sloppy the way they wrote them is...
+Even if you don't have a single component in the attachment chain that updates an overlap, it will still go through this entire update overlap chain down the children.
+So once again, if you have a long attachment chain, it will go through that.
+So as an optimization, we just kind of deleted that because we didn't want to use them.
+And that saved us a lot of cycles since we weren't even using overlaps.
+Back in starting in raw data, we wrote our own async overlap system that updates overlaps on a worker thread.
+And that doesn't block your thread every time you move an object.
+Obviously it's deferred, but we use events for when overlaps happen anyway.
+So that's been a huge kind of optimization for us.
+I know it's easy to say, hey, my hand is close to this bottle.
+I'm just going to stick one trigger box in the hand, one trigger box in the bottle.
+You can't be sloppy like that on these platforms, especially once you start having thousands of bottles and two hands and touching everything.
+So ticking, once again, very simple.
+Just disable tick when not needed.
+So often, designers just have components, and actors just tick when they're not even they just have a flag to disable certain behavior, but they're still ticking.
+So tick interval is another thing.
+Often if the things are not significant, they don't even need to tick every frame.
+Once something you have to watch out for is in Unreal at least the tick interval, you can, they added tick intervals.
+So you can say like, okay, this tick ticks like once every like 0.1 seconds or something, but there's no control over which frame you tick.
+So now if you have a frame rate hike or whatever.
+Now all of a sudden things just get pushed into one frame.
+So you have like one frame where a bunch of things tick, the next frame nothing ticks.
+So you really want to load balance.
+So we've modified the engine once again to really help us load balance and tick things in one frame versus the other frame.
+I mean, the easiest is just to say, OK, half the enemy's ticking this frame, half the enemy's ticking the other frame.
+Now all of a sudden, technically, you just did a 50% optimization.
+Good job.
+So Blueprint logic, it's really slow.
+Try not to have any Blueprint logic in Tick.
+Try to nativize as much as possible.
+Throw in C++ if you can.
+Active pooling, just spawning things.
+Dynamically is pretty damn expensive.
+So we developed our own active polling system, which automatically disables like physics collision and a bunch of other things.
+So we don't have to do it manually every time.
+If you're using UMG UI, you can't get away without using a validation boxes.
+So let's move on to the draw calls.
+Make sure to use multi-view.
+So multi-view allows you to do one draw call per eye.
+Makes no sense not to use it unless you really want to double your draw calls for some reason.
+Try to merge your geometry as much as possible.
+You can do it in Maya or Unreal has a merge actor's feature.
+We actually modified Unreal to make an unmerge actor's feature that we serialized like the previous state.
+It's great for iteration, but make sure when you merge things, you actually minimize the material count, because even if you merge a whole bunch of...
+Actors together, but they're all using different materials still.
+That's still each individual draw call per material.
+So now you actually just made things worse, to be honest.
+Because now things don't call.
+So minimize your material count.
+Instance as much as you can, if you instant static meshes, then it's just one draw call.
+That's even better.
+And like I said, not all draw calls are equal.
+Some draw calls are more expensive.
+Switching materials is expensive.
+Switching meshes is even more expensive.
+And actually, the complexity of the mesh actually affects the draw call cost.
+This is a capture of RenderDoc, part of the scene in Creed.
+This is actually a stadium piece.
+You can see how we merged this one stadium piece all the way from the floor to the ceiling.
+We divided the stadium between five to seven pieces, and we used three shared texture atlases.
+In this one capture, you can see the only two textures that attach to this draw call is essentially the diffuse map and the shadow map.
+And so we used three texture atlases across the entire stadium.
+So.
+Moving on to GPU, disable early Z-pass.
+That's an optimization in Unreal.
+So early Z-pass is actually redundant in the tile-based renderer.
+So the binning process actually pre-sorts all the triangles so that it avoids overdraw by only rendering the triangle that's closest to the screen.
+So the Z-pass in Unreal actually counteracts that.
+Also, don't use alpha test.
+So if you have like a.
+texture that tells the pixel like this is transparent or not, actually don't use that.
+I know that's like a common optimization, but that actually counteracts once again this early sorting that happens on the hardware level in the GPU, because the GPU already pre-sorts all the triangles. So this actually forces it to invalidate that whole calculation.
+So get rid of specular.
+Specular added about 100 instructions for us per pixel.
+I know that's like an entire hard pill to swallow because things are usually shiny in the world.
+But for us, like the environment took up most of the screen and just removing that, Specular just gave us two milliseconds back on the GPU.
+So that was pretty massive gains.
+We still kept it on the characters because you're boxing, the characters are sweaty.
+We wanted to simulate that shininess of their sweat.
+and post-processing.
+So that's an even tougher pill to swallow because post-processing just is such an easy way to just really drastically change the appearance of the entire scene.
+The problem is it really does not play well with the architecture of the quest because with post-processing, essentially you have to do a whole new render pass.
+You have to take the rendered image and you have to pull it back into the...
+The process and operate on that again. So, it's just, it's really expensive. Something we're talking about in the future is just modifying our shaders for some just a global shader effects, so that you can potentially like apply apply things on a, you know, per object basis so it's not a screen space effect, but simulate those things.
+And also, stay away from dynamic lights.
+Fake as much as you can.
+It's kind of obvious, I guess.
+But we actually faked lighting on a per shader, per object basis where we needed.
+So speaking of faking post-processing and dynamic lights, so I don't know.
+Is that video playing?
+It's not?
+Sorry.
+Okay, so probably should have tested this but essentially it's a ring, there's spotlights floating around, and the spotlights hit the ring and you can actually see a circle. So for the bloom around the spotlights instead of using post processing bloom, just attach a sprite.
+And for the actual circle on the ground, what we did is we actually projected, instead of using the dynamic light to calculate how the spotlight affects it, we just projected a circle of patterns on the floor there, and that's way cheaper, only added about 20 instructions, but we didn't want to add, the thing is, That's 20 instructions for every single pixel.
+We didn't want that active during the actual fight because the spotlights were only floating around the flight during this intro sequence.
+And during the fight, we would have particle systems and all these other things spawning and using up more draw calls.
+We put in a global if statement to disable that.
+One thing you have to watch out for if you're using Unreal is if statements in the material graph still actually evaluate both conditions.
+And then they choose which one.
+So this is something we picked up in RenderDoc.
+So instead, we wrote this just in the USF file where we wrote the actual shader code with the if statement in there.
+And we called that using a custom node.
+In Unreal, you can use a custom node to call into any shader code by name.
+So, I mentioned texture atlases.
+Make sure to combine all your textures as much as possible.
+Like I said, switching between textures is a pretty expensive draw call operation, so you want to batch things as much as possible.
+So, we used about two, three for each environment.
+Make sure you use ASTC compression.
+You can use RenderDoc to confirm that, or Memoryport to confirm that your textures were actually Successfully converted to STC.
+Sometimes textures fail because of some weird things that the artist did.
+Similarly, actually, speaking about texture dimensions, make sure they're Power of 2.
+Just make sure the textures are clean.
+Because if they're not Power of 2, then they won't mipmap properly, and they're not going to stream properly.
+And mipmapping is great for caching, too, because then it's not going to use the highest res texture when it doesn't need to when it's far away.
+And on the topic of dependent versus independent texture reads, so dependent here refers to you using one texture's, you're looking up in one texture and using that result to actually look into another texture.
+So we found that the cost here was actually about the same.
+So if you can then potentially bake some expensive calculation you're doing at GPU at runtime, just bake that into a texture and use that to look up into another texture.
+MSAA, it's actually cheaper on tile-based renders.
+So, and honestly, in VR, you really should be using that.
+We ship with 4x MSAA.
+Shader hitches was another issue we had.
+Basically, any time a particle spawned for the first time in the game, you'd get a hitch.
+So, in Unreal, there's a console command, r.saveshadercache, which basically, we had to run through the entire game, make it as thoroughly as possible, use this console command, output a binary file with all the shader permutations, and then you can package with that.
+In 4.21, they have this PSO caching feature, which I hear is making that easier.
+We had to ship in 4.20.
+Fixed foveated rendering, if you don't know what that is, is essentially rendering the screen at different resolutions depending on if it's the center of the image or it's the edges of the image, since if it's in your peripheral, it doesn't need to be as high res.
+So you can actually control the resolutions of those regions.
+I mean, worst case scenario, you might even have to down res even the center image if you're really fill rate bound.
+And try to avoid long thin triangles because those can really not play nice with the whole binning process because then the the bounding box I'm still not you know reading online I'm still confused whether they have dealt with this or not But essentially as far as I understand the bounding box can make the long thin strips fall into multiple Tiles where they're not even really contributing any pixels and it you're just making all those tiles more expensive I'm going to talk about the fact that it's shared bandwidth.
+So that does mean that if you're doing some expensive stuff on the CPU with the memory, it can actually affect the GPU and vice versa, which once again is useful to be able to toggle one of the processes on and off to figure out which one's actually causing the bottlenecks.
+Some memory stomp tracking.
+Essentially, if you have somewhere writing or reading into memory that it doesn't actually own some de-allocated memory blocks, Unreal has a Memory Stomp allocator that you can compile with.
+But we found out that it caused the game to crash relatively fast because it really pads all the memory.
+So, like I said, ideally you test on the PC, but we had this case where our game was crashing like five times a day, randomly in like random regions.
+So we knew it was a memory stomp and it was only happening on the Creed, on the quest build.
+So it was a pretty kind of...
+So we found out that you can use essentially the built-in Android memory stomp allocator here.
+And we caught this stomp happening deep inside of the OVR compositor, specifically related to the splash page.
+So essentially in their load screen pop push functionality, they were accidentally writing over some memory that they didn't own.
+So we helped them fix that crash in their system.
+And yeah, so other general tips, they, you know, just like PlayStation VR, there's some TRCs related to how fast, you know, the game loads, how long you spend before you show the load screen.
+So what we've been doing basically for our titles is we usually load into an empty room first.
+And then, because if you have, if you're trying to load into your regular map first, it will try to load that and you just won't, will not be able to push the load screen fast enough, the game will just be stalling. But even there, there's often issues with just global assets being referenced, like global managers referencing some assets with hard references where they're not needed, etc. So.
+You're going to need to break those reference chains if you want to have a quick load time.
+Audio, the Unreal, the audio, the default Android audio does not actually spatialize audio.
+At least it didn't when we shipped.
+And so you can use Android, audio mixer Android or other third-party plugins for spatialization.
+It actually messed up all our mixing and we had to ship.
+So unfortunately we shipped without spatialization because it was either the audio team was going to somehow...
+I don't know, try to redo all our audio for the entire game, why not chip?
+So yeah.
+So that's about it from all the tips.
+Does anyone have any questions?
+Sorry, that was pretty, I don't know if you guys were ready for such a technical deep dive or whatever.
+I don't know.
+Hopefully that was useful to people who are thinking about targeting the Quest.
+Hey, that was really interesting and useful because I am in the same boat of thinking about porting.
+But I have a more general question on, like, once you've done it and you've got it working on the Quest, but you primarily develop on PC, like, how do you keep your integration working and keep, you know, because it's such a pain, like, trying to test it again and again and again.
+I'm just curious, how do you manage that, making sure your developers continue to keep it working once you've done the original port?
+Yeah, well, so what, that's why I don't like the word port, it's more parallel development, right? So you choose your your you choose your targets queue. And you, you have, ideally, qA that hammer on this build. Every day, you have continuous integration. So Jenkins or something that basically outputs these builds on a daily or hourly basis, and then daily basis, depending on, you know, if it's a full package, whatever. And You have QA actually testing these things on a regular basis so that they can catch issues really as fast as possible.
+So it's definitely a lot of process.
+And I'm not saying it's perfect.
+It's a constant battle of you getting in fights with other people because they break things.
+So yeah.
+Hi.
+Thank you.
+First off, are your slides going to be available?
+Do you know?
+Yeah, I can upload them.
+Yeah.
+And when you were mentioning some console commands, except for the few that were ADB, was that the Unreal console you were talking about?
+Yeah, it's all in the Unreal.
+All right, thank you.
+Hi, I was wondering for people starting to develop a new experience, would you recommend that they start by developing it on Rift and then port to Quest, or start on Quest and then add more stuff to take advantage of the higher performance on Rift?
+Well, you would always be kind of developing alongside because all your testing is probably, most of your iteration is going to be on PC. But if you're going to try to launch into Quest, Like a said avoid porting, try to launch that thing on the quest as soon as possible so you can at least periodically see that when you add things you didn't just blow yourself way past the budget because now you added twenty things and they're all past the budget and you have to determine what needs to be cut and what doesn't so it's always easier to add things than remove things Yeah removing things is killing your babies adding things is making more babies I guess That's interesting. I hear a lot of people say the opposite, actually.
+What do you mean?
+Just focus on developing the experience first without worrying about performance and then kind of do that after the fact.
+It's I guess it.
+I don't know. Question of philosophy.
+All right. Thank you. Yeah.
+Hi there. Thanks. That was really interesting.
+Can you tell us anything at all or comment at all about the submission process and how quickly they're turning approvals and communication at all?
+I.
+I don't know if I can really give an accurate estimation of that because A, I'm on the software side really so I'm not part of the schmoozing process.

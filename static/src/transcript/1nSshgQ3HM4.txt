@@ -1,0 +1,672 @@
+Thanks, Tim.
+All right.
+Well, thanks everyone for coming.
+I originally wanted a much longer title for our talk, but Mike nixed it, so I can see why.
+Okay, introductions, quick introductions.
+So I'm Jeff Harawar, I'm senior software engineer at EA Vancouver, currently lead gameplay engineer on UFC.
+I've been working in the industry since 2000, so I've been working at EA for 16 years, which, along with my increasingly thinning hair, makes me feel very, very old.
+And I'm Jerry Matheson, lead gameplay animator at EA Sports and the UFC 2 title.
+Been in the industry since like 1999.
+Started at Mainframe Entertainment making kids cartoons and now I'm here making video games.
+All right.
+So here's an outline of what we're going to be talking about today.
+So I'm going to go first, and I'll be talking about all the technical engineering stuff.
+I'll give you an overview of our dynamic grappling system, kind of the design change that we went through from UFC 1 to UFC 2, and talk about how that influenced our animation requirements.
+I'm going to do a bit of a technical deep dive on the relative IK system.
+I talked about that a little bit last year.
+Looking back at my talk, I don't think I explained it very well, and there's a lot more depth I could have gone into, so I'm going to dive into that because it's kind of a fundamental building block to the procedural system we put together this year.
+And then I'll go over what we called procedural mocap.
+It's a term that Jeremy coined after seeing how this stuff worked, how we solved our grappling problems for this year.
+And I'm going to talk about essentially how one gameplay animator can create that much content for a feature.
+I'm going to start with UFC 1, you can see doing it the old way, how much content we created, and then on UFC 2, how we improved on that.
+And a big key part of that is just procedural techniques that kind of aided us in a big way on that.
+And then I'll come to a conclusion where we've arrived.
+So this is a big exciting week for us. Our game launches tomorrow.
+So if you're not familiar with our game or the UFC, here's a hype trailer to get you all excited for the talk.
+Wow!
+Holly Holm!
+Ronda Rousey!
+All right. There we go. Game looks fun. Yay. Thanks. Okay. So one of the big back of the box features for this year's game is something that we called dynamic grappling. So to understand what that system is, I'll take you back to UFC 1 and talk about the grappling system there. So it's pretty straightforward kind of stuff. So when you take the guy to the ground, you start off in some kind of idle depending on what position you're in.
+The top fighter has a bunch of things he can do.
+The bottom fighter has a bunch of things he can do.
+Let's simplify it a little bit and say the top guy can go left or right, and the bottom guy can go left or right.
+So if the top guy presses to the left, he'll play an animation of him doing something to the left.
+That could be a submission, a transition attempt.
+In this case, he's trying to pass the bottom guy's guard by pressing down on the knee.
+So you've got a start animation to initiate the action.
+You've got an idle pose where the game kind of figures out the transition logic.
+And then you have a cancel animation to bring you back from where you came from, and a finish animation that executes the technique and takes you to where you're going.
+Similarly, the guy on the bottom presses to the right, he'll play some move in that direction.
+Similar thing, a submission, transition, something like that.
+So what happens if the top guy presses to the left and the bottom guy presses to the left at the exact same time?
+So in UFC 1, the top guy pressed to the left, he would play his transition animation.
+But if the bottom guy also pressed to the right and the game registered the input just one frame later, he would get absolutely nothing.
+No response from the game that he had done anything.
+He'd be locked out of any transitions.
+The only thing he could do is recognize that the top fighter had started a transition and play a denial animation, which just prevents him from doing his action.
+So this wasn't very good for users.
+They felt frustrated.
+Oftentimes, they'd be pressing on the stick and get no response.
+They thought the game was broken.
+It's unresponsive.
+I don't understand how to play.
+Just generally a bad, bad experience for people.
+So in an ideal world, we want something like this, where top guy presses to the left, and he gets an action.
+Bottom guy presses to the right, he also gets an action.
+So the two players could act independent of each other, playing an animation that corresponded to what they were trying to do, no matter what the other guy was trying to do.
+Increase responsiveness, increase that sense of engagement with the game.
+So let's get a sense of what kind of numbers we're looking at in order to support a feature like that.
+So just in full guard, this position here, let's say the top guy has eight possible transitions.
+He could do eight transition submissions, whatever.
+So left, right, up, down, and then holding a modifier, left, right, up, down.
+And the bottom guy also has eight transitions, say, for example.
+Similar deal.
+This would represent all the different idle states that the players could get into in full guard.
+It's not 100% accurate.
+This is kind of the back of the napkin kind of calculations we were doing at the beginning to see what we were up against to try and implement this.
+So you're looking at 8 times 8, 64 different states.
+That'd be like top guy's going to the right, bottom guy's going to the left, top guy's going to the right, bottom guy's going down.
+All those permutations, right?
+So in order to figure out what kind of animations we need, we need four different animations for each one of those states.
+We need something that takes you to that state, an idle animation once you're in that state, a cancel that brings you back to the state you came from, and then a success animation that takes you to wherever you're going from each of those states.
+So we multiply by four.
+And then the game has 15 different ground positions.
+So assuming every ground position has the same level of complexity as guard, which they don't, but some are close, some are bigger, some are smaller, we've got to multiply that number by 15.
+So we've got a really big number here.
+To put that into context, this little piece that I cut out at the bottom, that's the number of animations that we built for the entire ground game in UFC 1, and the big picture is what we would need to build in order to support this system for UFC 2.
+with the same budget, the same timeline, same number of animators, that kind of stuff.
+So on the face of it, it looks absolutely impossible unless we can come up with some kind of procedural system or something, just some way to optimize this so that we can get like a tenfold increase in content creation.
+Not trivial at all.
+So before I dive into how we did that, I want to talk about RelativeIK.
+So RelativeIK existed in EA MMA like four years ago.
+It existed in EA UFC.
+It's used by a bunch of different games in EA Sports.
+It's a system primarily designed for playing two-player animations on characters of different scales.
+That was kind of its first purpose, and it's taken on a different meaning this year for us.
+I talked about it a little bit last year, but I'm going to dive into some details.
+Same rules apply. I'm not allowed to show any of the editors in our tool, but I kind of mocked them up a little bit in PowerPoint to give you an idea of how it works.
+So, yeah, two-player animations. Let's take a look at a concrete example here.
+So in this one, the bottom fighter is reaching up and grabbing the top fighter's head, and then canceling back into the idle.
+So...
+What does that look like if we make the bottom fighter's arm comically large?
+Obviously the contact points don't line up.
+The animation completely breaks.
+So, with the relative IK system, what we do is we offer a constraint between the left hand of the bottom fighter and the head of the top fighter.
+And we bake out the position of the hand relative to the head into a new channel in the rig for every frame of that animation.
+This is not how it works under the hood, but conceptually think of it as a bone that's parented to the head of the top fighter in the top fighter's rig that's just constrained to the hand, say, in MotionBuilder, and then baked out with that global position.
+Now, you might be thinking, how are you going to generalize that?
+There's, like, the hand could be relative to the head, to the arm, any number of joints on the other character's skeleton, and vice versa.
+Are you going to put that many joints in the skeleton?
+One of our really clever engineers, Dominic Parker, figured out a way of encoding that information in the rig so that we could do it with a limited number of slots, and it would blend across animations.
+That's kind of the secret sauce of this solution.
+But if you have like a limited number of joints you want to make relative to each other, the bone approach is pretty much exactly what we're doing here.
+So we bake out the path of the hand relative to the head all throughout the animation, and the animators can author a curve that defines how tightly the hand is following that constraint.
+So it can become relative to the head, it can kind of ramp in as it starts approaching the head, be at 100% when he's holding the head, and then ramp back down to zero as he lets go.
+So when we play back this long-armed character on the same animation, we now have a target point for the hand relative to the other guy's head.
+We just snap it to there using IK, and away we go.
+So this is what that simple example looks like once you turn on the relative IK system.
+Pretty decent results.
+So, that works well for when the arm gets really long, and you need to figure out where to put it.
+What happens if the top fighter's head gets really, really big?
+That same approach doesn't work.
+So what we did, this is new for UFC 2.
+In the talk last year, I was saying that we wanted to move our IK system into the physics system, because we're having a lot of fighting between the IK and physics.
+One would be pulling in one direction, I could be pulling in the other, and you'd never really resolve anything.
+We accomplished that, and it gave us some new tools to use when trying to calculate these constraints.
+So what we do now is we cast a ray from the head to the hand.
+and figure out where that ray intersects with the collision volumes.
+And then we use those collision points on the surface of the mesh to define the relative constraints.
+So now, as the head gets bigger, the relative contact point moves out depending on the arbitrary size and shape of the collision geometry that's underneath.
+So, let's look at that in action.
+If I grow the top guy's head...
+and grow the bottom guy's arm, you'll see the results that you'd expect.
+The animation plays back.
+So that's a simple example, but in our game, we've got animations like this, where the characters are all tangled up like spaghetti.
+So someone has to go in and author all those constraints.
+Now, that was a huge time-consuming process in UFC 1.
+One of our engineers, John Tu, wrote an offline batch process to go through and analyze all the motion, figure out which joints were in close proximity to others and where they settled, and came up with a first pass of all the constraint authoring on these.
+And then sometimes they would work, sometimes they wouldn't.
+Animators would have to go through and...
+Tweak them in some cases just a little bit, in other cases a lot.
+But we were able to speed up the process by automating that stuff, and every single animation in the game has a set of these constraints built into it.
+That's kind of the base set of building blocks that I had to work with when putting together this procedural solution.
+Now, I've talked about using this for skill compensation, but it can also be used for other techniques.
+One that we use often in UFC 1 is animating against a static punching dummy.
+So you have a guy on top of another guy, and the bottom guy's animation is perfectly still.
+There's nothing animating there.
+And the other guy would just punch at his head, grab his arm, or whatever.
+And then you could play that animation against any animation for the bottom guy, and it would just track and move appropriately.
+So it was a good way of kind of reusing animations in two-player context.
+And that type of technique is where we're going to go to with this dynamic grappling system.
+It also worked on the feet.
+Now, I need a short volunteer.
+Tim, do you mind coming up here?
+We were doing a rehearsal last night, and I know something in the video that's coming up that I didn't really explain, so I don't have any slides for this.
+And Tim was begging for us to do some sort of physical comedy, because we did it last year.
+So I'm going to use Tim as my, get closer, come on.
+We've got to get in camera.
+All right, so in the next video that I show you, keep an eye out for this pose here.
+So this is the Muay Thai clinch.
+Now, obviously, I can do it to Tim, no problem, right?
+Now, try and do it to me.
+He's got to reach way up.
+Not easy to do, right?
+So we added a system where we could set constraints between arbitrary joints, same as in relative IK, but only on one axis.
+So you could define what axis it applies to.
+So if we're in the same pose here, I can apply a constraint between our hips and IK my hips to his hips, but only in the y-axis.
+So I can drop down like this.
+And now similarly, if Tim's trying to do it to me.
+I can drop my hips down and now he can do every move that he wants, I can do every move that I want against him.
+Now, obviously if Tim's doing it to me, he can't IK his hips up.
+Right? It's not possible.
+So what we did was we created conditional constraints where the condition could be the height difference between the fighters.
+So those are a couple cool little tricks that we used in this system.
+Thanks, Tim.
+Everyone, round of applause for Tim.
+So here's an example of this system working in game in UFC 2 with one of the most extreme height differences that we have.
+This is Stefan Struve, who's I think 7 feet tall or 6.
+7-something.
+Yeah, close to 7 against Mike Tyson.
+Not sure how tall he is, but he's pretty short.
+So you see the animations hold up pretty well.
+Here he takes his back.
+Pretty soon he'll get to that same high clinch position that I was demoing with Tim.
+Right.
+Almost.
+Next one.
+Right here. So now look at this pose, look at this animation.
+These are animated against same-scale characters.
+And then Mike Tyson's going to reverse it soon and get the Thai clinch on Stefan Struve.
+that's the exact same animation playing back. And I can't believe that this works. It holds up really, really well. I don't even think this combination was tested by QA. We saw it, like, last week. And we're like, oh, crap. And then it actually worked. So our clinch engineer, Dominic, spent a lot of time hand authoring that stuff. And then just for fun, here's another.
+Okay, I'm backing away. I'm backing away. I'm not going to let you hear me at first.
+That's an example of another extreme height difference that we weren't expecting to have to support in the game and really, really tall hair that can really mess with contact points.
+Anyway, let's go back to the problem we're trying to solve.
+Huge, complex animation tree that we need to build, and not enough time or manpower to do it.
+So let's dig into some concrete examples here.
+This is an example that inspired the technique that we used to solve this problem.
+I was looking at this animation, so the bottom guy just puts his hand on his knee.
+That's it.
+Very simple.
+And then what do I want to mix that with the top guy?
+Top guy's putting his hand on the bottom guy's knee.
+It feels to me that those should be able to play independent of each other without a whole lot of animation work, because the important things are moving independent of each other.
+You look at them side by side.
+There's not a whole lot of overlap in the important movement in both the start and the cancel.
+So in order to build this prototype, I asked Jeremy to throw together something that we called a mixed idle.
+So a mixed idle is just a regular hand-authored cycle that is what they should look like once they get to this state of one guy going to the right and the other guy going to the left.
+So this is what Jeremy put together for me.
+There's a lot of these, but it's not that exponential number in that first slide.
+This is a manageable number of animations.
+This is what I need from him in order to even start on some sort of solution.
+So this is what we need. We need, we go from the base idle to top guy going to the left, base idle, bottom guy going to the right, and then if the bottom guy is already going to the right, top guy going to the left, and vice versa.
+So the green arrows are the animations that we have from UFC 1 to work with, and the blue arrows are the animations that we need to figure out a way to produce in a very, very cheap kind of way.
+So we need to go from the idol on the left to the idol on the right.
+Let's focus on that example.
+Here's the animation of the bottom guy putting his hand on the knee.
+That seems very important.
+So let's make that the base.
+So what I'm doing here is I'm building a set of layers.
+I know that I need this animation because that's the piece that's missing.
+So I put that as the base layer.
+Now, he's not coming from the right pose or going to the right pose in this base layer.
+So I'm going to toss in the.
+from idle and the to idle into my set of layers here.
+And now I'm just going to start with the from idle, blend it out, and end with my to idle, so I'll blend that in.
+So I've got a bunch of curves that I can now manipulate, controlling the blend to and from the idle.
+And with that setup, you get this kind of result.
+So we start at the right pose.
+What we're doing, we play the animation on the right hand that we want, but the top guy's hand pops to the chest and then back to the leg.
+So if you focus just on the right hand of the bottom fighter, everything looks pretty good.
+The only problem is the top fighter kind of popping around as he blends out to the transition animation and back in again.
+So I toss in two more idles, the from idle again, the to idle again.
+I give the ability to mask in and out different parts of the body on those layers, give another set of curves to play around with.
+Surprisingly, this next iteration was enough for us to solve all the problems.
+There was enough flexibility in the setup to get everything that we needed.
+But I didn't know it at the time.
+Okay, so now we change our mask.
+I want the hand animation from the base layer, so I mask that out, that's what that little red dot means.
+I mask in everything else for the bottom fighter and the top fighter.
+Or sorry, just for the bottom fighter.
+And so I want everything from the bottom fighter except for the right arm.
+So right arm's coming from the base layer, everything else is coming from these from and to idols.
+And I just do a straight crossfade from the from and to idols for everything except the right arm.
+And then similarly for the top fighter, I just do a crossfade from the source idol to the destination idol, because he's not doing anything interesting with his body.
+So we just, there's subtle changes in the idol, but we just do a crossfade there.
+And this is the result that we get when we do that kind of layering.
+Hey, that looks good.
+I can work with that.
+This got me really excited.
+I think we've solved the problem.
+Let's try some more examples just to see what happens.
+And at this point, everything's hand-authored.
+All these curves are hand-authored.
+Here's an example where there's quite a bit more motion in the body of the bottom fighter.
+But the curve setup and the masking setup is surprisingly similar to the first one.
+So using that technique, we get a result like this.
+Doesn't look like super great, but it's passable.
+We could put this in the game.
+I could ship with this if I have to, but it could certainly look a lot better.
+So now I'm starting to get a little nervous.
+This might work, but it might not work.
+Let's see where it goes from here.
+Just as a test, I got Jeremy to take this into MotionBuilder and clean it up and see what he came up with.
+And the timing, but not spend a lot of time on it.
+Because I was like, OK, if we have to tweak some of these by hand, how much work are we looking at?
+So the one on the right is the tweaked animation that Jeremy did.
+The one on the left is the fully procedurally generated one.
+The one on the right looks better, but it didn't take a lot of time for him to put that one together.
+And the improvements.
+minimal. The timing looks better. It's not quite as lurpy. But yeah, we're still in a good spot here. Here's another example that came later in production when we realized that we could use this for strikes too. So this is something that the bottom fighter can do. He can punch the top fighter in the head while they're idling here.
+And I wanted him to be able to punch the guy in the head while the top guy was in the middle of doing something, so that you get that continuity of punching, no matter what the top guy's doing.
+So we put this animation in the same system.
+Instead of the from idle to idle setup, it was all just the idle that I want to use all the way through.
+Take the arm and a little bit of the torso and the head from the punch.
+The rest is just coming from the idle that they want to be in.
+And this is the results that we get from that.
+That looks awesome.
+That totally works.
+I can work with that as well.
+So this is starting to look up.
+There were some examples that didn't go so well.
+Anytime the guys were kind of on their feet, there was no way for me to get any kind of footwork.
+And no matter what I did with the curves, tweaked them, didn't matter.
+It basically ended up like a really crappy looking lerp where the head passes through the hips and it's very slidey and linear.
+And this we cannot ship with us.
+Absolutely impossible to ship the game with us.
+So what we ended up with in the end was a spectrum of animations.
+The masking and layers and curve setup that I showed you, that was final, that's what we ended up using.
+We were able to use the same pattern for so many transitions with that lerping all bones except for these, masking out this, but they were all kind of different masks and different layers, so what we did was we put together a process where we could identify the relative IK constraints that were the same between the source and destination idles.
+and procedurally generate these curves and masks as a first pass.
+And that worked for a large, large number of animations.
+But then there were other ones where we had to tweak some of the curves to try and get a little bit better results.
+And then there were other ones where tweaking the curves wasn't enough.
+So we built a pipeline that would bake out the resulting animation into an animation that could be edited in MotionBuilder.
+It's kind of like a one-button export straight into MotionBuilder.
+The animator could spend an hour cleaning it up.
+It would go straight back into game already hooked up.
+And finally, we had some that were just so bad that we had to use traditional mocap.
+So we had a spectrum here.
+I was aiming for fully procedural because you get all the memory savings from that.
+Obviously, a lot less work.
+But we were sitting in a place where we knew not everything was going to work that way.
+What we didn't know is how many would fall in which part of the spectrum.
+So we had the following concerns coming out of PrePro.
+Huge memory concerns, because if we have to do a tenfold increase in animations without increasing our memory budget, we just can't do this feature.
+The other one was the quality concerns.
+How many are going to be on the mocap side?
+How many are going to be on this fully procedural side?
+And are we going to be able to create enough content to support this?
+One of our brilliant engineers, Sam Rigamonte, put together an animation streaming solution for us.
+So, I'm not going to go into a ton of detail here, but...
+Because of the rigid nature of our state machine, if you're idling in state A, you have all those red lines already loaded in memory.
+If the guy presses on the stick, you can just play that animation because it's resident in memory.
+As soon as you play an animation that transitions you from A to B, we unload all the animations that come out of state A, start loading all the animations that come out of state B.
+And as long as you can load all those animations in the same amount of time that it takes you to play back the animation from A to B, you're golden.
+And he got the system working.
+So now we're sitting in a place where memory is not a concern.
+And we have a system that will scale up ridiculously big for future iterations of the game.
+So, super excited about that. Memory is no longer a concern.
+The big concern was the quality.
+We had no idea if we could get this done on time or to a quality level that was necessary to ship the game.
+So we kind of took a leap of faith here.
+There was nothing else we could do.
+We mitigated risk by focusing on workflow efficiencies and prioritizing the work just in case we ran out of time and coming up with some backup plans for some of the more fringe positions in the game.
+So that led us into production.
+Big unknowns.
+Not really sure if this is going to work, but a plan in place that kind of feels like maybe it would.
+And Jeremy will take you through production.
+Hello.
+Oh, sorry.
+Okay, so next we're gonna talk about the animation side of EA Sports UFC 2.
+And I think the best place to start is UFC 1.
+So, I wanna turn it back to UFC 1 and talk about our approach to workflow there.
+I want to talk about the early design and workflow approach.
+I want to talk about the changes we faced, and the challenges we faced, sorry, and post-mortem.
+So UFC 1, the way we faced the feature was the way that probably anybody does.
+I'd meet with Liam Miller, our lead game designer, and we'd break down that feature and see kind of what he had in mind.
+Next, I would collect any visual reference that would help solidify this feature in my mind and make sure that was the same page as everybody else.
+Ah, there we go.
+And then, what we'd do often is either use a piece of paper or use a camera.
+We'd go in and we would break down.
+the individual parts of that feature.
+This is an example of a transition on the ground.
+All our transitions, for the most part, have five parts.
+Here you see Jeff and Liam are starting in the full guard position.
+If the player were to press right on the stick, they would get a start animation, then they would enter a ready animation, and depending on their inputs, they would either get a success, a deny, or a cancel animation.
+So now, knowing that each transition has five parts and how many transitions, I can then create a shot list for Motion Capture Studio.
+On the bottom right, you'll see a pose library there.
+That particular pose library has 87 pages with several poses on each page.
+That's not even all our poses.
+That's our Bible when we go in.
+That's our visual reference to show the actors.
+and then we go in to the studio and we capture the data.
+If you look on the right-hand screen, Liam Miller is weighing down the cage, and beside him is that closed library.
+That thing's essential.
+And then, using proprietary software, I'll go back to my desk, and I will painstakingly and tediously order that data.
+It's not a fun process.
+And then for UFC 1 we would clean it up in-house.
+This is Dmitri Kuprin, one of our senior animators, cleaning up a grapple transition.
+And then we'd review and revise to a shippable quality.
+This animation is still in the revision stage, but it's in good shape. It's getting there.
+So, why do we do it this way?
+We had the time and we had the headcount. We had a headcount of one and we figured that would be enough for this feature.
+And I was worried that the complexities of mixed martial arts and jujitsu would be lost in translation using STRL development.
+The sport is very technical. Our fans are very knowledgeable and they would know if we messed up.
+Grips have to be just so.
+posing just has to be just so.
+I was wrong in this assumption.
+For UFC 2, we did use external development, and it was to a huge success.
+If you guys want to hear more specifically how we did that, Sego Tanaka and I did a presentation at XDS last July in Vancouver.
+So if you want to find out more about that.
+So working that way, we ended up with 600 two-player grapple animations for UFC 1.
+The problems we faced working this way, our name convention discipline was lacking.
+Some animators named, for example, our half-guard position, half-guard, others named it half-G, some people named it start for the start animation, others attempt.
+Neither are wrong, but they are inconsistent.
+And that made our implementation less effective when searching out these particular assets.
+Problems like that, and other problems completely different, led to overtime, led to late implementation, which led to poor testing, poor tuning.
+Did I skip something there?
+Nope.
+So, postmortem coming out of that.
+We decided right away we definitely needed a tighter name convention.
+Because of the animation number was limited, this made the ground game feel linear, limited, it was turn-based, and visual feedback was lacking.
+We ended up with a 7 out of 10 on Metacritic, we really wanted that 8 out of 10.
+We needed a bigger game.
+We needed more animations.
+and I needed to embrace external development.
+So, moving into UFC 2's production cycle, I want to talk about the prototype of the ground game, preparing for production, and then production itself.
+So, the prototype.
+Early in pre-pro, Jeff came to me.
+And he said, hey, Jer, I got something to show you.
+And I came over to his desk, and he showed me his version of the ground game very early on.
+And it looked smooth, and it looked organic, it looked real, and it was really exciting.
+I said, how'd you get this?
+And he said, well, I have this nifty new grapple controller tool.
+And he said, I just want to show you which kind of data it's coming out of this tool.
+So he had me mock up a mixed idle, which I'll explain more about later.
+And he put through two existing UFC won assets and kind of mixed them together.
+And what we got was this kind of weird programmer art, linear animation.
+I looked at it, I'm like, well that's interesting.
+I looked at it again and I thought, well, our mocap isn't that great either.
+And this data comes with the begin pose and the end pose already imprinted and perfect.
+and all I have to do is clamp the in-between poses.
+And I'm like, that's actually kind of really cool.
+So I was like, let's see where this goes.
+I like this so far.
+So we kind of started to break it down.
+Like, what if we did it the old way?
+And we would have to do a lot of our assets the old way, but what if we do everything the old way?
+You know, I still have to do it with Liam or Jeff and figure out how this is all gonna work.
+I still have to gather my visual reference for the motion capture, make sure we're all on the same page.
+I still have to create these mix titles, which I'll talk about more later.
+Break down the design.
+Figure out that name convention, super important.
+Create the shot list, not fun, takes a long time.
+Go in, shoot the data, can be fun, not always fun.
+Order the data, which always sucks, no one likes doing it.
+And if we did it the old way, we'd clean up in-house, which we wouldn't this time, we'll use the actual development.
+Some of it in-house, some of it external.
+And then review and revise to a shipable quality.
+So we knew we couldn't do the whole game that way.
+So what if we used Jeff's tool?
+So for the procedural data, we'd make our mixed titles.
+We'd throw it through Jeff's nifty tool.
+We'd press export.
+Ideally, we'd ship it off to Technicolor in India.
+you know, we're good.
+So we decided we're going to try that.
+Let's prepare for production.
+Let's see how we're going to do this all.
+So I'm going to first talk about the mixed idle, so we all know what that means.
+On the left, you'll see our regular full guard position.
+If the top man presses left on the stick, he gets this idle.
+Now if we go back to our default guard idle, if the bottom man presses left on his stick, we get sorry at the bottom model there in the middle and then if they both press left on the stick You'll see here in the full guard position the top man's right elbow You'll see here in his pose, he's digging into the bottom man's left leg.
+You'll see again in the far left picture, the bottom man's left wrist is now going for the arm drag.
+It's around the top man's left tricep.
+And in our mixed title, when they both press left of the stick, the top man's right elbow is digging into the bottom man's leg, while at the same time, the bottom man's left wrist hand is gripping the, whoops, gripping the top man's tricep.
+Perfect, that's what we need.
+So, we now had to figure out what kind of data was gonna come out of this tool, so we knew how to best prepare for that.
+We did like a vertical slice of the guard position.
+We kind of did some quick math out of that.
+So we figured, based on the guard position, that 80% of our data would be easy to process.
+It would take about 1.5 man hours to clean up each little transition.
+10% of the data would be difficult to process.
+Going back to the easy to process, that would also be great to send to our show of developments, easy for them.
+Difficult to process is 10%, that would be 3 man hours, and those would be awkward to explain to our show of developments.
+We thought, let's just keep that in-house, it's a small number, it would be perfect to keep in-house.
+And then 10% would be, cannot process, we'll have to go through that whole motion capture process.
+And then once that's done, it would be about 4 hours for a person in the studio to clean it up.
+So just an example of easy to process data.
+This was the kind of data we were getting for the most part from the tool.
+The bottom man's right arm is going through the top man's left arm and the bottom man's legs are crossing through each other.
+It's very linear.
+It's not bad, it's definitely something we can work with, but it's not perfect as you can see.
+So that's about 1.5 hours for a person to clean up.
+Difficult to process data, this is a bit trickier. It looks kind of simple at first, but the top man's right arm is going through the bottom man's left arm.
+So, we're going to have to explain to a person, you've got to bring that wrist all the way to his hip to pull it through.
+We'll probably have to separate the two, the top man will have to push off a bit separating their bodies, and then we'll have to pin the legs.
+Rather than try to explain that, we'll keep it in-house, keep it simple.
+And then difficult to process data, as you can see, the top man is like teleporting across the mat, he's sliding, he has no weight, he's like he's on an ice rink.
+We probably could spend some time cleaning that up, but why bother, let's keep our visual quality high, let's just go reshoot this.
+So moving into production.
+This is what our production was going to look like for all the types of data coming from this tool.
+We were going to lock down our name convention.
+We were going to create our mixed titles.
+We'd press our export button.
+We would, you know, take all that data, and we would estimate how long it would take to do it all.
+We'd make our docs and spreadsheets so we'd know where it was going to be at what time and what state.
+We'd ideally ship off the ease-to-process data to India in nice packages from the cleanup.
+Difficult-to-process data we'd keep in-house to cleanup.
+and then that can not be processed data, we would just go and recapture in our capture studio.
+And this is, here's an example of some of the naming convention we had to work with.
+It's the longest name convention I've ever worked with.
+This one, it's clearly UFC2.
+The G means it's the ground.
+Trans means it's a transitional animation.
+The sub means it's the submissive, the bottom man, who is initiating the transition.
+Back mount half guard means it's going from back mount to half guard.
+right means based off the top man, if his head is north and his groin is south, it's going counterclockwise. And Jeff can explain to you the last four parts of the name.
+Advanced right, none, none, those are kind of the states in the state machine.
+So the state in the state machine is defined by three things.
+What grapple position you're in, what slot the top fighter is in, and what slot the bottom fighter is in.
+That triplet defines a state in the state machine.
+So those last four pieces are kind of giving all the information to know we're coming from submission down, advanced right, and going to trans-none, trans-none, from the back mount state to the half guard state.
+And the important part here is that this does mean something to somebody and it sees this search out and finds these assets, which is huge, this number of assets.
+So this was a big win for us.
+So, now, it was important to keep that difficult-to-process data down to a small number and I explain why.
+We had 40 default poses, that's just your full guard, half guard, anybody who watches UFC, you know these positions.
+We had 122 neutral poses, these mixed idols, these ready idols.
+We had 261 submission poses from our grapple transition state going into our submission state.
+That's a total of 423 potential poses that you're going to have to...
+You know, you're writing out your shot list, you're figuring out what goes where, you're doing a name convention.
+You have to make sure you have all these poses printed out to show your actors.
+This is just a small example of some of the poses that the actor on the day has to match.
+The closer it matches, the easier it is for your internal development team to use.
+You then have to go and take that data and put it into a MoshBlur file and provide the outsourcers with the exact start pose and end pose.
+It's just a huge nightmare, so to keep that number small was crucial.
+So the end result of working this way.
+UFC 1 had 600 two-player ground animations.
+UFC 2 had over 1,957 two-player ground animations.
+UFC 2's entire grappling system had 3,153 two-player animations.
+Two or three of those were procedural, ran through Jeff's tool, and were untouched by an animator.
+437 were procedural animations exported and processed, meaning an animator touched them.
+98, we could not, it was data that was unusable from Jeff's tool, so we had to go and actually recapture those and clean them up the old school way.
+And then, 1,317 transitions we actually went and captured and cleaned up.
+in our capture lab. That's UFC 1 and UFC 2 combined.
+One point I want to make about this too is even though in the end we ended up motion capturing a bunch and cleaning up a bunch, while we were in early production in pre-pro, we had a template for almost all the transitions in the game so we could actually prove out the design, we could convince people that this was worthwhile from a gameplay standpoint.
+Even if the animations weren't perfect or beautiful, they were 100% functional and it gave us a template to work with all through production.
+If we hadn't had that early prototype, no way anyone would have signed off on this feature to begin with.
+So the procedural aspect had huge benefits in pre-pro, even if those benefits started to dwindle as we got through production and everything got cleaned up.
+Yeah, it's true. It worked really early on, used the procedural data, which is huge.
+So 587 transitions we sent to TouchColor in UFC 2, which was a huge win for us.
+80 of those were of Jeff's tool. This number could have been much bigger.
+I spent so much time managing my ex-dev group that I would have these small gaps in time where I could work on actual data.
+clean up processing.
+And so I like those animations because it would just be like an hour, hour and a half, and I would have to stop halfway through and go back to managing, so I like that.
+But this kind of data is perfect for your show development partners if you were to use that system.
+And so yeah, if we did this the old way, without Jeff's help, this would have taken essentially three animators in-house to do, and that just was not an option.
+So, just visual reference, if you compare the amount of data we created in UFC 1 to UFC 2, UFC 1 being the blue, UFC 2 being the red, you can see it's like over three times the amount with the aid of Jeff's tool.
+And just here it's a breakdown of the type of data we ended up having so on left It's our motion capture and then the two smaller pieces is the data from Jeff's tool, and you can see the amount the top wedge is Procedurally edited and then we touched it the bottom wedge is untouched by Jeff's tool, which is amazing And then of the data Jeff's tool produced, you can see on the left, that's the amount touched by an animator, and then on the far right, untouched, and then that top wedge is the amount we couldn't use and we had to go and capture.
+So, in conclusion, I think UFC 2 was a success because of our organizational protocols, all that docking, knowing what asset was where in the world and what state, we had to know that all the time, and what state it was in the game.
+Often we just put in raw MoCAP data for Jeff to use so he could get it all set up, and then we'd know when it was old, and then when it came from India, we'd know when we replaced it with new data.
+And the convention, if I didn't mention that already.
+And then at Erck's Drill Development was a big part of why we got this done.
+And then one of the biggest pieces was Jeff's tool, for sure.
+It was a massive win.
+And we ended up with our 8 out of 10, last time I checked.
+Which is very happy.
+It might have gone up.
+Might have gone up. It's 81 now, let's just say that.
+And so, in conclusion, a lot of you, I'm assuming, watch House of Cards.
+There is a scene in House of Cards where there's all these monks in the White House, and they're sitting over this table, and it looks like they're kind of grating chalk onto a table, creating this pattern. It looks like painstaking work. It looks monotonous and tedious, and it looks long and hard. When Jeff came to me and showed me the early prototype, and I kind of understood what it would take, I knew it wouldn't be sexy work like Overwatch.
+But I believed so much in the result.
+And as you see the result of this, you know, the monk's work, this beautiful, inspiring pattern that is pretty mind-blowing.
+And I just saw the bigger picture of the tunnel like this.
+Working with all these little pieces and doing this tracking documents and working with XDev is not sexy work, but I had the big picture in mind and I was super excited.
+I love the sport of martial arts, I love grappling.
+And I was like, what if we could actually make the first legit grappling feature in a game?
+And so that's what, you know, that's why I went through all the hard work was for that end result.
+I was so excited to see it. And here's an example of all that hard work.
+Good shot. Huge bump from the top. Big punches landing.
+Powerful right hand.
+Great position. He's got him mounted here.
+Maya, court for a submission.
+He's got that armbar wood off right here.
+And he gets out of it. Deep armbar. Beautiful escape.
+Oh, big diving punch to the head.
+Maia's right eye is looking pretty swollen.
+He's doing a great job of moving and transitioning here on the ground.
+Good elbow to the head by Meghni.
+Meghni's inside control again here.
+So that's literally thousands of animations.
+And from here, I'm going to hand it back to Jeff.
+So I want to go through a few of the learnings that I took away from this project.
+So we're in pre-pro.
+We've got this seemingly insurmountable problem, unless we can come up with a procedural solution.
+And procedural is sexy.
+I could probably do a GDC talk on this awesome procedural solution.
+I really want this feature to work.
+We've got to find a way to do it.
+So I start on the procedural solution.
+I'm starting to get these mixed results.
+And it's like, eh, I don't know if this is going to work.
+There was a decision point there where I could double down on making it 100% procedural and trying to introduce our physics engine into this offline animation generation process.
+So some of those clipping issues would go away.
+But that might introduce more problems.
+I could maybe try to add more intelligence in the auto-matching algorithm to try and get better results.
+But don't lose sight of the forest for the trees.
+The goal was actually to ship this feature and figure out how to make this much content.
+So put the cool technology to the side and focus on workflows.
+Focus on tightening up the export process.
+Make everything as quick and as fast as possible.
+And figure out a way to work with the animators to get to the end result.
+That was a big one.
+Another one, so game industry has kind of matured a little bit over the years, animation has matured, kind of falling behind, or trailing behind a little bit, but we've got a bunch of mature tools, most engines have like some pretty good generic state machine technology, animation blending technology, all that kind of stuff. So we've got some really good general purpose tools.
+But when we scaled up to this volume of content, those generalized tools just weren't going to cut it.
+So there's a tipping point somewhere where the number of assets that you need to create inside of a system...
+It's not worth using those general purpose tools.
+You have to build something very specific to the problem at hand so that you can extract every tiny little bit of efficiency out of that process because it's going to just explode in volume and every little bit counts.
+So we spent a lot of time, we wrote a custom state machine for this.
+I manually entered all 4,000 nodes in that state machine, but it contained all the metadata that was needed in order to understand where it fit in its place.
+We could write a bunch of automation tools off of that state machine.
+All of the procedural transitions and animations were built off of that base state machine layer.
+So everything kind of came from one central hub.
+And the workflows for authoring that state machine were 100% designed just for what I had to do with that state machine.
+And if we hadn't done it that way, there's absolutely no way we would have had time to do this.
+It was a massive, massive undertaking.
+And that initial authoring of the state machine could not be automated in any way because...
+It had to follow the real-life sport of mixed martial arts.
+It wasn't a homogenous system that translated across all grapple positions.
+Every position had a unique flavor and difference based on what arm was grabbing what, what could you do while another guy was doing a thing, and it took a lot of knowledge of the sport and custom tools in order to put something together that complex.
+And this was a big one, and this is what I wanted in my original title, but we cut it out.
+To quote Nate Diaz, don't be scared, homie.
+We were facing something that seemed insurmountable.
+This is probably going to be really bad advice to give to you, but I'm going to do it anyway because it might be inspirational, or it might tank your next project, I don't know.
+We, we're, you're kind of looking at this massive amount of stuff that you have to do and huge unknowns and you've got management asking you to come up with estimates and then you've got to break that down into who's going to do what and honestly like there's a point where I don't know the answer.
+Like, I cannot estimate how long this is going to take.
+I have no clue.
+So I get to choose, are we taking this risk or not?
+Because people are trusting my judgment to decide whether we go forward.
+If I was conservative, I would have said, no, we can't do this, because there's too many unknowns.
+But Jeremy and I were super excited about doing this.
+It was like, ah, fuck it.
+Let's do it.
+Right or die.
+So yeah, just don't be scared.
+If you're really passionate and you make solid contingency plans and you know you have decision points in the production cycle where you can take a left turn or a right turn if things don't work out the way you want, just go for it.
+You're working with a team of really smart people and you'll be able to pivot when you need to.
+So yeah, just don't be scared.
+Take risks.
+Awesome things can come with it.
+Probably bad things can come too, but I'm not going to talk about that.
+And that's it. We've got a few minutes for questions if anyone has any.
+Applause Hello, I'm John Butterfield. I have a question. If you ever went back and edited any of your mix idols, excuse me, like so that if your start and end poses changed, how did you realign those throughout the process?
+So there's two pieces to that, probably what Jeremy's going to say.
+But at the beginning, there was a lot of editing of those mixed titles.
+So we would try and keep things procedural for as long as possible to kind of work out all the details with those mixed title poses.
+If we were to bake something out and have it tweaked, all of that procedural information was still stored in the data library.
+So we could always flip back to the procedural one, regenerate it, and then do the cleanup again.
+So that's my answer.
+That's pretty much my answer.
+There were times where.
+If it was a small change, I'd just go into the edited data and just slap the pose on and polish it further.
+But sometimes you just regenerate it a bunch.
+It was kind of grunt work at that point.
+The bigger problem was with if any of the transitions that were used as a base for the procedural generation changed timings.
+That was a much bigger challenge, because when we auto-generated these transitions, they would reuse all the tagging information from the animation.
+They would reuse all the relative IK information from the original.
+So no one had to manage or maintain any of that tagging or curves or anything like that.
+As soon as you bake it out, it basically becomes its own entity where any changes to the timing, all those tags have to be updated.
+We also had some problems with some of the auto curves have to be regenerated if the base animation changed length and stuff like that.
+So that's a tricky thing to manage for sure.
+OK, thank you.
+Hi.
+Jeremy, when you first saw the procedural system, you said something along the lines of, well, our mocap isn't that great anyway.
+Could you just elaborate on some of the problems your mocap sees where this procedural solution looked like a better way to go?
+Um, I wouldn't know, like it wasn't like it was better because the data was good or bad.
+It was when you go into the motion capture studio and you get these actors posing themselves on the ground um and real weight and the difference in their bodies, they just have challenges sometimes matching those poses. Or we had the problem with UFC 1, we were kind of a bunch of white belts making jiu-jitsu and we kind of had some bad poses and we had these black belts coming in with better poses.
+and their hips would be more on the side, they'd be using more of a deep half kind of position, and then we'd send that data off to India, and they're like, hey, these poses don't match your old poses, and you're making our work quite a lot harder for us.
+So with having Jeff's tool, that was the biggest part of it, was just baking out those poses.
+And then when I take that data and I package it up and send it to India, I don't have to tell them to do anything, just clean up the middle.
+Whereas when I send them the motion capture data, I'd have to go and find those poses and in each package, each transition, I'd have to give them each start and end pose just to make sure, you want to make things as simple as possible.
+And there is a lot of front-end work on that, and to get rid of that front-end work is huge.
+Yeah, I don't know that people will really appreciate how complex a state machine with those 4,000 transitions is.
+When you go into mocap and, like, you got your 8-day mocap shoot, and you're aggressively trying to capture, like, 250 moves because we need these moves, otherwise there's all these massive holes in the state machine.
+You're going to be on top of every single animation that you're trying to capture because you've got to do it quickly.
+And someone has to have all that in their head because you look at this.
+I need up transition from half guard while this guy's pressing left and this guy.
+Like, figuring out what all that even means, let alone digging up the poses.
+It's a lot of overhead.
+Jeff often directed those shoots because he knew the system more than I did and I was like you got to do this because I don't I was the only person who had everything in my head because I authored the state machine and It wasn't until way later in the project that like our QA guy was up to speed and understood it Jeremy was up to speed and understood it. It was extremely complex And to the animation data, like you guys were saying that the hand poses you get back from mocap aren't good, but if like the hand is just resting on the shoulder and then it shifts a little bit, that's better than having like a hand that has no posing on it and is kind of floating and bouncing and stuff.
+So there are some efficiencies there that you don't get from mocap.
+And just, you know, the usual issue with mocap, some jittering, some knock knees, some weirdness going through the ground.
+Yeah, I think that's... it's mostly saved, but I've forgotten now.
+Thank you guys so much.
+Thanks.
+Hey, so you've got a huge combination of animations and various character sizes.
+Do you have any strategy for how you would test that everything was working with all your different characters?
+Yeah, it's really hard to do.
+We would always test... well, I thought we always did, but apparently we didn't...
+the tallest versus shortest, fat versus fat.
+Tall and fat versus short and skinny.
+Short and fat versus tall and skinny.
+And then always men and women.
+Because there were differences with the female rig that caused issues like breasts and stuff like that.
+Like colliding, causing collusion, geometry to push you out in different ways.
+So we had to deal with some of that stuff too.
+But there's no way to test every combination. It's just impossible.
+So just pick your extremes and like one middle of the road and hope for the best.
+It was a little manual, but did you have anything automated?
+We didn't have any automated testing on that kind of stuff.
+The other thing I really wish we had time to do, but we didn't, was write an automated script to walk the state machine, basically, so that a QA guy could just sit there and watch it do everything, and then pick up on any problems and flag them.
+We ended up having like this master tracking document that was generated from the state machine That would have like a unique good for every transition And then one of our QA guys wrote a script that would pull telemetry from the game and like flag them as This has been played this hasn't been played so when QA was doing testing They could like flush that database and then retest and figure out hey, no one's played this particular transition yet That's a problem someone has to trigger that to know that it's functioning properly.
+But testing the system was a ridiculous undertaking, too.
+Every time something in the game changes, you're supposed to do a full smoke of the system, and this was just too large and complex to actually do manually.
+So writing a lot of Automotion tools, we could have done a lot more, but very, very difficult to test.
+And as far as the animations testing, there's a little trick that happens on pretty much every UFC MMA title.
+When the characters are in the takedown and they take to the ground, if they scale at least bone length one to one, the girth stays the same.
+So if you're Mark Hunt versus Strube, Mark Hunt's still fat, Strube is still skinny.
+But they're both essentially the same height, and that kind of takes care of a lot of that problem.
+I think we're out of time now.
+Jeremy and I will stick around up here at the front if anyone wants to ask questions.
+Thanks, everyone, for coming.
+Thank you.

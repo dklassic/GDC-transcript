@@ -1,0 +1,375 @@
+Hello, my name is Graham Willetall, and I'm a rendering engineer for the Frostbite Labs team at Electronic Arts.
+This presentation will cover the various features, improvements, and optimizations developed for our 4K checkerboard technology that shipped in Battlefield 1 on PS4, as well as in Mass Effect Andromeda, and the majority of other titles moving forward.
+First, I'd like to discuss our motivation.
+Frostbite Labs has been focusing on a number of longer-term projects to advance games, graphics, and storytelling.
+In addition, some shorter-term work has been completed, such as a strong push to efficiently target higher perceived resolutions with the Frostbite Engine and games.
+Here's a screenshot of Mass Effect Andromeda running at 1080p on a PS4 Pro.
+And here's a screenshot of this environment at 1800p, which offers a substantially higher increase in visual fidelity compared to the 1080p version.
+And here's a screenshot of this environment running at 2160p, or 4K resolution, which adds some additional quality.
+I do apologize for the camera deltas, it was tricky to get the exact same view in the scene due to some gameplay.
+Let's look at the difference in detail for the highlighted region.
+Comparing the left version, which is 1080p, to the right version at 4K, you can see how much more detail and crispness the high resolution offers.
+Looking at another highlighted region, you can clearly see how much of the original art intention is being lost due to the undersampling.
+Looking at another highlighted region, this is a similar case.
+And one last region.
+You can see much of the details are blurred out compared to the high resolution version.
+Over the past few years, visual fidelity and complexity has greatly increased, accredited to an order of magnitude increase in both available memory and primitive rate, as well as algorithmic advances with huge computational demands, like PBR, dynamic GI, SSR, and others.
+Comparing previous generation consoles to current generation, the number of display pixels was roughly doubled.
+But scene complexity has increased dramatically.
+It's about time that perceived resolution got a bump as well.
+In this screenshot, you can see the type of detailed environments that are being rendered in modern games.
+Scenes like this generally require reasonably high resolution in order to reduce aliasing artifacts and showcase the details desired by the artists.
+Rendering extremely detailed geometry requires a much higher sampling frequency or ugly geometric aliasing occurs.
+Without additional high-resolution geometry information, the bulk of techniques that exist for removing geometric aliasing sacrifice overall image quality in favor of temporal stability.
+Previously, Frostbite had deferred MSAA support, but as it was an ongoing maintenance nightmare, it was removed in order to reduce complexity in our rendering.
+And while acceptable software solutions exist, Sony recently added new hardware features to PS4 Pro that allowed us to more easily and efficiently implement higher resolution rendering.
+The brute force approach of rendering native 4K is not doable for the majority of engines or games, since current hardware is largely bottlenecked by bandwidth.
+A very practical method to reduce the shading cost of the image is by shading only a subset of pixels in the majority of the graphics pipeline, while geometry information is computed for all pixels.
+Some of the information is lost, but with the 4K sampling rate, most of the adjacent pixels will have strongly correlated shading values, as long as they all belong to the same surface.
+A high-quality geometry-aware resolve is performed to reconstruct the missing information.
+Here is some history around how this particular checkerboard implementation came to be.
+There were some algorithms and prototypes at Sony that utilized object IDs for edge detection as well as using EQAA for higher resolution depth.
+Killzone Shadowfall then shipped with temporal super resolution and a differential blending operator.
+Then the PS4 Pro was architected to include some hardware features aimed at more easily and efficiently supporting alternating pack checkerboard sampling, as well as some initial implementations in a few first party games.
+Last GDC, Jala at Ubisoft had a great presentation on MSAA checkerboard implementation in Rainbow Six Siege that helped bring more awareness to the overall idea.
+And now we have implemented our own support in Frostbite for the alternating pack checkerboard approach, which shipped in Battlefield 1 and Mass Effect Andromeda.
+We tried a number of high-resolution techniques with varying success.
+The results were evaluated on a 50-inch TV at living room distance, not on a computer monitor two feet from your face.
+We started with native 4K, and while it looks excellent, the performance is unacceptable.
+Other resolutions were evaluated like 1440p and 1800p.
+And while 1440p was within budget, we found that 1800p offered a much more dramatic improvement over 900p.
+One way to think about it, as compared to the previous console generation, is that 1440p is to 720p as 1800p is to 900p.
+While resolution can be a subjective topic, recall the difference in quality for 720p versus 900p on a 1080p screen.
+Extra resolution has a roughly linear performance cost, at least for deferred passes, but will give diminishing returns in perceived quality.
+Here's a scene from Battlefield 1 at native 4K resolution.
+29 milliseconds for a 60 hertz game is obviously a showstopper.
+Even rendering at 1800p native and scaling up to 4K has a cost of 21 milliseconds, which is also too high.
+There's been a lot of buzz in the last few years about variable shading rate, and checkerboard rendering is a practical idea that could be used to greatly increase the resolution without much performance cost.
+Some experiments have been done to implement checkerboard using Stencil.
+While we didn't bother with implementing this, it is important to cover for posterity.
+Stencil checkerboard can be done in one by one blocks, but please don't ever, ever do this.
+The GPU shades in two by two quads, so you'll pay the shading cost of native 4K, but then throw away half of the work.
+In order to get a performance gain, stencil checkerboard can be done in two by two blocks, but now the sampling distribution is terrible with less correlation.
+You get great coverage in a two by two block, but then a huge hole.
+In many cases, you'll get diluted color bits every second quad that are quite blurry, and in order to solve that, you end up blurring even more.
+So what's the point?
+Initially, we looked into a 2x color and 4x depth checkerboard.
+The portability of this technique is compelling, but is very invasive to the rendering pipeline, as practically all shaders and render passes need to be modified.
+Additionally, this form of checkerboard isn't the most optimal configuration.
+Some other variants like 2x color and 2x depth have shipped in some games, but have to sacrifice some performance to remain portable across various IHVs.
+Another experiment was to use 1x color to keep most of the rendering pipeline unchanged, but render with 4x depth samples.
+A geometry-aware upsample from 1080p to 4K was performed with the idea of maintaining the hard edges.
+This was a good idea and is similar to SRAA, except this trades the second pass, normal, and bilateral of SRAA with a single pass IDs and custom reconstruction.
+In the end, the quality wasn't high enough, and while it could have been improved over time, the implementation cost between 4K geometry and 4K checkerboard was comparable.
+As such, this approach was abandoned early to focus on a superior technique.
+Eventually, we settled on a very efficient packed checkerboard technique.
+We started with the PS4 Pro reference implementation, customized and optimized it further, and then incorporated it into our own temporal anti-aliasing.
+The Packed Checkerboard approach gave a substantial boost to image quality and clarity while maintaining a 60 hertz target and shipped with very positive reviews in Battlefield 1.
+Here's an example scene that rendered with the Packed Checkerboard approach.
+Looking at the highlighted area zoomed in prior to Checkerboard Resolve, you can see which samples were shaded and which samples were not.
+Reconstructing unshaded samples or holes in the current frame with information from the previous frame, as well as using high-resolution geometry information, can produce a result at very high quality.
+Using the PAC checkerboard rendering, we're able to take this scene, reach comparable image quality to 1800p native, yet stay within our performance target.
+Here's a close-up of the scene showing 1800p native.
+And here's a close-up of the scene showing 1800p checkerboard.
+Now I'll go over our specific checkerboard layout and configuration.
+AMD EQAA is a superset of MSAA and provides quite a number of interesting hardware features.
+One such feature is the ability to store fewer color fragments than depth fragments, which is exploited by the 4K checkerboard technique.
+The most common checkerboard configuration is to use 2x color and 2x, or 4x depth, sorry.
+This approach is nice due to its high portability, and derivatives do not require any sort of adjustment.
+But this approach is inefficient due to the way that the shading quads are packed.
+The example shown here will shade eight samples, but only store two of them.
+Our layout is using 1x color with 2x depth.
+With the Packed Checkerboard approach, you only get one shading quad in this case.
+Four samples are shaded with two samples being stored.
+On average, the samples are 30% closer together, which results in a very measurable performance win.
+For checkerboard rendering, the sample locations are alternated each frame.
+For configuring EQAA, the scan converter must be informed how many samples to produce per pixel, as well as the absolute distance from the pixel center of the sample furthest from the pixel center.
+In the case of our checkerboard layout, the samples are at 1 quarter and negative 1 quarter from the pixel center.
+Now we'll go over the various features that were used to remove or reduce checkerboard artifacts, providing an increase in visual fidelity.
+Arguably, the most important feature of our checkerboard is the object and primitive ID buffer used by the resolve.
+The IDs are generated at a higher resolution than shading. For each geometry sample, an identifier is stored in an image buffer, which uniquely identifies object and primitive that are visible at that sample.
+Instance draws provide a separate object ID per instance by binding an array of object IDs, one per instance.
+And tessellated draws are given a primitive ID per input patch.
+The ID buffer can be written out during any full geometry pass, which is either a depth and ID only pass or the main scene render.
+Since the depth pass will typically consume less memory bandwidth than the shading passes, it is advantageous to write the IDs at this point.
+On PS4 Pro, the ID generation is performed without any shader involvement.
+So the impact on asynchronous compute jobs and parallel is minimized.
+It is not recommended to add an additional depth pass just for ID generation, as the increased CPU and GPU overhead is not worth the benefit.
+Without an existing depth-only pass, the ID generation is easy to integrate into the main shading pass.
+Doing so will cause the ID generation to compete with memory bandwidth, but at least the ID-only samples don't pay for the shading.
+The IDs themselves are stored as 32-bit, 16-bit, or 8-bit values.
+We use an ID that is 31 bits wide, with the most significant bit of the parameter ignored by the hardware.
+Object ID is 14-bit with an optional 17-bit primitive ID arithmetically added, which is reset to zero at the end of each instance or draw.
+The ID buffer is a color target bound as the eighth MRT.
+A shader cannot export to this target when IDs are being generated, and since the ID buffer is treated like a color target, it uses both the CB's data paths and the color target tile modes.
+It is also safe to set this with a null pixel shader because the eighth MRT is not treated as a pixel shader target when ID propagation has been enabled.
+An alternative way to produce object IDs is to export them from the vertex shader.
+However, this could reduce the number of VS wave fronts that can be active on the chip at a time.
+There are many other interesting use cases for the object ID buffer, but for this presentation, it will be used in the checkerboard resolve to improve the final image quality.
+Here is a complex scene from Battlefield 1 with a number of unique objects.
+This is a visualization of just the object IDs in the scene.
+And here's a visualization of the primitive IDs in the scene.
+Remember what I said about the object and primitive IDs being a bit different for the tessellation, how it's done at the input patch level?
+If you look at the bottom left of that screenshot, you can see that there are a number of adjacent triangles of the same color, and that's because the ID was assigned prior to tessellation expansion.
+When rendering a checkerboard with any pixel shaders that use implicit gradients for mipmap selection, gradient adjust must be configured, otherwise graphical artifacts will occur.
+On the left, you can see the expected gradient, but on the right, you can see what the real gradient is.
+The horizontal gradient is twice the expected value, and the vertical gradient is stretched and rotated 45 degrees, which resembles bad anisotropic filtering.
+In order to correct for the rectangular pixels, we need to apply a non-uniform rescale.
+Because of this, we can't use LOD bias as it scales uniformly.
+Instead, we'll use a gradient fetch with rescaled coordinates.
+The adjustment is done by applying a 2 by 2 affine transform to the derivatives of the texture coordinates.
+If checkerboard is disabled, an identity transform is used with no measurable performance impact.
+This approach allows us to avoid having an extra copy of all our shader permutations for the adjusted versus unadjusted case.
+And in Frostbite, it's about 80,000 to 100,000 shaders with our generated pipeline, so that's an important thing for us.
+When checkerboard is enabled, the adjustment alternates between the two forms that you see here.
+The result will be texture coordinates that have been adjusted to account for the packed checkerboard.
+Manual gradient correction in the shader does come at a price for calculating the adjusted derivatives, which is roughly 10% extra cost in main gbuffer shading.
+Sample grad issue is more expensive than normal fetch, though there is no change in bandwidth or latency, and the fetch and filter costs are unaffected.
+Other than ALU cost, there is also increased register pressure, as the derivatives need to be kept around.
+You need to be careful that the gradient adjust doesn't hurt your occupancy, at least on the critical path.
+However, we only shade half the pixels, and not all instructions in the shader are a fetch.
+Overall, this is a win.
+The PS4 Pro added special hardware and compiler support to apply the affine transform directly in the texture unit with no register usage.
+On this platform, just turn the feature on at no ALU or VGPR cost.
+Here are two images, courtesy of Sucker Punch, which clearly show the value of gradient adjustment.
+In these images, you can see a curved surface going into the screen and a scrolling text advertisement, which is selecting a lower mip earlier than it should, resulting in very blocky rendering.
+Most cases of gradient adjust can be solved with an automatic adjust performed in the texture unit, but cases like custom filtering or virtual texturing need to be manually corrected.
+In this magnified test scene showing some horrible programmer art, thank you very much, you can see two alternating frames with regions of blurriness due to lack of gradient adjust in the virtual texture sampling.
+It is exacerbated by an isotropic filtering because the skewed gradients will cause the filtering to behave more like a blur.
+And here is the same test scene with explicitly adjusted texture gradients in the virtual texture lookup.
+The flickering stabilizes and the correct MIP levels are being chosen now.
+In addition to gradient adjust, the barycentric evaluation also needs to be corrected to use sample positions instead of pixel positions. Without barycentrics evaluated at sample positions, texture fidelity and smoothness will be affected. In this example, notice the loss of detail on the vertical lines of the background and a more rough appearance of the vegetation.
+Speaking of vegetation, Battlefield 1 has a lot of it, and correctly resolving alpha-tested objects with checkerboard rendering is quite challenging.
+Alpha-test shaders compute the depth or coverage of a pixel inside the shader, instead of relying on the scan converter to determine these parameters.
+If these shaders are run at pixel rate, all samples in the pixel share the output of a single shader invocation, resulting in IDs that are at shading rate instead of full rate.
+This presents quite a problem with checkerboard hole reconstruction.
+The solution is to run the pixel shader for each sample in the image, instead of just once per pixel, to be able to generate full resolution depth and ID values.
+The hardware will unroll each pixel quad, creating a shading quad per sample.
+Because unnecessary unrolling can have a severe performance impact due to a large increase in pixel shader work, it is important to switch off the unrolling whenever it is not needed.
+First, all alpha-tested geometry will run a minimal pass to compute the coverage and or depth.
+Since this pass is unrolled, the shader needs to be as fast as possible.
+Next, all alpha-tested geometry runs the expensive shading pass, which computes the actual color values.
+This pass is performed at pixel rate and with depth equals testing.
+With the previous coverage pass, the expensive shading operations benefit from maximal hidden surface removal.
+In order for the depth equals test to work correctly, the positions written by the coverage pass and the shading pass need to exactly match, so make sure that your positions are invariant.
+Otherwise, there can be subtle differences in the computed vertex positions, which can lead to z-fighting in the shading pass causing holes.
+One approach is to disable fast math for everything that goes into the position.
+We did this on all our vertex shaders with no measurable performance cost.
+Here's another test scene with awesome programmer art, shaded at low resolution to make the artifacts on the alpha-tested vegetation more apparent.
+Here is the same scene using alpha unroll, avoiding all of the nasty artifacts.
+Let's go back and forth again.
+Visualizing the object and primitive IDs without the unroll shows the lack of high-resolution geometry information for the vegetation.
+This is what the object and primitive IDs look like with the alpha unrolling enabled.
+I'll go back and forth again.
+Now, I will cover various optimizations that were done to our checkerboard solution in order to make it affordable, especially for our 60 hertz titles.
+The first optimization to cover is pixel shader invocation control, otherwise known as PS invoke.
+Every sample position, if covered by a triangle, can trigger pixel shading work.
+Checkerboard uses 1x color and 2x depth and IDs.
+Due to the way that EQAA works in this case, half of the shading does not contribute to the final image.
+We can prevent overshading by configuring certain samples to be non-shading, which brings the amount of pixel shading work back to what it would be with 1x depth and IDs.
+On PS4, there's a very simple API to turn this on, but it's definitely not simple under the hood.
+And I don't want your brains to explode, so that's this slide.
+Another optimization was the usage of FP16 GCN instructions in our checkerboard resolve shader.
+PS4 Pro has support for FP16, and we used it throughout the checkerboard resolve shader.
+The largest benefit was the ability to greatly lower our LDS memory usage.
+This resulted in about a 30% improvement in the resolve shader.
+Another important optimization was the implementation of an efficient depth resolve.
+After the ID, depth, and stencil values are written in the frame, it was important that passes not requiring higher resolution depth and ID information be allowed to read from single sample depth in order to halve the depth block bandwidth.
+Transparent objects, as well as post-processing, read from a single sample resolved depth and stencil target, as they do not write depth or reasonable IDs.
+Higher resolution depth is resolved to single sample after our main gbuffer lay down, which is used for the remaining passes in the frame until the checkerboard resolve occurs.
+The simple approach is to copy depth of the compute shader, but this is slow as it requires full decompression of depth to be readable in the shader.
+During optimization, I developed a technique that can resolve depth and stencil to a single sample target without requiring decompression.
+This is done with a nifty hidden feature of the AMD GCN color block, or CB.
+The publicly available AMD Evergreen acceleration document describes a mode where the CB can copy depth to a color target.
+Since the CB can read compressed data natively, a decompression is not needed.
+This all sounds great, but we want a usable depth target in the end, not a color target.
+Here's yet another instance where low-level graphics APIs can really shine.
+First off, because we want 32-bit depth in many cases, a dummy shader is used that writes out zero, and the compiler is forced to output 32-bit.
+This is important in order to avoid truncation of depth values when the CB does the blit.
+As mentioned, this harder feature is designed to efficiently resolve depth to a color target, but we want a depth target in the end.
+Through a lot of trial and error, I found a single tiling mode that matched up between color and depth layouts.
+2D non-displayable thin and 1XAA depth micro-tiling are essentially the same.
+By aliasing the depth target as a color target, this technique can resolve multi-sample depth to single-sample color, which is secretly a single-sample depth target.
+Just the setup alone is not enough, though, as we currently would be invoking pixel shader threads that would just output zero to the destination.
+Depth and stencil need to be disabled, copy centroid set to on, and copy sample index can be used to specify which depth fragment we want to write to the destination.
+Zero seems like a sensible index to use in all cases for us.
+The main secret here is that the dbRenderControl register has a depth copy bit, which will read depth and write it to the red channel in the destination.
+It is important to mention that hTile will remain untouched and not copied either.
+Stencil is done in a similar manner, except using the stencil copy bit of the dbRenderControl register.
+Stencil copy will write through to the green channel, which makes sense for what this hardware was designed for, but does not work correctly when aliasing the color target as a stencil target, as only one channel is present.
+To solve this, the cbColorInfo register is programmed to perform a component swap, which effectively swizzles the green to red channel on write.
+Here is the dummy shader used for the depth and stencil resolve, which as you can see is quite dummy.
+The biggest thing is just outputting zero and forcing the compiler to 32-bit.
+It's just a placeholder.
+This is what occurs if you only resolve depth and stencil, but do not copy and fix up the htile metadata or hi-z.
+Zooming in on that area in the top left.
+You can see the invalid blocks of pixels due to broken hTile.
+Just copying the depth will only work if the destination depth target does not use hTile.
+However, hTile is critical for performance, especially at high resolutions like 4K.
+And so we also need to explicitly copy hTile to the destination and patch up relevant bits.
+The copy was accomplished with a very fast compute shader, which will keep the hTile acceleration working correctly on the 1xAA depth destination, and any further writes will compress as expected.
+Here is the hTile copy shader, which will load four 32-bit hTile values per thread, copy them to the destination, mark the tiles as expanded.
+This shader copies four values at a time instead of one to avoid being SPI bound.
+This pass will produce a destination H tile that has correct Z ranges, and all tiles marked as expanded, since that is how the CB has copied the depth values across.
+This optimization saved us over one millisecond, and leaves both the source and depth stencil fully compressed.
+Other than preserving compression, this technique is great, because it's completely bandwidth bound.
+Now I will cover the integration of checkerboard with our post-processing.
+After laydown of our checkerboard at gbuffer, it is important to invoke as many post-processing steps before the checkerboard resolve is possible.
+The reason is strictly due to the performance cost.
+While certain passes can produce better results when computed at higher resolution, the majority of passes do not benefit enough from the quality increase compared to the extremely high performance cost.
+It was very time-consuming and painful work due to the initial refactoring of lighting and post-process for the checkerboard, and evolution of the code base over time breaks various parts often.
+Checkerboard is a new concept to many, so it's important to auto-test the checkerboard pipeline if possible.
+In Frostbite, we have a full auto testing setup where we were able to just add this into our existing test suite and test for it now, which is great.
+There are some passes that ignore geometric information, like SSAO or luminance estimation, which provide very little visual benefit to be run after they're resolved.
+Some passes that can benefit from geometric information in order to limit color propagation over an edge can still run at a very low resolution.
+Although the render targets are not structurally different from non-EQA surfaces, their pixels do not correspond to a regular grid.
+This makes linear sampling of the checkerboard surface problematic.
+It also means that the aspect ratio of the buffer is different from a normal 16 by 9 render.
+As an example, if a blur pass is applied to a checkerboard surface, the correct thing to do is treat each pixel according to its exact position on the checkerboard.
+In the majority of cases, it is possible to get away with treating the buffer as a 1920 by 2160 buffer.
+However, to maintain the shape of the blur, the horizontal filter should be halved.
+Here's a test scene that shows the tiled lighting before checkerboard correction.
+Notice the blockiness of the lighting results in the zoomed-in region.
+And here is the same test scene in region after accounting for the checkerboard pixel grid.
+Let's go back and forth again.
+Hopefully the projector shows it.
+This was trivially fixed by applying an offset to the UV used for reconstructing the clip space position.
+This convenience function will return a packed value for checkerboard UV adjustment.
+If checkerboard is disabled, this simply returns zero, which doesn't apply any sort of adjustment.
+Otherwise, the return value contains a frame parity bit in the LSB and half texel width when interpreted as a float.
+This packed representation allows us to have a single version of all of our post-processing shaders, regardless of whether or not checkerboard is active.
+And this packing function is what produced the CB state packed variable being passed in.
+This is an overview of a Battlefield 1 frame on PS4 Pro and the associated resolution changes.
+The clear up to the velocity vectors are done at 1800p checkerboard.
+Then the checkerboard resolve, coupled with temporal anti-aliasing, outputs a native 1800p frame, which is the resolution used by the remaining passes that do not currently benefit from the checkerboard.
+Finally, the display mapping and resample is performed, which prepares the frame for scan out at native 4K.
+And here is an overview of a Mass Effect Andromeda frame on PS4 Pro.
+The render passes are very similar to Battlefield 1, except Mass Effect also runs a sprite depth of field pass after the checkerboard resolve and temporal AA.
+The quality of the final image is greatly dependent on how the color buffers are combined with the higher resolution geometry information, making the shaders that move the frame to 4K resolution a very important part of these techniques.
+The checkerboard resolve is broken into two main parts, the spatial component and the temporal component.
+The spatial component exploits the relatively dense sample rate in two ways.
+First, only the unshaded samples are resolved, and the shaded samples are simply passed through.
+Second, the resolve only looks at the four direct neighbors of the unshaded sample, instead of performing a wider search.
+The checkerboard resolve typically does not use depth for performance reasons.
+Therefore, the color information must be used to determine if an edge is soft.
+This should only be done for colors produced from the same primitive, as there are no cases where we want contribution to a pixel from different objects.
+In the case where none of the surrounding colors are from the same objects, an average of all four color samples is used.
+This slide shows a problem with false hard edges.
+The pixel labeled a C will be resolved using all four of its neighbors, resulting in an even blend between red and blue.
+Pixels labeled as A and B have an uneven number of red and blue neighbors, leading to different blending results.
+Applied over the whole quad, this would produce a visible diagonal edge.
+The color bounding box will add all color samples from a primitive to a bounding box in Y, C, O, C, G space, and color samples that are from the right object but a different primitive will be considered to be on the right primitive if they are contained in this bounding box.
+It is important to decide what to do when a single sample is contained in the bounding box.
+Here's a test case courtesy of Sucker Punch, which really shows the problem of single bounding box samples.
+Because it is unlikely that other samples pass the test, the single sample is copied directly into the destination pixel, causing an obvious artifact.
+The problem can be avoided by using a heuristic that compares the single color value to the blended color of all samples from the correct object.
+The heuristic is to help reduce artifacts in highly tessellated yet smooth areas, like in this character face.
+Let's go back and forth.
+Using a distance-weighted blend would perform a simple averaging, since all four samples are equal distant to the center sample.
+You can see artifacts on the left image where visual continuity is being interrupted by averaged pixels.
+The solution is to use a differential blending operator that compares two pairs of opposing color samples, and weighting each pair's contribution to the final value, higher if the samples in the pair are more similar than the colors of the opposing pair.
+The differential blend operator is much better than a simple averaging, but it still has limitations due to its small search radius.
+If both pairs are quite similar, there is not enough information to select the appropriate blend.
+This mainly occurs when a single pixel wide texture feature is encountered, like in this example where the light background is visible through single pixel wide openings in the foreground geometry.
+The solution is to use the ID buffer to influence the weighting.
+Back and forth.
+This is the differential weighting function, which includes ID evaluation.
+The exact formulation is dependent on what color space you operate in, such as log space luminance.
+As you can see, the operator is quite simple, but greatly improves the image quality.
+Here are some examples showing how object and our primitive ID can be used to help in separating out unique surfaces.
+It may seem like the inclusion of object and or primitive ID results in a more aliased image, but keep in mind that it is desirable to keep the hard edges between different objects, rather than just blurring everything together and reducing image quality.
+The temporal component uses reprojection to combine the results of the spatial resolve with a color history buffer.
+For the majority of details, you can refer to all the great presentations and research already out there, especially the work of Brian Karras.
+Our temporal AA is very similar to this, and general TA isn't the talk's focus, so I won't be going into much of the details for that.
+I will briefly touch on velocity-based reprojection, which was updated for checkerboard.
+A static scene over two frames is trivial to reconstruct, but an actual game is obviously much more dynamic.
+There are numerous objects on surfaces in motion, yet the pixel grid is stationary.
+Because of this, we need to correlate 3D surfaces in motion, such that a valid reconstruction of unshaded checkerboard pixels can be performed.
+The correlation is achieved by having surfaces write per-pixel velocity vectors, which can be used by the reconstruction.
+Anti-aliased edges potentially span depth and velocity discontinuities.
+In order to make sure that we don't lose anti-aliasing when reprojecting, we need to reproject anti-alias lines as a whole.
+In order to do that, we must dilate velocities around them.
+In practice, using the frontmost velocity works well in most cases, so that's the technique we would like to use.
+Unfortunately, to find the frontmost velocity, we also need to fetch the depth buffer, and doing so is quite expensive.
+This is an overview of our optimized velocity dilation, which determines the pixels that need velocity dilation, loading depth to compute the frontmost velocity, and the pixels that can use a basic averaging, which bypasses the loading of depth.
+The pass-through pixel uses a cross-shaped kernel, while the filtered pixel uses a plus-shaped kernel.
+In this debug overlay, the red pixels are moving edges, which require velocity dilation, while the unmarked pixels do not.
+Here's an overview of the checkerboard resolve shader, which processes two pixels per thread, the pass-through, or shaded pixels, and the filtered, or unshaded pixels.
+You'll note that the spatial resolve occurs within the same shader as the temporal AA, so that the spatially resolved color is never written back to memory.
+After resolving the spatial and temporal components, the results undergo a sharpen filter, and then the final frame is written out to memory.
+Despite being quite advanced, the 4K checkerboard resolve plus temporal AA is essentially a smart blur filter.
+As a result, the absence of high frequency components in an image makes it harder for observers to discern objects.
+Ganglion cells, which link the retina to the optic nerve, respond acutely to high frequency image components.
+With a blurred image, the brain's visual cortex will lack the necessary information to discern objects within a blurry frame.
+Applying a sharpened filter to the blurred image will help recover the high frequency components, which will result in enhanced visual quality.
+Be careful to not reintroduce aliasing or false high frequency and to not introduce ringing or oversharpening.
+Here's a screenshot without the sharpening filter applied.
+Here's the same scene with the sharpening filter applied.
+before, after.
+Another example before and after.
+Close up before the filter and after.
+I feel like I just gave all of you an eye exam.
+Once checkerboard was submitted to mainline, I started to receive absolutely every artifact-related bug report, like for the entire game, claiming that the cause must be the checkerboard, including bugs that existed well before the checkerboard was submitted, which is fun.
+Adding lots of debug overlays was a great way to help with debugging and isolate the root cause in whatever rendering component was to blame.
+It was never checkerboard.
+Also, take advantage of your technical artists and fellow rendering engineers.
+Teach them how to tell the difference between an actual checkerboard bug and an unrelated system like motion blur.
+You might think those are the exact same bug.
+They're not.
+So get ready for an old-fashioned witch hunt.
+Now I want to briefly touch on a couple infrastructure pieces that were indirectly related to the checkerboard rendering.
+Perhaps the biggest pain point of the move to 4K rendering was the massive increase of memory usage by the majority of our render targets.
+At the time, we didn't have a fancy system moving and repurposing memory throughout the frame, so we had to do some pretty creative refactors to do manual aliasing in very complex This extra effort pulled us away from doing further 4K specific improvements that we wanted to do.
+Going forward, we now have very flexible and efficient approach for managing render target memory and aliasing.
+If you're interested, please go back and watch Yuri's talk titled Frame Graph Extensible Rendering Architecture in Frostbite.
+It's really good.
+Render target aliasing is also super defunded a bug at times, especially when the corruption manifests in the object ID buffer that helps drive our checkerboard resolve.
+The corruption wasn't obvious at the time, as the checkerboard resolve errors were noticeable, but still quite subtle.
+Closer inspection of the memory at this point in time, at this point in the frame, sorry, identified the culprit here.
+This was especially difficult to debug and track down because our memory layouts were also constantly changing frame to frame due to dynamic resolution scaling.
+Developed by Dice and Microsoft, another great feature is our dynamic resolution scaling system, which also plays nicely with our 4K checkerboard implementation.
+Checkerboard is always active, but the dynamic resolution scaling will determine what initial checkerboard frame resolution should be based on a running performance heuristic.
+Battlefield 1 contains a number of infrequently running GPU tasks.
+These caused the resolution to adjust in small increments almost every frame, which turned out to be not an issue.
+It actually worked with the jitter to provide different variation in subpixel detail.
+We tried preventing any upscaling if the camera wasn't moving, but this resulted in a noticeable lower quality image.
+And also, nobody complained about it.
+Lastly, I will cover performance and future work.
+Going back to this battlefield scene, let's look at the performance numbers for it. A couple things to note here. The ID clear is quite high, as there wasn't enough time to implement something better, such as using CMask acceleration to mark cleared tiles instead of clearing the backing memory. And we had to do this because of our Sky not actually writing down IDs. This should bring the time down quite a lot.
+The other note is around the three instances of depth, stencil, and htile copying.
+The reason is complicated and specific to how Battlefield and Mass Effect are currently rendering a frame.
+Other Frostbite titles going forward will only require one depth, stencil, and htile copy on average, making the total cost a third of what you see here.
+Comparing 1800p checkerboard versus 1800p native, the checkerboard implementation saves 5.08 milliseconds in the scene, making the total frame cost suitable for the 60 hertz performance target.
+Here are some interesting GPU timers for this scene, comparing 1800p native versus 1800p checkerboard.
+In a lot of cases, you can see that the timing is pretty much half of what it was before checkerboard.
+The cases where it's not that, like the Gbuffer, is because it's bound by other things in the pipeline, like bandwidth, for example.
+And here's a scene from Mass Effect Andromeda using checkerboard, which shows the timings between 1800p native and 1800p checkerboard.
+This is a 30 hertz title, so the checkerboard cost is well within the allotted budget.
+The checkerboard-specific timers are similar to the Battlefield 1 capture, except the Resolve is much more expensive due to higher quality settings since Mass Effect is a 30-hertz title and can afford it.
+Here are some interesting GPU timers for this scene comparing 1800p native versus 1800p checkerboard.
+We have planned further improvements to the checkerboard resolve, as well as optimizations to alpha-tested objects so that the sample rate coverage is not needed.
+And we also want to get our actual resolution higher, which is just more of general optimization work.
+We've also only scratched the surface for what the IDs can be used for.
+The general theme is that a number of heuristics can be removed in favor of trivial comparisons, such as the uncharted four or censor-based tagging stuff that we could replace with object IDs.
+We plan to implement Packed Checkerboard on other platforms.
+The PS4 Pro has some great hardware features for this, but reasonable workarounds exist for both Xbox and for base PS4.
+On PC, we need EQAA or something like that for all IHVs, as well as programmable sample locations for Vulkan and DirectX 12.
+We also need efficient driver support for the EQAA depth resolve, such that the source is left uncompressed and the technique is purely bandwidth bound.
+More forward-looking, but also related to high-resolution rendering, is the notion of using a filtered visibility buffer and decoupled shading and other variable shading rate techniques.
+G-buffer performance becomes challenging at high resolutions, so classic deferred shading isn't the answer.
+The goal of the visibility buffer is to decouple G-buffer from screen resolution, which improves performance at high resolutions like 2K, 4K, and even MSA configurations, as well as on some bandwidth limited platforms.
+I'd like to give a special thanks to the people listed here for their collaboration and feedback.
+It was greatly appreciated.
+And with that, I'd like to open it up to actually questions you have, and thank you very much for coming.
+Hello, nice presentation.
+Do you try or are you using any kind of stencil anti-alesian?
+Sorry, can you repeat the last part?
+If you are using or at least trying any kind of stencil, sorry, specular anti-alesian?
+Not this time, as far as I am aware, actually.
+We're investigating certain techniques, but no.
+Okay, thank you.
+Since you were using EQAA, did you find any use for the fmask, for example, for the color resolve?
+With this particular technique, you actually don't need to use fmask for it.
+I have some other plans for some of the vbuffer stuff maybe using fmask.
+All right, that looks like it.
+Thank you very much, everybody.

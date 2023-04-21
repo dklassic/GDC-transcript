@@ -1,0 +1,659 @@
+Welcome to our talk. I am Nikunj Raghuvanshi. I work at Microsoft Research in Redmond.
+I'm John Tennant. I'm lead technical sound designer at The Coalition, which is a Microsoft studio up in Vancouver, British Columbia.
+And today we'll talk about Project Triton, which shipped in Gears of War 4 last year in October.
+And Triton is a acoustic system that models how sound waves behave in 3D game environments.
+And the thought behind Triton is acoustics is very important for immersion in games.
+Because in everyday life we understand our surroundings audio visually, sound and light work together.
+If somebody walks into a different room, they become invisible and their sound should also get muffled accordingly.
+And also sound gets around the head, it gets around corners, it fills up spaces.
+So sound is very important for giving us this persistent awareness of what's going on around us all of the time.
+So we need good acoustics in games.
+And there's a lot of interest in virtual and augmented reality these days, and a lot of focus on headphone-based HRTF directional audio rendering.
+But environmental acoustics is a crucial portion to get positional audio, which conveys not only direction, but actually locations in the environment around you.
+But compared to lighting, sound has limited CPU and RAM, and sound behavior is physically more complex.
+I'll show you some examples.
+For sound, you have to model all these wave effects to get convincing results.
+And because of a combination of both these problems, right now we have a mixture of approximate methods, which work well in some cases, but you need to know the caveats, and manual tagging work, like drawing reverb volumes.
+And what this means is the designer has to do a lot of work to get a baseline sound going.
+And ultimately it limits the time for audio designers to work on the thing they'd like, to make the games an emotional experience and a medium for creative expression.
+So the thought behind Triton is why not follow the path that game lighting took, which is do the physics based on the scene, get a baseline result that's physically plausible, and then you design on top of that so you get automation as well as freedom to do the artistic expression that games need to have.
+As soon as we started thinking along these lines, we realized we had a two-part problem.
+Part one, doing these accurate simulations is expensive if you want moving sources and listeners, which we wanted.
+So in GDC 2011, I had given a talk on a research system I'd been working on that could, for the first time, do real-time-wave acoustics.
+But this formed the basis for Triton.
+But when we got together and I started talking to the Coalition audio team, and we started thinking about, okay, what's the requirements for a real game, I realized this was very far off.
+So this system used to take a full, this previous system used to take a full core for doing like 20 sources.
+It took gigabytes of RAM for a few rooms.
+And it used a custom audio engine because the audio filters were changing on the fly per source.
+So thinking about this, the second part of the problem emerged.
+This system used to just do pure physics.
+So how do you design with a system like that if you don't want to be struck rigidly to what physics predicted?
+And secondly, so design is a problem and audio middleware integration is another problem.
+We couldn't have a custom audio engine in a production game.
+easily.
+So over the last five years, we've been working hard at this and we managed to solve this two part problem and that's why we're here to talk to you about.
+So to give you a flavor of the solution, it's similar to light mapping.
+You do accurate physics, but offline you bake the results and then you bake out these results into some sort of volumetric acoustic data and then you can take this data and design on top of it and do expressive acoustics in standard audio middleware.
+So basically, you get to have your cake and eat it too.
+You get automation and you get expressive design together with that.
+So I will talk about this first portion of how to do the physics and what to put in the data.
+And then John will talk about how to take that and do audio design with it for a game.
+So let's dive right in into the physics of what sounds do.
+So here's a scene you're seeing.
+This is a 3D simulation.
+You're seeing a horizontal slice through it.
+And if I put a pulse of source, pulse of sound in there, you immediately see these wave fronts making their way around the doorways in that building on the left.
+And I've put two microphones in this scene at point A and B.
+So when the wave fronts make their way, you start receiving some signal at A, and then you start receiving some signal at point B.
+Now this thing that sound propagates like ripples in water where it goes around all these obstructions, that's called diffraction.
+And you need to model that to get the effect of sound bending around corners.
+That's what makes sound useful for navigation because you can always hear it.
+And the other one is that sound is just bouncing around and shimmering in the space.
+That's reverberation.
+Because sound speed is low enough that you can hear it bouncing around in the space.
+You can hear it in this hall.
+And that's a very important effect.
+So these two are very distinct from light.
+So that's why sound simulation is different.
+And so at point A and B you get very different signals.
+And these signals capture everything that the scene did to the sound when it went from the source to listener.
+And it's called the impulse response.
+This is the key quantity we're after.
+If you model this correctly, if you model its characteristics nicely, you get good acoustics.
+So perceptually for our brain, there are two important portions of this impulse response.
+The initial energy, which is the straight energy that gets from source to listener through shortest path, and then all these reflection, all these meandering paths through the scene that get from source to listener.
+So you want, these are important quantities, I'll get to them.
+So based on the impulse response, you hear all sorts of interesting acoustic effects.
+These are perceptual.
+So the four most important ones that we focused on are obstruction, occlusion, wetness ratio, and reverb decay time.
+And there's a whole long list, but this is just an initial set.
+This is the first step, and these are pretty important.
+So we focused on those.
+So the first two effects, obstruction and occlusion.
+Usually these two concepts are conflated, but they're quite distinct.
+So obstruction refers to how much of the initial energy gets from the source to the listener.
+So if you see the scene on the bottom left, there's a source on the left, and the initial sound would get blocked by this obstruction.
+So the sound waves have to make their way around it.
+But reflections can get there just fine.
+So this is a case of strong obstruction, but little occlusion, because occlusion refers to the total energy, initial plus reflected.
+But in the second case, if I extend the partition, both the initial energy and reflected energy, both of them get blocked.
+So you have a case of strong obstruction and strong occlusion.
+So to approximate obstruction, one of the approximations used these days, one of the nicer ones, is to use the shortest path length.
+So you compute the shortest path and then you compare its length to just the straight line distance.
+And if it's much longer, if it's a winding path, then you reduce the loudness by some amount.
+You make it weaker.
+But even with this, there are some issues.
+Like for example, in this case, you have a little bit of wave scattering from the corner.
+Maybe you can ignore this, get away with it.
+But think about this case.
+The shortest path tells you that the sound should be very weak.
+But there's a strong reflection right there.
+So you would still hear strong sound in this case, even in the initial energy.
+So even the initial sound is not just shortest path, but shortest plus a few paths.
+And you need to model them to get good effects.
+And life can get much worse from there.
+And this is a simple scene.
+So you could have a 3D environment with broken windows and ceilings and all that.
+It gets pretty complicated very quickly.
+Now think about occlusion.
+Occlusion refers to the total energy, all paths.
+So what does that look like?
+This should scare you, because there are so many paths to compute.
+How do you do this in a fraction of an audio core per source all over the game in a complicated scene?
+And with sound, you need to worry about these diffractions going on at the edges.
+If you ignore those paths, you severely underestimate how much loudness a person would hear.
+And this is ironic, because total loudness is one of the simplest perceptual things, but it turns out to be the hardest one, technically, to figure out.
+And because of these difficulties, and also there's another problem that if you're computing these paths, and you're moving through the scene, if you miss a path at one frame and find it in another, the loudness will bounce around.
+That's also not good.
+So there are no fast methods.
+There's research going on on this, but as far as game scenarios, there's no approximate fast methods for this.
+So that was obstruction and occlusion.
+The third effect is wetness ratio.
+And it just says what's the relation or ratio between the reflected energy to the initial energy.
+So if you're in a room, you're standing very close to the source, initial energy gets there with very high loudness because you're close by.
+but reflections are relatively weaker.
+But if you walk further away, the initial energy decays quite a bit, but reflections are still similar.
+So you have the effect of the sound losing clarity and becoming more reverberant as somebody walks away from you in a room.
+And the scene's geometry is also important.
+What if I'm behind this little partition?
+Now the initial energy drops quite a bit because it has to make its way around that, but the reflections can still get there.
+So you have a case of very high wetness.
+and very low clarity in the sound and lots of reverberance, which conveys to you that the sound is in an adjoining room, and it conveys location.
+And the way we do it in games right now is a designer specifies a distance roll-off for the reverb, but as I just showed you, it's heavily dependent on the room size and the specifics of what's in the room.
+So a distance-based curve doesn't work very well to model this effect, and it really needs the scene geometry to work properly.
+So I'm going to show you some demos now, and these are real-time captures from the game.
+But keep in mind that these are tech demos, so I've changed a lot of things.
+So you can hear these effects clearly, hopefully despite this halts reverb.
+And what I've done is you'll hear a helicopter sound, and I'm playing only the chopping sound from the helicopter, so you can focus on one sound and listen to the effects.
+All the guns and everything is turned off.
+So this first demo is with Triton off to give you a baseline.
+Okay, now we'll try to listen to the loudness transitions and reverberance on the sound.
+So throughout this scene with its complicated broken geometry, Triton is computing right on the geometry you're seeing.
+There's no extra audio geometry to draw.
+And it's computing all these transitions, smooth transitions for you automatically from the geometry.
+And this shows that all those three effects I showed you kind of matter for getting these effects.
+So now I'm going to break down that sound for you and show you how these effects kick in.
+So I'm just going to play the initial portion of that video.
+And this one just shows the initial energy, the initial wavefronts from the helicopter to the player.
+So this one is pretty dramatic, because it's just the initial energy.
+But if you play just the reflected energy, no initial energy, it sounds like this.
+So this doesn't vary as much, because once a sound gets into a room, it keeps bouncing around and fills the whole room.
+So you get that effect.
+And when you combine them, you get.
+So when you're hidden from the helicopter, it's more reverberant, but still has some loudness, because the reflected energy is providing some energy, even in the shadowed areas, which the initial energy doesn't get to.
+So the first one relates to obstruction, the initial energy, total energy relates to occlusion, and the interaction between the initial and reflected energy, that's the wetness.
+So all these three effects arise from these two numbers.
+The fourth effect is decay rate, and this conveys scene size to us.
+So think of this scene I've shown you, this is a top view, source is outside, listener is inside, and the way we do it right now is to draw reverb volumes driven based on the player location.
+And this is a lot of work to draw.
+Like ideally you'd want to draw this many, but this is a lot of work.
+It's too much work.
+So physically what do the paths look like?
+They look like very complicated because they include diffractions and lots of bounces and you have to compute these sort of weak paths to get reverberation going on in a scene.
+And there's another problem with listener location driven reverb, which is what if I reverse the source and listener?
+All these paths simply reverse.
+In other words, if the source is inside a cathedral, you still expect sound to take a long time to decay out.
+But if you just drove this based on the listener in this case, you'd get a short sort of reverb because the listener is outside.
+So you need both locations even for the decay rate of reverb.
+And this is a quick demo of this.
+I'll play it and explain later.
+Great, there's even more of them up here.
+So the player and the male squad member, they speak a line both in the main hall, and you're getting a consistent reverb.
+The reverb is not very different between them, even though the listener has gone into a smaller room.
+So I'll play it again.
+Through that door.
+Great, there's even more of them up here.
+So you're getting a mix of the spaces.
+That's the important part.
+This demo shows that acoustics can convey location in a scene.
+Across the way.
+They're coming around.
+Look out.
+So her line at the end, she's speaking two lines.
+One when she's inside the room, and one she's in the same hall as you.
+And from that, you can get a sense of where she's located.
+I'll play it again.
+Across the way.
+So you can see her acoustics building up properly as she's in the same space as you.
+So in a gameplay situation, if she's behind you, just from the sound you can get a sense of is she right behind you in the scene or stuck in a room, in an earlier room.
+So to quickly summarize this, these are the four effects we wanted and they all depend on where the source and listener are moving around in a complicated scene geometry and with Triton we can model them.
+And the question is how?
+So let's jump into that.
+So the idea of Triton is to bake wave simulations and these wave simulations look like the animation I showed you in the beginning and they give us accuracy and reliability on all these complex geometries you've been seeing.
+And then once we bake out the data at runtime, it's lookup plus interpolation.
+So it's like light maps in that regard.
+It's CPU light, memory heavy.
+And the thing is, if you want dynamic sources on listener, we have to sample source and listener location possibilities and that means a lot of RAM.
+So that's the key technical problem here.
+And baking, of course, restricts to static geometry, but this is not a preference.
+It's just the first feasible step in our view.
+Just like lighting, maybe we can layer dynamic stuff on top of it later on.
+So here's what the baking pipeline looks like.
+The input is a game map in FBX format with per triangle materials assigned.
+And along with that we have some NavMesh geometry which I'll get to later.
+So once we have this 3D geometry, we voxelize all of it.
+Each voxel gets a material code, so you get proper reflectivities throughout the scene.
+And the material name's mapped to acoustic reflectivity coefficients.
+And the simulator runs on this voxel data directly.
+But the problem is we need to sample where the player can be.
+Now how do we do this sampling?
+We can draw boxes in the scene to indicate where to do sampling.
+And John's immediate point was, this is similar work as reverb volumes.
+So this is not very good.
+So we solve the problem.
+We realize that the nav mesh already tells us very nicely where the player can be.
+So we just lay out our samples at some fixed height above this nav mesh in the scene.
+and then we get these blue boxes, those are the player probe samples.
+And along with that, we do adaptive sampling, which simply means that in narrow regions, we sample more densely, and in very wide open areas, we sample more coarsely, because this gives us a better RAM budget, and it doesn't produce bugs where you just miss samples in some areas, which used to keep me up at night, so this was great.
+And then the bake process is the same thing repeated for all of these probes independently.
+And what that process looks like is, suppose I pick this probe with the red circle one, the bake process for that guy will look something like you do a 3D wave simulation from that location.
+Because then it tells you for this player location, what the acoustics is like in 3D throughout the map.
+So now the source can fly anywhere at runtime and we can calculate the acoustics.
+If you look at the lower right, you can see sound leaking out of the broken roof of the cathedral.
+Again, this is a 2D slice of a 3D simulation.
+And you can see sound going into that adjoining room, radiating outdoors.
+And with time, you can see the sound decay out properly, which captures the absorptivity of the scene.
+So we repeat this process for all probes.
+So think about, you did a probe simulation, you capture the signal at one possible point.
+So you have a pair of source and listener location.
+For each one of those, you get an impulse response, which if you remember, each of these spikes represent a wave front coming from source to listener with some delay and some loudness.
+And then we have this nice data.
+I told you which things we want out of it, so we just extract them.
+So we take the initial energy and just take a time bin and calculate that.
+It can have multiple paths in it.
+And then we do the same for the reflected energy.
+We want the decay rate, so we also compute the decay rate of the reflections, and then the decay rate of the reverb tail.
+So four numbers.
+So we went from these impulse responses to four numbers, and we can visualize them.
+So this is for a single-player probe location, we have mapped out what the initial energy variation is throughout the scene.
+And in this you can see, in the initial energy, you can see strong shadowing effects.
+Like I'm zooming in into one portion, it's like you get soft shadow edges, and if you walked across a doorway, you get the effect of sound going from faint to loud to faint again in a smooth way.
+Reflected energy behaves differently.
+In the helicopter demo, you saw it stayed constant in the room, it didn't change that much.
+And that we see in the data as well.
+If you look at this room, it's pretty constant throughout the room.
+Once the energy gets in there, it keeps bouncing around.
+And so you automatically, just from the 3D geometry, you get this room division of the whole scene where the reflected energy is mapped out as constant areas in the scene.
+And similar for sound decay rate, you can see it's decaying faster for the smaller room and it's decaying slower for the main hall.
+So all the four effects I was talking about, they're all in this data.
+Now the thing is, this data is smooth.
+These are not impulse responses, these are parameters.
+And they're perceptual parameters, so we can compress them.
+And we can go from 50 terabytes to 100 megabytes.
+So this is what makes it practical.
+So 100 megabytes, we can live with.
+And that was the budget for campaign maps in years of war for this.
+Actually, the initial budget was.
+150, so we came in under budget.
+Yes.
+So we have, so these bigs are costly.
+You do pay pre-compute cost for this, for getting the smooth results.
+100 machines take about four hours.
+It's 10 minutes per task, 10 to 20 minutes, and we have thousands of these for potential player locations.
+But it's trivially parallel.
+Throw more machines, it gets faster.
+Now once we have this data, runtime is lookup.
+So we need to decompress out the data, which is the bottleneck.
+So we use ZLIB for the compression.
+So we keep a decompression cache, which is a 20 MB overhead.
+Triton runs in its own worker thread, and it's receiving queries at visual frame rates, so we're uploading acoustics.
+And for about 32 sources, which we do per frame, we can do 10 to 20% of an Xbox score, because it's only 100 microseconds per query, so it's pretty fast.
+So overall, after we're done with all this, this is the big picture of the game integration.
+There's a static library for Triton.
+It loads up the data during map load.
+It loads the Triton data as well.
+At runtime, you get a source and listener location.
+You do this table lookup that I just described to you, and you get these four numbers out.
+Now the cool thing is these four numbers mean something.
+They are not samples in an impulse response.
+They're actually parameters that describe something.
+So they are meaningful for an audio designer to take and interpret into an existing audio pipeline.
+And in our case, they amount to reverb send values and occlusion obstruction values, which John will talk about.
+So to wrap up my portion, this idea of going to perceptual data gives us efficient efficiency.
+Because we're doing wave simulations, we get robustness in complex geometry.
+From the designer's viewpoint, it's automatic, no geometric cleanup, no volumes to draw.
+And it's pretty expressive, as John would talk about.
+There's a paper reference.
+This will be on GDC Vault, so you can look at it later.
+So that was my portion, how to get to the acoustic data from the 3D map.
+And then the question is how to use this data to do audio design.
+So I'll hand it over to John.
+Thanks, Nikunj.
+So that's what I got from the coons.
+So I you know.
+I like wise I can know how to work with blueprints fairly well.
+But this is what we have to work with.
+So the challenge was is how do we take this and interpreted to do something that we can actually here in the game.
+move right into it.
+So, it's important for me to kind of, might be a little bit of reiteration, but to describe what Triton actually is for me as a sound designer, as opposed to what Triton is for Nacoonge as a researcher.
+So, as a sound designer, it's a set of listener and source positions that refer to these four numbers, collusion obstruction, wetness, decay rate.
+And it's a lookup table.
+It's an inert set of data that has to be interpreted.
+And that data is very big.
+So it takes up a lot of our RAM budget.
+Going to get into this later.
+But audio designers are often working with smaller and smaller RAM budgets.
+So this is a fairly big sell for an audio team to use this.
+What Triton is not, is it's not a reverb plug-in.
+You can't just take it, put it on a sub-bus, turn it on and have it work.
+It's not a plug-in that goes into an audio engine like UE4, turn it on and it works.
+It has to be, at this stage, implemented.
+Maybe one day, but at this stage, has to be implemented.
+So, to reiterate, what the ideal interpretation of the ideal implementation of Triton is uh...
+because it generates a whole bunch of impulse responses uh... ideally we would use those impulse responses for every sound in the game as the game is rendering so that would end up being you know maybe a hundred sounds in a complex scene.
+Different games use different number of voices, but obviously this is way over CPU budget, and to use this many impulse responses, it's way over the RAM budget.
+So, that's not practical for video games.
+So, the next thing that we had to figure out was how do we get variable reverb decay rates without instancing one reverb plugin per sound.
+So we came up with.
+Let me interject quickly.
+Please.
+So this ideal system is describing, that's what we started with.
+That's the GDC 2011 system.
+That's right.
+And you can see the RAM footprint right there.
+So it was 100 GB.
+So that's the motivation here.
+Good job.
+Thank you.
+So this was the first version of our implementation.
+It's very simple we use 3 instances of wise room for and we sent to those 3 instances of wise re room for her 3 game object to achieve different river to K times.
+So the big one was three seconds, the middle one was one second, and the smaller one was half a second.
+So if you wanted a reverb tail of, say, .75 seconds long, you would send a little bit to the middle one and a little bit to the small one, and what your ear actually heard was about a .75 second decay rate.
+And so what it gave us was send levels controlled by Triton that gave us decay rates per 3D sound.
+So this, we didn't know if it was gonna work.
+We gave it a shot.
+Turned out that it worked really, really well.
+Occlusion obstruction in this, in this implementation was immediately awesome.
+So I'm gonna show a video example of that in a second.
+But the reverb still needed work.
+RoomVerb, when stacked on top of each other, again and again can sound a little bit cacophonous.
+It's the same tone stacked.
+We didn't quite know how to control all these sources going through RoomVerb and it was unpredictable about 25% of the time.
+So it wasn't yet shippable, but it was a successful proof of concept.
+Mainly because occlusion obstruction was excellent.
+And that is typically one of the hardest problems to solve.
+So here's a little demo of what we got out of that first implementation.
+So there's a firefight happening around where that red circle is.
+And the player's just gonna move around in the scene.
+You can hear it occluding and obstructing.
+What is this?
+Jin's bucket heads are taking on the swarm.
+Jeez.
+Okay, so...
+Obviously, we knew we had something cool.
+Inclusion obstruction's working really well.
+So the rest of the talk's going to kind of focus on the story of how we got the reverb to sound a bit better.
+So our next version of the implementation was significantly more complex, because we had all of these numbers to work with.
+We wanted to do something cooler.
+So this is what it looked like.
+We added.
+Well, we added nine more reverbs.
+So what you're seeing here is a matrix of reverbs.
+The first row of six, there's indoor reflections and outdoor reflections.
+The second row of six are indoor late reflections and outdoor late reflections.
+And so Triton is controlling the sends per 3D game object to each, matrix of reverbs as the player moves around the scene.
+So in theory, it should have worked really, really well.
+And it did.
+And I'm gonna just, actually just give you a picture of what this looks like in Wwise real quick.
+So we have our Triton bus there on the top left.
+Expanded.
+That looks kinda crazy.
+But the reason there's so many buses there is we were doing a set of 12 reverbs per map.
+And because there was no signal being sent to the buses that weren't being used, those buses didn't register on the CPU.
+So we were only ever running 12 convolution reverbs at a time.
+Which sounds like a lot, but it actually worked kind of okay.
+CPU was not the problem with this implementation.
+So then, as you can see there, the map, the working name of that map was Dan B.
+And then a single instance would look like that.
+So it's just the Wwise Convolution Reverb plugin.
+Now the difficult thing with this system, the main problem with it, was we're working with a very new set of tech.
+And we knew we had this squirrelly behavior about 25% of the time, which is definitely not shippable.
+The hard part with this stuff was calibrating and tuning.
+So, because we were working with impulse responses that were recorded by different people, different parts of the world, with different microphones, using different theories of game structure.
+we had to calibrate and tune every single reverb that was in this matrix of 12 perfectly to be sure that what we were getting in the end wasn't...
+a mistake in tuning, but was actually what Triton was trying to give us.
+So this task of calibrating and tuning every single reverb that we wanted to use ended up being the main flaw in this implementation.
+So the version 2 summary, there's two sets of six reverbs, and Triton is feeding indoor and outdoor signals to both of them.
+You can change reverb sets per map.
+You could also change reverb sets mid-map if you wanted to.
+So there was a lot of versatility for it.
+We had great response for the reverbs and the early reflections as you moved around room.
+There were incredible relevatory moments that this system can work and is going to work.
+But we didn't know whether or not.
+we could calibrate and tune this much stuff in time.
+So, because calibrating and tuning were so hard, it was very, very difficult to figure out where the bugs were coming from.
+I always thought they were coming from Nacoonj, Nacoonj always thought they were coming from me.
+So, one of the things that worked really, really well with this implementation was the blending that we did between indoors and outdoors.
+So, I'm going back to.
+This slide is familiar.
+This is the matrix of reverbs.
+I want to talk about how we achieved the indoor and outdoor blend.
+So, in a video game that isn't completely simplistic, you often have...
+partially destroyed buildings, you have doorways of various sizes, and so it's not really a binary concept whether you're inside or outside. You're usually partially indoors or partially outdoors.
+And so for a while, what I was doing was I was just shooting a ray above the player 15 meters.
+If it intersected with geometry, the player's inside. If it didn't intersect, I used filtering over time to gradually smooth the value out to the players outside.
+So this is still binary, didn't work at portals.
+So I told the problem to Nacoon, and Nacoon said, well, all the hard work is already done to get this data.
+We can just use the Triton data set to figure out how indoors or outdoors the player is.
+So we shoot energy around.
+How much of that energy intersects with the sky?
+determines how outdoors a player is.
+So as the player moves towards the portal, the outdoors value, which is that 1.33 here, would change to 0.72 here.
+So this is how we achieved the mix between the indoor Reverb Bus and the outdoor Reverb Bus.
+And it gave us a really nice blend.
+Check, check.
+Mic check.
+Gave us a really nice blend.
+as the player moved through thresholds and spaces, which are traditionally very difficult to manage.
+This had unforeseen uses as well.
+We were using a six-channel ambience for wind and a six-channel ambience for rain.
+In the game, I think my batteries might be low or something.
+Anyway, I'll just keep talking.
+Should I talk into here?
+OK.
+Whoa.
+Is my loud down? Okay, cool. We're using, as I said, sick channel ambiences for wind and rain.
+And we played, for various reasons, we played those on the listener position. And so then as the player moves through the spaces, we use the outdoorsness value to determine how much of the wind and rain.
+the player should hear. So as we pass by thresholds, we use the outdoors value to modulate the filtering, the pitch and the voice volume of those sounds. And so I got a demo of that here. So you're hearing just the rain. Just the rain.
+So portals are no longer an issue.
+This was huge for me.
+It solved many issues, I was very excited about this.
+So version two, although it solved the problem of whether you're inside and outside and it solved a lot of problems with our ambiences, it still generated some uncomfortable questions.
+We still had some squirrelly behavior from time to time.
+We didn't know why.
+and the system was going to require a lot of sound designer time to calibrate, tune and interpret, aesthetically, to be honest. So about six months out from shipping, we had Chuck and Rod in my office and we were doing a demo of I think it was a dialogue tuning level where you could walk around and.
+and trigger squad speech at random so that you could get further from your squad and do roll offs and stuff. I thought this level was pretty great. I said, please ignore the reverb. We haven't tuned it yet. Well, there was this one spot, we walked through and all of a sudden the squad sounded like they were inside an airplane hangar. They weren't inside an airplane hangar. And the conversation very quickly switched to a conversation about Triton. And they asked us politely to get it to a shippable level of quality on one map in two weeks to see if the work would scale to the rest of the maps of the game.
+It's a completely fair challenge.
+So, big change of strategy.
+We had to figure out where the bugs were coming from and we had to reduce timing for calibration and tuning.
+So, we had to reduce the number of sounds going into Triton.
+and we had to reduce the number of reverb outputs coming out of Triton.
+Again, occlusion obstruction worked just fine, so I'm not even talking about occlusion obstruction anymore, we're only talking about reverb here.
+Once we simplified, we started to get a real understanding of the root causes of our problems.
+So what did that simplification look like?
+It looked like this.
+We cut six of the buses and combined the late reflections and early reflections into the first six buses.
+So it was a dramatically simplified implementation.
+We knew the indoor and outdoor switching worked really well and we knew we could manage six buses per map as a set rather than 12.
+So.
+The rest of the talk is gonna be about what we learned once we did this and how we shipped.
+First, I'm just gonna run through these points real quick.
+Explain them later.
+Physical dynamic range that's modeled by the Triton numbers versus an aesthetic dynamic range that sound designers interpret to create a mix.
+Dry gain, Triton models dry gain that can be applied to a sound when you're in certain enclosed spaces.
+physics-based decay times versus aesthetically chosen decay times.
+So it turns out that we choose decay times in film, TV, and games on an emotional scale as well as a physical scale.
+It's not just physics-based interpretations.
+So this got to a shift in thinking.
+We're getting these realistic values from Trident, but how real is too real for the game?
+So, lesson number one, dynamic range.
+Real world dynamic range is about 190 decibels between barely audible and permanent hearing damage.
+This is no news for sound designers.
+We've always had to interpret this in a game mix.
+But what was new was a realization that we had to make that interpretation pre-reverb sound when using a system like Triton.
+So that was new.
+So to illustrate for the non-sound designers in the room what that looks like, there's a map of real world sounds.
+A map of sounds that are in Gears of War 4 as they would fall in a real world decibel scale.
+All of that has to be mapped into about a 35 decibel scale of dynamic range.
+All of that was going through Triton.
+And it didn't sound right.
+Obviously, now, seems obvious now.
+Wasn't obvious then.
+So we knew we needed to focus on a specific dynamic range going into the reverb.
+And even more so than that, we knew we had to nail it for a single, the single most important element of sound in the game, which is the squad speech.
+So we figured once we nail the squad speech, get that sounding good through all of the reverb spaces in the game, then we can start adding the other stuff.
+The other fallout from realizing the dynamic range characteristic of Triton was that we were too aggressive with our occlusion obstruction curves and we backed them off a little bit.
+So we were working with a attenuation of 100 decibels before and we backed it off to an attenuation of 25 decibels.
+In a linear game experience like Gears of War, this was an aesthetic choice to move away from reality.
+other games wouldn't want to make this choice. This would be a per‑game decision. So lesson number two, dry gain. Once we moved to this more simplified implementation, I was walking around the office.
+and I was snapping my fingers, I was clicking my tongue, and I was trying to figure out all of these things that Nukunj is telling me that happen in the real world.
+Do they actually happen in the real world?
+And it turns out that if you just cup your hands in front of your face, all of a sudden sounds get louder.
+So if you walk into a dead end hallway and snap your fingers, it's a lot louder.
+So Nukunj rightly so had a dry gain component to the Triton implementation.
+It turns out that dry gain, when implemented into a video game, at least when implemented into Gears of War, did not sound expected.
+It was an unexpected bit of reality.
+So the solution to that was very simple.
+We took the dry gain bus, which had the capability of being plus 12 dB and reduced its range to plus 3 dB.
+So the loudest that the dry gain could be added to any sound was three decibels instead of 12 decibels.
+So now it's lesson number three.
+And this was perhaps the coolest lesson of all.
+Triton simulations were.
+Very real.
+Sometimes, small spaces like a marble bathroom can generate a very, very long decay time.
+Other times, large spaces can generate very, very short decay times.
+And so, what we realized is we needed a way to tweak these numbers to fit our expectations as sound designers.
+to emotionally interpret a space.
+So what did this mean?
+It meant if there was a church and something really grim was about to happen in the church, perhaps we'd want a very long decay time in that church, longer than what that church would actually give us in real life.
+So the solution was.
+a new blueprint node to make the distortion or reinterpretation, the creative reinterpretation of the Triton values possible for sound designers as we move through the maps.
+So I've got a demo showing this.
+So this is Triton turned off in this map, and then Triton turned on afterwards.
+I'd say it's about time we got the hell out of here.
+Hey, are we not going to talk about what happened back there?
+With the nest? I mean, what the hell was that?
+It looked like they were transforming.
+Wait, you mean like evolving?
+Shouldn't that take a lot of time?
+It's amazing how much you can hear this room.
+Okay, so I swear there was no reverb on that.
+So here is the same scene with Triton turned on with exaggerated reverb for the big space and then as the squad moves into the smaller space we start to get a more physically accurate reverb.
+Wait, you mean like evolving? Shouldn't that take a lot of time?
+Well, some insect juveniles can become drones in days. Hours even.
+So, juvies and drones. Juvies and drones of what?
+I have a feeling we're going to find out.
+So you're hearing in this demo an amalgamation of all of the things that I've been talking about so far. We've got conversation over multiple spaces, a big church space to a small room, and then moving smoothly into the outdoors. You hear the rain fading up smoothly.
+And all of that was accomplished with this final implementation.
+So yeah.
+So in conclusion, implementing Triton.
+the biggest risk of implementing this system turned out not to be the tech itself, but the tuning and calibration of it. So we really ‑‑ we initially bit off more than we could chew. We pulled that back. We found all of the problems. And we were able to ship a system that sounded pretty good. The second big lesson was to focus on the on an emotionally motivated cinematic experience for acoustics rather than a physics-based, reality-driven experience.
+So, this is my favorite slide.
+Who knows what the uncanny valley is?
+Raise your hand.
+Sweet, okay.
+Our first implementation of Trident put us about here.
+We knew we had something cool. We were moving towards reality pretty cool our second implementation of Triton Definitely put us here people were freaked out. We got a lot of Interesting feedback Version 2.5 was cool, but it was still too real too real. I don't know. It's an aesthetic choice, right? We were still getting the interesting feedback. But at that stage, we had the simplification of the parameters to achieve something that was shippable. So we moved to something fairly simple, but we still have a lot ‑‑ all the hard work to create the Triton data is done.
+All we need to do now is start pulling more numbers from it and figuring out creative ways to add them to the acoustics in our game.
+So, we really think that we've only scratched the surface of what we're gonna be able to do with this system.
+So, there's a final demo.
+This is kind of like the victory lap demo.
+It shows.
+Triton working through various indoor and outdoor spaces.
+It's got some aesthetically chosen reverbs for caves.
+It's got rain, it's got wind.
+And yeah, it's maybe Triton's proudest moment.
+At least it's my favorite.
+It's my favorite moment in the game.
+You won't be able to see the burial site from here. It's on the other side of the dam. Come on.
+So, who are the four guys on top of that thing?
+Uh, no one. They represent the four sources of energy. Water, air, solar and gas.
+No emulsion?
+The dam was built pre-emulsion.
+Wow, it's that old. There's hardly anything left that's that old.
+There are still a few things.
+You know, a while back, I looked up how many locust burial sites there actually were, and I got a big ol' classifier.
+There were dozens of them. Maybe even hundreds.
+They can't all be infested, right?
+Well, we're gonna find out one way or another.
+So, conclusions, both of us.
+So the major takeaway that we hope all of you will take away is that baked wave acoustics systems are practical for video games today.
+The designing of those...
+The designing of those numbers, the sound designing of those numbers is what is critical.
+So how you interpret those numbers for your game.
+And what makes it challenging to begin with is the sources and listeners are all moving around.
+We wanted that from the beginning, and that gives you a large amount of data.
+And the key idea to compress it is to go to these perceptual parameters.
+And it's a pretty sweet spot, because you get low memory usage, it makes it practical, but also this perceptual data is now in a vocabulary where a designer can take this and design it.
+So for the future, the very next thing we're looking at is to add directional effects.
+I told you we have four parameters.
+We want more.
+We want the directional effects of sound coming out the cave of a mouth and its proper direction and reflected, delayed echoes.
+We're looking at streaming to reduce the memory footprint.
+We just load up everything right now so we can stream that.
+And we want to make the bakes faster because that's the key cost right now associated with this.
+And we feel that once we have these features, it would be in a place where we could package it and share with other interested studios.
+And longer term, we'd also want to do dynamic geometry, of course, with this thing.
+That's a longer term goal.
+So this system never would have happened if it wasn't for the support of a lot of people.
+It's new tech, never shipped in a game before. A lot of people put a lot of faith that we could figure it out and make it sound okay. It didn't sound okay for a fair amount of time.
+So, big thanks to these people.
+So I'd highly recommend you listen to these videos with headphones on or a good speaker setup later on, because this all adds a lot.
+And I put the slides on my website, but they'll also be on GDC Vault.
+So if you have questions, just step up to the mic.
+Hey.
+So first off, thank you for that talk.
+That was really eye opening and, you know, just gets all our creative minds just going.
+But I missed a certain idea that you had in one of the slides.
+And it was during the outdoorness.
+And it was energy reaching sky and then that was divided by what was it?
+the total energy shot from it.
+So it's a fraction of energy that gets to escape the scene.
+If nothing gets out, then it's zero.
+Everything escapes, then it's one.
+OK, no, thank you so much.
+Great talk.
+Two questions.
+One is for when you tweet the values for your reverbs, I was wondering roughly what percentage of the space did you have to adjust to get the more emotional kind of response?
+I would say that there were fewer than a dozen.
+Yeah. Because it really was ‑‑ tried and worked really, really well most of the time.
+There was just certain spaces that you would walk into and the squad would say something really key and something really cool was about to happen. You would be like, it's not doing it for me. I want something cooler. And so you pick a certain, you know, that's when you would go crazy by tweaking the values. Like I want this ‑‑ I want this way wetter. I want the decay time way longer. And then when the fire fight starts, okay, we'll pull it back.
+And another thing that happens is many spaces are in real life much more cluttered than they are in a game, but our expectation comes from real life.
+And clutter reduces the decay rate.
+So it's like you walk into this empty room and it reverberates for a long time and you feel this is a small room.
+Because typically when you see those small rooms, they have stuff in them.
+And so those cases also happen.
+And the other quick question is for your reverbs, you said you didn't do any kind of directional kind of panning on that?
+No.
+OK.
+Did you find that it impacted the effect of not having panning on it?
+It is the first thing I asked for after we shipped.
+Because these simulations you're seeing have all that.
+The question is, can we get the data we want without blowing our RAM budget?
+That's really the only question.
+And how do we render it, of course?
+How does it go into the middleware or our DSP or what?
+So those are the two questions you need to go solve for each parameter.
+Once we figure out, okay, this is something we want, that's the process.
+Right, cool, thank you.
+Hello, I had a question about how you generated your impulse responses.
+Do you use like a normal raycast method or did you do finite difference or anything else?
+This is finite difference.
+So it's a finite difference.
+This is actually a solver I worked on in grad school, so it's faster than finite difference.
+It's faster than finite difference.
+Are you talking about the impulse responses that were used for the reverbs in the final game?
+Or the impulse responses?
+No, no, no. You're asking about how we got them.
+So these simulations I've been showing you are like fluid simulations, you could think of.
+So they're solving for pressure values over space on a grid over time.
+Yeah, and you do that at high orders.
+What's that?
+High orders of reflection or...
+Yeah, this is infinite order, pretty much.
+Like if you have a small space, they can bounce around any number of times they want.
+So this is different from ray tracing for sound.
+This is an advantage of, that's why we went with this.
+Because it gives us diffraction and all that for free.
+And it's a big cost to start with this, but if you bite the bullet, then it gives you all the cool effects.
+And you didn't do anything with the room node data that you got back from that.
+Say that again, please.
+The nodal data that you got back.
+Which data?
+The room nodes are like, you know, like if you get a base trap in the corner of a room, that kind of information that you get back.
+Yeah, we didn't, yes, so frequency dependent data, we didn't get that out, so that's another thing.
+Yeah, that you get from a problem.
+Even if you get, do low, mid, and high, that triples the numbers.
+Yeah, sure.
+So, yeah, so it's like how to extract that.
+Yeah, cool.
+All cool problems.
+Yeah.
+Another quick one, so did you ever think of, I know you couldn't use the full impulse responses that you got back because it's too much RAM and too much processing to do, but did you think about just using the first part, like the early reflection part of the impulse responses because it's much less data?
+You're describing the 2011 system.
+Oh, okay.
+It took the early reflections and looked for peaks in that to get the sharp reflections and it kept their amplitudes and delays.
+And that's 100 GB.
+Right, oh, okay, so it's too much, okay.
+That's why we did this.
+So thanks for asking a good question.
+I guess just a wise question, if you guys could theoretically run four concurrent convolution reverbs, what were your memory pools for your lower engine and default?
+Okay, so we were, we ran up to 12 and then we shipped with 6.
+And so the question is how much memory we were using for those, well the convolutions were always fixed length to .5 seconds, .75, no, sorry, .5, one second and three seconds, so it was always the same.
+You could, you know, I think we were doing 48K.
+resolution convolutions, so I don't know the math, but you can figure it out.
+Cool, thanks.
+No problem.
+Well, I guess if that's it, we are duty-bound to put that slide up.
+Oh, one more question.
+I'm just wondering what your RAM budget was on the game.
+Say again?
+The RAM budget was for the runtime.
+We were initially given a RAM budget of 500 megabytes, and we shipped with 400 because we came in under budget.
+So Triton initially had a budget of 150 megs.
+And so we shipped most maps were 100 to 110 megs.
+We can improve that with existing tech.
+The problem was time to get it lower.
+Thank you.
+You're welcome.
+Thanks so much, guys.
