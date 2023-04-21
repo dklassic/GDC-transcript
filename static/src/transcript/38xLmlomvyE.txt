@@ -1,0 +1,132 @@
+everybody. Thanks for coming out today. My name is Zach Aikman. I'm the lead engineer at 17 bit. 17 bit is a small 7 man studio based in Seattle and in Kyoto. Most recently we developed the turn based strategy game skulls of the shogun and right now we're working on galaxy. Today I'm here to share with you about the process of building procedural dungeons in our game.
+If you're not familiar with the game, Galaxy is a top down 2D space shooter. It's an homage to 16 bit shooters updated with modern tech and modern design. If you try to compare the game to asteroids, halo, far cry, spelunky or even the early 80s anime series Star Blazers, you wouldn't be far off. All of these have served as inspirations when designing and building Galaxy.
+Galaxy is being developed in unity with a custom AI solution provided by sentient and will be released this year on the PlayStation 4 and later on Steam.
+those of you who haven't seen or heard of the game before, I'm going to play a quick gameplay video just to give you some contextual reference for those things we're going to be discussing. Is there audio? Should be playing. Okay. Product not yet rated. So I'm going to I'm cognizant of your feelings, I'm cognizant of your feelings 2014, please pretend.
+At PAX Prime in 2013, we demoed our tutorial level, which we had internally named the fourth cave. It was the fourth iteration of a lot of hard work. And every rock had been hand placed and sized. Every region was uniquely lit. Every enemy patrol was strategically placed. Put a lot of work into hand crafting this sort of experience. We were really happy with the end results, but it also showed us exactly how much work was left to finish making the game.
+The PAX demo also highlighted for us the true strengths of the game, which I've listed here.
+And if you notice, the delicate placement of rocks and flora and fauna is not on that list.
+Our level design approach started to shift very rapidly once we realized this.
+We had a hunch that we could randomly generate our levels, but we didn't quite know exactly how we'd go about that.
+And I had some prior experience doing procedural generation on a student game called Synesthete, and so I volunteered to take on the task.
+and by this point I had a fair amount of reading about procedural content generation techniques and the one that immediately stood out to me the most was something called cellular automata. Cellular automata refers to a simulation performed on a grid of cells that are always on or off and are governed by certain rules.
+These rules are applied to every cell during each step of the simulation. Each rule examines the cell's current state, if it's alive or dead, and also the number of living neighbors. If there are enough living cells surrounding a dead one, it will become alive as well. And similarly, if there are not enough living cells around a live cell, it will die off.
+John Conway's seminal game of life which was devised in 1970 is a collection of these rules that produces an unstable, constantly shifting field of cells that closely resembles the rise, fall, and alterations of a society of living organisms.
+The cellular automata game is initialized with a starting configuration of cells and then the user sort of steps away and doesn't interact with it except to observe it.
+And here we can see two examples of cellular automata patterns.
+One very simple and one very complex.
+Both of these patterns are what are called gliders. A very popular type of pattern in the game of life. The glider pattern will move across the grid infinitely until it hits the edge of the grid, which makes it capable of transmitting information. Even if that's only one bit at a time, it can still transmit information, which means you can build things like logical gates and or exclusive or etc. Which ultimately means that the game of life is Turing complete if you build enough little tiny gliders. So the complexity exhibited by such a relatively simple algorithm is nothing short of phenomenal.
+But remember, the rules used in the game of life were specifically chosen to generate these types of interactions.
+If you play around with the rule set and pick a different set of rules that will ultimately bring the grid to a state of equilibrium, some very interesting shapes start to emerge.
+Let's see what happens with a more stable rule set and a random configuration of starting cells.
+perfect. Let's just take a moment to appreciate the beauty of this cave. It's got pretty much everything you would want in a galaxy level. Islands, narrow passageways, pockets for hiding or for placing lava pools, there's so many things you can do with the space. And all of this from that same underlying system that generated those gliders in the previous slide. The only variation is a rule set that tends towards equilibrium and a much denser starting grid. The algorithm stabilizes relatively quickly. It only takes about 10 or so iterations to achieve this.
+And here we see a step-by-step generation of a small cellular automata cave using a custom tool that we built for Galaxy.
+This first animation shows how the cave evolves from its initial chaotic seed.
+You can see it starts with pure noise, but over time it converges into this really cool shape.
+So we fill the starting grid with about 50% living cells and 50% dead cells, and then run the rule set repeatedly.
+and here we can see the final results of that same cave if we change the proportion of dead to living cells. By seeding the grid with more dead cells we produce less open space and vice versa. When we seed it with more living cells we're able to produce more open space. So we just make our grid bigger, run the cellular automata algorithm and voila, we're done. Right?
+Actually, no, not by a long shot. Because as beautiful as this is, it's impossible to control. It's visually fantastic and it's exactly what we want, but you still have the daunting task of writing some sort of algorithm that populates this cave with interesting objects. You would need to place treasure, enemy patrol paths, hazardous obstacles, all the things that make the game fun and interesting, you still have to place and that's actually really, really difficult to do with a shape like this. So cellular automata are really cool, but they're not a good choice for generating levels at this scale.
+They are, however, an ideal solution for generating smaller chunks within a level.
+And so once we decided that the smaller cave chunks were the way to go, we started experimenting with many different spatial subdivision techniques to link them together and to form something larger and cohesive.
+Binary space partitioning is a tried and true process for splitting space into smaller discrete chunks, and so that was the first method that I turned to.
+Given a rect that defined a dungeon size, I would split the space into smaller and smaller pieces, stopping when each piece was small enough that I could consider it to be room size.
+And at the end, some percentage of those rooms would just be thrown out, leaving us with a scattered collection of rooms to be filled with cellular automata. And from this collection of rooms, I was able to construct a minimum spanning tree, which gives you the most direct path from any one node to all of its neighbors.
+using the connecting edges of the tree, which in this image are represented by those thick black lines, I tried to drill tunnels that connected individual rooms together. The result, which I neglected to take a screenshot of, was kind of a mess. Just imagine that every node on that graph pictured was replaced with a small cellular automata cave.
+connecting corridors were sometimes too long or too angled or the rooms were too far apart or they intersected the rooms in awkward ways or there were just too many things wrong with this approach. And I really like solving problems but all I saw in front of me after this were more and more problems. So this is around the time that I decided to take a few steps back and reconsider our whole approach. During this time, maybe by chance, my co-worker Paul pointed me to a Wikipedia page on Z-order curves and suggested that they might be useful.
+A Z-order curve is a function that maps multidimensional data to one dimension while preserving locality.
+Sounds like a mouthful, but like everything else we are going to be exploring, it's best illustrated with a picture or two.
+So here we see a few different instances of the two-dimensional Z-order curve at increasingly higher resolutions.
+The first one maps a 2 by 2 space, and then a 4 by 4, 8 by 8, and finally 16 by 16.
+The Z order function works by interleaving the bits of the X and Y coordinates to generate a single value called the Z value.
+And I'm going to skip over the details of the implementation, but if it's something you're curious about, it's fairly straightforward if you're comfortable with doing bitwise operations in code.
+So how does all this relate to Galaxy and cellular automata?
+Well, obviously this isn't quite how I'd imagine our dungeons turning out.
+There's a lot of zigging and zagging, but there are two characteristics of this algorithm that are of interest to us.
+The first is that it gives us a way of representing two dimensional grid with linear values.
+If I have a square grid I can generate a linear path that takes us from one end of the dungeon to the other.
+It lets us map physical space to logical space.
+And secondly, but just as importantly, this function is invertible.
+If I have a Z value I can retrieve the X and Y coordinates very easily and very quickly.
+Incrementing the Z value from say zero to three will take you through all the cells on a two by two grid.
+sorry that was really loud.
+As it turns out, zeroed curves are part of a whole family of space-filling curves, which are functions whose range contain the entire two-dimensional unit square.
+So if you have a two by two or a four by four, eight by eight, whatever, square, you can ensure that every point in that space will be touched by one of these curves.
+This is a big selling point for me because one of my pet peeves is handling backtracking and intersections, which is a common issue when you're doing pathfinding and space-filling algorithms.
+So Hilbert curves are another set of functions that belong to this family. And the moment I saw this diagram, everything started clicking into place and you may already be able to see why.
+They preserve locality even better than Z order curves and the coordinates between points on the curve never change in both dimensions at once. That means they're orthogonal, i.e.
+there are no diagonals, which was something that prevented Z order curves from being really useful for us. Only having to deal with the four cardinal directions actually simplifies a lot of stuff.
+To work with the Hilbert curve, like with the Z order curve, all you need are two functions, one that maps one-dimensional space to two-dimensional space and vice versa.
+And instead of calling the one-dimensional value z, we're going to call it d for distance.
+As you can see, this entire implementation is only about 20 lines of code, and it's mostly composed of simple arithmetic and bitwise operations.
+So if we are banding all that spanning tree in binary space partitioning nonsense and instead just lay the rooms out on a grid, it becomes a perfect match for the Hilbert curve.
+There is however one glaring fault with using Hilbert curves to map out the interior of our dungeon and that's that the path is always the same. In the following example we're trying to build a dungeon that's four rooms wide and four rooms tall and so naturally we would want to pair it with a Hilbert curve whose dimensions match.
+And as you can see, if you follow the path of the Hilbert curve, every cell gets visited, but the shape of the path is far too recognizable.
+It doesn't really look random at all.
+Even if you rotate the underlying curve, it's still very recognizable.
+And even in the game, without a level map or something, the player is going to be able to pick up on this sort of repetition very, very quickly.
+So our solution?
+First, we start by expanding the dimension of the Hilbert curve to the next power of 2, which makes it four times the size of the dungeon grid.
+and then we pick a random offset for the dungeon grid.
+So rather than mapping the grid and the curve one to one, we use the smaller dungeon grid as a sampling kernel and only take the parts of the Hilbert curve that are contained within the grid.
+We do this by walking along the Hilbert curve from one end to the other and checking to see if the XY coordinates at each point on the curve are contained within that dungeon grid.
+If they are, then we add that cell to the dungeon's main path.
+If we ever walk off the grid, we simply keep walking the curve until it returns to a neighboring cell. If it doesn't ever touch a neighboring cell, then the path ends. And here are a few more examples of random paths that can be constructed with this approach. In this animation, all the red cells are dead cells. They've been excluded because they were unable to connect to the main path as we were walking along the Hilbert curve. So already we have a lot more variation, but the paths are still a little on the plain side.
+And so in most cases, we're left with a handful of dead cells that we normally just discard.
+But it turns out we can reuse those instead of discarding them entirely.
+For every dead cell that is touching the final path, we consider a candidate for a dead end.
+And dead ends are offshoots from the main dungeon path.
+And they're represented by the purple cells in this animation.
+Dead ends actually play a very important part in Galaxy, because that's where treasure troves and mission objectives are usually placed.
+If we can't generate enough dead ends to meet the requirements for a particular dungeon, then we simply discard the results and start again from scratch. And because the whole process is very, very quick, it's easy to brute force a layout that works. So now we have a way of generating random layouts within a confined space. It's time we go back to the thing that started this whole mess, which was generating cave-like rooms. By working from the top down now instead of from the bottom up, we have a little more information about how to generate these rooms using cellular automata.
+Our approach to generating the dungeons layout added some restrictions to the rooms, which ends up being a really good thing.
+When you impose constraints on a problem, it typically makes it easier to solve, and that was definitely the case here.
+With a clear understanding of our high-level layout, let's take a look at some of these considerations.
+The first one is that we decided that the cellular automata would be used to generate individual rooms of a fixed size.
+We always know how big any one chunk is going to be.
+We chose a seemingly arbitrary grid size, not at all related, 17 bit, actually, totally coincidental. Size that provides enough fidelity for the cellular automata features to show through without being so big that they're unwieldy. Additionally, because these rooms need to be placed along an exit, or along a path with discrete cardinal exits, the edges of the rooms need to be open enough to connect to their neighbors. The cellular automata algorithm does a good job at providing the initial shape of the room.
+but sometimes it's not quite right. There's an odd pixel here or there or that passageway is just not quite wide enough. So it's important for the content creators to be able to go in and touch up these shapes when they need to. And also empty rooms are boring. We need a way to specify the placement of loot, of enemies, mission objectives, all that good stuff. And finally we knew we'd also need some extra data about a room for filtering criteria. Say you want to make a room that's only going to be used at the end of a dungeon or a room that's used for a particular mission, we need a way to be able to specify that as well.
+So all these requirements helped us build a tool that was uniquely suited to addressing the aforementioned challenges.
+And there are two main parts to our room template editor.
+At the top is a layer-based pixel painting tool that allows our content creators to create a low-res template of a cellular automata room.
+There's a little button they can click, and just keep clicking it and it'll keep generating new shapes that they can start with as a base.
+And these templates are simply patterns for building the actual room at runtime.
+All we're doing is seeding the data.
+At first glance, I know this looks like a jumbled mess of colors, but each color represents an individual layer that controls the placement of a different collection of objects.
+And below all that is a panel for editing things like the template's name, its available exits, its room spaciousness, metadata, all that stuff, as well as some controls for previewing the room in-game.
+Let's take a little bit of a closer look at that painting panel up top.
+room creation becomes decidedly less complex when you go layer by layer. In the first layer here the user can paint over anomalies or add their own geometry to the room. In the second layer they can add way points for enemy patrol paths and then there are layers for bug spawn points, decoration objects, interactable objects, background objects, fixed obstacles, floating obstacles, destructible barricades, lava pools, foreground elements to enhance the sense of depth. All these things come together in this one tool. And they all utilize the same interface for creating, placing and editing.
+So with this tool, at any point in time, the user can click the Build button to see what the room will look like in the game.
+And as you can probably guess, this particular feature proved to be invaluable.
+But as it turns out, it's not just invaluable.
+It's actually kind of a necessity.
+Because these are room templates, the content creator doesn't know exactly the configuration of the room when it's in the game.
+There's a bunch of different templates or a bunch of different data that could be applied to this template.
+And so it's important for them to be able to see the room in different configurations.
+These configurations are called dungeon zones.
+So dungeon zones are how we give a room with the same template their own unique aesthetic.
+Typically a dungeon is made up of anywhere from one to four zones with zones often spanning multiple rooms. They group different parts of a dungeon together and they give the player some sort of frame of reference when they're traversing it. It allows the player to say things like, oh I must have circled back around because I'm back in the bug area where I started.
+It also allows us to extract a lot of variety from a single room template.
+and specifically dungeon zones control how the room is lit, what you see in the background layer, what you see in the foreground layer, what types of enemies can spawn there, what types of loot can spawn there, and how many rooms you'll encounter in a row in this particular zone.
+Astute viewers may have noticed that the final appearance of these caves is much more organic than the blocky templates that we've been looking at. And we accomplished this with two steps. The first is to flood fill the cellular automata grid to detect isolated shapes.
+and these points are then triangulated into meshes and then assigned collision data and a tiling texture and this forms the interior of the cave walls. And then to form the exteriors, we simply place pre-made rock objects along the edges of those meshes. And this is what gives the cave walls their jagged roughness. And so finally after all that, hopefully you now have a pretty good idea of what's going on in this animation. There's the exaggerated Hilbert curve layout, the placement of rocks.
+different colored zones, etc. We finally have one big happy space cave. Space hulks are another type of dungeon in galaxy that utilize the same procedural system as the caves with a few key differences. Caves are organic and expansive while space hulks are man made, they're quantized, they're much more linear as well. I took advantage of the fact that our space hulks are longer than they are tall.
+being never more than two rooms high, the Y coordinate can be represented with a single bit.
+So rather than using Hilbert curves to generate these layouts, I generate a random number and I look at its binary encoding and then alternate between the top and bottom rows of the dungeon grid. So the bits are read from left to right, placing new cells either in the same row or in the opposite row depending on whether or not that bit is set. This gives you a very sort of jagged, zigzaggy effect, which the Hilbert curves do not.
+Like with Hilbert curves, generating a new layout is very, very quick.
+And so it's acceptable, again, to brute force our way to a result that meets the criteria for a particular level.
+And here we can see the grid-based room templates continuing to pay dividends.
+Rather than jumping through hoops to make the cells appear organic and cave-like, for space hulks, we embrace their sharp edges and uniformity by placing metal panels in place of rocks.
+I'd like to show one more final example of how we squeezed as much value out of the low res room template system as we could. By combining elements from both the space hulks and the cave dungeons, we were able to create a third type of dungeon. In our games fiction, pirate bases are created by enemy units who have set up shop in cavernous asteroids. The interiors are man made but they often contain organic elements left over from the original cave.
+and this one literally fell into our lap with almost no extra coding. Just some creative combinations in the JSON dungeon data. We take elements from both and create a new type entirely. So with that, I'd like to leave you with a few best practice recommendations. These are things I wish I'd kept in mind or known about from the start.
+The first is to pick a coordinate system and stick to it.
+In the Unity editor, the y-axis goes from top to bottom, and in the game itself, it goes from bottom to top.
+And because I was doing so much work in the editor GUI, I made the mistake of using an inverted coordinate system when generating dungeon layouts, which resulted in a lot of unnecessary flipping along the y-axis at various points in the pipeline.
+Before I standardized our coordinate systems, this led to a lot of frustration when debugging.
+Also draw pictures, very very important, and keep them nearby. Having a visual reference is incredibly invaluable for this sort of thing, especially if this is going to be a multi-week or multi-month project. You really want to be able to refer back to your original idea or things you've done in the past that haven't worked out. One of the strengths of our system is the ability to swap out pieces to generate entirely different results. Keeping systems modular is notoriously hard in gameplay code, but in a system like this, it's much more straightforward and there really is no good reason not to do so.
+The more you have in some external file format like JSON or XML, the easier it is to make changes or to write tools that make the changes for you. We chose JSON over using Unity's scriptable objects because of its flexibility and the ability to modify it quickly in a text editor. I didn't end up writing any sort of tool for modifying some of the dungeon zone data and stuff like that because it was easier just to write it by hand and tweak it when you needed. And when possible, give yourself a target to work towards.
+But we had the benefit of having already created a level that we were happy with and met our expectations and so that was a good benchmark for us when we were redesigning things with a procedural mindset. Also keep in mind your own working memory capacity. Working memory refers to the number of concepts that the human brain can hold onto at once. This is particularly relevant to the discipline of computer programming and helps to explain why the concept of flow is so important.
+I'm sure most of you have experienced this in the past.
+You're knee deep in a difficult task when someone shouts your name across the room because they desperately need your attention.
+The mental model that you've spent the past hour building in your head all of a sudden falls to the floor, comes crashing down, and it takes another half an hour just to ramp up and get back in the groove where you left off.
+When designing and interacting with complex systems like this, it's important to be able to fully grasp the big picture at any one point in time. And that really can only be accomplished by providing enough layers of abstraction. So figure out your own working memory capacity. For me it's about five or six high level concepts. And then refactor your code when the number of systems in any one layer exceeds that amount.
+If I can leave you with one last thing, it's this. There's not a textbook approach to generating procedural content. The process is absolutely as unique to your game. Just as unique as your game is. It doesn't need to include difficult or abstract math. Like many other game development techniques, it's largely a question of creative problem solving and being willing to attempt new and untested methods. We failed many, many times along the way, but each failure taught us something new about the game we were trying to make.
+Unfortunately I only have about a minute left. I think we're out of time. If you have any questions I would love to talk with you after, either down here or in the wrap up room in 2002. If you're interested in hearing more about the music side of Galaxy, there's going to be a really, really sweet talk by Andy coming up right after this one. Thanks for your time.

@@ -1,0 +1,399 @@
+Hi everyone, my name is Nick Heron. I'm the Technical Director of Infrastructure for EVE Online at CCB Games, which is a really long title for Cosmic Plumber. We'll be talking about Quasar, which is a collection of technologies that we've employed to evolve the development stack for EVE Online.
+This includes things like gRPC, it includes things like Kubernetes and Golang.
+We'll talk a lot of different technologies as we work our way through.
+And first, we'll kind of go through what is EVE Online for those of you that might be unfamiliar.
+We'll talk a bit about EVE's network topology and what that looks like and how that's evolved over time to get us to this point of solving some of these problems with a system like Quasar.
+and ultimately how we fundamentally worked on changing how we build services in EVE Online from a technical aspect and from a cultural aspect.
+And so hopefully we can drink from the fire hose fast enough to get to some questions towards the end.
+And let's just start with EVE Online.
+EVE Online has many different names.
+Internet Spaceships is probably the most endearing one.
+There's also Spreadsheets in Space.
+Recently heard the one Space Lord Simulator.
+Most people though, watch Eve Online from afar, in the sense that they hear about the heists in corporations or alliances, players basically liquidating all assets of other players in massive theft, you know, that takes like one to two years to kind of really pull off.
+But ultimately, what allows this to happen is that Eve is a single shard sandbox MMO for spaceships.
+And from when we say single shard, this means that EVE Online doesn't really have realms or regions. Everyone's connecting to the same server and playing with the same resources and playing in the same universe. And then when we talk about sandbox, one of the more emergent mechanisms inside of EVE is probably the player-driven economy. And with our market, the kind of market transactions are roughly half a million on a slow day.
+And this represents probably about 12 billion items moving around in the universe.
+But keep in mind that that number is pretty high considering like it's not that high considering that those things involve like munitions, weapons, ships, raw materials.
+And probably the other biggest claim to fame for EVE Online is the massive fleet fights that we have.
+We're in the Guinness World Record for most concurrent participants in a multiplayer video game for a PVP battle.
+We're around 6,500.
+And we'll talk a bit about how dealing with the natural tendencies of the player base to all congregate and want to basically have a brawl in the same place, how that kind of affects some of the technology decisions we made and the techniques that we used.
+to deal with that kind of server load. And to get a little bit more perspective on what that means for EVE Online, we can't really just make these broad sweeping changes easily because EVE Online has been in development for about 20 years. And I'm sorry, I shouldn't say in development. It's been EVE's been running for 20 years, but we've been developing on it that entire time. It released back in 2003 and started development a few years before that.
+After 20 years, this roughly looks like a little bit more than 2 million change lists in Perforce.
+And kind of as a silly unit of measurement to give a little bit of perspective on the size of the code base, we talk in the measurement of, you know, how many UE4s this represents.
+And so if we start with the C++ aspect of the engine, this contains things like the renderer, the simulation engine, and the C to Python marshaling, along with all of the other middlewares that we have that are integrated into the engine itself. Next up is the SQL code base, which is a lot of the backbone of EVE Online originally, because this represents about 7,000 procs that power the persistence of EVE Online, and also has a lot of the logic of how the gameplay works itself.
+I would guess to me there's probably around a 30 to 70 splits for SQL to Python logic, because some of that logic is in SQL prox. A majority of that logic is definitely in Python code. Speaking of Python, this represents our rules engine.
+and all of the services that we'll be talking about, the proprietary protocol that we have for our network layer, and this is all powered by stackless Python as well. And then kind of because we got curious a little bit while doing these numbers, ultimately looked at how much authored content is in the universe, and that ended up being a concerning 53 million lines of YAML.
+This is ultimately where Originally, the University of online was authored inside of a SQL database, but then that was eventually all pulled out to be authored on file simply to take advantage of source control mechanisms like Perforce. And so moving on to a little bit about what the topology of Eve looks like. So in the beginning, it was deceptively simple, Eve online.
+There was basically a data center and an SSQL database, what we call sole nodes, which in any modern clustered service, these are just basically worker nodes that can take on whatever workloads they need to take on.
+In our case, sole nodes naturally started spreading out across things like character information services or alliance services or corporation services in the game.
+That could also cover regional markets as well, depending on how much load was needed and how much processing was needed for each of those groupings of services.
+Another example of that is we have our main trade hub solar system in the universe, which is has a dedicated sole node to it because it needs all of the single logical processor that it's using to process all the Python.
+And all of these souls are then interconnected to one another, which gives it the property of being a single hop mesh network, which is very advantageous in the early stages of figuring out, you know, how would you load balance?
+How do you route information and traffic that way?
+But ultimately, it's a quadratic problem of resource management, where the more we scale horizontally, the more RAM and CPU processing we need because of that guaranteed one hop mesh network.
+Now, we also have proxies, which are basically the same as the souls.
+It's this exact same code, actually.
+But these are more for workloads that are slightly different in the sense that they're handling all of the desktop client connections.
+And those connections are more about making sure that we can deal with.
+the tens of thousands of connections coming into the cluster and not affect the kind of premium that we have on CPU inside the cluster.
+And the proxies differ slightly from the sole nodes in the sense that the proxies don't connect to all of the proxies, but they do connect to all of their sole nodes.
+So we still have a scaling ceiling to deal with, but it's not as exaggerated as the sole node scaling themselves.
+And all of these are connected with a...
+a proprietary network protocol that we have.
+And this is built on top of what we call CarbonIO.
+And there's a lot of mechanisms that we have in a certain era of technology where we just have Carbon as part of the name.
+And we'll talk about another one later on.
+But CarbonIO is basically the, it powers the proprietary network implementation of the protocol in Python.
+And this combines with techniques like I O completion ports, which is akin to E polling for Linux, but it's specific to windows because these servers are running on windows.
+And I O completion ports basically allows us to defer scheduling checking of sockets are available or not, which is an actual benefit for us because we use stackless Python and Python, regardless of its backless Python or not can only do one thing at a time.
+So anything that you can do to save scheduling time when it's not needed will be a benefit to performance.
+And so moving forward a bit, we have kind of an interesting evolution and reaction that happened in the infrastructure of EVE Online very early on.
+Whenever there was a release, and just for clarification, we kind of collapsed the souls and proxies into monolith services as we move forward to kind of declutter some of these diagrams.
+As we made new releases for EVE Online, we realized that the players understood that information was power.
+And instantly, with a new release, with new information that was put on a website or on a forum, that would be scraped by bots almost immediately, causing traffic problems and availability problems for both the forums and the websites.
+And so a response to that was made where the XML API came online.
+This is just HTTP, or sorry, this is XML over HTTP.
+and it just had a direct read-only access to the persistent state of the universe itself.
+And this had some heavy, heavily aggressive caching on the API itself so that probably you wouldn't get anything up to date and faster than our timetable. But this was all built to protect the services but also provide a ton of information to the players.
+And this part gets a little bit more interesting because The players started building on paradigms that we didn't even have names for yet, even as a gaming industry.
+This was well before the advent of mobile gaming and those kinds of things.
+And players started using these APIs to build appointment mechanisms to remind them to go back into the game and either update some information that they had or some jobs that they had running in the game, or update their skill queue and what they needed in that skill queue.
+And so this kind of established one of the primary retention factors of EVE Online very, very early on, where the community would start augmenting the actual capabilities of EVE Online as it was growing.
+Then we kind of moved into the era.
+of Web 2.0. And with this brought on all of the kind of federated logins, OAuth 2, all of those kind of things, and this is where we started introducing more applications out in the wild where they were integrated with a lot more of these services like the websites and like the launcher at that point in time.
+Then ultimately the service area grows a bit more.
+we get to the point where CCP Games starts building a first-person shooter for PlayStation called Dust 514.
+And one of the goals was to connect Dust 514 with Eve, because they were in the same universe, where you could call in an orbital strike from the PlayStation console to an Eve player in a spaceship.
+And they succeeded at that, but they needed a way to solve for the problem of, how do I make a network call from a PlayStation console to EVE?
+We're not going to rebuild all the proprietary protocol and make it compatible with PlayStation and all these other things.
+And so what ended up happening was they built a RESTful interface, carbon REST, so we called it CREST for short.
+And This was a Hypermedia RESTful JSON API.
+And Hypermedia is a version, a methodology of RESTful implementation, where it's a bit more academic in the sense that it's all about self-referential links and self-documenting information, so that basically any kind of bot could go through and rebuild and find information that you need.
+But we slowly learned over the years that it's humans that write the integrations with those applications, not robots.
+So that was a pro and a con for that API as soon as it was created.
+Now, the Crest interface solved two problems. The biggest problem being that the XML API was read-only, and so we couldn't actually affect any change in the universe.
+But then there were special endpoints made that only like the PlayStation Network could talk to for calling in these orbital strikes or making these requests for orbital strikes.
+And that created a new interesting paradigm where we could write into the universe, or at least we had a path to do so with this RESTful API.
+Now, we didn't necessarily open this up initially to everyone, but ultimately, it kept growing and growing the same way that the XML API kept growing.
+And while we allowed write endpoints, they weren't necessarily affecting the universe the same way that dust could affect the universe.
+So what I mean by affecting the universe is most of these endpoints that you could write to, they would allow you to send an e-mail or set your autopilot path or change your contact list in the desktop client, those kind of things. Something that's localized to the actual character itself. The other interesting problem that this solved was that it dealt with the problem space of needing to understand the schema of the database.
+because Crest was actually built on top of the sole node code the same way that the proxies were.
+So it had access to all the proprietary protocols and all the runtime information.
+So it didn't really need to care about drift between developers in the monolith services versus making sure the XML API could keep up with the changes in the database schema in the database.
+It all just had direct access to this information.
+And so that was probably, again, a pro and a con in the sense that it gave us the capability to get runtime information, not necessarily have to fight with whatever the state of the database would eventually be.
+But at the same time, it put all the constraints on us again for that monolithic environment and those points in time where we can't really get performance or scale out for those nodes in particular.
+And so then we get to, you know, what kind of, how do we categorize the, the, the problems of, of this surface area.
+So.
+Can you kind of reiterate some of these pieces, you know, we're using stackless Python, we're using, we're, we're dealing with the global interpreter lock in Python.
+This is the piece, the global interpreter lock is the piece that only allows Python to do one thing at a time.
+And then there's also carbon IO, which again, got a lot of speed ups with, with IOCP implementations.
+But ultimately we'd have to like all roads lead back to the global interpreter lock.
+We'd have to find a way to get around the global interpreter lock itself.
+Then we have the problem of the database. The fact that every data model, every bit of information, everything about the universe is in a singular database.
+And this limits what we can change moving forward. It limits how we can, the agility that we have in making bigger changes in that database.
+because ultimately everything is shared.
+And we'll get into some other things that reinforce this as well.
+From a maintenance perspective, we had a problem around deployment.
+So, EVE Online goes down every day at 11 UTC and probably reboots in a little under a minute.
+During that time, it's doing a lot of housekeeping work, a lot of that we've kind of taken out so the housekeeping isn't needed, but we still have a bigger problem to solve with recycling RAM and cleaning out basically what the cluster was doing during the 24 or the 23 hour run, I should say.
+And this really affects agility because even though we have the auto-reboot to deploy, we have to take advantage of that time period to deploy any changes.
+And that means that many different teams have to come online to then prep the, make sure the builds for that is good, prep the changes, deploy those changes, and all of that has to be coordinated and synchronized.
+There's not a lot of agility for a team that wants to make a change in the universe quickly.
+There's basically a 23 hour turnaround to make a change to the server.
+And ultimately all of these kinds of things lead to uniform criticality.
+And this is kind of present in the database where If you have a database table that's causing a problem for the database, it doesn't matter how insignificant that feature is.
+It's a problem for everyone.
+It's the same with, you know, if we have a problem with Eve mail, and that we should be able to turn that off, but ultimately if it causes a bigger problem for the cluster, it could cascade through the cluster, bringing the entire cluster down, which makes it the same criticality as the space simulation.
+And that doesn't necessarily make sense.
+It doesn't really allow developers to, to move quickly and iterate on those services themselves.
+And then there was ultimately problems around the development process.
+So again, with the database kind of highlights this as well where there's really no domain boundaries.
+And this gets into a place where we were seeing that, while there was a user domain and character domain and how all of these pieces were built, all of those principles were there, but over time you combine that with the fact that there's a single database, that there's a monolithic code base.
+And my personal opinion that there's also introduced a dynamically typed language.
+You combine all three of those, and over time, everything slowly starts to weld itself together.
+Unless you're incredibly vigilant at that, but the amount of developers that have been through CCP, it's inevitable that some of that will eventually slip through, and you will then get this momentum that you can't really stop.
+This also gets into data ownership.
+The fact that we talked about if you wanted to make a change to the user table and how that works.
+it became difficult to do so because everyone owned the data in the database and no one owned the data in the database.
+So any broad sweeping major changes were incredibly difficult to achieve and very laborious to get to the point of understanding what the effect of those changes would actually be.
+And all of this kind of.
+rolls into cognitive load for the developer. There are so many different things that a developer needs to keep track of in order to build a feature in order to get anything done there.
+And our developers have gotten really, really good at this. The side effect of that is that it occupies so much of the work that they're doing, they can't remotely think about what would happen if they tried to do something outside the box or differently to how we've been doing it for the last 20 years.
+And that's where the real problem lies, as far as building new features and making things more interesting for EVE Online.
+And so taking that away and looking at this again, this kind of became the list of problems that we had to solve in Quasar's infancy.
+And Quasar didn't really come about as a singular idea initially, until we started seeing these patterns form.
+And those patterns started forming in the same way the patterns formed for the Crest APIs.
+where you know, Dust had a need for that product and they were trying to implement the need for that product.
+We then started another project where we were going to add a companion app to Eve Online.
+So a mobile app for Eve Online.
+And when looking at that, there's all sorts of pieces of that puzzle that don't make any sense.
+It's in the terms of how Eve Online works.
+The fact that you could send a message to somebody who isn't online in Eve, doesn't make sense unless it was Eve Mail, unless there's some layer of persistence to it.
+There was no concept of of queuing or deferring information in any of the real-time systems.
+And then also just thinking about how many systems would be online to ask questions about this would be even more interesting to see as we saw all the heavy caching that we're doing with the APIs themselves. And we wanted this to be more reactive and would be more dynamic in the sense of what you could do with the application itself. So we started building what we call the Eve Swagger interface.
+E-S-I, we call it E-S-I.
+And Eve Swagger interface is based off Swagger spec originally, which is now OpenAPI.
+And we did this because we wanted something concrete that our actual community could take and generate code with and build some interesting things with.
+And that was a long process.
+And we went through a lot of things and we eventually migrated over everybody to easy from XML API and Crest API.
+Those are gone.
+Um, all for the better from what we've heard from the community, as far as, you know, how, how they've been able to build things on it.
+Um, but then we started thinking about when we were surfer started building easy, we tried to understand, okay, well, where do we put this?
+How do we deploy this?
+Cause we know we don't want the 23 hour cycle of deployment.
+We definitely don't want that.
+And how do we make sure that this doesn't roll into the same level of criticality as the rest of the pieces of the cluster?
+And how do we make sure that we stay away from any of the production database?
+Like, like the third party API is not the same criticality as if people can actually play the games.
+We need to be careful about making sure those don't actually connect to one another.
+And so with that, we started getting into products like Kubernetes and cloud providers.
+And the cloud providers basically allowed us to provision any of those pieces that we needed for running a database.
+We could just online a Postgres instance and not have to worry about our massive MSSQL instance.
+And then Kubernetes, we actually got into Kubernetes pretty early on.
+I don't know if that's a bad thing or a good thing considering, you know, how many people talk about and joke about whether you need kube, but we've been growing up with kube since probably 016, pre V1.
+Um, and this has given us a lot of power over how we see, uh, developers building services and deploying them and maintaining them.
+And this has also given us a lot more tooling around dealing with things like uniform criticality in the sense of, Kube will make sure that you have services that can deal with being restarted.
+So make sure you have redundancy and all these other things.
+So just by nature of how Kube works, that gave us kind of a leg up in how we were building those types of services to make sure we had zero hit down times when we were transferring from one pod instance to another, for example.
+But then we were looking at, okay, now we have a place to put these services.
+How do we communicate with our primary cluster?
+And that all came into a message bus.
+The message bus ultimately is one of the key aspects of the architecture of Quasar in the sense that we discovered we could sidestep decades of technical debt with a message bus.
+It gave us an escape hatch to get in and out of the legacy code base.
+And then once we had a message bus connected and working through that I think we originally started with Google PubSub, and then eventually we wound up in RabbitMQ.
+During all that period of watching this ecosystem explode inside the message bus and the growing in surface area, we realized, OK, we need a way to deal with our messages a bit more clearly.
+Because at the time, they were just JSON messages flying around.
+And it became very obvious very quickly that we needed to change that.
+So we started looking into protobuf.
+We looked at many other schema based things, but ultimately landed on protobuf.
+And this one's interesting because it actually ended up helping us define domain boundaries really, really well in our ecosystem.
+Because it introduced this new concept of modeling into the system that we didn't have before, where it wasn't just a random Python function that just appeared with some different arguments that had to work for the whole system to work.
+It was, it forced our developers to think about a little bit more about what they were building and how that worked in the whole ecosystem.
+And so it started creating these nice domain boundaries or helping us with that.
+We intentionally started off with this because we initially started off with the proto definitions or repo for the protobuf definitions.
+We initially started off with the technique of consumer driven contracts, where the idea was that if you need something from the ecosystem, convey that, express that in protobuf and then have the teams who are responsible for producing that information be able to provide you with that information.
+And that is ended up working pretty well for us for quite some time.
+Now, one of the reasons that we picked protobuf, in addition to all the other reasons, is that we had our eye on GRPC because we knew eventually we'd have to deal with the fact that we shouldn't be in the business of building a protocol.
+That doesn't make any sense unless it's solving a specific problem.
+And our protocol was solving the problem of generic services across the board, not a very specific problem.
+And so one of the reasons why we picked Protobuf is to lean into gRPC eventually.
+And then we got to that point where we started thinking about, okay, Protobuf has this interesting characteristic where you can generate C++ code and Python code from the same message definitions and load that C++ module into the same memory that the Python module is loaded.
+And Python will then marshal to C++ and let C++ do the serialization.
+So right off the bat, we got a huge performance increase in serialization because ultimately Python wasn't doing the serializing C++ was.
+And it was doing it in such a way that we didn't really have to care about the complexities behind the scenes of whatever scalar values we were using inside of Protobuf that was all covered.
+It also had the interesting side effect of providing a more type safe environment within Python because Protobuf was enforcing the types that were being applied there.
+And then we started thinking about this process of, OK, if we can marshal things into C++ the same way that Protobuf does, why couldn't we do that with messages?
+Because ultimately, the biggest problem that we have is when we're looking at fleet fights, we saw 30% of our time was being spent in three major places, serialization, transmission, and multiplexing.
+And so serialization, pretty obvious.
+Transmission, while we do get benefits from IOCP, it doesn't change the fact that we actually have to put the data on the socket.
+So that was also a percentage of the actual CPU time.
+But there's also the multiplexing.
+And what I mean by multiplexing is fan in, fan out of messages itself.
+So for example, 1,000 people in the solar system, one person fires.
+That's 1,000 messages, technically not every 99.
+But you get the point that we then have to multiplex out of Python into those clients eventually.
+And so we realized that with the message bus, we got that for free ultimately because that's the point of message bus.
+They knew how to do routing and fan out.
+All those were kind of built in.
+So ultimately, with the domain boundaries that we had set up and the modeling that we had set up, usage of the.
+of the message bus became kind of second nature to achieve what we were already doing in our own proprietary systems. But then we started looking at the serialization and the transmission part.
+So even though we got faster serialization, it still meant that we had to spend time within the global interpreter lock to wait for C++ to give us that information back.
+And so what we started toying around with was the idea of, okay, what if we had an actual thread beside the main Python thread?
+And when I say things like actual thread, so stackless Python operates on a single logical processor.
+The end.
+I don't mean core.
+I mean, single logical process.
+And so we have a very finite amount of CPU that we can actually use there, which it might be gobbled up by these three things that we were talking about scheduling all and then actual, you know, um, rules engines or any other simulation pieces that may need to be translated into Python.
+But ultimately, we realized if we have a separate thread doing this, we could simply marshal the messages to and from Python and C++, but then have a dedicated C++ thread just burning on the actual gRPC implementations.
+and then just handing those versions over to Python because we've already generated the Python version of those messages.
+So it gave us a nice ecosystem to sidestep the global interpreter lock completely.
+Now, we can still only go as fast as global interpreter lock, but theoretically, that gives us a 30% performance increase because we're no longer needing to care about serialization, transmission, or multiplexing because the rest of the ecosystem takes care of that.
+And that's really the core of where we started looking at this whole system holistically and where the name Quasar started to come from.
+And then once we had that and we realized, well, we've done this in the server, we've proven that that works, and then, well, we can do that for the client as well.
+Like, that's just a different domain we need to model, but we can do that for the client as well.
+Once we got to that point, we realized we could build domain services.
+And we're specifically not saying microservices because that gets tricky.
+Ultimately domain services being, this service is responsible for anything you could do with a user.
+This service is responsible for anything you could do with skills or a corporation or the market, for example.
+But once we saw this, it became a bit more interesting to reason about where we got to currently with Quasar.
+It allowed us to then sidestep all of those pieces of the previous era of technology, because we could isolate the domain services and every resource that they need in a cloud provider.
+But we needed a way to get to and from all of these pieces.
+So one of the other things that we learned early on was running a message bus or having a message bus is tricky because most people just want their messages.
+The side effect of that sometimes is that they start treating it as a hard drive.
+And because of that, because of domain services, we want to really standardize all of that across the board based on the RPCs that we defined in the gRPC protobuf definitions.
+We onlined the service gateway, which represents our east-west traffic, which is ultimately any kind of CCP networks that we have, which is our cloud provider and our data center, among other networks as well.
+And then for anything that was outside of those networks, was north-south traffic, we had the public gateway.
+And so on the service gateway side, that was basically all of our services and our, our legacy services connected into the service gateway with gRPC.
+And on the client side, we have all of our applications connecting in through gRPC into the public gateway.
+Now, it's not technically all gRPC.
+So the desktop client, the launcher, those are definitely gRPC.
+Those have full connectivity and have full capabilities.
+But things like the third party APIs, EASY, is still going through a Swagger spec interface and then getting to the message bus.
+The websites and the installer are going through a HTTP gateway, which then translates that into events on the message bus.
+The mobile client also same as the third party APIs.
+It has a backend that has direct access to RabbitMQ.
+And so with all of these pieces, we basically kind of were able to address most of the problem spaces of being able to have go from proprietary technology to standard technology.
+And this includes part of off gRPC, Qube, Postgres, RabbitMQ, AMQP protocols, all these different things that we have access to now.
+And again, to reiterate, this was a message bus ecosystem.
+So it allowed us to add and remove pieces without really needing to reconfigure any other pieces of the ecosystem, which was very important for us at the beginning because we didn't really know how this was all going to play out.
+And then also the ubiquitous language of the ecosystem.
+So.
+Protobuf provide us a way to express how the ecosystem should interact with one another without being tied to implementation details. And that's a very powerful capability because it allowed us to then think about, okay, what does this really need to do?
+And it allowed us to push more into our pre-production processes and get people to the place where they understood exactly what they're building and then understood exactly what they needed to build and the how came later.
+as far as the details of the implementation.
+And then again, domain services.
+The domain services here allowed us to build a lot of different pieces in isolation to get rid of that uniform criticality, to allow people to iterate at their own speeds.
+That was a very important part of this.
+I mean.
+We had teams who recently released features the day before the release of the feature.
+Uh, you know, Hey, we forgot to deploy this.
+No problem.
+Do it now.
+Um, and that was done.
+They just did that.
+And that's a wildly different cultural experience than what the rest of our developers are used to where it's 11 o'clock server goes down, switch out everything, work with all the other teams, get it back online.
+hope everything's working correctly or else we have to have another downtime or hotfix it until like live reload code until we get to the next downtime. And so what have we kind of learned from you know introducing this suite of technologies into our ecosystem? So the first one we kind of touched on earlier is the micro versus domain.
+We've been very careful not to call them microservices simply because we kind of get the feeling that nobody knows what that means.
+And ultimately, this came from mobile and web where you have better isolated systems like completely orthogonal systems that are interacting with each other on a specific client like a browser or mobile or mobile app itself.
+Whereas a game client intrinsically is a monolith. We're not going to get away from that anytime soon, but that'd be very interesting to see us kind of grow out of that. But everything that we have is very coupled data. Ultimately, everything inside of a game client needs to interact with everything else in a game client, and you have to separate that by boundaries, those boundaries being domain boundaries.
+And so these are one of the first things that we learned. Another big one was, and this is probably another conversation in and of itself, is message bus versus service mesh.
+We again, like we said earlier, chose to go with a message bus simply because it was easier. It was just so much simpler because we could see everything in one place. We understood how we could add and remove pieces of the puzzle and not have to worry about what was on the other side, as long as producers and consumers were doing their jobs.
+Whereas a service mesh has a lot of complexity up front.
+A service mesh is great if you know exactly how you know that change is going to play out.
+We do keep an eye on things like Linkerd and Istio, as well as things like Envoy and Ambassador for Qube.
+But ultimately, we're pretty happy with our message bus ecosystem, especially after we saw a recent release from Linkerd about performance.
+They have probably, I think they said a 20 millisecond overhead.
+We're seeing a five millisecond overhead in our ecosystem.
+So we're still pretty happy with that.
+And unless that changes anytime soon, we probably won't be heavily looking into a service mesh shift.
+But that's one of the first conversations, big conversations that we had about the ecosystem.
+We also learned that.
+APIs represent team boundaries.
+And this is a really big one for the cultural aspect of it, simply because when teams were working in the monolith, they had to solve all of the problems.
+And.
+once you started peeling away some of those problems, they got more freedom to do more things, basically focus on the product they're trying to build, it got a little bit more interesting.
+An example of this is usually when teams build something, a new feature, they're building tooling for the customer support, the game masters, player experience, those types of teams.
+But in this ecosystem, what we do is we basically say, build the API, and then we'll help the tooling teams use that API, but you don't have to provide the tooling for it. So these teams that then had to worry about a UI for how to manipulate or or administrate their feature that kind of all kind of fell away because ultimately it's about the API and what the actual functionality of the feature was. And then ultimately like relatively speaking new technology is easy, culture is not. And we learned this in a very interesting way because the TD of EVE Online, the head Cosmic Plumber, We were working with a lot of teams and building these different pieces.
+And we were trying to understand, like, the problem isn't learning the technology.
+The problem is at the time to learn the technology.
+It's something nobody wants to once they don't want to learn the technology.
+That's not complex technology.
+We learned that the cultural shift from working in a 20-year-old code base to a newer, more progressive code base in the sense of having modern techniques involved, like upfront test-driven development, upfront domain-driven design, all of those things built in, you have these almost subconscious behaviors that happen because they're not, the developers aren't belligerent or malicious in any way.
+But when you have this giant umbrella of a monolith, you think about things differently and you worry about things in different ways because you have to because all those big, that uniform criticality.
+And then a lot of that kind of allows you to get away with some interesting things that you wouldn't normally get away with if it's a very isolated and focused project.
+And so this was probably the biggest cultural change that we had to deal with in general.
+But then overall, like why, why this holistic approach?
+Why not fix things individually?
+I mean, we ultimately saw what the outcome of fixing things individually with XML API and Crest was.
+But we've been talking internally and externally about Eve forever.
+Like how does Eve live into the next decade?
+And so we know that Eve needs to fundamentally change to continue in the next decade.
+And that fundamental change cannot happen if we continue to work in the same manner.
+And so Quasar has become our stepping stone to allow and facilitate that fundamental change in how we build and maintain EVE Online.
+And yeah, that about wraps it up.
+Thanks, guys.
+I appreciate your time, and I think we might have some time for some questions.
+All right.
+Thank you very much, Nick. If anybody has any questions, there are two mics. You're welcome to form lines. We will just swap back and forth. If anybody has more than one question, please ask one question at a time, then go back to the back of the line and come forward again so everybody gets a chance. And I also just want to remind everybody after this session, if you could please fill out the survey. It gives him feedback, it gives us feedback, so we can do better. Okay, thank you very much, everybody.
+Hi, can you hear me okay through the mask?
+Sounds good.
+So you're talking about this shift between culture, we're working with a 20-year-old code base and how it was the hardest thing to change.
+Assumably, you'd think that now for the next 10 years, to solve the issue of having to go through that culture shift again, do you have any plans to prophylactically address when you're going to make the next change in culture in order to integrate the new forms of tech and make that switch easier?
+So the interesting part about that is we're in a different phase of the lifespan of EVE Online.
+So a lot of EVE Online originally had a lot of great principles in it. Like if you look at the core structure of EVE Online at the code base, it is service-oriented architecture, which is just, you know, an old school term for microservices really. And all of those things are there, but the problem is that in those critical moments where EVE had to make it work, in the early stages of its life, that just kind of piled on and piled on and piled on.
+And then of course, there's evolutions of a company's, you know, lifespan and how a product lives through that.
+And some of those things have to do with the fact that, you know, at some point they just were just like, great, EVE's awesome, let's just keep adding things.
+And there was nothing really mitigating those factors.
+And so ultimately what we're looking at here is to make sure that we're more modular in the sense of, you know, back then, Eve had to invent a lot of things.
+They had to invent CarbonIO in order to make things work the way they want.
+Things like RAF protocols, gRPC, none of that existed.
+Like the concept of orchestration and routing at that complexity level didn't really exist in a real time system.
+So I think the biggest difference here is that the philosophy has changed where.
+The team that started this project, we had the motto of, if you can't Google it, don't use it.
+Simple as that.
+And so we stuck with that.
+And that's kind of what we're hoping helps keep us on track moving into the future of what we should be inventing are only things that are unique to our product, not the rest of the technology stack the rest of the world is already using.
+Awesome, thank you.
+Hi, can you hear me?
+Yep.
+Yeah.
+So I was wondering, it seems like one of the major problems with Eve with so much information moving around is that you need to keep an authoritative kind of copy of the information so that you can prevent kind of desync.
+Was that kept up mostly by the kind of a single Python thread, or is there other measures you took?
+So in the original cluster, there was a concept of a session.
+And that session could move from node to node.
+And whether or not that session was up to date.
+Who knows? You could only know that for certain if you knew you had an active connection to the same desktop client.
+And so there was this authoritative state that moved around in the sense of having quick access, not necessarily for being authoritative. That's the interesting part.
+You could always figure out what the actual authoritative information was that was easy inside of the cluster. It was the expense that that came at.
+that function call, that dbdip, whatever that might be, that was expensive in the ecosystem of Stackless Python.
+In Quasar, that's still there, but it manifested itself differently.
+It was interesting going through this process again and kind of, you know, working with some of the original devs like Hilmar, our CEO, who built some of the original pieces.
+And working with, talking with him about like, well, why do these things exist?
+And re kind of running into those same kind of problems like as a session.
+But inside of Quasar, it's taken on a more modern approach that you mostly see with things like.
+headers in an HTTP ecosystem where that's the authoritative information.
+You can't really, you know, if you've ever done anything with like AWS and they're, they're off protocol, they basically signed those headers so they can't be touched. And if they are, then you know, they're wrong. So those paradigms still exist and move over, they just manifest slightly differently.
+Okay, thank you.
+Hey, Nick.
+Quick question for you.
+So is there a class of problems that the changes you recently made are still maybe not addressing to do with the challenges you were talking about earlier with schema changes in the database and how that kind of transpires?
+And is there still a sort of issue with agility and how fast you can move around the persistence layer?
+Yeah.
+So one of the things that kind of caught us off guard was when we talked about the 53 million lines of YAML, um, that's where everything is authored and we use Perforce as a runtime versioning mechanism for that.
+And what we didn't really think about was that that only solved half the problem.
+Um, sorry.
+So the authoring time version versioning, I should say there is no runtime versioning and that's where the problem lies.
+And so what we saw developers do initially is that they're like, Oh, we just need to send these YAML files everywhere.
+And we're like, you're not sending 53 million lines of YAML everywhere.
+That's not going to happen.
+And so that's probably one of the blind sides that we had in this ecosystem, where then we kind of had to, had to just kind of throw that, that mentality away and say, Hey, you own your data store.
+How do you want to offer your data?
+How do you want to promote your data?
+How do you want to version your data?
+If you even need to version.
+And so that's one of the things that we're still working with teams on to see how that really manifests in a in a in a useful like more generic patterns.
+Brilliant, really interesting talk. Thank you.
+Thank you.
+Hi there.
+Earlier you mentioned that if you have, say, 1,000 people in one system and one person shoots, you get 999 redundant messages.
+It seems redundant to have that many messages.
+So by what system do you sort of trim that down to more reasonable size?
+Or do you just deal with all 1,000 of them?
+It's tricky.
+So those messages aren't necessarily redundant because all clients probably need to see that that happened.
+So EVE Online is interesting in the sense that there are no, there's no wall blocking the corners.
+Like you can't do all the old school MMO tricks of making the town hall have these indented entrances.
+And so people can't see everyone on the outside.
+Everyone on the inside can't see everyone on the outside and vice versa, right?
+So you're in space, there's no occlusion.
+So everyone is relevant all the time in a space battle.
+So the bigger problem is actually worse than that.
+So on top of the 999 that we need to send out that we know we need to send out, there might be parts of the object graph that might be unique to certain subsets of those entities.
+Because for example, the one part of relevancy that we do have is whether or not you're cloaked.
+If you're cloaked in a ship, you're in a whole different chain of information that gets pushed out to the clients.
+Because ultimately, no one else knows you're cloaked, but that means you're getting separate information based on that.
+Because we can't leak any other data that's relevant to you, because then people know you're there.
+And it kind of defeats the whole point of cloaking.
+But more of the espionage stuff we've been looking more into is how we can provide a less than perfect intel for EVE Online.
+But ultimately, I think that.
+the things that we're trying to combat there.
+And that's one of the next big things that we wanna do with Quasar since simulation data over Quasar to actually achieve the goal of getting rid of that multiplexing problem.
+But it also kind of highlights a lot of the I've called them barnacles on the network protocol, where they're developers just like, hey, I just need to send like this effect is going and there's a simulation frame flying by, I'm gonna put it on that.
+And it makes it really difficult to formalize those messages.
+So the bigger problem that we have right now is how do we formalize the domain boundaries within the simulation frames versus any of the extra gameplay logic that's added onto it, like if a light's blinking on the ship or the turrets are facing this way as opposed to that way, like those kinds of things.
+Did that answer your question?
+Yeah, I'd say, yeah, thank you.
+Yeah, thanks.
+Can you hear me?
+Yeah.
+Do you have any data on how the transition to gRPC increase the performance on the messaging system between the client and your server side?
+Yes, actually we saw, so it's, it's, it's comparing apples to oranges really.
+Uh, because ultimately within a SACWIS Python ecosystem, there's a bit of a tax that tax comes from the scheduler.
+So the more stuff that you're doing, the more latency you incur.
+Uh, just by definition, it's not because you're using more like.
+I mean it is because you're using more CPU, but it's the one logical processor that you have.
+So it's a bit apples to oranges, but in general we've seen probably an average of 60 millisecond performance increase across the board, and in some cases it's been more profound than others.
+Okay, thank you.

@@ -1,0 +1,251 @@
+Hello, welcome to Environmental and Motion Mesh Interactions, Madden, FIFA, and Beyond.
+I'm Henry Allen, a senior software engineer on the Frostbite Animation team at Electronic Arts, and the product owner and primary engineer for our multi-character interaction system.
+The goal for this talk is to share some developments in our multi-character interaction system at EA that may be of interest or applicable to similar systems in other games and engines.
+First, we'll do a quick overview of Interact, EA's multi-character interaction system.
+We've shown this at GDC before, so we'll just spend a few minutes briefly clarifying what it is, how it works, and establishing key concepts relevant to the rest of the talk.
+Then we'll move on to the meat of the presentation, which is focused around two topics.
+First, extending this type of system to interacting not just with other characters, but also with the environment and or objects in the world.
+Take this kick, for example.
+It'd probably work better without the blindfold.
+That's off topic though, but it probably wouldn't work too well without that box for the athlete to brace his hand on.
+The box isn't a character per se, but it's integral to the interaction.
+We'll look at ways to handle this type of thing using a multi-character interaction system.
+And then we'll get into motion and pose matching.
+We'll take a look at two ways we've integrated motion matching tech with our multi-character tech, which have very little to do with this picture.
+So let's get into it.
+Interact is short for Interaction Scenario System, and as stated, it's EA's multi-character interaction system.
+Used for detecting multi-character situations that match available multi-character animation content, and then playing and synchronizing the chosen animations to create crafted multi-character gameplay moments in games that replicate real-world interactions like these.
+For example, all the blocking, tackling, and most other player contacts happening here.
+Our multi-character interaction system is responsible for detecting when these can and should play and coordinating the animations and alignment of the players involved.
+So briefly, how does it work?
+First, the game and or animation state machines control which candidates we can even consider.
+We'll only spend time looking at candidates who actually requested a particular interaction and have fast the conditions to enter it.
+The game creator has total control as to whether or when such a request is made.
+In the interaction evaluator, a centralized processor, we gather all requests for the frame and group them by interaction requested so that we can process all candidates for each unique interaction type as a group.
+For each interaction type being considered, we'll first identify a master candidate, a reference character around which we'll match the interaction.
+In our example, we've got the ball carrier as master.
+So for a given master candidate evaluation, we then do a broad phase check.
+to quickly rule out any candidates who are out of range of various physical match conditions in our database, distances, angles, speeds, etc.
+Then identify appropriate role and slot assignments for each remaining candidate.
+And finally, we search the database of animations to find a match or not. We're essentially just examining the relative trajectories of the master and the candidates looking for animations that match.
+If we do find a match, we ask the game or animation state machine to start the animation on each character and run some additional processing afterwards each frame to adjust the participants into alignment.
+Now just to clarify, these physical match conditions in the database are automatically generated based on the relative trajectories of the characters in each source animation, with some content creator-defined match tolerances applied.
+And we also automatically generate bounding ranges, which encompass the coverage in the database for each of these conditions, which is what we use in that broad phase step I mentioned earlier, so that we can efficiently check if a particular match condition, like distance to master, is outside the range supported in our database, allowing us to reject various candidates before getting to the point of searching the database.
+That's as deep as I'm going to go into how the system works today, but there's more detail in the previous Interact presentation for those interested.
+So let's move on to object and environment interaction.
+We've solved the blindfold issue with googly eyes, but how do we integrate environment and object interaction into this type of system?
+To lead up to that, we need to discuss passive participation and interaction, which we refer to as ghost interaction.
+This running punch is an example.
+We have two different characters interacting with the same victim, the guy in the middle.
+He's not joining into the animation or alignment of either interaction until impact.
+He's a passive or ghost participant.
+At the point of impact, he late joins into the interaction that is ready first with the guy on the right in this case and the guy on the left aborts and transitions into a new punch interaction.
+This ghosting or passive participation is an important feature for involuntary interaction like getting punched, as it lets us keep the user or AI in control until the point at which it actually makes sense to bring them into the interaction.
+It also leads to the realization that it can be useful to have interactions where one of the participants never participates at all other than to serve as a reference point.
+This juke is triggering two different interactions with the ball carrier as ghost in both.
+He's totally uninfluenced by the defenders as they respond to his move.
+This is essentially a form of context-driven animation where the context is provided by some other character.
+Now, since the other character is just providing context for an interaction, there's no technical reason that the passive participant actually has to be another character.
+Since the vast majority of interaction matching logic is based on trajectories, the partner could simply be a static object or locator in the world.
+Matching to a specific location should actually be simpler than matching against other moving characters.
+So we should be able to support interacting with objects in environment using this exact same system if we alter it to support interacting on some abstraction instead of directly on characters.
+So that's what we set out to do.
+The runtime was fairly straightforward.
+There's just a few properties we use for matching characters, but we don't want to represent interaction points using characters.
+So instead we support defining locators in the world, which are just identifying an interaction point that has these properties we need.
+The big arrow will represent a locator here.
+The other issue is, we don't want a special case all of our code to work with both characters and locators.
+So we just added a new interface for retrieving information needed for matching, and updated the system to, for the most part, use this interface instead of directly operating on characters.
+And this let us wrap locators in an implementation of the same interface, so the system can mostly be unaware of whether it's looking at a character or a locator.
+On the tool side in our sequence controller, we added support for locator tracks, where you can add a locator and specify its interaction slot, similar to how you would for another character, and support for positioning the locator in the scene, defining its expected relative position and orientation for this particular interaction animation.
+And we had to update the code that measures match conditions for our database to support detecting slots represented by locators and doing the distance, angle, et cetera measurements for those, the same as characters, but it wasn't anything crazy.
+So here's an early untuned prototype of the system in action.
+We've got an interaction with a few vaulting animations.
+Each has a locator in it, defining where the character's hands should go to achieve the vault interaction.
+And then we have locators representing the vault positions in the world, and the character is able to use the interaction system to match and play back vault interactions against those locators, selecting and playing appropriate animations based on matching the character's distance and angle to the vault locator in the world against the distances and angles in the original animations.
+In our game preview here, we've just placed locators at the vault points manually for now, with the idea they could be driven by content creators or world queries in the future.
+Vaulting is just one example of how this setup could be used.
+You could use it for something as simple as having a character reach out and feel the texture of a nearby wall, or when the player runs their character into a wall, you could have them push off of it rather than face-planting into it.
+Or for handling opening door interactions from different angles, speeds, styles, etc., or even different character types.
+Or interacting with other objects in the world, like treasure chests, or furniture, or whatever.
+Now we do want to prevent things like attempting to use a door opening animation when a vault would be appropriate.
+So we also support exposing some content creator defined type info to, for example, let the content creator just distinguish vault locations from door opening points.
+And to support more complex situations we extended the locator interface to optionally expose game variables.
+That's just a means in our system to convey logical state from the game that can be used for matching.
+For example, in our tackle case earlier, we have a game variable indicating who's the ball carrier, and that's used as a match condition for the ball carrier slot in the interaction.
+Speaking of more complex cases, here's an example of how Madden is using this with tackles.
+They've placed a locator in the animation to indicate the relative position of a first down or end zone line for this specific interaction.
+So that in game, when a tackle occurs near one of these lines, we can use a locator on the line to match this type of animation that shows awareness and has the player reaching across for a first down or touchdown.
+As shown here in Madden, they're spawning locators as needed when the character is near the first down or end zone, allowing the system to match against them and trigger these multi-character tackle interactions when appropriate.
+where the locator is an additional persistent who just serves as context and a reference point for the interaction.
+Last bit on locators.
+Can this concept be applied to interacting with a moving object?
+Because this needs to be in the game.
+Main issue is with something on a ballistic arc, you definitely can't adjust its position or velocity to have it sync to an interaction because it doesn't want to look natural to, for example, have the ball change course midair.
+So the character or characters intending to interact with it really need to do the moving.
+But you really can't match your interaction with the current position of the object either because then the characters are aligning to an old position and chasing the object as it moves and they try to align as if they didn't know it was going to keep moving.
+So we really need to anticipate the movement.
+Well, since we support evaluating multiple candidates for interactions, what if we place multiple locators representing future positions of the object, then the system can choose to interact with any future position of the object as it arrives.
+This is the approach that Madden team came up with to get both single and multi-character catches using this system.
+This is some debug output from a Madden multiplayer catch.
+These circles are predicted future positions of the football.
+Each of these is represented as a locator to the system and is using game variables to convey the exact time the ball will arrive at that particular location, so that it can match an interaction with any of them.
+In order to create moments like these, where one or two characters interact with each other and the future position of the ball for a multiplayer catch or catch deflection interaction.
+I think this concept and even the implementation of using locators with the multi-character interaction system is pretty simple, maybe even obvious, but we're also finding it to be incredibly useful and powerful.
+OK, now let's move on to the second half of our talk, motion matching.
+For those not familiar, motion matching is an animation technique where, given a path to follow and a character pose, it selects the most continuous pose to play next.
+out of a database of poses.
+With more and more of our teams relying on motion matching technology to achieve higher fidelity animation without compromising player control, it was inevitable that we'd see demand for the same kinds of power in multi-character situations.
+One way we tackled this with Madden was integrating motion matching with our rally system, a system that helps get characters into position for pre-selected or predicted interactions.
+For example, take this case where the characters are too far apart to start a tackle.
+The system could look at future anticipated positions of the candidates and pre-choose a potential interaction.
+We can then use this information to, for the characters who want to interact, guide them towards the ideal position and rotation for that interaction.
+So now we support rallying characters who want to interact using motion matching.
+Here you can see the blue path as the predicted path of the ball carrier.
+And the gray path is the plotted intercept path for the tackler, limited to a time horizon for how far out we want to initiate tackles.
+If the paths intersect, we find an interaction that works for those future trajectories.
+Then use motion matching to drive the defender to the ideal location so that the interaction animation can start without any warping or alignment necessary.
+Here it is in motion.
+This gives us a much more flexibility to start interactions from a greater variety of distances and angles, without having to do much if any warping to achieve alignment, because participants are using motion match, locomotion and pathing to get into the ideal location before the interaction animation is actually started.
+But that's just single character motion matching to get into interactions.
+How can we apply motion matching once we are in the context of a multi-character situation?
+While I was doing this, the initial work at EA in this space actually started with the owners of our motion matching tech, the brilliant folks on our A team.
+They essentially modified their motion matching tech so that pose features used for checking quality of different aspects of the pose could be measured relative to user specified reference joint, the character's trajectory joint in this example, and then made it so that the reference joint could actually come from another character.
+So they could identify a reference character and perform pose and motion matching on multiple characters relative to that character's reference joint.
+This is one of their first prototypes showing this, using multi-character motion matching to select a two-character punch and punch reaction interaction.
+They were able to build some pretty compelling demos and even shippable tech for well-defined setups, like two characters paired and driven by game code.
+However, they soon started running into various multi-character problems we've solved over the years with Interact.
+Like how do you pick apart partners when there are multiple possibilities or efficiently rule out out of range candidates or deal with potential for multiple simultaneous instances of the interaction?
+Or support passive or ghost participation for interactions like this punch where it could look and feel even better if the victim joined on impact.
+Dynamic partnering, broad phase and ghost interactions are already key components of Interact along with a host of other solutions to multi-character specific problems.
+So it quickly became clear that continuing development of multi-character motion matching, independent of our existing multi-character system, was going to lead to duplicated effort on a large scale considering the years of development on Interact.
+And also competition where our users within EA would have to choose.
+I'm not making a comment here about one of these techs being Walmart in this poor analogy, by the way.
+Maybe this is more apt.
+So we realized our teams needed to join forces for this problem.
+But we have these two powerful complex systems.
+How do we get them working together?
+Well, with our motion matching now supporting multi-character, they're both doing their matching relative to a reference character.
+And they're both at their core animation selection systems driven by a database of animation content.
+So our initial proof of concept was essentially to replace the interaction scenario database with a pose matching database.
+This actually worked, but it was definitely not getting us access to the full power of both systems.
+We got the bare minimum amount of interact that we needed, but quite a bit of functionality was lost with this setup.
+So with our proof of concept, we went back to the drawing board to come up with a different approach.
+One possibility was consolidating the two databases into one solution with the features of both.
+The main issue with this idea is that the two databases function quite differently.
+For motion matching, each match condition or pose feature is assigned a cost based on how well it matches the original animation.
+And the sum of the costs determines pose cost, which we use to compare different poses.
+So it's kind of a soft matching.
+Well, for interaction, we do pass-fail matching on each match condition.
+And if any fail, we reject the match.
+Both are good for the different problems they're solving, and we felt that neither should necessarily change.
+So what we came up with instead was to keep the interaction system functioning exactly how it normally does.
+But if we have multiple animations or animation frames to choose from after interaction selection, We send those results in for motion matching to help refine the selection.
+The key piece to this approach would be entry ranges, a feature Interact already supports, which allows us to match against multiple entry points in the same animation.
+For example, here we've defined entry points every four frames up to frame 20.
+This leads to the database creating match conditions for each entry point instead of just frame zero.
+The asset and frame to be selected is on the left, by the way, and the match conditions are on the right.
+So for example, we can match and start this animation at frame 16 if the characters are too close together to match it in an earlier frame.
+For the motion matching case, we could even match ranges of frames.
+figuring that frames that are near each other can generally share match conditions from an interaction perspective, and then send along the passing entries or batches of frames to our motion matching to refine the selection.
+This would let us keep the selection features of both systems and keep the two distinct matching styles intact.
+And we were hopeful that with interaction selection, matching, and rejecting batches of frames, it would serve as sort of a broad phase for motion matching, limiting the number of frames to examine and helping to address some performance and scale concerns.
+This felt like it could be quite an upgrade from our first attempt.
+Now, early in the presentation, I showed this video as an example of ghost interaction and late join, but it's also showing off motion matching.
+So let's look at a test case I started with using JustInteract.
+Again, we have a ghost running punch into a late join situation.
+At the start, the system chooses a punch from the front interaction.
+But the victim, being a ghost participant, that can do what he wants, happens to be turning around.
+So when it's time to late join, the animation is no longer a good match, and we bail.
+Then immediately start a new interaction, which is a good match in terms of distances, angles, velocities, but is really poor in terms of pose continuity.
+If pose matching was working and we have enough coverage, we should be able to get a much better selection when the animation changes.
+After a flurry of typing, here's that same setup.
+Exact same situation as before, but now we've hooked in pose matching on the hands and feet.
+We handled failed join and new selection much more gracefully.
+There's still a hitch, but it's a lot better than totally changing hands and feet.
+To clarify, the animation we chose initially had the ghost joining on this frame because the characters were facing each other at the time we did the selection.
+However, when it came time for the actual join, the ghost had rotated 180 degrees.
+So the join failed and a new post-matched interaction triggered, this bunch from behind, which looks a lot better than our initial test case since the frame chosen is taking into account post-continuity, specifically the positions and velocities of the hands and feet.
+The hitch is because we exit the interaction for a frame and start a new one.
+It could look even better if we had a way to just switch animations without exiting the interaction state at all, which leads to our next topic, continuous reselection.
+By this time we had a first adopter and they wanted continuous pose matching for their jostling feature.
+Traditional interactions involve choosing and playing out an animation.
+It's sometimes transitioning between interactions like this two character to three character tackle case.
+But part of the point of motion matching is the ability to switch from any frame of any animation in the database to any other frame of any other animation as needed to best maintain post continuity while respecting the desired path of the player, or now players in our case.
+For example, here the green path is the desired path and the animation and associated blue path is updating constantly to match it. I'll refer to this as re query.
+We wanted to integrate motion matching re-query in the same way we did for the initial selection, where motion matching refines interaction selection.
+However, Interact did not have this concept of continuous re-querying, but conceptually it should be able to.
+As an aside, once we went down the path of interaction matching as a broad phase for motion matching, there were multiple features and options we added.
+we ended up adding to the interaction system to mirror functionality available in motion matching to allow them to work together as seamlessly, efficiently, and effectively as possible.
+This is just the first such change.
+So we updated the multi-character system to support re-query, and motion matching hooked into this fairly naturally given the setup we had already put in place.
+And this is the example again with continuous re-query enabled.
+The hitch is gone because we're changing animations more seamlessly and without ever dropping out and restarting the interaction.
+The animation is actually switching twice before contact because of the extreme change in rotation of the victim between when the interaction was started and when the victim is in position to join.
+And here's the setup we used for stress testing this.
+There's no physics or collision enable here, so it's a bit sloppy, but it's a proof of concept.
+And we've been having fun with all this punching, but I mentioned earlier, we had a customer.
+So Sam on the A team threw together a bit of code to provide an input path based on a combination of input paths for multiple characters.
+And we used that to do this prototype for FIFA Jostling with 2,000 frames of animation.
+Two characters are user controlled here, and you can see their inputs in the top left.
+I think it shows off pretty well some of the benefits of the power and power of combining these two systems.
+The ability to maintain control of characters during interaction while still getting high-fidelity animation by allowing seamless transition into, out of, and between interactions at any frame.
+Multiple simultaneous instances of the interaction, automatic partnering and slotting of the characters, and automated match conditions of broad phase that let us easily avoid expensive queries when candidates are out of the supported range.
+So this brings us to the point where we felt pretty good about the systems working together, and it was time for FIFA to get involved as the first adopter.
+FIFA had a bunch of data ready to throw at the system and got things set up pretty quickly.
+These are just some of their animations.
+But as you might expect, there were a few challenges that presented themselves.
+I don't have time to go into everything, but I'll touch on a few.
+When FIFA initially hooked it up, we found that selection was very unstable.
+It would rarely choose and stay in the same animation for more than a frame or two at a time.
+It's kind of the point that we should be able to switch animations and frames as needed, but not constantly and seemingly arbitrarily.
+A big reason for this instability was the different matching styles, specifically the hard matching and interaction worked poorly with continuous re-query.
+That's because for each possible entry range, any one match condition failing or matching on a given frame could totally change the frames available for motion matching to pick from.
+So any time we're at the fringe values of any match condition, we'd continually shuffle the frames available to pose matching, which would lead to chosen matches jumping around.
+The main thing we did to address this was, for re-query, to expand interaction match tolerances for subsequent frames of the currently playing animation.
+In other words, once we pick a particular animation, the match tolerances to force us out should be more relaxed than the ones that let us in.
+This made things a lot more stable.
+Another big issue we faced was how we handled pathing.
+Typically, interact supports animation and alignment dictating the character path while interacting, which is using root motion.
+That's what we're showing here.
+We thought this looked really promising, but there was quickly a realization that using any sort of root motion to align these interactions would take away control from users and affect gameplay.
+Notice how the blue animation path is never quite taking the player where the green desired path indicates that they should go.
+This was a deal breaker for FIFA Jostle because we couldn't accept taking away any user control to make these interactions play.
+Fortunately, the FIFA engineer working with us convinced us to try something else, just playing the animation without modifying paths at all.
+So we tried it out.
+And we found that with enough coverage and tighter tolerances set for choosing the interactions, they may play slightly misaligned, but it's not so noticeable.
+And at the cost of precise alignment, this gets us higher fidelity interactions than we had before in these jostling situations with no compromises on player control and pathing.
+Essentially, this is the ability to use the system as a continuous multi-character animation selector, but not for alignment.
+Performance was also a concern.
+FIFA threw a lot of data at the system, 82,000 frames of animation last I checked.
+So I'd like to touch on just a couple of the optimizations that we did.
+Something we quickly noticed for this type of Jocelyn interaction, it's very possible and even common for traditional interaction matching conditions to stay static for many frames. Here's an extreme example. Notice how the relative speeds, positions and angles between these characters in this test animation isn't really changing at all.
+With our default setup of having entry ranges every four frames, we had 75 entries in the database for this 300 frame animation.
+Now we could have reduced that number of entries by going every eight frames instead, for example.
+But in general, the larger we make entries, the less precise our interaction matching becomes, because frames sharing an entry and share match conditions.
+But the match conditions for many of those frames in this particular animation are almost identical, because the characters' positions and angles relative to each other is largely static.
+So the optimization was to evaluate the data offline and automatically tune entry ranges to extend as long as all the interaction match conditions remain fairly constant, leading to examples like this, where we went from 75 entries in the database to four for this animation.
+This dramatically reduced the size of our interaction matching database from about 20,000 entries to around 3,000, which helped with performance during the interaction selection phase.
+and led to us passing in fewer larger chunks of data to motion matching, which could be collated more cheaply and which it could chew through more efficiently than many smaller chunks.
+This was a nice performance boost.
+The other optimization I want to mention has to do with path matching.
+The optimization was actually to add more match features to the interaction system to make it a more effective broad phase for the path matching done in the motion matching system and further reduce the number of frames sent to motion matching.
+For example, if the green arrow here is our desired path in game, motion matching would score the red path very poorly because it's going to turn the wrong way in the future.
+Interact didn't have this future match concept, so we added it in the form of distance and angle to future position match conditions.
+This let us rule out many more animations and frames that would score poorly in motion matching, both in bulk and much earlier in the process.
+These two optimizations and others helped us get performance to target.
+Even with the performance in hand, I do need to touch on scalability.
+To do these two character jostles, we needed a lot of post coverage from the same set of angles, distances and speeds for each character.
+Throwing a third or more characters in would exponentially increase the required coverage.
+But I think this is really powerful for interactions involving two or maybe three characters, for continuous re-query like we just saw with FIFA Jostling, or just helping pick a better start frame.
+And I think it can be used for larger interactions where they're just post-matching a few of the characters to help pick a better entry frame.
+Anyhow, here's a few cases in action.
+You can see this often very transient, just a moment of contact, because we're only using it when the game situation is very close matched to available animation content.
+And it's not perfectly aligned since we've chosen the trade-off here of keeping root motion weight at zero, sacrificing precise alignment to avoid influencing gameplay.
+I think we can improve on this in the future, for example, using root motion and alignment carefully in contexts where it does make sense to get higher fidelity visuals.
+But we're really happy with the results we got from this and looking forward to leveraging it in more games and situations.
+And that's everything I have for you today.
+Thanks to the Mata and FIFA and Frostbite teams for their feedback and helping collecting the videos I shared.
+And thank you for coming.
+I hope you found something interesting or useful.
+Have a great rest of your day.

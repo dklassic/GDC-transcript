@@ -1,0 +1,413 @@
+Hello and welcome to Rocket League Scaling for Free-to-Play.
+My name is Matthew Sanders and I'm a Lead Online Services Engineer with Psyonix.
+I'm giving this talk because I was responsible for coordinating the backend preparation for transitioning Rocket League to free-to-play.
+Let's start by talking about my team and quickly covering the scope of the problem. What does the online services team do at Psyonix? We are responsible for all game related databases, web services, and some websites.
+This includes the software development and DevOps deployments for all of them.
+And what is free to play?
+Just like it sounds, the plan was for Rocket League to drop its price tag.
+This lower barrier to entry was expected to bring in lots of players that didn't want to or couldn't pay the sticker price.
+All right.
+So just scale up the backend to accommodate more players, right?
+Well, this change could ask our backend to handle an order of magnitude more traffic.
+We had gotten to know our backend very well since its original launch in 2015, and therefore we knew immediately that significant improvements would be needed.
+As we'll see in this talk, after nearly a year of preparation, we did see a huge increase in player traffic, but we were rather well prepared for it and had a successful free-to-play relaunch.
+To describe Rocket League's journey to free-to-play, we'll discuss it in three parts.
+Part one is about planning and preparation.
+We'll briefly cover setting up new partnerships along with some methods of analysis, and then load testing to figure out what improvements were needed the most.
+Part two is where we'll discuss our scaling improvements in more detail.
+Finally, in part three, we'll discuss the launch experience and the new normal that has developed since then.
+Let's dive right into part one, planning and preparation.
+Now, what shall we talk about?
+We went through a lot of different planning and preparation, and it spanned a lot of our calendar time, but here we'll cover just a few areas.
+First up, our analysis tasks mostly revolved around trying to figure out what to expect.
+We spent some time with load projections to figure out what player population levels we might see, and we also spent time analyzing our architecture to set up a backlog of potential issues.
+Next, our partnerships are definitely worth discussing.
+We lined up several support contracts ranging from simple ticket-based support to much tighter working relationships that directly helped us prepare for the launch.
+Finally, we'll talk about load testing and how it fit into this project.
+Let's start with load projections.
+How many new players will be brought in by going free to play?
+It might seem hard to divine, but there are techniques.
+One of the best ways is to find a comparable game release that's similar to yours.
+Unfortunately, Rocket League is a multi-console sort of sport sort of action game with rockets, so there were no incredibly close comparisons available.
+Ultimately, we settled on an increase of three to five times our current scale.
+We used the upper end of this projection as our load testing target.
+We'll cover much more on load on this load testing later.
+Next, let's talk about our architecture evaluation.
+What did we do to evaluate our architecture?
+We wrote up a thorough description of how each component works and called out any scalability risks in its design.
+Those risks went into the backlog destined for validation via load testing.
+As we worked on the first few, we worked out a template for consistency and reuse.
+This documentation actually made good reusable training material.
+We also added a peer review step for each write up.
+We have peer reviews for most steps of our SDLC, including documentation, so this was no exception to that.
+We also wrote up an audit of our source control repositories to help make sure we didn't miss evaluating any of our products.
+These evaluations were pretty straightforward, but the whole exercise took a while to get through, since we had a few dozen components that we wanted to evaluate.
+Now let's talk about our partnerships.
+From very early on, we knew we wanted to line up the best possible external support.
+We don't have a huge engineering staff, so we wanted to augment with dedicated experts wherever possible.
+The primary intent of signing support contracts was to be able to summon expert specialists at a moment's notice.
+We quickly noticed that having specialists on call like this is actually pretty expensive.
+But our thought process was, if the expert help reduces our downtime at all, it would quickly pay for itself by restoring our revenue stream sooner.
+The first company we have to talk about is Google.
+Our backend has always run on GCP, so we already had a working relationship and a support contract.
+That said, after discussing our upcoming release with them, we decided to take advantage of some of their additional programs, such as CRE and GTLA.
+Next, we wanted to augment our in-house DBA expertise.
+Percona are the MySQL experts, so it made sense to sign up for their support service, especially because we use Percona Server, which is Percona's own flavor of MySQL.
+Finally, Redis Labs was a new addition.
+We were running some open source Redis clusters, but that has no formal support.
+We got in touch with Redis Labs and started a migration to Redis Enterprise.
+This got us support, but it also offloaded a lot of DevOps work by using their new managed offering in GCP.
+Bringing on these companies was like buying insurance.
+It gave us a lot of confidence that we'd be able to deal with scaling issues during the release, but it also presented a golden opportunity to leverage their expertise during our planning and development phases too.
+We took advantage of our support partnerships immediately in the form of several different types of exercises.
+One handy exercise was called the premortem.
+This is similar to a postmortem, but predictive instead of retrospective.
+Basically, you just get your whole team together and brainstorm possible causes of outages based on what you know about your systems.
+Score each idea with severity and likelihood, then multiply those scores together for a stack rank.
+This stack rank helps guide which problems you should focus on.
+Items near the bottom of the list are most likely not worth your time since they'll be either low severity or unlikely to occur.
+Another exercise from Google was for resource planning.
+Since we were not a new game launch, we already had a firm baseline of resource usage, including CPU cores, memory, and disk across all different GCP services that we were using.
+Our load projection that we mentioned earlier gave us a times 5 multiplier, which then yielded our projected resource usage.
+This resource plan was directly useful in two ways.
+The first was to get our quotas increased preemptively, and the second was to give the affected GCP zones plenty of lead time to make sure they have enough hardware for our increased scale.
+Hardware usage can often be ignored or forgotten under all the abstraction in this age of cloud services, but if our services are suddenly scaling up by a factor of five, it's only courteous to give this heads up.
+Besides Google, we also talked to Redis Labs quite a lot.
+We had several technical Q&A sessions before even deciding to commit to Redis Enterprise, where we learned about the specific advantages it offers.
+They would also support us during our database migrations later.
+This brings us to load testing.
+This was the most important feature of our entire release cycle, and it's not even a player-facing feature.
+Our original intent was just to use it as a research tool to figure out what needs improvement, but it ended up with far more uses and was massively underestimated.
+Writing load tests was unique compared with the rest of our code base.
+They're totally different from writing services, so we got almost no reuse from our existing code base.
+Load testing was also expensive, both in engineering hours to write and just running our load test environment.
+This environment contained our full set of services and was necessarily scaled up beyond our production environment in order to handle our times five load projection.
+Lastly, for the load tests, they were hard to get right because it took both research and iteration to get the client requests simulated realistically.
+We wanted to get the request patterns to match which involved calling them in the right sequence and with the right timing.
+And we also wanted the request volumes to match, which involved tuning the weighting of how often each service was called.
+Once the scope of this work became clear, we realized we were going to have to level up our load testing.
+So we made load testing one of our primary focuses as we continued into major feature development.
+So we continued upgrading our load test code base, now as full-fledged feature development.
+We already had some engineering work invested in Locust, and after evaluating some other frameworks, we stayed committed to it.
+In particular, we wanted to make sure the framework we used supported WebSockets, which eliminated many other frameworks.
+Also, it ran in Kubernetes, which is another plus for us.
+The one relative downside was that it's written in Python, and we have almost no other Python code amongst our services.
+A quick note on terminology, Locust scales up by hatching Locusts, where one Locust simulates one client.
+As we started writing and running tests, we felt out several different practical aspects of load testing.
+The first was that our tests were growing in size, worthy of the term new code base.
+Orchestrating this many tests required its own debugging, sometimes even to make sure the framework was working properly.
+One notable gap in our original design was that our locusts did not coordinate.
+They simply generated randomized data for their test runs.
+Running certain test suites was generating far too many validation warnings.
+This was a big problem because while the call volume might be correct, the work done by each service call would be completely inaccurate.
+For example, most validation warnings cause our services to return an error without even hitting our database.
+Our solution was to set up an independent Redis database just for coordination of test data.
+Locusts would then register themselves and some of their actions, similar to how players coordinate in the real world.
+This let us query for active player IDs and other sensible inputs to reduce those validation warnings and thus exercise our services more accurately.
+Having to stand up this new Redis database and write the related queries and coordination code is just a classic example of how the scope of our load tests grew quite unexpectedly.
+Another big issue we found was that running load tests had multiple heavy time costs.
+The first was that scaling up a test took much longer than we were expecting, proportional to the scale of the test being run. For example, it was common for us to run a million locusts and our stable hatch rate was a thousand locusts per second.
+Some quick math shows that it's going to take a thousand seconds or nearly 17 minutes. That's a hefty commitment for one test run.
+So what should we do about it?
+We could figure out how to stabilize a higher hatch rate, but that's another whole engineering problem and less more development time to spend.
+We were content to pay this time cost because we could just multitask while waiting, since our locus deployment runs entirely in the cloud.
+This hatch rate was actually also realistic since it roughly matched our target player authentication rates anyway.
+Scaling up more quickly than this could actually make each test less realistic.
+The next big time cost we found was the runtime.
+Once the test was running at full scale, was it just an immediate pass fail or should we let it run for a while?
+Given the ramp up time, the latter was definitely our preference.
+Longer runs helped reveal non-obvious issues, such as resource leaks, and running semi-randomized tests for longer helped test more input combinations.
+Now, the scale up time and the run time combined to form one test iteration.
+As multiple iterations are run, of course, this time stacks.
+We ran many experiments using this iterative testing with our load tests, and they were incredibly useful for experimental performance tuning, but they paid this heavy cost in time.
+Speaking of experiments, part of each iteration was gathering the results.
+As I mentioned, our load tests were not just pass-fail, so what did we look at?
+Locust reports HTTP response codes in aggregate, but we also reviewed our services logs and looked at our Stackdriver dashboards with many metrics plotted over time.
+The goal was to determine what errors the Locusts were receiving, if the services had unusual warnings or errors in their logs, and of course, what the resource usage looked like for our services and databases.
+Now that we were gathering test results, how sure were we that the testing was accurate?
+How accurately and completely did we simulate our clients?
+We started with plenty of knowledge about the global volumes of our service calls, and we definitely studied the call patterns of real clients.
+But in the end, our load tests were still just a simulation of real traffic.
+The biggest intentional difference is that our real clients call hundreds of different services, and it was prohibited for us to simulate them all.
+Instead, the research from our architecture evaluation helped inform us which features had the highest scaling risk, so we could make sure to focus load testing on those first.
+The bottom line, our load tests were as accurate as we could make them.
+We designed and adjusted the best we could.
+We couldn't know anymore until the actual launch.
+Still, these tests were definitely guiding us to many improvements.
+We ran into probably dozens of scaling issues and had to fix each one to scale up higher to uncover the next issue.
+To do this under pressure of live traffic would have been disastrous.
+So what did the future hold for our locust load tests?
+Unlike the cicada, we couldn't just take a break for 17 years.
+Given the amount of effort it was taking to develop and run our tests, we resolved to continue load testing up until the release.
+It's always better to know the limits of your services, even if it's too late to make improvements.
+You can have mitigation ready instead.
+Looking even beyond the release, we realized that load testing can and should be more fully integrated into our SDLC.
+Once running at a higher scale, we could expect all of our services to be more sensitive to performance issues.
+Changes will be more likely to have unexpected impacts, and continued load testing was going to be the easiest way to maintain confidence in the performance of our services.
+And as we begin thinking about what it will take to get to the rapidly approaching launch, this brings part one, planning and preparation, to a close.
+This next part is all about scaling improvements.
+This is where we'll discuss the feature work that comprised the bulk of our development time.
+The first part of our journey was all about planning and preparation to help decide what improvements we needed to make.
+And this part is all about the improvements we had time enough to complete.
+First, we moved our core set of services from Google App Engine to Kubernetes.
+Second, we overhauled our matchmaking service.
+Third, we migrated all of our Redis servers to Redis Enterprise.
+Fourth, we made a set of improvements to our MySQL databases.
+Fifth, we added a web service rate limiting system.
+Sixth, and finally, we'll spare a few moments to discuss this development cycle's postmortem.
+The first feature we'll talk about is the live migration of our core services from Google App Engine to Google Kubernetes Engine.
+GAE is Google's platform as a service, similar to Amazon's Elastic Beanstalk or Azure's App Services.
+Just upload your PHP code base and the service takes care of everything else.
+GKE is just Google's managed Kubernetes service.
+We had been using GAE since our original launch in 2015, but in the last few years it was showing its age, and we had actually started the migration to Kubernetes before free-to-play preparation had begun.
+Still, this effort was folded into our free to play release as a prerequisite.
+There were several reasons for us to move to GKE. We wanted increased control over our PHP runtime, since we were missing out on some significant performance improvements, among other things.
+We also needed more control over our resource scaling.
+Another goal was more deployment consistency by running more components of our architecture in Kubernetes. This also happened to make us more cloud agnostic.
+Another big part of our core services migration was introducing separate GCP projects to better separate our deployment environments.
+A project in GCP is simply a high level organizational structure to divide up your GCP resources.
+With this change, the paradigm is to have nearly identical project for each environment, with no sharing of resources between those environments.
+Having separate projects made it much easier to determine which environment owned each resource and enforced independence of our lower environments.
+Gone were the days of production affecting our test environment or vice versa.
+Our logging became simpler to browse because it was simply a matter of selecting the right project rather than setting up the right log filters.
+Finally, our security and access control was massively improved, although we had to rethink it completely due to the way everything was reorganized.
+When this migration was complete after many long months, incorporating load testing was indispensable.
+GKE was still fairly new to us, as our small DevOps team only had experience with it from deploying and migrating our services.
+This is where our support from the GCP teams came in handy, as they were able to assist us by monitoring our load tests from the platform side and suggesting adjustments based on their extensive Kubernetes experience.
+Completing this migration to Kubernetes was a fundamental part of getting our core services modernized and tuned for higher free-to-play scale.
+The second major feature we worked on was overhauling matchmaking.
+The architecture of our matchmaking system has some insurmountable scaling performance problems.
+These issues did not affect its correctness, but rather meant that it had a strict performance ceiling.
+To fix these problems, we knew we were going to need something new.
+And it was going to be difficult because Rocket League's matchmaking has a lot of complex rules.
+Our matchmaking service was a single threaded .NET application, pretty close to being maxed out and definitely not going to hold up anywhere near our load testing target.
+And as this cat could tell you, it contained a lot of spaghetti code.
+So with a blank slate, where do we go?
+We needed to fundamentally change the way it scales, yet preserve all of the original functional requirements.
+The most obvious direction was a horizontally scalable map-reduced solution.
+We considered building from scratch, but we also found OpenMatch.
+After much analysis and deliberation, we decided to go with OpenMatch.
+It seemed like it would let us skip some framework development, but still allow us the freedom to implement all of our functional requirements.
+It's also open source.
+In contract with our matchmaking service, OpenMatch was designed for scaling, which is where the MapReduce algorithm comes in.
+It runs as an orchestrated set of Docker containers.
+This orchestration also enforces a division of responsibilities for each container, which compartmentalizes the different areas of our matchmaking logic.
+This was a huge improvement over the original spaghetti code.
+Sorry, cat.
+Lastly, it was cutting edge, so cutting edge that it was not up to its 1.0 release yet.
+Integrating with a pre 1.0 product actually went as you might guess.
+We were held up by or found blockers that required us to wait for the next revision.
+This also forced us to fix all breaking changes when that next version was released.
+So it was not the smoothest development cycle, but we launched with Open Match 1.0 and it certainly follows better versioning practices now. For our last bullet, of course, we mentioned load testing again. Having load tests that incorporated the matchmaking path were essential.
+We were able to tune Open Match in GKE for running at higher load levels, just like with our core services.
+More importantly, we learned the dynamics of how even subtle configuration changes affect the matchmaking system as a whole.
+This allowed us to react more quickly and correctly during our free-to-play launch, as well as know where to go with further development.
+Overhauling our entire matchmaking system was another huge undertaking, lasting more than a year.
+But it was desperately needed and directly contributed to the success of our free to play release.
+Next, let's talk about migrating to Redis Enterprise.
+In our view, the best feature of Redis Enterprise is its fully automated re-sharding.
+This means we can increase our cluster size, that is, add shards to scale horizontally, with a few clicks, and the data in the database is automatically redistributed across the updated cluster with no downtime.
+And yes, we used this during the free to play release.
+Of course, there is a performance cost while your keys are being redistributed, so hopefully you don't need to do this because your database is already pegged.
+If it is, you won't see any performance improvement from the additional shards until the re-sharding is complete.
+As part of deciding to use Redis Enterprise in the first place, we also learned in detail about how it can be deployed, specifically with respect to its proxy.
+Pictured here are a few common Redis Enterprise proxy configurations.
+As pictured on the left, most deployments only need a single proxy because it has very high performance.
+However, for our largest cache database, we did end up needing a multi proxy configuration to guarantee consistent performance.
+We initially tried to enable support for open sources cluster mode pictured center, which deploys one proxy per shard and has all clients connect to all proxies.
+This was the simplest change, but unfortunately, we couldn't use it due to lackluster support in our web tiers Redis client library.
+Instead, we are using a multi proxy setup that uses DNS load balancing pictured on the right.
+This has the typical disadvantages versus a layer four load balancer. Specifically for us, our web tier had recently moved to Kubernetes, and we set up node local DNS caching to improve some of our network performance.
+Unfortunately, caching DNS results is incompatible with DNS load balancing.
+So all DNS queries on the same Kubernetes node would always resolve to the same Redis Enterprise proxy rather than rotating.
+That said, we run enough Kubernetes nodes that the connections still end up reasonably well distributed across the cluster, so it works just fine.
+Once using Redis Enterprise, we noticed that a few of our databases were performing as if under provisioned, despite our estimates.
+Why did we have to scale up these databases to get the performance we expected? It came down to improving observability.
+Measuring performance in Redis is somewhat difficult. Measuring CPU directly is too opaque, and measuring operations per second is also misleading if your commands have a mix of O1 and ON operations.
+Performance.
+So we did tune some of our commands to simplify from the application side.
+For example, we switched from using mget and mset to the single get and set sent with pipelining.
+Thanks entirely to the pipelining, there was only a minor difference in performance from the client's perspective, and the registrars were able to burn through the smaller commands more efficiently.
+Furthermore, this made the reported operations per second far more accurate, since mGet and mSet both counted as one operation, no matter how many keys they updated.
+This observability change gave us the right information to explain the performance issues and then scale the cluster appropriately. Tied closely with observability is how we monitor each database. Redis Labs provides a guide for setting up Prometheus and Grafana integration.
+including some fantastic pre-configured Grafana dashboards. Once we got this working, it was far better than anything else we hooked up for our open-source Redis deployments. The screenshot on this slide shows operations per second broken down into reads and writes, and it's just one of the many charts on these dashboards. Redis Enterprise also has a few other nice advantages that we leverage.
+Redis Enterprise handles Redis PubSub much better than open source in a few different ways, but primarily because it doesn't distribute all publications to all shards.
+Next, standing up a temporary replica for keyspace analysis or other inspection is just a point and click operation.
+This has already come in handy several times for looking at production data without interfering with the performance of the production clusters.
+Finally, none of the features of Redis Enterprise that we are using result in vendor lock-in with Redis Labs.
+The only risk is not wanting to leave.
+Besides Redis, our other primary database system is MySQL.
+It has been our most serious known scaling bottleneck for a long time.
+Specifically, it only scales vertically.
+Give the database server more CPUs and memory until no higher spec machine is available.
+It was easy enough for us to add replicas, but this could only offload the read traffic that could tolerate replication lag.
+We implemented countless optimizations over the years, which gave us more headroom, but eventually there's an upper limit on a single server, especially when anticipating a quintupling of the server's workload.
+Our best option over the years has been feature shards.
+This is where we move sets of tables to new servers.
+And it's relatively easy.
+Well, as long as you can identify a set of tables that can safely be separated out.
+Unfortunately, having all of our tables on the same server for many years has led to many tightly coupled features due to convenient table joins.
+We were left with a large core set of tables, including our largest overall tables, that could not be separated out without significant refactoring effort.
+Notably, this does not solve the vertical scaling problem, but does buy us a lot of headroom for each feature.
+Despite the scaling risk, we estimated that there was not sufficient time to safely incorporate a horizontal scaling solution to our databases that needed it the most.
+We thoroughly evaluated Vitesse. It would have let us spread single tables across multiple database servers. This would scale better, but to use it properly, we need to solve new types of problems.
+One big example that's both mundane and labor intensive is that Vitesse would have required us to eliminate stored procedures and move all of the SQL into our web tiers code base.
+We have over a thousand stored procedures, so ouch.
+In the end, we split out one last set of tables in this release cycle, and our load testing demonstrated that we were able to exceed our load target.
+But this was not our only MySQL improvement.
+We also incorporated ProxySQL to proxy the database connections between our core services and our MySQL databases.
+ProxySQL is deployed as a horizontally scalable set of identical proxies behind a load balancer.
+we can scale out as many of these as we need.
+Each proxy maintains a set of persistent connections to our MySQL databases and listens for connections coming from our web tier.
+The point of this setup is to offload the connection churn caused by our PHP web tier.
+Unfortunately, we can't use either connection pooling or persistent connections from PHP.
+The process model makes connection pooling impossible, and persistent connections are not feasible because it would establish one connection from each PHP worker thread to each database, and we run too many worker threads for that to work.
+Processing a login to MySQL is a surprising amount of work for the database server.
+Offloading this work cut the CPU usage on each server by about half.
+This gave us a lot more performance headroom, which is critical for our vertical scaling.
+We also gained instant failovers.
+Our previous technique for promoting a replica was to swap IP addresses.
+This would take about 50 seconds, which was a rather large unacceptable hiccup to deal with.
+So it was only reserved for emergencies or maintenance windows.
+Proxy SQL lets us promote a replica almost instantly.
+This allows us to upgrade our servers much more regularly and without a maintenance window.
+Proxy SQL has some other benefits too.
+It speaks to MySQL protocol, so it looks like a MySQL database to your application.
+Just point to a different IP.
+It also has dynamic configurability for routing queries to replicas.
+We had already done this manually in our web tier, but it's a handy tool for a scaling emergency without having to modify our services.
+There are also some cons from using ProxySQL.
+We had some downtime due to ProxySQL bugs.
+There were socket leaks in some error handling situations, which took us a while to detect and mitigate.
+In fact, we're still dealing with one which we can't reproduce for the maintainers to fix.
+Also, ProxySQL is a bit complicated and the learning curve plus our lack of experience with it resulted in a misconfiguration in production within a few days of our free-to-play launch.
+This is another good reason to release major features early.
+All in all, ProxySQL was a definite improvement.
+We only discovered these cons after using it for a while, and the pros still clearly outweigh them.
+The last feature we'll discuss is one of our handiest small features, rate limiting.
+Where did this feature come from?
+Originally, we designed a few options for introducing a log-in queue as a major feature, and the engineering effort for most of those designs was significant.
+Eventually, we thought up a much simpler solution by understanding the relationships between our player population levels, session creation rates, and player churn.
+We reasoned that a configurable limit on session creation would allow us to control population well enough in the event we had to use it.
+Of course, the hope was to never use it, so it was more of a load-shedding technique added to our tool belt.
+This is also why we didn't want to spend tons of time on a more complex login queue that would be rarely used.
+We went with a custom implementation instead of integrating an off-the-shelf product, because the logic is very simple to add to our web tier, and having our own implementation let us use our existing infrastructure, such as our feature flags, logs, metrics and dashboards.
+We also leveraged key expiration in Redis to reset each tally automatically, which keeps this logic flowchart really simple.
+Rate limiting turned out to be one of our most versatile and useful features.
+we could configure rate limiting for any set of services.
+This would let us limit or disable problematic features.
+To this day, we have rate limiting set up to protect our immensely popular tournaments feature.
+We could also limit service calls globally or per player.
+For example, we could limit overall session creation to 500 per second to control how quickly our player population grows, or we could limit friend invites to one per second per player, if we see a client bug or something like player abuse.
+This simple rate limiting feature definitely takes the cake for cost benefit in our development cycle.
+It was cheap to write and has demonstrated its benefits many times.
+As our feature development was drawing to a close, it started to seem like we hadn't accomplished as much as we wanted to.
+Weren't there many months available on the timeline?
+Don't be afraid of asking these kind of questions in a postmortem.
+Let's see if we can come up with some answers.
+The first thing that sprung to mind was that our team, like many others, transitioned to full-time work from home in March, 2020.
+As teams go, much of our work is in the cloud or at the very least remote desktop friendly.
+It only took most of us a matter of days to get set up in our home offices.
+But of course there are many other less tangible impacts that the industry as a whole is still sorting out.
+This makes it hard to put a finger on any specific impact or lack thereof.
+Next, major features will take a lot of effort and are very involved if you follow your department's SDLC.
+Changes to live services will always need live migration plans and rollback plans.
+Bigger changes need bigger plans, often with multiple phases.
+Our matchmaking and core services migrations were the epitome of this since they both fundamentally changed how they scale.
+That's quite different from your typical feature change.
+Something else to be aware of, don't overanalyze.
+A hefty backlog containing great ideas does no good if you have no time left to work on it.
+It's probably best to have some engineers start working on features while research is ongoing.
+Next, define intermediate deadlines, respect them, and coordinate them.
+Treat them as legitimate deadlines, escalate, and call out the risks if the work is falling behind.
+Make sure everyone on the team buys in. This can be hard to sell to the team if the real deadline, such as the launch day, is still much further away.
+most of our major features actually slipped far past our intermediate deadlines.
+We were almost in a situation where our major features were all trying to roll out at the same time, right before the free-to-play release.
+That was incredibly high risk.
+From our postmodem, we realized that our feature deadline slippage was also partially the result of not properly coordinating the teams.
+As I mentioned earlier, some of our features were already underway and simply folded in as prerequisites to our free-to-play release.
+This weak association allowed those features' deadlines to slip without considering the wider free-to-play release schedule.
+We should have brought our teams closer together, which would have clarified the overall schedule and the impact of any individual delays.
+So after reflecting on our development postmortem, we can now start thinking about the big release.
+This part is where we'll discuss the launch itself, followed by our new normal.
+First, we look at the schedule.
+Our final launch schedule is as you see here.
+Releasing the game update a week early was an important part of the launch logistics.
+This had a few nice impacts.
+Historically, every update has had a significant upswing of users who sign in to check out the new features.
+For this launch, releasing some of these new features early allowed some of this user bump to subside, which helped flatten the curve before going free to play.
+One of the features we released early was account linking with Epic Games accounts.
+This was a very complicated feature, and releasing it early let us start monitoring it and get in some bug fixes before the additional influx of players.
+Similarly, we were able to watch the newly patched clients for any abnormal call patterns, and had time to react to the hotfix before the free-to-play release.
+The free-to-play launch itself was on a Wednesday, and midweek is significantly less busy than the weekends, as we shall see.
+And here's the launch.
+This chart shows the game update, the hot fix, the free to play launch on Wednesday, and how the population climbed into the weekend.
+Look at that population increase compared with the previous week.
+We exceeded a million concurrent players for the first time ever.
+This was an incredible milestone, but achieving it actually felt like a foregone conclusion because our load testing had demonstrated that our performance ceiling was much higher than this.
+Sunday's highest population peak actually exceeded our five times high-end estimate, but it did not exceed our how high can you go load testing.
+This reinforces that you should continue with load testing and improvements up until the release.
+This also shows why releasing on a Wednesday was an excellent choice.
+The first boost on Wednesday was big, but then we had a few days to react to issues as the population climbed ever higher into that first weekend.
+But if you look closely at the charts, the release wasn't entirely sunshine and roses.
+As good as the launch looks, we did have some severe issues including two near total outage indicated by the red arrows. The first outage was on Wednesday, the 23rd, which was our free to play launch day. We had an unexpected scaling issue related to signing in with Epic Games accounts and our new account linking feature.
+This was an integration point between Psyonix and Epic Games Services that was not covered by our load testing.
+Also note that account linking had released a week earlier, so this problem only showed up at the higher free-to-play scale.
+The second outage was on Thursday the 24th.
+We saw climbing Redis traffic getting too close for comfort and made the call to double the number of Redis shards for the affected Redis Enterprise database.
+This was a preventative measure, but this database was already stressed, and adding the overhead of the re-sharding operation ended up starting a death spiral resulting in this outage.
+The third issue was on Friday the 25th.
+It's not visible on the chart because it did not affect player population.
+This was the proxy SQL configuration issue that I mentioned earlier.
+While preparing to promote a MySQL replica, We removed the read-only flag from its configuration, and ProxySQL picked up on this config change automatically, which was premature.
+That replica was added to ProxySQL's write group, which led to a split-brain situation.
+This wasn't an outage, but we had to spend quite a lot of time reconciling the data.
+Over the rest of the weekend, we had no load-related outages.
+This is despite far more load compared with the first few days.
+These were the only issues major enough to make it into our release postmortem.
+Also, a reminder to the viewer, don't forget to keep a record of your issues to write a complete and accurate postmortem.
+We've referred back to ours many times.
+This was a pretty incredible record for the first weekend.
+But how did the team handle it?
+Our team was tense, but confident.
+The rest of the studio just bombed us with memes.
+The peak load set a new record every day for the first five days, which meant every day was more stressful than the last.
+When was our all-time peak going to occur?
+Amazingly, our times five projection turned out to be extremely accurate.
+The entire team joined a war room Zoom call every day up through this first weekend.
+We were more prepared than any other release prior, but it was still tense to monitor.
+It was so difficult to try to load test everything we've ever written.
+Did we somehow miss something important?
+Lastly, it's worth saying that just because there were no other big outages doesn't mean that we weren't actively identifying and fixing issues before they became problems.
+We spun up a simple spreadsheet for lightweight tracking of potential issues.
+It ended up with over 50 entries.
+Many of these were fixed quickly, and the rest were put into the backlog to fix once things calmed down.
+After the population began to subside on Monday, the team was able to take a breath.
+and our new normal.
+Halfway through 2021, we're still seeing a sustained increase in users.
+It's holding at about three times our previous normal.
+With this new normal, the higher population makes our services more sensitive to performance issues.
+This applies to both code and configuration changes.
+The specific danger is that if the client call patterns deviate from our load test simulations, we end up in uncharted territory.
+One example of such a configuration change is when we enabled a limited time mode like Heat Seeker or Spike Rush, where up to a million players all switched over to that game mode nearly simultaneously.
+That's very out of the ordinary behavior, different from our load tests, and therefore not something we tested.
+Thankfully, we were able to react quickly to the situation by extrapolating from our previous load testing of matchmaking.
+A second example is when we set up an easy challenge that rewarded multiple items.
+This caused players to be rewarded items at a much higher rate than normal, and it ballooned our inventory system to its breaking point.
+This has left us watching our inventory system very closely until we can migrate it to a new database engine that supports horizontal scaling.
+On the upside, now that we've put all this work into our load testing system, it's readily available for testing any of these situations.
+Finally, we've renewed our diligence in following best practices for designing live migrations, promoting code, and always having a rollback plan.
+This concludes our look at the launch, so let's wrap up.
+Takeaways. What do I think you should take away from this talk?
+These are my picks for takeaways. From the planning phase, seek expert advice and support.
+Stay organized and get working on the long tentpoles first, but beware of overplanning.
+set a deadline for it. The next theme that permeated this entire talk was load testing.
+It's our most significant feature that came out of this release and we would have failed without it.
+It was far more work than we expected, but it was unquestionably worth the investment for the free-to-play release and beyond. Next, when thinking about major improvements, take care to carefully coordinate their deadlines and rollouts and respect those deadlines.
+Finally, you should always have some versatile load shedding controls like rate limiting.
+They're low effort and will get a lot of reuse.
+Even if your load testing demonstrates you can handle your load target all day long, what if you actually get 10 times or a hundred times that target?
+Rate limiting might just keep your services stable rather than have them go down entirely.
+So in closing, thanks to efforts described in this talk, Psyonix had a really successful free play launch for Rocket League, and I hope you will too in your future endeavors.
+Thanks very much for attending.
+Please ask questions if you have the time.

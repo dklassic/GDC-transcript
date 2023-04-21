@@ -1,0 +1,232 @@
+Hello, I'm Clément Duquesne, Technical Audio Designer and Audio Programmer at Pixel Riff, and I will be talking about the audio systems for our VR game Paper Beast.
+I'll be addressing several different topics ranging from simulation and physics to audio-based synchronization and VR spatialization.
+If you're not familiar with the game, Paper Beast is a VR adventure game where you're accidentally thrown into a poetic world in which new life is born from big data.
+and you will explore this world and slowly discover and interact with its ecosystem.
+Here's a short trailer to get a better idea.
+Ok so let's go now into the details of what we've seen.
+The game relies on a custom physics engine, and everything is physics driven.
+Creatures, plants, terrain, weather...
+The creatures have procedural locomotion, this means their movements are not written in advance but calculated in real time.
+They can slide if they are ascending slippery slopes, they can be carried away by river streams or struggle if their limb is caught by a predator.
+The terrain is handled with a fluid simulation. Water and sand flow dynamically. There's erosion.
+Creatures leave their tracks. They can dig and create small dams.
+The weather is dynamic as well. You can have rain, sandstorms, and wind affecting the physics.
+It ranges from a small breeze making plants rustle to a big storm blowing creatures away and flooding the land.
+And all these elements can be interacted with.
+You can grab the creatures, lift them in the air, help them cross obstacles.
+You also have tools to manipulate the terrain and weather directly or indirectly.
+All these elements and features had many implications and were the starting point of the audio tech design.
+Paper Beast being a VR game with immersion at its core, in an unfamiliar setting, we had to put a lot of energy to make sure runtime audio behavior was accurate.
+I mean synchronization, spatialization, propagation, they were all key elements for making the player truly believe in this universe, no matter its weirdness. Then there's this highly dynamic game context where situations get very unpredictable and granular with many moving parts. This means audio has to be very dynamic as well and react accurately to every possible situation, even when it gets a bit chaotic.
+And on top of that, there's the VR medium, which gives the player much more focus and discernment about what they're hearing with 360 immersion, head tracking, and we felt this really raised the bar for interactive audio. So because of all these things, sound has been an early focus in the development, and indeed the audio team was quite large compared to similar sized projects.
+For 12 people into the development team, 3 worked exclusively on audio, so that's a quarter.
+We had Florianne Pochon, she's a radio artist who specializes in pseudo-natural sounds.
+She's fully into original sound creation.
+We had Rolly Porter for the original soundtrack, a British composer of electronic ambient music.
+They both brought a very fresh vision as it was both the first time they worked for video games.
+And finally myself, I am a sound designer and C-sharp programmer and I took care of the audio tech from integration to system design and coding. We worked with Unity and Wwise from AudioKinetic which was a big help to get many advanced audio features.
+We also used the binaural audio features of the PSVR as it was our main target platform.
+We'll now go through the major audio features of Paper Beast and we'll use them to discuss the more general strategies and lessons we learnt about interactive audio and VR.
+First we'll talk about the creature sounds and more globally how we handled the physics engine's audio.
+Then we'll go with the vocalizations and how we used audio to drive animation and other things throughout the project.
+And finally we'll talk about the environments of Paper Beast and how we handled VR spatialization.
+Let's start with the creatures.
+Here are a few of the creatures inside Paper Beast.
+As you can see, we have many very different creatures with different number of legs, different sizes, different behaviors and materials.
+They were designed in a custom editor within Unity which we called PolyTool.
+Creatures can be created and edited on the fly, adjusted very quickly.
+It's a very flexible tool.
+As we said, these creatures just have a code behavior, but they have no traditional keyframe animations.
+They have intents of movements, but unexpected results can happen anytime if the creature slips, if another creature interferes, if the player grabs it.
+And the terrain is also possibly soft, so creatures can be buried, the ground can fall underneath them, and there's also water and streams, making it even more complex.
+So for us in audio, the only reliable source of information is the actual physics engine's data.
+Within these features and constraints, what we wanted for the audio was something as flexible as the physics editor, something that reacts accurately and closely to the physics simulation, but most importantly we wanted to give a real sonic identity to each creature.
+So how did we approach this? Well, physics, fluid simulation, and all small granularity, very dynamic systems are a big challenge for interactive audio design.
+When working with physics, on one hand, you have these unpredictable continuous streams of data coming from everywhere in the simulation, and what you need is to trigger a very limited number of discrete sounds at a given time, maybe a dozen.
+Also, you can't anticipate anything that's happening next.
+So the work here is really to interpret this data, to translate it, and make it usable and meaningful for audio.
+As said earlier, we could rely only on the physics engine's data, which are positions, velocities, collision information, and none of this data is clean.
+Even when you see what seems to be a clean collision, it's often a succession of frames where many collisions occur with various velocities, there's a lot of noise.
+So we built small code units to analyze specific physics interactions, which we call sound sources.
+Their job is to filter the noise and translate the data into sound information.
+This sound information is events for triggering and stopping sounds plus runtime audio parameters.
+The sound sources are instanced and attached to specific points on our creatures.
+And there's one sound source type for each different physic interaction.
+For example, our most common sound source types were move, impact, slide, tension, immersion, shake and bind.
+And each was tasked to trigger a specific set of audio events and to control specific parameters in Wwise.
+Now let's take the case of the Move sound source as an example.
+So the Move sound source is used for putting sound on simple movements.
+For this one, we used three inputs from the physics engine, which are speed, acceleration, and position.
+Each one is fetched on the points that are attached to the sound source instance.
+First, speed and acceleration are mixed into a custom intensity value, which is computed per point. Then, this value is averaged between points and with a system of thresholds, it triggers and stops a sound loop in Wwise. This same value is smoothed and sent to our RTPC in Wwise, affecting volume and filters depending on the case.
+The point positions are weighted by the intensity into a centroid.
+This centroid is smoothed over time and used as the sound emitter position by Wwise.
+Now we'll explain a bit more each stage of the process, beginning with the mixing of speed and acceleration into this custom intensity.
+So it's actually a basic tweakable sum and product of speed and acceleration.
+The coefficients are set by the audio designers for each creature.
+This allows us to tweak the weight of velocity and acceleration.
+In some cases, we wanted the acceleration to affect more, for example the sounds of paper creasing.
+Or sometimes we wanted the velocity to affect more, for example for a parachute whooshing around.
+Then, from this intensity, how do we get to the actual triggering of events and setting of parameters in Wwise?
+We start from this noisy intensity input and we add a threshold above which sound starts playing.
+But as we see, this would result in sound starting and stopping very quickly, which is not aesthetically or technically viable in audio.
+So we add a hysteresis behavior, which means there are two threshold values.
+When going above the upper one, we start the sound.
+When going below the lower one, we stop the sound.
+This makes much cleaner starts and stops for the sound, while still being very reactive.
+Then we add temporal thresholds too, a minimum duration, and a cooldown, which ensure that Wwise is never spammed with instructions and that the sounds have time to fade in and out properly.
+In parallel, this intensity value is also smoothed and sent to Wwise as a RTPC.
+About spatialization, each sound source is specialized independently.
+This has been key for us in VR. The moment we put one sound emitter per leg to play the footsteps was the moment they started to really work.
+In flat screen games, it's often more permissive.
+For example, you can specialize a whole humanoid voice for each footsteps on a single position and it sounds fine.
+In VR, you have to be more accurate than that.
+And in Paper Beast, I would say any creature bigger than a basketball had to be specialized on several emitters.
+So the emitters were positioned on the points that were attached to the sound sources.
+And when there were many points, we use centroids weighted by our custom intensity value to get as precise as we could.
+Here's an example.
+On this creature, the metallic rustle is moving along the body as the centroid follows movement in density.
+The small points are the ones assigned to the sound source, and their centroid is the big point.
+So the idea was that to each creature we could add any number of sound sources assigned to the points we wanted.
+Here is CAGE, one of our biggest creatures in the game.
+It has already 3 sound sources just for the sound of the body crackling.
+One for the head and neck, one for the left part of the body, and one for the right part.
+This was for when you go between its legs, you can hear the two sets of legs rumbling all around you.
+Also you can see the sound emitter for immersion being positioned in the middle of the immersed And here, for a simpler, smaller creature, you have a different sound source set.
+The locomotion sounds were a specific type of sound source that managed foot slides and footsteps.
+We used one emitter per leg.
+One challenge we faced was to characterize the gait of each creature.
+Often when you hear a real animal moving, especially when it's fast, you don't hear individual steps, you hear a rhythm.
+In theory that should have been automatic with our audio parameters being driven by the strength of each step but we wanted to accentuate that to avoid the typing machine effects when footsteps sound like tac tac tac tac tac tac tac. That's why we added static wise parameters giving to each foot different offsets of volume pitch and filters. So each footstep sound would be affected by these parameters giving a rhythm to the global gate. Now let's listen a bit to the result of all In the end, we would say these are the benefits of the method.
+The workflow is rather efficient.
+It was pretty quick to put sounds on new creatures.
+There's a lot of room for user intervention.
+It's easy to author the creatures, give them sound signatures, and adjust things when they didn't work right away.
+And its modular structure made it very flexible.
+In the end, it was used for all physical objects, not only creatures.
+And it was easy to add new sound source types for new behaviors that would follow the same pipeline.
+But there's also one particular drawback, it is CPU heavy.
+As each object can trigger many sounds, the voice count can easily go too high.
+And there's a limit to what voice can do on that level.
+So we had to do a system for custom high-level voice management.
+It was a bit of work, but it was essential, and after that, it made our life much easier.
+Now let's talk about the creature's vocalizations and how to drive animation and other things with audio.
+Creatures in Paper Beast vocalize when they are manipulated, when they are afraid or hurt or curious.
+So the vocalizations were a vital element in making the creatures feel alive and having the player connect with them.
+Our intention was to make them sound like nothing known and also nothing too distinctively vocal.
+Florian used a lot of non-vocal material, glitches, cardboard, flutes, pencils.
+Here are a few examples from the game.
+The Predator.
+Cage, Cotillon, the Papyvore, and the Tape.
+The challenge with these sounds was to connect them to the visuals.
+As the creatures both look and sound a bit out of this world, we had to give a little push so the player would recognize and accept these sounds as their voices without questioning.
+As the creatures are very flexible because entirely physically simulated, and as there are no keyframe animations and no animators, why not drive their movements with audio?
+Our strategy for this was to bake sound analysis data from the vocalization assets.
+We made this choice so we could tweak the analysis data and so we could anticipate by knowing the data in advance.
+It also allowed us to ignore runtime attenuations and base the analysis only on the original sound files.
+Here's an overview of our workflow.
+First, we have the offline analysis, where we extract pitch and volume information.
+Then audio designers tweak and mix the analysis curves with custom tools inside Unity.
+Then at runtime, when a sound is played, the game fetches the matching curve and feeds it back to the animation, the nodal script module, or anything else through the game code API.
+For the analysis, we used open source software, Sonic Annotator and Sonic Visualizer.
+With these two, you can visualize and batch extract almost any kind of data from audio files.
+In our case, we extracted amplitude, pitch centroid, and spectral centroid.
+The analysis batch was launched automatically from Unity.
+Here's how it looks.
+First, you select sound files, you run the analysis, then you can preview the sounds while visualizing and tweaking the curves.
+And you can create mix curves by combining pitch and volume together, with a bunch of tweakable parameters to get to the desired result.
+We also have additional options using Alternate Sounds for analysis, if you want to analyze only one layer of the sounds or get rid of parasite frequencies.
+And you can even draw on top of the curves if you don't get what you want.
+Here you see the raw pitch and volume curves and two custom mix curves.
+The mix curve exists in two modes, the absolute mode and the speed modifier mode, that I'm going to explain a bit more.
+Here's an animation with the absolute mode, where the movement follows a combination of pitch and volume.
+And here's an animation with the speed modifier mode, where it's the speed of the movement that follows a combination of pitch and volume.
+Sometimes we use these two modes combined on single animations, each curve driving different axes in the animation. Here's a basic example.
+And finally, some in-game examples. Here is the tape howling.
+Then, the baby vore.
+And finally, paper strip.
+In the end, this method helped us in several ways.
+It helped us making the vocalizations work by creating a strong audiovisual bond.
+It offered us free diversity in the vocalization motion as each sound file produces its own unique animation variation.
+And finally, it was very flexible and easy to adapt for various applications.
+And it could be enriched with new analysis methods, new offline processes for new uses.
+We didn't use it as much as we would have liked, but there's lots of potential.
+Now to the final part of this talk, where we'll speak about environment and VR spatialization.
+The environment of Paper Beast also had its share of challenges, essentially because of the VR specificities.
+In flat screen experiences, audio environment can be a background illustration that freely evokes what you want the player to imagine, but in VR the player has the environment all around them and they need to think they are truly there.
+Audio plays a major role in this VR immersion and it needs to be accurate and to behave in a natural and consistent way.
+Then you have also less choices when designing audio VR environments.
+With flat screen you can suggest a lot of things that aren't really there, but in VR you have to be very careful because there is no off-screen space.
+If something is heard the player can just look and see if it's there.
+You can still suggest something that is in an unseen space behind obstacles, but it has to be done with caution.
+And finally, there's the challenge of outdoors in VR.
+Making natural-sounding environments is somewhat easy when you are dealing with point sources, for example in interiors with a lot of machinery, electric devices.
+That's because binaural solutions provide good spatialization for point sources.
+But without those, you have to deal with ambience pads, which is a bit less easy in VR.
+There's the ambisonic format, which works quite well if you are able to record your environments, but to design ambisonic pads from scratch for non-realistic environments requires a very specific setup, and it isn't very fast nor intuitive.
+So we searched for other solutions that we're going to introduce.
+Our strategy for Ambience Pads was to blur the spatialization.
+The goal was to make sure the player wouldn't feel like they are listening to just sound files playing.
+We wanted to trick the ear into believing the sounds were coming from the VR world itself.
+To achieve this, we combined several spatialization techniques, trying to find the right blend for each scene and each asset.
+First, we use static, non-specialized binaural recordings.
+They sound very natural and are easily accepted by the ear as real.
+When rotating the head, they can sound awkward, especially if there are prominent elements in the sound.
+So we use them for indefinite, continuous textures like air tones or sand rustling.
+Then we used spatialized quads, so four-channel sounds.
+They are easier to author than ambisonic and they give a good sense of 3D depth to the scene when rotating the head. We had four emitters at high altitude for the four channels, each one with a bit of spread to smooth the rotation effect.
+Sometimes we use them with the binaural plugin, sometimes with the default spatialization.
+We also had an audio billboard mode to easily convert a stereo file to a quad pad.
+We would play the stereo file twice, with the second one seeking at 50% of the file.
+They would play on orthogonal facing emitters, giving the same result as a quad file.
+We used additional random effects to strengthen the 3D immersion and diversify the result, but we did this very carefully not to suggest world elements that should have been visible.
+Now, an important part of Paper Beast audio environments is the wind.
+The world of Paper Beast being quite barren, apart from the ecosystem, wind was a natural choice for being the main environmental audio character.
+On top of that, it was also a part of gameplay, so it really made sense to give it some sonic presence.
+But then the question was, how do we convincingly specialize something that is immaterial, everywhere, and yet constantly moving?
+Here again, our strategy was to combine several specialization techniques to try and make it feel real.
+We used specialized quads for the bass with a lot of asset variations for the different intensity across the game.
+Then we added the sound of wind buffeting in the ears.
+This was done with two voices playing in each ear, full left and full right.
+We made these voices react to head tracking with two individual EQs changing the filtering depending on the head orientation to simulate the wind entering differently in the ear depending on the direction. We also added 3D wind gusts with moving point sources circulating around the player and following the direction of the wind.
+When the wind is soft, they are almost inaudible, they only amplify the buffing sound and other wind-related sounds.
+But in high winds, they are very loud and they give a nice physicality to the air rushing around you.
+Another feature is the global dynamic equalizer on the wind bus.
+The idea is that the frequency and gain parameters of the EQ are defined by the ambient zones.
+So they specially interpolate when going from one zone to another.
+We use this, for example, to muffle the wind when going in a covered space, or on the contrary, to boost the bass and gain when going on an exposed ridge.
+So we create subtle local changes that are very cheap to do, and they give an impression of continuous change.
+This prevents the player from feeling a monotony that would break the illusion and makes him believe that the wind is actually making this noise.
+Okay, now let's listen to all of this in-game.
+Now for the reverbs, we tried again to convey a sense of space as much as possible.
+We used convolution reverbs and we added specialized reflections.
+The reflections enhanced the 3D impression of the scene, which is very valuable in VR, but they also made it easier to highlight the different locations and different acoustics, which isn't always obvious with the limitations of impulse responses.
+We placed these reflections on the prominent topological features of the levels, big cliffs, big rocks, and there are plenty of those in the game.
+On the technical side, we used auxiliary 3D positioned buses in Wwise and we put them as children of the convolution reverb bus.
+Each of these buses carried an EQ effect and a delay effect.
+We would have liked to put variable delays instead of static ones to have a realistic behavior when going near the reflectors.
+We tried with Heavy from Enzyne Audio, but we didn't have time to get to the end of that, but it's doable.
+Still on propagation, we did a basic sound occlusion system that would measure the thickness of obstacles between the listener and the emitter.
+It was difficult to do more in an open outdoor environment, but this simple solution was a lot better than nothing.
+In VR, it's very confusing to hear very clearly and loudly something you don't see at all.
+That's why occlusion is essential.
+On the audio processing side, we used Wwise's occlusion pipeline to filter independently pre-fader and post-fader, allowing us to filter only the dry signal and keep the reverbs and reflections when there is little occlusion.
+And we found this gives nice results.
+And finally, we wanted to make a last note about something very specific to the VR medium.
+When we were still looking for a composer, we made some tests with atmospheric music we liked.
+And even when the tone was 100% matching the game universe and scene, most of the time it didn't work in VR.
+It felt like our VR character was listening to music on headphones within the game, instead of having the magical blend that happens so easily in flat screen experiences.
+We think this comes from a dissonance between the acoustic space of the music, the space of the recording studio, or the space of the reverbs used by the composer, and the acoustic space of the game.
+A desert, hills, a canyon, a cave.
+So we thought of many ways to counteract this effect by specializing the music inside the game and so on.
+But Gladly, our composer, had a good intuition about this and he worked on the soundtrack by alternating all along with the VR headset and listening and tweaking it while inside VR.
+By doing this, he always found where to place his music acoustically in the scene, which was a big relief for us.
+The result is a soundtrack that is often melded into the sound effects, making it difficult to know where the world's sounds end and where the music begins.
+We still specialized the music a couple of times to integrate it even more in the sound environment.
+So we are coming to the end of this talk.
+Let's try and sum up all of this.
+We've discussed about the interpretation of a simulation's data into audio information with some examples of our implementation.
+Then we've seen how we can use the simulation's plasticity at our advantage and use audio to drive other game elements such as animation.
+And finally we've talked about some of the VR spatialization techniques we used and how by combining them and adding dynamic behaviors and details we tried to trick the player into believing into our VR illusion.
+Okay well, thank you very much for listening to this talk and feel free to comment this video or DM me on Twitter if you have questions or if you want to start a conversation.
+Bye!

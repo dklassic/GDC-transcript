@@ -1,0 +1,263 @@
+Hello everybody, and welcome to my talk on Starship physics and controls that feel real.
+How we brought the toys of Starlink to life.
+Just before I begin, I'd like to ask everybody to please silence their cell phones.
+And this is my first GDC talk, so I would love to, if you could fill out your evaluation forms at the end, and I love to read comments like that.
+So thank you.
+So who am I?
+My name is Michael Wasilewski.
+I've been in the game industry roughly 13, 14 years now.
+The last eight years at Ubisoft Toronto.
+I've been focused primarily on gameplay, animation, and tools.
+And for the last little bit, I've been working on Starlink Battle for Atlas.
+So our team's primary contributions include transforming the signals coming out of this hardware device that our very talented hardware team provide and turning them into a digital version of the ship.
+So along with that comes the controls, the physics, and reactions of the ship.
+I'm also super passionate about controls and how characters feel in games.
+And it's not easy to convey with just videos and text, but I'm going to try to do my best.
+So what is Starlink?
+Well, Starlink is an open world action adventure game targeted towards, but not exclusively for, kids.
+Players are encouraged to swap parts, not only to build the type of starship that they want, but also to overcome obstacles in the game.
+So you can sort of turn your wings around, you can swap them on top of each other, and swap parts of different hulls onto different other hulls.
+So you can see we've come a long way since the initial prototype.
+I think that was roughly four years ago or so.
+But even from day one, having the toy be a physical thing that our players would interact with was very important.
+The starship being mounted on the controller provides more of a visceral experience and we wanted that to translate into game.
+So how do children play with toys?
+Well, they skim them along the ground, they fly them through the air, they tumble them in the air, and usually smash them into the nearest available object.
+And those are some of the core experiences that we wanted to translate and to digitally emulate.
+Now, with that brings a few challenges.
+So, our starships don't have wheels.
+of course, and with that come certain expectations.
+Environmental collisions that in a car game would feel completely acceptable in stopping you dead in your tracks should probably be avoided.
+We also want to align nicely to the terrain.
+We are a shooter, so we need tight control over all movement of our ship.
+You know, we can't, we have to have control over timings, the feel, position on screen, that sort of thing.
+You don't need full physical accuracy, it's not that important, but being physically plausible while remaining fun was an important goal.
+Whoops.
+And we're a small team, so inexpensive solutions were always a big plus.
+I think each cell had roughly three to four people in it, so we looked for cheap solutions.
+And of course the unique challenge in our game was this.
+Players build their ships and we wanted them to give them the fantasy of being an ace pilot of their own creation.
+Thus, we couldn't optimize towards any single basic shape or convex hull.
+We kind of had to support a huge variety of different shapes.
+So I'm gonna go step by step to build up a ship that's dynamic, has character, reactive to the environment.
+My hope is that at each step it feels like, well, that was just the obvious next thing one would do.
+But.
+Like, make no mistake, it took a while to develop this game, and during development, we tried things, we iterated, and we did fail quite a bit.
+So, what is our ship?
+Well, it's just a point in space driven by linear and angular velocities.
+It's kind of an oversimplification, but at its absolute core, that's true.
+On the gameplay side, we drive the point in space.
+The ship mesh and collision shapes are bolted onto that transform, and we treat the whole thing like a giant rigid body.
+It's not quite that simple, and in fact, you can see from the picture that we use some sensors to properly navigate in the world, and I'll go into those in a moment.
+But first, the transformation pipeline of our ship.
+First, we try to apply any player input to drive it in the world.
+Then we apply some character, maybe flavor, onto the ship via animations.
+We perform reactions to projectiles and collisions we encountered last frame, and finally we pass all of that off to the physics system and read it back for rendering.
+So what is behavior?
+Well, behavior is the layer at which design, I would say, has the most control over how a ship will feel when being controlled.
+It's made up of several reusable classes that control primarily just one aspect of the ship via linear and angular velocities.
+Multiple behaviors can be sequenced or blended together to get something more complex.
+So the code here isn't all that important.
+I've kind of simplified it anyway from the real thing we shipped with.
+But the important thing is that each behavior is just a class with tuning parameters and an update method which operates on a set of input output parameters.
+Some behaviors drive our point directly.
+Some behaviors just calculate parameters for later behaviors to use in some way.
+Now, we have three major navigation modes, like I mentioned at the beginning, skimming, atmospheric flight, and space flight.
+Each navigation mode has a state machine that sequences behaviors together and adjusts various blend parameters.
+In the example above, we blend two versions of a camera alignment, depending on how fast the ship is moving.
+We can also adjust the settings if you're stalled, frozen, or have some other status effect applied.
+It's a really simplified example, and our real modes had many, many, many more sequence behaviors in this sort of tree-like structure.
+When we enter or exit the atmosphere of a planet, or maybe turn on and off our flight engines, we have to transition between these states.
+Thus, each of our state machines are behaviors themselves, and then we can use existing blend functionality to transition between them.
+And we have a big core set of behaviors, and most reuse happens by tuning a behavior for a specific scenario.
+Most of them are applicable to multiple navigation modes, although we do have more esoteric ones, like something our designers requested, aligning to the solar system ecliptic plane over time so the players don't get disoriented.
+So let's just start with the most basic, which is a thruster behavior.
+This just applies a linear force to our point based on user input.
+When the ship is attached to the point, the physics step keeps it in the world, but you know, we're constantly colliding and scraping in the world against our height map and props along the way.
+So there's no rotation on the ship, so it's not really useful on its own.
+But let's start aligning to the camera.
+The player actually feels like now they're controlling a third person character or third person avatar.
+We just dangle a carrot in front of the ship in the direction we wanna rotate, given our current angular velocity, figure out if there's any delta needed to get us there in the next frame, and then apply a force to do so.
+Design, of course, has knobs to tune the smoothing and acceleration.
+Once we're generally moving and facing the right direction, we can work on keeping ourselves off the ground.
+Our repulsor behavior sphere casts against the world a few times and tries to keep the ship from hitting the terrain.
+Now here, repulsor's a bit of a misnomer because depending on the desired gameplay, we either tightly keep our ship bound to the ground, for example in combat, we wanna keep them generally in the same combat plane.
+But when we're navigating across our giant worlds, we allow the ship to hit jumps, sail through the air, that sort of thing.
+So the repulsor is kind of just using a spring equation where our spring constant varies depending on the type of gameplay that we want.
+And it generally keeps us off the ground and away from objects, although, as you can see from the video, not all objects.
+And I'll get into that in a second.
+Well, once we have this repulsor behavior, we kind of have a good normal to the ground.
+So we can use some of the repulsors, the sensors to determine a good normal vector and refine our ship and align it to the terrain.
+This is where having multiple sphere cast results help, as you can never know what sort of scattered artist props you may find your ship on top of.
+You can also see that the array cast, the distance between array cast changes as the ship moves faster or slower.
+Then we add, I'd say, the most touchy-feely step for design to tune, but one that completely brings the ship to life.
+Adding roll to the ship based on player input helps give the impression of engines actually having to do work.
+Then putting that all together and including dashes in different directions, upwards, left, right, you get something that I think feels pretty dynamic and responsive on screen.
+The VFX help as well.
+Now, we're not a racing or simulation game where the player is expected to retain very high-grain control of their ship.
+We're a giant open-world game where the player's goal is to get across varied types of terrain and engage in combat.
+It was important that our worlds feel as interesting as possible and that the player felt like a skilled pilot while navigating every corner of each of our seven planets.
+Without some sort of avoidance behavior, I don't think we could have accomplished that goal.
+Thus we raycast in front of us to sense what's ahead and apply an upwards force to try to clear any obstacles in the way.
+In this case, it's getting me over some dinosaur bones and some scattered rocks.
+And you can see, even as I jump over it, when I go down to the ground, my repulsor spring equation kicks in and you get that nice sense of movement.
+So our tooling wasn't quite there for Starlink, so sequencing the behaviors was a bit manual, but all the design variables were exposed for tuning.
+Like I mentioned, we have the three major navigation modes, and the sequence of behaviors, the sequencing of behaviors was slightly different for each of them, but the core set of behaviors was all the same.
+In fact, we're releasing an update in April, I think maybe April, early May, that adds a drifting mechanic to the game, and we didn't add any new types of behaviors.
+We just sequenced existing ones with our state machine.
+And I mentioned that behaviors have settings.
+These include acceleration curves, blending times, maximum translations on screen, et cetera.
+But we also had many different ship hulls and wings that should feel different depending on how our players assemble them together.
+So design actually tuned several sets of settings for our behaviors, and at runtime, we would linearly combine them with weights extracted from this physical ship configuration.
+At one extreme, the ship could feel more like a motorcycle, and the other extreme, more like a tank.
+So onto animation.
+Since we have a rigid body as our main avatar, much of the character has to come from VFX, SFX, and secondary animation on the flaps.
+But we can do a bit better by using animations to drive our rigid body.
+There's not a lot of references out there for applying animations to a ship that's physically controlled, but it's not too bad.
+In a nutshell, animation is always additive for us.
+So, playing animation defines an offset around the base gameplay transform we want to be at.
+We never actually drive the route of the ship with animations, we just apply velocities to our physics bodies that take us to the desired offset.
+And just as a side note, we had a very small team to make this title, so...
+And since our animations are just a single bone, the first animations we applied were actually just repurposed camera animations from an internal third person shooter game.
+And I think we actually shipped with that.
+So once we have a ship that moves, has a bit of character, reactions to the world and the environment are in my opinion the biggest opportunity to connect it with the rest of the game.
+Makes the ship feel grounded and more than just a transform on screen.
+But remember our driving principle.
+The ship in game has to react to physical impacts just like you might imagine a child might mime while playing with a toy.
+Ship should translate, although maybe not too far.
+Should rotate, maybe not too much to interfere with gameplay, and finally recover back to its original transform.
+And one extra constraint for our team, depending on how the ship has been configured, you know, three wings on one side, no wings on the other, some pointing up, some pointing down, the ship has to react in a physically plausible way.
+So each part that we attach to the ship comes with a set of capsules that get added to a base compound shape.
+As we add more wings, they just stack on top of each other.
+And as you can build some pretty crazy ship combinations in our game, your rigid body compound shape will also look pretty wild.
+Each part has a mass and can change the ship's center of mass and inertia tensor accordingly.
+Together, the inertia tensor and center of mass position can drastically change how impact reactions feel.
+So we'd like to have impacts that feel real, or maybe a better term would be feel fun.
+And again, because we want tight control over our ship, we don't actually want the physics engine to do the creative work for us.
+We actually don't have that much control at that level.
+Ideally, we do some creative calculations on the gameplay side, figure out what our ship should look like, and then drive the ship transform in the physics step the same way we've been doing with behaviors and animation, just via linear and angular forces.
+So there are two components, and I'll start with translation.
+There's translation and rotation.
+At least in Starlink, projectiles move pretty quickly and players generally only perceive that one came from this direction and hit the main mass of the ship.
+Not that it came from an exact spot and hit my wing at an oblique angle.
+So in our simplified representation, the ship is just gonna translate for some amount down the impact direction.
+It's pretty easy.
+I kind of think of it as a little finger poking the ship at a certain spot.
+So you translate for a bit.
+And what does that look like?
+Well, it's not bad, I guess.
+Serves a couple purposes.
+It has the ship dynamically react on screen and shows which direction the impact came from.
+I think it works, but it's a bit sterile and lacking that oomph factor.
+So let's make it look a bit better by focusing on the rotation component.
+So we see an incoming projectile that's about to impact our ship.
+The impact in the projectile direction is in the red vector v right here, which will cross with the vector from the center of mass to the impact point.
+This gives us the green vector, sorry, the magenta vector coming out of the screen and maybe a bit to the right.
+Now, that becomes our vector that we want to rotate the ship around.
+Well, in physics.
+An inertia tensor kind of tells us how much a rigid body will resist rotation around each axis and how much torque needs to be applied to move the body.
+And as I mentioned before, each part has a mass, so each the ship has an inertia tensor that you can either calculate manually or ask your physics system to provide for you.
+So if we multiply this rotation axis by the tensor and the mass, the length of the result is the total angle by which you would need to rotate.
+It's an axis angle.
+So as a recap, each projectile just creates a new axis angle transform that we want the ship to be at.
+We blend those transforms out over time and we nudge the ship there using forces.
+So what does that look like?
+So the magic, as with most things in game development, is in the tuning.
+There's a maximum translation the ship generally remains, so that the ship generally remains in the center of the screen.
+This differs in space versus on planet, because we don't have the ground plane to worry about in space.
+There are also limits on the maximum rotation we can torque the ship, so that on screen the ship generally faces mostly forward.
+We can also combine this by modifying the behaviors from the beginning of the presentation.
+Hard enough impacts will push us towards the ground, causing our repulsor to work a bit harder.
+So you see the ship do sort of a bounce up and down, providing, I think, a richer sense of movement.
+And even harder impacts cause what we call a stall, where our repulsor and thrust behaviors just completely turn off for about a second or so.
+And then our VFX team did a great job of selling the actual engines recovering.
+Now, you may have noticed me snapping wings and weapons onto my ship, and you can literally feel in your hand the force needed to do that.
+And we wanted that to translate into game.
+So we actually just applied the exact same technique when a part animates it.
+We just do that fake little finger jab.
+And of course, depending on how the ship is currently configured, that reaction should still look pretty realistic.
+Basically, we kind of created ourselves an inexpensive form of procedural animation.
+Well, what about collisions with the world?
+This is sort of what it looks like if you don't react to the world at all.
+I mean, you don't go through those objects, but I guess it does the job, but it's not super exciting.
+But what if we were to do the exact same thing we did with projectile impacts?
+What if we were to apply that fake little nudge?
+In this case, I think it results in something that looks pretty good and, more importantly, pushes us out of the way for subsequent collisions.
+So as a side note, I can't tell you how many cliffs and rocks I've scraped our digital ship in during the course of this game to get it to feel just right.
+And my one note is that If you're doing something where you have a skimming vehicle, just ignore like 90% of the collisions coming from below your ship, because you're probably hitting collision-enabled props on the ground that somebody scattered, and your ship would just flinch way too much.
+So, some of the more eagle-eyed of you may have noticed a physics shape at the bottom of the ship that's colored a little bit differently.
+Internally, we call that the imp plow.
+We have a small NPC in our game, the imp, with very low hit points, kind of popcorn fodder for the player.
+And as they're pretty small, design wanted to encourage the player to drive right through them.
+The problem being with all the work we did to get our repulsor working, the ship sits at about the same height as the imp.
+And a player trying to ram them would often miss or skim directly over their heads.
+So our solution, was to add this invisible plow shape.
+So from the player's perspective, everything looks great, given the camera angle, speed at which we travel.
+But if we look at it from the side, the ship never actually hits the imp.
+It's just this invisible piece of collision causing the reaction.
+Well, really hard collisions are a special case.
+Sometimes it's best to just step back and let your physics system do the heavy lifting.
+Apply a little slow motion on the impact to emphasize it, and things look great.
+One thing to note is because all of our behaviors, animations, projectile impacts, et cetera, have all been combining to drive the rigid body.
+When we go into purely physics-driven mode, all that motion is carried through.
+We don't need to blend anything out or worry about a mismatch between the rendering and physics.
+But you will notice here that my ship actually recovers back to normal in a pretty physically plausible manner.
+And that was one of the biggest challenges we faced on this project.
+Recovery.
+So there are several different factors to consider when dealing with a tumbling vehicle.
+Its initial and desired orientations, as well as the initial and desired angular velocities.
+There's of course, and of course, you don't want to do it over one frame, so there's some recovery time that you want to nudge your vehicle over.
+There's of course the linear component to this, but we kind of ignored it for the purposes of this game and just let gravity do its thing.
+So just like with animations and projectile reactions, we want to find a good recovery way to recover and then nudge our ship over time to this better orientation.
+So I typically think of Bézier curves as a way to blend a position, but we can also use them to blend from one angle to another, where our intermediate points are blending out our initial angular velocity and blending in our target angular velocity.
+I've shown it above here in local space, but you can also do it in world space.
+K here is just a tuning parameter that kind of specifies how the recovery looks.
+And depending on the time that you use to recover, it can actually look quite a bit different as well.
+The important thing to note here is that this curve just defines orientations.
+Our job is to take these desired orientations and apply forces to our rigid body over some amount of time to sort of nudge it back into place.
+This is just an ideal representation of where we want to be.
+Now, when we blend to a target angle, of course we can go the short way or long way around the sphere.
+And I've done a lot of animation programming, so blending the short way is kind of embedded or ingrained in my head.
+But it's not immediately clear that that's the best approach.
+If you have that initial angular velocity, you may end up with something that looks worse.
+So I'll show you a video in a second, but here's a ship that from the perspective of the pilot inside is tumbling clockwise.
+The arrows represent the forward orientation of the ship if we were to simulate it ahead in time.
+We can either carry that momentum through, keep spinning, and then slowly nudge ourselves towards the target orientation, or, that's what the green debug arrows represent, or instead try to counteract that momentum, the yellow arrows.
+Both get us to this desired orientation and velocity, but one just looks much better.
+So we finally, we tried several things here, but we finally settled on this approach.
+We subdivide each curve into segments.
+We calculate the angular acceleration at each segment for curve A, do the exact same thing for curve B, and then pick the curve with the smallest maximum acceleration.
+And when you try to reduce your maximum angular acceleration, you preserve momentum, or at least it feels like you're preserving momentum.
+So here I am, heroically piloting my ship directly into a pile of dinosaur bones.
+As my ship tumbles, I can recover it nicely.
+Looks pretty good.
+Now if we scrub backwards in time to see exactly what happened, just remember that the projected path in green is always the recovery with the minimal angular acceleration, i.e. the best one.
+When I first impact, you can see it's better for me to fight the induced rotation and power through.
+But as my ship keeps tumbling, the path changes.
+So it actually becomes better for me to continue tumbling and actually increase my tumble rate versus drag.
+to rotate 360 through and recover.
+Finally, physics and readback.
+So, gameplay systems on Instarlink run on a variable time step, and we always render the ship at the gameplay position.
+Physics, however, operates on a fixed time step, and that's just due to simulation stability concerns.
+What this means is that our physics representation of the ship is always slightly out of sync with what we render.
+In games where you don't travel too fast, it's not that big of an issue, but for us it was something we needed to think about.
+And in fact, before working on a vehicle game like this, I hadn't even considered this problem.
+So you can step your physics to just before or just after your game frame.
+And for us, in fact, in order to keep them as close as possible, we try to split the difference.
+If more than half of the physics step time would have been past the gameplay frame, then we kept it back.
+Conversely, if the physics step would have been more than half its step behind the gameplay frame, then we stepped it past.
+But what that means is when you're reading back transforms from physics and actually rendering them, we either have to forward predict to where we think it'll be, or backward predict to where it has been.
+So here I've induced a bad frame rate in order to get my physics and game frames out of sync.
+Although you can see that for the player, the ship generally looks correct.
+But if I scrub back, the green physics shapes are always slightly out of sync.
+And depending on where my game frame and my physics frame are, I'm either predicting forward or predicting backward.
+But due to the prediction, you don't really notice it as a player.
+So, conclusions.
+Well, you can build up your vehicle behaviors one step at a time.
+Layering them together, basic behaviors together can really give you something a bit more complex.
+Simulating impacts on the gameplay side can feel real and be an inexpensive form of animation for the rest of your game, depending on what sort of game you're making.
+At first, when we started with a tumbling physics object in the world, and we had no idea how to recover it, but it turns out it's really not too bad.
+You can still look physically plausible.
+And I would really love to push that even farther by taking the linear component into account.
+I would love to be able to raycast ahead in time, see where I'm going to be and do something more interesting, or maybe even make a gameplay mechanic out of it.
+Thank you.

@@ -1,0 +1,487 @@
+I'm Kevin Tedisco.
+I'm a senior software engineer at Vicarious Visions.
+Before we get going, I was asked to remind everybody to put your cell phones on silent, and also please fill out the evaluation form that you'll receive at the end of this talk.
+And now, to start, I have a disclaimer.
+Any HDR images that I'm about to show you are a bit of a lie.
+I'm showing this on a non-HDR display, which means that it cannot faithfully reproduce an HDR image.
+Therefore, all of the imagery is tone mapped to be a perceptual representation of what HDR content looks like, as it might be compared to SDR or standard dynamic range.
+Also, some of the images were captured by taking a picture of a monitor screen, so quality may look a bit low at times.
+At this point in HDR's maturity, I'm sure that everybody kind of understands this, but I thought it might be worth a quick reminder.
+So I think we're all very familiar by now with what Destiny looks like.
+Here's a shot of the Hunter's golden gun activation in standard dynamic range.
+And after our work on HDR display support in the game, we bring this shot looking like this to looking something like this.
+And we take this beautiful landscape of Io with its greenish-yellow fields and tall blue billowing smokestacks and transform it into this.
+The colors are more vibrant, they pop, everything is brighter, richer.
+Today I'm going to cover how we brought this upgrade to Destiny, which had content only authored and mastered for SDR.
+I'm going to start by getting everybody in the right mindset with a quick recap of what HDR is, and then dive right into how we approached implementing HDR display support in Destiny.
+In particular, I'm going to talk about the goals that we set out with, as well as the constraints that we were bound to, which as I'll explain, proved very significant when it came to the decisions that we made and the approaches that we took.
+I'm going to focus on three main challenges that we faced in the work.
+How do we tone map the game for HDR?
+How do we color grade the game for HDR?
+And how do we add HDR support to our UI?
+I'm gonna talk about a comparison tool that we made that allowed artists to review HDR content alongside SDR content on the same screen.
+And then from there, I'm gonna shift gears a bit and move into a broader space.
+I'll talk about how wild the HDR world is right now, in particular, how wild it is on the PC.
+PC was the first platform on which Destiny received HDR support, so the bulk of the experience that I have was understanding how HDR works in the PC space.
+I'll talk about all the interesting things I learned about what's necessary for creating a successful HDR game for Windows.
+And finally, I'm going to pose the question, Did we do it right?
+Well, we turned out a really great looking HDR game, but I would hesitate to say that we did it the absolute right way.
+So one and a half years in, does it hold up now that HDR displays are becoming more and more mainstream?
+Well, sort of.
+Take Mercury, for example, in SDR.
+Today, I hope to shed some light on why, when we take this scene and view it on an HDR display, we get this kind of washed out look.
+We've gained detail in the bright sun, although arguably we probably shouldn't have, but we actually appear to have lost dynamic range.
+And this is an example of how our constraints ended up impacting our final result.
+I'll wrap up today with what I learned about doing this kind of work the right way.
+I'll admit that I didn't have a lot of experience in this space when the work started, and since then I've learned a ton.
+Hopefully I can pass some of these learnings onto you all today.
+So really, really quick recap of what HDR is.
+HDR gets us two major things.
+More dynamic range, black or blacks, bright or whites, and more color.
+You can see here that the range of HDR extends a few orders of magnitude above and below that of SDR.
+Incidentally, this range is about equivalent to that of the human eye without adaptation.
+Also on the right, you can see the difference in gamut size between the SDR standard Rec.709, which is the smaller triangle, and the new HDR standard Rec.2020, the larger triangle.
+Throughout the presentation, I'll mention these two color spaces a lot.
+Rec.709 is a color space used for HDTV, and Rec.2020 is for UHDTV.
+You'll also hear me mention NITs a lot.
+A nit is a unit of visible light intensity and is equal to one candela per square meter, where a candela is the SI unit of luminous intensity.
+Modern LCD displays output a range of 200 to 300 nits, and HDTVs can be anywhere on the range from 400 to possibly even 1,500 nits, depending on certain conditions and cases.
+And just to give some grounding for those less familiar with some more terms I'll be throwing around, Tone mapping is the process of remapping a set of colors in a particular range down to a new set of colors and brightnesses in a more limited range.
+For example, taking raw camera data of real-world lighting conditions and squashing that data down into a typical into a range that a typical display can represent.
+The term LUT is just shorthand for lookup table, and it's a data structure that's used in color grading as a means of altering colors.
+FE16 is a pixel format where each channel has 16 bits of precision, so double that of our standard 8-bit RGBA format.
+Gamma is the pretty well-known nonlinear transform of image data that originated in the CRT TV.
+It's nonlinear in order to give more precision to dark values, which is important because the human eye is more sensitive to brightness changes in low light than bright light.
+And finally, PQ is short for Perceptual Quantizer, and it's HDR's new gamma curve.
+I'm not going to cover the details of its formulation because that could probably eat up the entire hour that I have, but it's designed to ensure that enough precision is available over the entire range of the HDR standard so that a human can't visually perceive a discrete step in brightness.
+Now, all this out of the way, we can dive right into the details of bringing HDR display support to Destiny 2.
+I told you this recap would be quick.
+So we set out with a few explicit goals for our HDR implementation.
+The first of these were art-centric and championed by Nate Haubacher over at Bungie, who is the technical artist I worked with on HDR.
+We wanted visual consistency when compared to the SDR version of the game, as well as the same high level of visual quality that's expected from a Bungie title.
+We also needed to build the feature with little to no extra art support.
+Nate would be the only artist working on this.
+And this was maybe obviously our largest constraint.
+Now in addition to this, as an engineer, I saw a high degree of technical robustness in the implementation.
+It should always work when it can, or be clear why it's not working.
+Now at the time that we started the work in early 2017, HDR was in a very early adoption state.
+Working with it could be very finicky and in a few cases it still is.
+Very few users would initially have access to it, hence the limited resources to implement it.
+This essentially started out as a pet project.
+I was the only engineer working on it which brought us to a total of two people to support the feature.
+And one last really interesting constraint that I want to highlight here is that what we were trying to do was take a game that was authored and mastered for SDR and retroactively fit it with HDR display support.
+And as we'll see, this is what pulled us away from doing things the right way and drove us to come up with some very unique solutions.
+Now, if you review some documentation about adding support for HDR displays, you can come up with a checklist that looks a bit like this.
+First, we need to actually inform the display that we're supplying an HDR picture.
+This can be done with the API of the platform that you're working on.
+We need to change our backbuffer format to be HDR compliant.
+We need to ensure that we have at least 10 bits per channel of precision throughout the entire rendering pipeline.
+Otherwise, we're going to lose our larger range in precision.
+Now, before sending the image off to the display, we need to convert our picture to the new REC 2020 color space and PQ in code.
+Now on PC, these last two items are handled for us by the display driver, if we choose.
+And then, magic, right?
+Everything just works.
+And it's great.
+We send it out.
+No, it's not that simple.
+Destiny's rendering pipeline at a high level looks pretty standard.
+Lighting and shading uses 11.11.10 buffers.
+So we started with sufficient precision there.
+Post-process continues on with 11.11.10 as well as 16-bit floating point, so no work needs to be done there either.
+Then we take the scene and we tone map it down to SDR, and that tone map value is used as an input into our grading LUTs.
+We shift from 16 bits per channel to eight, and we've moved from scene referred space to a non-linear tone map space.
+We've lost our range.
+After this, UI is rendered directly to the back buffer, and then the final image is sent out to the display.
+And these formats used in the latter stages of the pipeline meant that initial HDR support wasn't as simple as changing the backbuffer format alone.
+The result is something similar to this, which hopefully looks a bit dim.
+The low brightness is because having rendered to an 8-bit per channel target during the pipeline, pixel values are clamped to 1, which, on an HDR display, translates to only 80 nits of brightness.
+Under these conditions, we could achieve nothing brighter than that, and because of something called the Hunt effect, you get something that looks pretty dull.
+Now fortunately for Destiny, it was fairly simple to change all these formats when running with HDR enabled.
+And we did this by branching, maintaining the old SDR pipeline in its entirety, while introducing a new rendering path where these formats would be different if our target display was HDR.
+On PC, the back buffer format was 16-bit floating point, and on console it's 10 bits per channel, 2 bits alpha.
+And the result of doing this is we go from this very dim picture.
+to something that takes much better advantage of the range that HDR has to offer.
+But of course, it's still not really that simple.
+If it were, I wouldn't be up here talking.
+The next step after that was figuring out a tone map for HDR.
+I mentioned earlier that tone mapping takes place right at the end of post-processing alongside color grading.
+Destiny 2 has a rather unique tone mapping curve and it looks like this.
+It doesn't really have much of a toe.
+It gives more contrast to the low ranges rather than the mid.
+And initially, for simplicity's sake, we implemented the ACES HDR filming tone mapping curve just to get us off the ground and running.
+And that looks like this.
+It's kind of a different shape than Destiny's curve.
+You can see that here.
+So the result doesn't actually match the intent of SDR very well, as you can see here.
+SDR is in the left halves of these images and HDR is in the right.
+In particular, the darks were really crushed.
+We couldn't go the ASIS route because it was too far off from our goal of visual consistency, and also players would have kind of a terrible time trying to play in dark conditions like that.
+So we modeled an HDR curve that matched the shape of the SDR curve and got much more visually consistent results.
+Now, this is an area where we probably could have explored other options, but with the existing SDR curve so ingrained in the visual style of Destiny and in artists' expectations, changing the SDR pipeline was a non-starter given the impact and the resources that we had.
+Two people.
+Next up, color grading.
+Color grading is a step during post-process that essentially converts colors to other colors.
+It's a common practice in the film industry to alter the look of any given frame.
+We use it in games primarily to set ambiance or create color warping effects.
+For example, when you travel through a man cannon or a VEX teleporter in the game, as pictured here, a LUT transformation is being used to achieve part of the screen space effect you see.
+The hurdle that we faced was that the LUTs for Destiny 2 were authored for colors in SDR space from zero to one.
+So the values we got back were not HDR, and the values it expected to go into it were also not HDR.
+There were two choices. Either we re-author the LUTs for HDR and choose which tables to use depending on what display we're outputting to, or we find a clever way to use the SDR LUTs.
+And as an engineer, of course I went the route of trying to be clever.
+I settled on some math trickery, considering that we're taking a linear input, y equals x, tone mapping it down to a new range, y equals str tone mapped, so s of x, and then transforming that color with a lookup table, l of s of x.
+The hdr value we want in the end before tone mapping is just our original linear input, so if we ignore the color transform, To get back to our original linear value, we just have to multiply by x over S of x, and voila!
+We have our HDR value back.
+And it worked!
+And this is what the code looks like, or pseudocode at least.
+We tone map our SDR color, we perform our LUT lookup, we calculate this transform by dividing the input color — careful not to divide by zero — and then we multiply our LUT color by that transform.
+Now when I say it worked, it wasn't quite perfect because whenever the input color is zero, we'll fail to perform a color replacement because we'll still get zero as a result.
+And this means that we can't replace the color black.
+We decided to ship with that issue as it really wasn't very common to try to perform that color replacement in that specific case.
+We did unwittingly ship with a different bug though and maybe some of you saw this at some point if you play with HDR.
+because this one was around for a while.
+Yeah, so anywhere in the game that had particularly dark colors like this cave ended up getting kind of blown out, looking overly bright and bloomy in a pretty broken way with elements of it still just as dark as they should be in splotches.
+Yeah, it doesn't look good.
+And the problem became very clear when the trick to transform our LUT lookups back to HDR space was graphed out.
+So this is a graph of that mathematical trick.
+As the linear input approaches zero, the transform actually starts to slope upward.
+So LUT lookups from the dark input colors, like the ones seen here on the right, are actually going to be greatly amplified, like so.
+Now the fix wasn't particularly elegant, but it worked pretty well.
+I introduced a piecewise function that would preserve the slope of the transform curve as the input approached zero.
+And this abrupt change in slope at the intersection point of the two functions didn't produce any visual artifacts.
+I verified the validity of the approach using the HDR-SDR comparison tool, which I'll talk about more shortly.
+You can see that on the right side there.
+Okay, UI.
+UI was definitely the most arduous journey in bringing HDR to Destiny 2.
+We tried a total of three different solutions.
+Each had unique issues, so we just picked the one with the least complicated problems to solve and plowed right through those.
+There were two key things that played into all this difficulty.
+The first one, unlike lighting calculations, UI content is inherently SDR content.
+You're taking images that were authored on an sRGB display and drawing them right back.
+what you see is what you get.
+And the second problem is that UI is expected to be blended in SDR space.
+Quick preview of UI rendering in Destiny.
+Each UI element in Destiny is rendered directly to the back buffer, like the cursor here.
+Some more complex elements are rendered to a smaller offscreen buffer first, and then the contents of that buffer are rendered to the back buffer.
+And lastly, there are these things called overdraw elements, which sample from the back buffer first, perform maybe some kind of blur on that sample, and then render over that sample and draw that back onto the back buffer.
+The first challenge that I mentioned, UI is authored for SDR, seems really easy to overcome at first.
+Just boost the brightness of the UI into a more suitable range.
+So attempt number one was, still render all the UI directly to the back buffer, but multiply by some magic constant.
+Now unfortunately, giving each individual color channel a boost in intensity didn't end up looking quite right.
+All the UI elements look washed out, overly white shifted.
+The reason for this is gamma encoding, or more generally display transfer functions, or in this case, lack thereof.
+In SDR, you're viewing the UI after it undergoes a gamma transformation when being decoded by the display.
+And the result of performing this operation on each channel individually actually means that a hue shift takes place.
+This meant that in order to faithfully reproduce UI as viewed on an SD or monitor, it would have to undergo the same transformation, but we would have to perform this manually.
+And the code looks something like this, raised to a gamma exponent and then multiplied by our magic constant.
+The result turns out to be pretty accurate.
+And with some experimentation, we settled on a gamma exponent of 2.8 and a boost to a maximum of 700 nits, which when you think about it is actually quite bright.
+Unfortunately, there were still other issues after this first pass.
+More complex elements like overdraw elements were completely wrong.
+You can see that at the bottom here with the new user experience overlay.
+The buttons in the character creator screen were also super broken.
+And text looked severely aliased in some places.
+The overdraw is the most straightforward to address, just don't perform the HDR transform when drawing back the overdraw element because you've already sampled it from HDR space.
+We don't want double HDR.
+Text, unfortunately, complicated matters quite a bit more.
+It turns out that we can't blend SDR content over HDR content because this ends up darkening the pixels rather than brightening them as it would have in SDR.
+So our next plan was, why don't we render all our UI elements to some off-screen container that's the same size as the back buffer.
+We'll do all this blending in SDR space and then perform one big transform to HDR space at the end.
+This still had two problems.
+One was really specific to Destiny's UI architecture.
+And it was that overdraw had nothing to sample from.
+It would try to sample from this blank container on which we were rendering all our UI.
+The second issue was that text would still look aliased because even though we've removed the problem of blending over UI elements in SDR space, it was still ultimately trying to be blended over HDR colors in the back buffer.
+So our next idea after that was, let's implement a custom blending pass.
+But that still didn't give the overdraw mechanism any source to sample from, so we had to scrap that too.
+So I backtracked to rendering UI offscreen with one small change.
+Before rendering the UI, I'd copy the back buffer into it and use a simple reversible tone mapper to bring it into an SDR range.
+Render all of the UI in SDR, and then reverse tone map back into HDR space.
+The tone mapping function was specifically chosen to be the exact inverse of the transformations to bring UI content into HDR space, so the full operation would be a no-op for pixels that didn't have UI rendered over them.
+Just review that again using our render pass diagrams, lighting and shading and post-process from before.
+And in our HDR rendering branch, we tone map and color grade for HDR.
+We then tone map down to SDR range, but still keep our 16-bit floating point precision, render all of our UI in SDR range, and then inverse tone map back into our new back buffer with our UI rendered over it, and then we can output to the display.
+So now let's talk about our HDR-SDR comparison tool.
+While all of this work was going on, there came this request from TechArt to have a means of comparing the two contents on the same display.
+And this is a really interesting challenge because once a display is in HDR mode, SDR values are going to be interpreted literally.
+Modern SDR displays actually boost the brightness of your content above the standard 80 nits to something like three to 400 nits.
+And due to the hunt effect, like this image I showed earlier, if you were to just view this content at its intended 80 nits, it would look less saturated even though it's the same color value.
+Brighter values cause the perception of higher saturation.
+So what this means is that just tone mapping to SDR and throwing the result up on the screen wouldn't fly.
+We'll get an image that looks dim and desaturated like this one, since it's only maxing out at a very low brightness.
+Now before I actually go into how we made this comparison tool, I just want to stress the tremendous amount of value that it had.
+I mentioned before that we utilized it when comparing the SDR and HDR tone mapping curves.
+And then I also used it when chasing down the color grading bug where dark areas appeared extra bloomy.
+The following images were taken really early in HDR's development, and are just photos taken of the HDR screen with an iPhone.
+But more importantly, demonstrate two things.
+HDR on the right definitely had the wrong look.
+and SDR on the left was definitely reasonably reproduced.
+One major issue that we had early on was the shift of colors, particularly in the skybox pictured here, the planet Nessus.
+It can be seen in the background light shafts, which are blue in SDR, but came through green in HDR.
+And the reason for this was that the linear values produced by the skybox were actually somewhat dominated by the green channel, but the SDR tone mapping curve balanced out both blue and green.
+And the HDR tone mapping curve exposed this discrepancy because it didn't match the intent of the SDR curve at this point.
+The second issue, which was also present in the other shots, was this real over-darkening of areas.
+This was partially due to the tone mapping curve, but it was also due to my overzealous attempt to correct for the lack of ambient occlusion in my own local content build with the toe of the tone mapping curve.
+So when that was combined with the real baked AO solution, it would produce this really dark spaces.
+Oops.
+How do we actually do this?
+The problem that we were solving for UI was teaching us pretty important lessons that were required to understand this problem too.
+All we need to do is recreate the transforms that a pixel would go through on an SDR display and then scale that to a target brightness.
+But what exactly are those transforms?
+We wanted to be more exact here than we were with the UI, so we needed to understand them in greater detail in order to manually reproduce this SDR image.
+And there are two types of transfer functions at play here.
+The first are EOTFs, or electro-optical transfer functions, which define a transformation from a signal voltage to an optical intensity on a display.
+And the second are OETFs, or opto-electrical transfer functions, which define a transformation from an optical intensity to a voltage.
+Now, both of these functions are the answer to the question, how do you represent a light intensity with a single voltage?
+An EOTF is the reproduction of light from a voltage, and an OETF is the capture of light to a voltage.
+These transformations in conjunction are important because, as we saw with the gamma correction on UI, applying them to individual color channels alters the linear curve, and introduces a hue shift.
+These differing transfer functions are also the reason that brightness screens exist in video games.
+Depending on the transfer function used by your display and media, you may not see the content as it was authored or mastered.
+The brightness screen adjusts the gamma exponent in order to better tune for the intended visual output.
+Now for the reproduction of SDR content in HDR, we chose the sRGBF...
+sorry, bleh...
+the sRGBEOTF, so many acronyms, which generates this curve.
+and the BT709 OETF, which is from the standard for high definition television.
+After tone mapping for SDR in our tone mapping pass, we would run the pixel values through both of these curves and then scale that result to a target brightness.
+And here's the final result.
+Standard SDR is on the left and our recreation in HDR is on the right.
+And here's another look with these photos being taken on the monitor to try to demonstrate what you would see if you were just looking at the screen.
+Now TechR was really happy with the results.
+They felt that it faithfully reproduced the SDR look and used it in order to tune HDR tone mapping curve to match the intent of the SDR tone mapping curve.
+I must highlight though that these images here definitely don't look perfect and I'll get to why that is in just a little bit.
+But first.
+I want to talk about some of the more interesting problems that came up during this work.
+Consider this a mix between a rant and a brain dump of all the weird things that I encountered and learned while working on this.
+So first up.
+Some TVs may not support HDR right out of the box.
+You may be required to locate an enhanced HDMI setting for one of the inputs.
+Usually it's input one.
+Usually that's the only input that supports the switch.
+But until you do that, your hardware won't recognize the TV as HDR capable.
+And this must be really great for a consumer to unbox their brand new HDR TV, plug their console into it, and then have the console say, nope, not HDR.
+More technically, we had to be careful about using saturate in our shaders because this inherently clamps to a 0 to 1 range, so you're automatically going to lose this larger range that HDR has to offer.
+The solution here is pretty simple.
+Roll your own saturate function or just avoid its use in general.
+If you're using 16-bit floating-point buffers, that actually means you can get negative numbers.
+This picture here is a bug that we had when we tried to use 16-bit floating point lighting and shading buffers instead of 111110.
+The VFX for the ship's thrusters in this cutscene could generate negative numbers in the frame buffer that would lead to these colorful artifacts.
+In this case, we addressed it simply by not leveraging 16-bit floating point lighting and shading buffers.
+In the future, the more ideal fix would be to just obviously prevent these negative colors from happening.
+Our two anti-aliasing algorithms, FXAA and SMAA, need to operate in SDR space in order to be effective at all.
+In both cases, we use a cheap reversible tone mapper to bring the range down before performing AA and then inverse tone map back to HDR.
+And then finally, on screens with really, really deep blacks, like OLEDs, screen noise suddenly becomes much more pronounced and visible.
+It looks like static.
+So you have to attenuate it accordingly, depending on the minimum brightness of your display, or the low range.
+And then all these technical gotchas get kind of crazier when we start talking about support for HDR on PC.
+And admittedly, this space is much better than it once was, but at the same time, I think it has a bit of a long way to stabilize.
+So here's a short retrospective on developing an HDR game on Windows.
+For the longest time, we were plagued by this banding in the skybox and other atmospheric effects.
+Really anywhere that had a gradual gradient of color.
+I was quite confused.
+I painstakingly scrutinized every single stage of rendering for weeks to try to spot where this banding was being introduced, convinced that we were losing precision somewhere.
+But eventually I arrived at the NVIDIA display settings where you can choose the output color depth for your display.
+And I found that it had defaulted to eight bits per channel.
+The reason for this, I'm pretty sure was that the video mode I was trying to run 4K at 60 FPS required a data rate too high for the HDMI protocol at the time.
+Dropping this target frame rate to 30 and then manually switching this bit depth to 10 bits per channel fixed the banding.
+What was odd is that I still had to change the output color depth manually.
+And this is another area where I could see players getting pretty confused about not getting the best quality out of the box.
+Quickly, if we look at the requirements for 4K HDR, 30fps would require something a little over 11 gigabit per second rates, while 60fps naturally requires twice that.
+This was with no chroma subsampling.
+Now fortunately HDMI 2.1 supports these rates and so does DisplayPort, so just make sure that you're using either of those if you're going to do this work.
+Now when we first shipped HDR on PC we got a really positive response.
+We'd hit our goals for visual consistency, quality, technical robustness.
+and we were one of only a handful of HDR games on the PC at the time.
+People were having very few issues getting the game to engage HDR, which was great.
+I think one player commented something to the effect of, finally, an HDR game on the PC that just works.
+However, HDR was still a feature that was restricted to full-screen exclusive window mode, and that's a mode that not everybody likes to use.
+So when new DXGI features started to come into the picture, I wondered if we could improve on this implementation and support HDR in a windowed mode.
+Now ideally, an HDR game on Windows supports both Windows 7 and Windows 10.
+Windows 7 requires full screen exclusive, there's no getting around that.
+It has to be engaged with the APIs from NVIDIA or AMD.
+While Windows 10 can now utilize DXGI to query HDR support and set the metadata appropriate.
+What we tried, and what I'd recommend doing, is first checking for compatibility with DXGI 1.5 or above.
+This will tell you whether you're working with Windows 10 or 7.
+Then you have to check if the monitor's color space is REC 2020.
+Now, if HDR and advanced color is turned on in the OS, it will be.
+If neither of those are true, you should fall back to using vendor APIs, because it means either it's not on by default, and you have to go into full screen exclusive to turn it on, or you're using Windows 7, and you have to do that anyway.
+We make the distinction between native and vendor support and cache which support we have in order to determine how to enable it if the user chooses to.
+It's also worth pointing out, both of these methods can use a 16-bit floating point back buffer with 709 primaries, so you are able to unify your two pipelines for both cases, which is great.
+Now that works great on the surface, but HDR and DXGI still has its quirks.
+The first that I found is that depending on which back buffer format you use, your choices being 10 bits per channel and 2 bits alpha or 16 bit floating point, your color space will either be PQ encoded with 2020 primaries or no gamma with 709 primaries.
+For some reason, it's not okay to have a 16 bit floating point buffer with 2020 primaries.
+I kind of want that.
+Furthermore, the swap chain has to be using the flip present model to support any color space other than 709 with 2.2 gamma.
+And this is because legacy GDI is still in use for the non-flip swap effects, and it has no support for surfaces with greater than 32-bit depth.
+Lastly, I'm not actually sure if this is documented anywhere, but the desktop window manager in HDR mode actually expects an FP16 back buffer from applications.
+If you provide it with 10 bits per channel and two bit alpha PQ encoded back buffer, it will DPQ, composite your frame in its own internal FP16 buffer, before re-PQing and then sending that off to the display.
+This obviously brings with it a perf hit for the composite step.
+We didn't measure exactly what that was.
+I think it's probably obvious that it would have some kind of perf implication.
+But because of this, we opted to stick with the FP16 back buffer instead.
+And I showed this a few slides ago.
+This all works totally great, but.
+We still have not shipped this improvement because of no shortage of edge case issues and other strange behavior, particularly as it pertains to another improvement that we made, which did ship last year, and that's the black and white point calibration screens.
+So these screens were implemented using a pretty standard scale and bias.
+And we kept the reference white paper value at a fixed 80 nets, and let the white point change the max knit value of the PQ algorithm.
+So by default, that's 10,000.
+Reducing it has the same effect as increasing the reference paper white value, that's the scale step.
+Now the white point screen is implemented with three tricorns of increasing intensity in front of a background of an intended 10,000 nits.
+The brightest value that we could hope to output on any HDR display is 10,000.
+Of course, no display can actually achieve this right now, so we're basically telling the display, give it all you got, show the brightest thing you can.
+The not visible track horn is a value just above the maximum output for our HDR tone mapping curve.
+In other words, it's the brightest value the game could ever display, and it can safely blend into our bright background.
+The barely visible track horn represents one step down from that brightest value, and then the clearly visible track horn another equal step down.
+Seeing both of these ensures that the detail will be preserved in bright areas of the game the way that it was meant to be.
+Unfortunately, the brightness screen behaves differently under several different conditions.
+First off, you can get different calibrations whether you have HDR enabled on the desktop or not.
+Turn Windows HDR off, enter the game in full screen, calibrate your white point, turn Windows HDR back on, re-enter the game, and the screen looks different.
+You can get different results if you toggle between windowed and full screen modes.
+Calibrate in one, change to another, you have to calibrate again.
+The screen can be different depending on what type of video card you're using.
+Your calibrations can change if you add or remove a second monitor to your rig.
+And lastly, my personal favorite, depending on how long you leave the white point screen open, the monitor will auto correct itself to balance out the intensities that you're trying to display creating a moving target as you're trying to calibrate and this is the worst that I want it to go away now.
+All of this is really to say that HDR in Windows is a really challenging space to work in right now if you want to make things perfect.
+you might have to accept that everything isn't going to work exactly as you expect it to all the time.
+And the real goal is to just abstract away these quirks from players.
+And I'm just gonna insert in here, I had another bug where the white background bar of this calibration screen would just completely disappear sometimes if you turned your calibration meter all the way up.
+It would just go away.
+Never figured that one out.
+Eventually fixed with a driver update.
+So that brings me back to this comparison tool.
+I mentioned that these pictures of it show that it's not 100% accurate if we compare directly to what we see with our own eyes on an SDR display.
+But can we really make this perfect?
+If I were to revisit the comparison tool, I might take a different approach.
+I'd switch to a ChromaLuma representation, I'd raise the Luma in order to avoid hue shifts at all, but then I'd be skipping this inherent hue shift that comes with sRGB displays and their transfer functions.
+So I'd be leaving out kind of an important part.
+I'd have to find a way to do both.
+It's actually really difficult to get this to be really accurate, but why?
+Well, at least part of the reason, a large part, I think, is that different monitors do all sorts of different things to an image to bring you what the manufacturer deems to be the best quality.
+In this example, each image's color distribution is slightly different and represents the differences you might see across different monitors, with different calibrations displaying the same scene.
+In this case, my monitor was really pushing the vibrancy of the image and also adding a blue shift.
+I'll admit, I didn't really take much care to calibrate its SDR mode prior to taking these pictures.
+The differences in display curves are what make this kind of comparison tool really hard to nail down.
+But what's important to remember is that for this tool, we just have to match artists' expectations.
+We don't actually have to match a real SDR display that could be calibrated to anything.
+Now, all this stuff about varying display curves can be true for HDR TVs as well, and that's what makes these calibration screens really hard to get right.
+While the HDR standard is much more clear about encoding and decoding, we're still subject to some very black box color correction or luminance correction, depending on the capabilities of the display.
+And this is something that the HDR Gaming Interest Group wants to address, by encouraging TV manufacturers to implement common behavior in the game mode of displays.
+One of the key points is that in game mode, instead of the TV rolling off near-peak luminance values like this, which can end up altering our content unexpectedly, The TV just clips as soon as it reaches its peak luminance value like this.
+And we, the developers, are given details about the display that allow us to customize our tone mapping function.
+Until this kind of standardization happens, we're going to have to drum up some really, really robust calibration tech.
+All right, that was a lot of stuff.
+I mentioned at the beginning that I don't believe we really went about this the absolute correct way.
+I should say that I still think we ended up with a really great looking HDR game, and I'm very proud of that.
+But I have to recognize the things I learned along the way and things I've learned in the time since would have been really valuable to have known from the start.
+So if I were to have a second go at this, I'd definitely start by choosing to use HDR LUTs.
+Being clever was great, but several of the unique issues that I covered today, while interesting to solve, could have just been avoided entirely if we used LUTs designed for HDR.
+Next, I definitely use a ChromaLumar representation to convert the UI to HDR space.
+And along those lines, I think more carefully about how other color spaces like ICTCP, which is a ChromaLumar representation specifically designed for HDR and wide color gamut, how these spaces could be used to generate better quality results.
+And finally, I defer tone mapping until much later in the pipeline and would prefer not to branch between SDR and HDR across the whole pipeline.
+I'd really be looking for a pipeline that looks more like this, what I call the ideal HDR pipeline.
+Lighting and shading, post-process, those can all be the same.
+But then we only have one singular path.
+We tone map and color grade in HDR using something maybe like the ASYS Filmic HDR tone mapping curve.
+We render UI out separately in SDR space.
+I don't have a great solution for this right now.
+We can do it in the offscreen container like I described.
+And then we have this composite step where we composite UI onto our HDR back buffer.
+And then something that I and a lot of others have called a display mapping step, which is where we, depending on the type of display that we're going to, we'll either tone map to the capabilities of an HDR display, or tone map all the way down to SDR and convert our color spaces if we have to.
+And this brings us to the real lessons that I'd like to leave you with today.
+So as you're adding support for HDR displays in your game, I strongly recommend taking these steps to ensure the best quality and long-standing results.
+First up, validate your content.
+The sun should be brighter than everything else.
+Highlights shouldn't be brighter than the lights are themselves.
+HDR tends to expose these kinds of lighting hacks all the time.
+And on the flip side, with deeper blacks, we also need to make sure that our darker content is still bright enough or has enough contrast for players to be able to see what's going on in front of them.
+Be prepared to change, maybe even overhaul, possibly get rid of, your original SDR rendering pipeline.
+I don't recommend branching.
+Unifying the two now will pay you great quality dividends further down the road.
+Like I mentioned before, you should strive to stay in HDR space for as long as possible in the frame, right up until the point where you need to send the image to the display and then tone map down.
+Next, don't rule out using other color spaces like ICTCP in certain stages of your pipeline.
+I don't have great recommendations on how, the best ways to use them, but I think there's a lot of potential research in that area.
+Use phonometric units.
+Being able to reason on physical light values is really useful in helping understand what dynamic range you have at any given stage of rendering and how to adapt that range for your target display and get the best quality result.
+And then finally, I would recommend making a comparison tool for HDR to SDR.
+Now, as I was putting together materials for this talk, and as we move towards a world where HDR is the new norm, I was actually wondering if this kind of comparison tool is still worth implementing.
+And I actually think that it is, but for the opposite purpose.
+We're still going to need to master for SDR.
+I mean, just think of how long we had to adhere to a safe screen zone for CRTs.
+SDR displays are gonna hang around for quite a long time.
+And this kind of tool can give an artist a great approximation of what the game will look like in SDR without them having to manage two different displays all the time.
+So I'd like to give a special thank you to Nate Haubecker for his really excellent work in helping deliver a great HDR game and bringing HDR display support to Destiny 2.
+As well as a thank you to Ace Staff at Vicarious Visions for consulting on many of the technical challenges that we faced.
+Shout out to Brandon and Brad at Bungie for their help in bringing the HDR implementation to consoles and a thanks to Tim Healy at Vicarious Visions for helping me assemble materials for this presentation.
+And that's my time.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Yes.
+Questions?
+Hi, you mentioned content validation.
+Were you allowed to file a bug on art if the rocket thruster was brighter than the sun, or did you just have to work around it?
+Yeah, were we allowed to file bugs for art for content validation issues like that?
+It didn't really happen that often.
+For cases like, for bright cases like the sun, we didn't deliver anything like that.
+For cases where linear content values were too dark, we did start to look at those because, I mean, recently we started having more and more problems with people complaining about too many dark values in the game as they went into different caves.
+So Nate over at Bungie started to implement some content validation tools that would determine if linear values in the game were too dark and thus be too dark on displays.
+That's where we started actually applying pressure for art to fix up some of that content.
+Hey, can you go over your point about the sRGB and 709 EOTF OETF point and how that helped you?
+Sure, do you want me to recap it or how exactly it played into?
+generating those results.
+Yeah, how it played into fixing your final issues.
+So, hopefully I'll.
+Maybe recap, maybe I just missed your point.
+Sure, sure.
+So, the idea was that with the UI, we needed to put it through a manual gamma transform that it would have had had it been displayed on a normal SDR display.
+Doing that manually allowed us to recreate what it would have looked like otherwise.
+And then when we were doing the comparison tool, we needed to use the transfer functions going both ways because we were taking linear, normally we would kind of inverse gamma that in order to get the linear result back on the screen because it would be encoded and then decoded to get our linear result back.
+So we had to look at both the, what did I say we use?
+whatever the EUTF was, we would go OETF to encoded space and then we would decode it manually and then output the linear space through PQ to the HDR display, which that was a lot of words.
+I apologize.
+But using those transfer functions in conjunction with each other essentially was a recreation of the entire pipeline of an SDR display.
+Normally we'd have linear values in our game, we would apply an inverse gamma function before we send it out to the display, the display would decode that gamma.
+We needed to reproduce that entire pipeline.
+And it's worth pointing out that we applied the same transformations not only in our comparison tool, but also to the lookups that we got back from SDR in the normal HDR pipeline.
+Cool, thanks.
+Hi, can you comment on the performance hit that you experienced converting everything to floating point or 10 to 10?
+Yeah, I don't have great hard numbers for you.
+And the reason for that is pretty much that.
+When we were doing the work, we were thinking about the PC space, and we were also thinking about the fact that, well, okay, all our users that are going to have HDR capabilities are going to have these pretty powerful rigs.
+So performance kind of went out the window for a while while we were doing all this work.
+When we brought the HDR implementation to consoles, it was a different story.
+We had to consider both memory and the cost of doing all those tone map, inverse tone map steps and everything.
+Ultimately, it fit, barely.
+But it probably added a solid .1 millisecond, .2 millisecond to the whole frame, just for those steps.
+And then from a memory perspective, it definitely pushed us against the barrier of VRAM.
+Cool. And one other quick question.
+Are there standard color calibrations for the HDR space?
+Like, there's a lot of color calibration tools that exist right now for calibrating your SDR monitor and getting, you know, good photographic quality color out of it. Do such tools exist for the HDR space that we should be looking at if we're going to be authoring HDR content?
+That's a really good question.
+I am actually not sure, although I think if you talk to Chaz over there, he may have some...
+Some companies have told me that their tools now work in that space.
+I haven't tried it.
+Okay, thank you.
+Okay, so yeah.
+In case that didn't get mic'd, a bunch of color calibration companies have said that their tools now work in HDR space.
+Thanks, Chaz.
+Hi, what was the iteration time of creating like a new sort of grading each time you do it, you build and put it on a console for the next version?
+Yeah, the iteration time for creating a new grading curve or the tone mapping curve.
+I actually can't comment too well on what that was.
+The tone mapping work after...
+the comparison tool was created was done by Nate over at Bungie.
+I believe that he...
+I think he did something like extrapolate the SDR curve into a wider range and then perform a curve fit to generate a curve that had roughly the same shape.
+But the actual iteration time and the steps that he took to do it are a little bit of a mystery to me. I'm sorry.
+No more questions.
+All right, thank you all very much.

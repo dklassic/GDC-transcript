@@ -1,0 +1,651 @@
+Hi all, my name is Ben and this is Zabir.
+We'll both be talking today.
+We're here to talk about geometry caching that we did implemented in Halo 5 Guardians.
+So for those that are kind of new and don't know what geometry caching is, it's the storage of vertex motion for quick playback.
+It's like motion capture for character animation.
+It allows you to encapsulate really complex motion and play it at runtime in a game engine.
+For those Maya animators out there, geometry caching will be a familiar term as you do play blasting in your 3D animations when you're doing flip books.
+But let me show you an in-game example from Halo 5.
+Keep your head down and run!
+I'm okay, keep going!
+So, beyond doing massive-scale destruction, which was our primary goal on Halo 5, we found out that geometry caching is pretty much good for any type of kinematic-based motion.
+As we developed this system, we went from just purely a destruction team into a wider-ranging thing, using it throughout the whole package and software.
+We used it for character rigs, effects, environments, and skyboxes.
+The author of this team, authoring teams for this type of technology can actually be any of your team.
+You don't need to have a specific team for it.
+You can use it based on any of your system if you componentize this code.
+So what we're really talking about is moving geometry really fast on the GPU.
+We got over a million.
+GPU transforms at 60 FPS in our engine, which allowed us to fine-tune and make this thing extremely fast and efficient in the gameplay.
+Me and Zbier didn't do this alone, there was a large team of us that did it, so we want to give a quick call out to those guys.
+Michael Bolton was the forefather, he made the first homebrew geometry caching for us on Halo 5.
+Chris Woods was our fearless art lead who kind of led our team.
+Zbier was our white knight engineer that came in after Michael Bolton and fine-tuned that, so he's going to go through all his technical details on that.
+Alex Hogan was our tech art lead.
+He helped with the initial testing and implementation.
+Michael Fave was our content creator on the project, who really put the thing through its paces.
+My name's Ben.
+I did the authoring story for.
+Halo 5 for all this content that's now in actually Houdini 16, so you can actually get in there and actually access this technology right now.
+But we also want to give a shout-out to everybody else at 343 that we worked with.
+The list is kind of long, so they all helped in a lot of different ways, so I want to give them a shout-out to that.
+So for the course of this talk, we're going to kind of give a little outline to what we're going to do just so you kind of understand the data flow.
+We're going to talk about the initial concept, how we actually kind of thought it up, where we came from.
+We give you a little background story on why we're actually optimizing things, because geometry caching has actually been implemented in a few engines now, but these are optimizations to actually push it up to the next level.
+Then we're going to break down the technology and its core architecture and then all the componentized systems that we have for it.
+And then we'll wrap up for a few questions.
+So in the spring of 2015, we knew we were going to be in the E3 headliner.
+So all eyes were on us for our talk.
+That sequence was the main focus of the studio.
+And our stuff started running a little bit over perf, because we were trying to get the best we could out of it.
+We were shoving as many things and sequences in there.
+So one of the tasks that we were challenged with was making our system even more faster, get more geometry in there.
+Optimize it so we had to share the load across all the different teams like lighting, animation, effects.
+Those all had to share and coexist with our system.
+So we had a little eye of the production, eye of our own fun as everybody was intently on us.
+So it kicked us up to the next gear of technology.
+For those wondering why we needed to improve...
+That was the primary reason, so let me just kind of dive forward.
+Our very first implementation is kind of a standard fluid approach.
+This is topology that changes every single frame.
+That means, we can describe it as vertex-counter-gnostic.
+That means from one frame to the next frame, topology is completely different.
+You can go from a human to a man, you're not using blend targets, you can literally re-topologize anything like VD remeshing and surfacing.
+This is kind of like the Olympic file format, where you can quickly load and reload anything in offline packages.
+While Olympic is a good idea, it's not actually a practical runtime solution in Engine.
+So one of the things that we...
+if we continued with Fluid, we were gonna actually have all of our assets cut.
+So we moved to the next thing, and we found out Michael Bolton implemented this for us.
+Sorry.
+Michael Bolton helped us implement a rigid pipeline.
+So rigid is what we kind of define as multiple vertices that share a single transform.
+This is the concept of object transforms, bones, particle animation, character, flock swarms, leave blowing in the wind.
+This became our golden child.
+This is pretty much what we shipped almost all the assets.
+with in Halo 5.
+However, this method was not enough to ship.
+We still needed to do soft deformation.
+One night, Zabir was working hard, and he actually came up with the next implementation for us.
+We called this Soft.
+It's a single transform per each vertex.
+We found out we could pass around like tens and hundreds of thousands of transforms.
+So in order to take those transforms that are per an object, we put it per a vertice, allowing us to bend, deform towers.
+A lot of those actually towers are really soft deforming.
+buildings that had over 32,000 transforms that were crushing down.
+But in order to take the technology further for us, we developed a framework in order so we can further and continue to optimize this going into the future.
+That's we got the full framework.
+This is the core architecture on top.
+This is the shared across all the heuristic values.
+Our base component we actually introduced was static, rigid, skin, soft, and fluid.
+Static is something that we actually never focused on at first when we first implemented this.
+But actually the static component is really kind of important.
+It's when the geometry is not moving, which is the biggest time saver.
+You don't want to have moving geometry hiding under a table or something like that.
+you need to efficiently call and maintain this.
+Just normal end states, environment geometry.
+But it actually has to be built into the system.
+And Skinned is more of your standard character pipeline.
+We didn't really focus on this because of the type of work we were doing, but it is a core implementation strategy.
+This is a multiple transform for multiple bones.
+Going forward.
+So as we go through the talk, we kind of have this in a different little heuristic, too.
+We're gonna talk about the core architecture, which I'm gonna pass off to Zabir for a little while.
+and he's got run through what the common optimizations and quantizations for the rest of the code.
+Then we're gonna come back to it and I'm gonna talk about the fluid, rigid, static, soft, and skin more from the authoring side of handling.
+Okay, so let's talk about the engineering side of things.
+Mainly this slide is here for you to kind of refer back to roughly as a.
+We'll go through the data structures involved, the import pipeline, and what the runtime involves.
+So as Ben mentioned, in order to actually pull off this geometry cache system, you have two components to it.
+You have transforms and you have geometry.
+These are roughly the components that are necessary for each type.
+You know, something like static, you only require geometry just because it's actually not moving.
+And something like soft implicit surfaces, you only need transform since the implicit part kind of describes the geometry inherently.
+We'll touch on these exactly as we go through the slides.
+So, let's talk about transforms first.
+In order to represent a transform, this is kind of the bare minimum that you need to represent.
+Rotation represented using a quaternion, translation, and scale.
+Obviously, completely unpacked, this is 32 bytes, which is quite heavy to be passing around.
+But before we go further, let's talk about some of the alternative representations that we considered when developing this technology.
+One of the first things that came to mind is storing delta position and delta rotations.
+Of course, because of the temporal coherency, you get much better compression from this.
+However, we knew that Halo 5 was going to have to support join in progress.
+When you have join in progress systems, we didn't know exactly how long certain animations were going to be.
+and that we would possibly not be able to support blast playing up to a particular frame when a join in progress was actually happening.
+In retrospect, this was the right decision.
+Looking at the perfmetrics and some of the lengths of animations, we would not have been able to blast play everything up to when join in progress needed to actually occur.
+The second representation we also considered was storing velocity and acceleration.
+This again has a lot of temporal coherency, so there's quite a bit of compression you can get out of this.
+However, I was worried about the physics simulation that we would essentially be writing and the stability of that, right?
+Because again, this is still sort of like a delta compression format where the previous frame describes your next frame.
+This again doesn't solve the blast plane problem and joint in progress was still a concern.
+So the third representation you can think of is sort of like a video codec, right?
+Where you have major frames where the full transforms are stored and then you delta compress between them.
+This is quite promising, but of course the complexity was high.
+Throughout the project there was only one graphics engineer on this project.
+First it was Michael Bolton and then I took over midway through.
+So we knew we didn't have a whole lot of time to dedicate to this.
+And.
+On top of that, I had other responsibilities as well.
+Also, when we were moving from Halo 4 to Halo 5, we went from 512 megabytes to 5 gigabytes.
+At the time, we thought, oh man, 5 gigs.
+We have so much memory.
+We don't need to compress that much.
+We have plenty.
+We're just going to have trouble filling the 5 gigs from disk.
+This turned out to be, we were very wrong.
+We ran out of memory right away.
+So to remind you again, this is kind of the transform which can fully describe what the transform is per frame.
+We didn't want to be dependent on previous or next frames.
+The pack transform that we end up coming up with is we relied mostly on quantization.
+So we ended up packing the quaternion translation and scale sort of as follows.
+So let's go through each one of the quantizations that we did.
+For translation, we generate a axis-aligned bounding box per frame, and we store that per frame bounding box off as constant data.
+We quantize the translation between 0 and 1 within the axis-aligned bounding box.
+and it's a simple operation to reconstruct our original translation.
+Of course, this is a lossy compression, but this, as long as your content team is sort of aware when they're starting to lose precision, they can work with this, and then we'll touch on exactly some of the techniques we use to try and mitigate this.
+So, quaternion compression.
+This isn't entirely novel, I've seen it in a few different places, but I don't remember the exact source where I pulled some of the ideas from.
+But we start with a quaternion identity.
+Given the quaternion identity, we know that we can derive the fourth component from using only the three others.
+However, this leads to a precision loss if you always pick W as the, oh sorry, skipping ahead.
+So we know that from the previous slide, you can see that W will always result in a positive value.
+Of course, using another quaternion identity, we extract the positive, or the inverse quaternion in case W ends up being so.
+However, that leads to precision loss if you always drop the W component, right?
+So we can store off exactly which component we are going to drop, and we drop the maximum value between X, Y, Z, and W.
+This allows us to, again, retain more precision.
+Since we also know that we've dropped the largest quaternion value, we want to renormalize the remaining values.
+The remaining values being renormalized remaps to 0 to 1.
+So essentially, we're storing three components at 30 bits, and we store which component we actually dropped in two bits.
+Scale was very simple quantization, and this was quantized between zero and one.
+What we did is, during the import stage, the entire scaling, entire scale, the maximum scale that we could see was renormalized between zero and one, and the geometry was expanded so that scaling was always between zero and one.
+This allowed us to only shrink the geometry as necessary, not actually grow it, and this was quite helpful.
+Also, being able to scale by zero is quite important as that's how we deleted parts out of our actual simulation.
+We'll touch on that later.
+So, let's talk about the geometry representation and what actual, what that meant.
+So we have to remember that this is going to involve two different geometry representations, one pre-geometry cache transform and one post-transform.
+You want to integrate this into your existing rendering pipeline.
+You probably do not want to build a whole new rendering system just to render this. You kind of want to do the transforms and integrate it into exactly how you are doing it.
+And you want to try and look for the fastest way in which you render static geometry in your Engine.
+uh... for us uh... this is roughly kind of the vertex format that we had in the vertex target that we wanted to go to Again, so position we needed to transform, UVs were kind of a pass through.
+Normal and tangent, of course, we needed to transform since the target is a world vertex.
+And the XForm ID was again used as a lookup to try and feed the color.
+The reason this geometry format was picked is Halo's engine didn't have a super flexible vertex format in that you could arbitrarily pick whatever.
+We had a set of vertex formats we were choosing between.
+and the world vertex format was essentially the fastest that we could render objects with dynamic lighting.
+For shadowing, we just rendered the geometry into a cascaded shadow map, and the geometry, again, this was the fastest pipeline through our engine, so this is the vertex format we chose.
+So, the vertex and index buffers, I'll touch on this very quickly.
+The vertex buffers we were able to limit to 65,000 parts and therefore we were able to get away with 16-bit vertices.
+The way we were packing the vertex buffers, initially we stored them as 32-bit vertex indices.
+This is quite slow on the Xbox One, so if you are considering doing this, it's really worth your time to...
+chunk up your assets so they can be split into 16-bit indices.
+We didn't end up being able to make this optimization, just ran out of time, but this is definitely something you should consider.
+So I want to touch on implicit surfaces.
+There were some types of surfaces that we used in the engine that were very uniform.
+It was just like a flat plane, so you can imagine like a flag, which has a very uniform topology.
+You don't actually need to store geometry data for this.
+Given a width and height, you can actually derive where the vertices would be on this particular shape.
+And you can use the vertex shader and the SV vertex ID attribute.
+to derive where all the positions are of this actual shape.
+So all you need to compute is the transforms.
+This is particularly useful for soft bodies.
+Now, I'll touch on how we used LDS later, but in this case, each vertex is carrying a unique transform, so the LDS memory where you would potentially share computations between threads wasn't actually necessary.
+So this turned out to be a good way to handle implicit soft surfaces.
+We also had initially talked about the idea of additional vertex attributes.
+The transforms are essentially what's driving the dynamics of the whole simulation.
+However, there could be additional attributes like temperature and viscosity and things like that to drive the color and the shading of the object itself.
+Ben will touch on the pros and cons of this approach.
+We ended up not making a whole lot of use for it.
+But yeah, he'll touch on exactly from the authoring story on why you would want to prefer one versus the other.
+Okay, so let's move on to the import pipeline.
+We used Alembic heavily, and from our DCC we would go into Alembic.
+However, you do not wanna use Alembic as your format that your runtime is actually using.
+You wanna pre-process this into a specific engine optimized format.
+Because Alembic generally represents a full frame geometry.
+Every frame you're getting essentially the entire stack.
+The initial implementation that we had for this was an analytic part extraction where we were trying to find temporal coherence between a rigid part that appeared on one frame and then rediscover that part in a later frame.
+was a complicated mathematical process to try and discover this coherency.
+Based on the tolerance levels we used, we could either get higher accuracy, but it led to a huge import time, or if you reduce the tolerance, you would get either false positives.
+So this ended up being very problematic, especially how long it was taking us to import.
+So, the next stage of it, I realized after working with Ben for a little bit, is a lot of this inter-frame tracking that these rigid pieces were going through actually existed in the limbic, or existed in Houdini, our program to begin with.
+If Ben was just able to export this additional attribute data, we could speed things up immensely.
+And once we did, we saw an incredible speedup.
+We went from things that used to take over 30 minutes to 45 minutes down to maybe 30 seconds.
+It was an incredible speedup that was very much worth it.
+Also, this led to a really, really high accuracy, unless the artist actually made an error in the part tracking.
+So this was overall a win.
+Sometimes just a little bit of data helps eliminate a lot of...
+processing power. We didn't actually end up fully implementing this in the production pipeline but after working with it for a little bit we realized...
+The system can actually be split into two components.
+You have the transform hierarchy and this transform cloud that your dynamics artists are working on.
+And then you have a palette of geometry that a separate set of artists could potentially work on.
+So for instance, if you wanted to do an interesting flock of birds, one artist could actually work on the bird model itself and then the other artist can actually work on the dynamics and the fly-through.
+And then during the import stage, bind them together.
+We ended up not quite having this nice separation between the two teams, but this is something that you guys should consider if you plan on implementing something like this.
+Just a quick note on mesh optimization.
+We used the DX mesh optimizer, and this saved about 3% GPU time.
+Yeah, GPU time.
+This added very little to the import stage, so it's definitely worth adding in.
+So let's.
+So let's talk about packing for the runtime.
+So far we know that the import stage generated a palette of geometry pieces that we want to pack together and we have a set of transforms that are per part per frame while the part is actually alive.
+So what's the optimal strategy?
+The entire time we were bandwidth bound on the GPU.
+So bandwidth is the key thing you want to minimize.
+So the way you want to kind of pack this, and we'll go through an example to kind of show you, is you want to sort everything that's first born to the front of the list, all the vertices, and then all the parts within that frame, you want to sort the thing that dies the first towards the front.
+And what you end up with is essentially the right edge moving ahead as parts are born and the left edge moves ahead as parts die.
+And you want to pack this into one big buffer.
+We were specifically shipping just on the Xbox One, so we really wanted to optimize for the minimum number of allocations and pack the data together and offset into the buffer when actually binding it.
+And also null transforms are important here in order to eliminate some of these transforms.
+So to give you an example, here we have four parts.
+One's born on frame zero, the first one, and dies on frame three, right?
+So the active range for this, when you're rendering frame one, is just this object here.
+When we start rendering frame two, the next part is born and we're still rendering the previous part that's alive.
+In frame three, obviously, the first part dies, in which case now the active range shrinks again.
+The left edge moves ahead.
+When we render frame four, another part is born and the active range expands.
+And this is kind of the way you want to bind into the, onto the GPU, the active range of the vertex buffer.
+Now on frame 7, you notice that a new part is born, however, a part that's stuck in the middle has actually died.
+In this case, the way our pipeline was set up, we shipped on DX11 Halo 5, so we didn't quite have some of the more, I guess, advanced geometry.
+vertex generation on the GPU that we're starting to see kind of like in Frostbite and also in Assassin's Creed.
+But this is essentially the idea.
+You might be able to do some interesting things with there and not have to rely on the fact that you need to delete a part in the middle in this case.
+Now, when it comes to transform packing, you kind of want to do the same thing.
+Pack all the transforms into a single giant buffer, and we want them packed right next to each other, and we offset into the buffer to actually render it.
+In this case, you can kind of see that on frame zero, there's only one part that's actually active and alive, and therefore, that gets packed first.
+The next frame.
+Again, just only a single part, so that's what gets packed.
+In the next frame, there's two parts, and so on and so forth.
+This ideal packing, again, tracks to what your actual active range is, and you're binding the minimal set to the GPU, and essentially transferring the minimal amount of data to the actual GPU.
+One thing, yeah, so pack into a single buffer.
+This ended up being much more efficient in terms of minimizing the number of allocations that D3D is going to do.
+One thing to note is because of the packing structure that we talked about earlier, if you use structured buffers, this is going to lead to byte swapping.
+That's gonna occur between the CPU and GPU.
+So you wanna be aware of this.
+We ended up using the byte address buffer, which is quite handy.
+Not a lot of engines necessarily support it, but this is something that you need to consider if you're doing bit packing on the GPU and CPU.
+Okay, so let's talk about the runtime now.
+So the first thing that we implemented was interpolation and lerping for everything, even the quaternions.
+We were able to drop something from, most of their animations from 60 frames per second down to 30 frames per second.
+This allowed us to obviously cut the bandwidth in half right away.
+For far distant objects, you can interpolate even more and kind of get away with it because they're obviously not so big in screen.
+Thing to note is deletion and creation rules can kind of get hairy here.
+When you're interpolating, you need to come up with a defined set of rules that make sense of when is a part actually born and when does a part actually die when you're in between frames.
+We weren't super happy with the rules we came up with because it always led to some inconsistency in one animation or another.
+So experiment with this and find something that you're happy with.
+Also interpolation is obviously not an option for fluid assets.
+This is changing topology every frame.
+There's no inner frame coherency between the vertices.
+So the first approach that we had for the GPU pipeline was a series of compute shaders where we would decompress and blend transforms in one compute shader, transform the vertices in another, and then another compute shader to compact and feed into the render pipeline.
+This obviously continually round-tripped to the main memory and completely killed our bandwidth.
+So this approach was not going to work.
+The second attempt was to have an uber compute shader where we perform all the stages in a single compute shader.
+We used group syncs to try and synchronise data caches and we utilised LDS to synchronise between or within the wave itself.
+This was about a 3x speed up and so we were pretty happy with this.
+A note on the decompression, obviously you have a limited amount of LDS memory.
+when you're actually sharing your blended and uncompressed transforms.
+So your active number of transforms that you can write to LDS has to, we limited it to 64 in order to make sure we had enough occupancy on the GPU.
+This was enforced in the importer.
+When the importer detected that you were going to end up with more than 64 transforms per wave, or it limited the wave size to only a maximum of 64 transforms.
+So when actually selecting the dispatch size, this is essentially what you want to keep in mind.
+You want to select the largest dispatch size you can find, but only up to 64 transforms per wave.
+You don't want to, if you schedule any more than that onto the LDS, you will start to suffer occupancy issues.
+For us, this.
+Almost all the time we were still able to run the maximum 1024 lanes, except for the last wave which usually was whatever leftover number of vertices needed to be processed.
+The next big optimization came is when we moved everything over to async compute.
+This is a fixed animation, so you know what's going to happen ahead of time.
+You can prepare future frames in previous frames.
+We had quite a few occasions in our pipeline where the GPU was idle.
+and this is a great thing to pair with things that are ALU heavy.
+Essentially this process is almost entirely bandwidth bound and so if you have ALU heavy sections of the GPU, this is when you want to layer this in.
+Also at the end of the project, we started to play around with how to integrate physics more into this.
+We were able to generate physics collision data just in time, and especially on a shared memory system, this works out pretty well.
+You can feed this back into Havoc using, we were experimenting with those two physics types to try and feed the geometry back into Havoc and actually have collision responses on them.
+There are several variants here that you can play with.
+For instance, you can have on-off states, which is obviously pretty easy.
+So if the player can't get to a bridge, you want to blow up the bridge, and then so the on state is the bridge is there, and the off state is the bridge is gone.
+And then a more fine-grained approach is the player might be on the bridge while it's collapsing, in which case a physics geometry needs to be generated every frame.
+So those are the two kind of approaches we started to look at.
+And the last thing I'll point out is, the slides will be available offline, so you can read through the shader exactly.
+But the key thing to remember is you wanna try and hoist as many of the processing into the scalar unit from vector units as you possibly can.
+For the Xbox, this was make uniform call.
+This is now available in shader model six as more of a, cross-platform ability, but it's definitely worth optimizing to move as much of the work from vector units into scalar units as you can.
+The next thing is also be sparing with your group syncs.
+They can be costly, and if you have too many of them, they will end up slowing down perf quite a bit.
+So we only ended up needing one, and this is the rough structure and how we decompressed everything.
+Again, just to remind you on some of the things you can do, here's another.
+Bearly's in the air, Osiris. Focus fire on ground forces.
+Our British people have the Kraken distracted.
+You're clear to advance on the constructor's coordinates.
+Affirmative, Commander.
+Let's go.
+That Kraken reveal sequence from Halo 5 and the plateau section of the game was one of our first levels that we actually worked on.
+So it's one of the first things that we learned a lot about the game and how the geometry caching worked.
+It's also the one that kind of carried us through the whole production as we had to optimize and change things.
+So I'm going to jump into more of the authoring side for the rest of the talk and kind of go in lessons we learned from the artist side.
+So you can use any content creation package you want.
+One good thing about using Alembic is that intermediately we could use Max, Maya, any package and write to Alembic and then we could import that.
+import that data into the engine so that way we won't be limited by whatever software our artists were.
+But a few things to keep in mind though.
+When you're authoring for these different types, static needs a relative mesh for each frame, so that's like camera culling.
+So you need to have components in that in your DCC.
+Rigid needs an identifier per part. In Houdini we use name.
+In Maya you can use the shape nodes or you can put an ID per each bone.
+Soft needs a wide range of deformers, so whether you're doing cloth, fluids, lavas, or ray projection.
+Skin needs the whole character pipeline, so the more automating you can do of a character pipeline is a little bit better.
+You try to avoid as much of that character authoring when we're doing geometry caching.
+And fluid needs to be able to...
+allow the package to do anything.
+So you can switch from bears to dogs to cats, all in the same geometry sequence, and pick any frame you want.
+It's not just necessarily VDB remeshing.
+You literally need to be artistically allowed to do whatever you want.
+One of the things to keep in mind is the lexicon for each software package is different.
+We actually ran into this issue a lot.
+Limbic Houdini and Maya all use different terminologies and across the studio, not everybody's really familiar where data is stored.
+So you can look at this offline, but like places where UVs are stored, is vertex level in Houdini, but in Maya it's like the face vertex level.
+This actually becomes a big lingo issue when you're going back and forth with your software.
+And these are the additional attributes that we had to store for each level of the data.
+I'm using the Houdini terms on the left because I'm more familiar with them.
+With the point, that's just your raw position data.
+And you also need your DCC additional attributes that you don't really export, and that's usually your rest position.
+This is usually your T-pose on your geometry caches.
+You use this to blend back and forth and to maintain the geometry as it goes through.
+Traditional stuff like your vertex, as your normals, UVs, CDs, and colors, and skinning weights, that's where you normally maintain them.
+And then on the primitive level, you have to maintain your part IDs and materials.
+The other things to keep in count is point list and primitive list.
+This might seem a little bit weird, but as you have a geometry frequency over time, it's very easy to manipulate the data and have points in the geometry get in a different array.
+And as artists come and merge and blend geometry sequences together, you can get the data stack of all the different point listings arbitrarily out of focus.
+And it becomes really hard to track the data.
+So we actually put a list at the very beginning of our content import.
+So as soon as the geometry came in, we assigned each point a list number.
+So that wouldn't go to export it.
+It came out the same list as it goes through the whole sequence.
+Also, the Olympic Intermediate Format, one of the reasons why we're using it, is it's supported in a host of DCC formats.
+And it's also actually implemented in a lot of the engines at different varying levels.
+One of the things was we originally got this concept of geometry caching from the CryEngine.
+So we know in a lot of the derivatives of it that this geometry caching text exists at a lower level state across a lot of the engines right now.
+Also, the one thing we also want to talk about, the Alembic versatility.
+As you're using it as an authoring source, the best thing about Alembic is it allows you to read any line of data at any frame without having to slurp up the whole thing.
+If you use FBX and you have a 3000 frame sequence, you have to literally load up the whole FBX sequence in order to pull lines of data out of it.
+Whereas Alembic, it's really easy in Python or in different seed bindings to be able to pull the one exact piece of data you need.
+And when you're writing out big, large sequences of 3,000 frames, 100 frames of geometry, you don't want to kind of have to pull in and consume all your memory on your computer just to reread it.
+The one other thing, though, to describe, though, is Olympic is not a universal scene description format, like FBX and Collada and stuff like that.
+But what it does really well is handle geometry.
+And that's all we really want the intermediate file format to do.
+Another thing that we kind of ran into a lot is integration and performance testing.
+Geometry hashing is going to be really a small part of your pipeline.
+So as you implement it, you should take in these things to note.
+Build in a kill switch.
+We were working on some of the biggest events throughout Halo 5, and we got kind of the eyes sore on throughout the whole project just because they're the biggest things everybody has really focused on.
+So in order to prove that our system wasn't the culprit, you can just easily kill it.
+and then see the perf cost of other systems, whether it's your effects, your lighting, or stuff like that, are actually...
+baseline for our system was under 2 microseconds.
+Whereas the other effects systems and animation systems usually have a higher level need because they have to do a lot more CPU, GPU bound work.
+Whereas ours, if you just turn on the system, is 2 microseconds.
+The other things to keep in mind is it's a geometry sequence, so when you actually want to put it into a sequencer or do testing, have start, stop, resets, and go to frames.
+And also, make sure you do test for a limb bit because it does different varying types.
+of storage format so it's kind of dynamically compressible.
+So make sure that the, when you have just like say a static piece of geometry, the whole format will change itself to be the best optimized.
+And then also with the, as Sibir mentioned earlier.
+with deletion and creation, it can get really hairy.
+So we listed out a list of tests to do.
+These were very, seems like silly tests, but they became very unique and different for us.
+And then, depending on how you write the code, they can actually cause some pretty interesting gaffes, to say the least.
+We actually lost our whole fluid caching pipeline because of deletion and creation at one point.
+So now I'm going to dive into the component system.
+So for fluid, to kind of give you a little better idea of what it is, if you ever have seen a 3D zoetrope, it's just static models.
+And as you spin this around, you look through the slit, you'll see the birds in motion.
+This was thought of over 130 years ago.
+But we use it a lot for VDB remeshing nowadays.
+I'm going to talk about the pros and cons of Fluid, some additional optimizing, and some topology examples.
+Fluids were kind of like our first love.
+We thought it was going to be the only thing that we needed.
+And that's one of the reasons it actually almost got the whole system cut from Halo 5, because it's not really a great experience.
+It's really easy to author.
+It's easy to get into the game.
+You can rapidly prototype and you can do any art asset.
+There's really no minimum bandwidth.
+You can just pump geometry into the game.
+However, it becomes very expensive in there.
+It's the same reason you don't want to put an Olympic file straight in there.
+It becomes really large data sizes.
+But it's not really a reason to discount Fluid.
+There's a lot of times where you just need to do pure art and rapid prototype, so Fluid is a really good test case for that.
+As Zubair was mentioning, the optimization that doesn't require transforms, the geometry you know is a constant load to the GPU, so if you have a really good streaming system, it makes the process a lot faster.
+You can always balance for the constant memory load.
+Sorry.
+Yeah, go on.
+So this is a quick topology example for those aren't familiar with the dynamically changing polys.
+This is what fluid really is.
+I'm going to move on to rigid now.
+This is used really heavily at the very end state of our game.
+We actually, when you see this next sequence, we actually had over like 10,000, close to 20,000 swarms going for.
+But at the end of the sequence, we passed it off to an outsource vendor and they did the assumption that we could only have about 20 of these constructors in the swarm afterwards.
+So we actually had to cut out over 75% of the swarm down in order to meet the outsource vendor's expectations.
+...activated. You can't...
+Exoberant, what instructors? This is a builder facility after all.
+I was installed by the builders. I serve the builders.
+Stop it!
+You took my installation.
+I will take something of yours.
+So rigid really was our golden child. It was how we shipped a majority of all of our assets across the whole game.
+Soft and fluid and skinned are really important, but rigid's really where you're going to use 90% of your assets.
+When you can access tens of thousands, hundreds of thousands, transform very cheaply and efficiently, it's easy to make anything a rigid body.
+So we're going to kind of go over some of the different benefits and pros and cons of this.
+Aliasing issues, subsidizing issues, some of the reasons why we actually had art-defined limits on the asset types, and then some more improvements with instancing LODs and sprites.
+So with Rigid, it's really any kinematic motion.
+It becomes really just a transform cloud in the end.
+And you can put on this transform cloud pretty much anything you want.
+though, since it is kinematic, it means it's baked animation.
+But the good thing is, you still want to put lots of life in your engine and in your game.
+So if you have all these interactive systems, we're not trying to observe them or replace them.
+You can actually use those where it matters, really up close and in your face.
+So if you have a nice animation system or flocking system, you can have that right up in your face.
+Whereas this geometry caching can be off to the side and cyclical cycles or flags off to the side.
+It's a trade-off in memory and stuff like that, but you're reducing all the runtime costs associated with running a simulation or a whole character-based animation pipeline.
+And you can also componentize this code so that you use it in your GPU in different sections of these systems, like your flocking, your particle, your crowd system.
+You can kind of spread it depending on how you cut up the code and share it in your system.
+So one of the things that we actually found out, we actually don't have anything with a million transforms in Halo 5.
+This was actually a system test that we did.
+When you actually put a million things in the game at only 1080p, you don't actually have enough pixels on the screen.
+This creates a noise problem.
+You actually get true aliasing, because you don't have enough pixels on the screen.
+Only until you really get to 4K do you actually notice that you can actually have a million points flying around.
+So we're not really trying to compete with Krakatoa.
+We're trying to just do simple assets.
+And usually, when you're getting that complex, it doesn't actually have the intended visual objective that you're trying to achieve.
+Just because you can be more approving things on the screen doesn't necessarily mean you should.
+But one of the things to do if you are trying to put that many points on screen, use just a simple pixel shader.
+You don't need to do any expensive textures or anything like that.
+It causes a lot of aliasing.
+And also...
+So you don't even actually have to really do geometry or anything like that.
+When you really get to a million points on most of the screens resolutions for the next couple generations, you can really just use a ribbon with points on it in a regular effects pipeline.
+It's useful up to a point, but what it really means when you can push a million transforms around is it's really efficient, and that you can share the load across the whole system with your effects and your lighting teams, and your footprint is generally extremely small.
+One of the methods we actually used is called subsidizing.
+It limits the amount of pieces that you actually have to author.
+You don't have to author a hundred different objects.
+People have a hard time counting objects.
+If you really want, try to count all the stars real quickly.
+It should take you only a second, but it's actually ten stars in there.
+But the way your brain processes it, the same reason we cut phone numbers down to about seven digits, it's about the max limit that humans can perceive real quickly at a glance.
+So when you're building a crowd system, especially, usually you only do three to eight variations.
+You don't really need to do more than that.
+It simplifies the authoring story, because you don't have to make hundreds and hundreds of unique objects.
+The beauty really is in the motion, not really in all the different unique geometry.
+It's not really your environment.
+In order to actually make the system even go further, we didn't carry this out fully, but since it is really just a true transform cloud, you can actually just use instancing for a lot of this geometry.
+If you're only using three to eight objects, you can actually just instance across the whole thing.
+One of the things that we actually didn't do correctly was on those swarms, we actually had...
+at one point, 30,000 unique pieces of geometry.
+This created a bigger disk space.
+If we literally just used one instance piece of geometry, it would have cut down the disk load.
+The render time is still the same in order to render that many constructor swarms.
+the actually on disk footprint, which kind of really fights you when you're actually doing downloadable content, that's significantly reduced.
+Additionally, using LODs, what you can do, you can keep this completely in the GPU.
+You don't have to do anything.
+The same deletion and scaling method you can just do with the z-depth and just pick different models to scale in and scale out on.
+So.
+I'm going to actually leave you with a reference from Alfred Hitchcock's The Bird.
+It was actually filmed not too far from here.
+Only a few of these birds are actually alive on the set.
+Most of them are just static.
+So you only need to animate what you want to see.
+You don't have to animate everything just because.
+Some of the art-defined limits that we did is from our bigger towers.
+They came up to around 32k in transforms.
+You don't really need to have more than that.
+We actually found that half of our assets actually worked at about half that rate.
+This is kind of up to your studio and what your game is doing, but we recommend anywhere between 4K to 65K for each asset.
+Since your artists are authoring this, they know what the asset's best.
+You don't want to put more transforms in just because.
+So if they know what the limit is, it's easier to cull.
+The other one we had, it was a 3,000 frame limit per each animation.
+This roughly, depending on your frame rate, equals anywhere from 25 seconds to over 100 seconds of animation.
+And you can even actually go down to five frames per second if you want with these exports, if you're just going slow motion across the screen.
+What we found out is it doesn't really need to be a long sequence of geometry.
+Most of the time, it's just culling something like a bird flock flying across the whole level.
+The issue wasn't really that the flock was flying for a minute and a half in the screen, it was the bounding volume across the whole object was becoming a problem.
+So I call it the centipede thing, where we just take the asset and then you cut it off, you delete scale, even though you author one animation asset, you're just shrinking the bounding sphere for each section of it as the flock flies across the screen.
+This actually significantly reduces the load time too, because you don't always have to have a constant 3000 frame geometry sequence in memory, just because of the sheer scale of it, when the whole bird's flocks are flying across.
+That way it's easy if the player looks at it, you can cull and drop that from the memory really quick.
+A few other random authoring notes.
+When you're doing Rigid, you pretty much need any particle, rigid body, motion graphics, any mechanical motion methods you can use to author with Rigid.
+But you always have to do IDs on any object, so that's the most important thing to maintain.
+And then also when you're separating the parts, we used a connectivity-based dictionary so that we could identify which piece was associated with each other.
+In Houdini, this is usually like the Assemble software or something like that.
+But the one thing to do is, once you actually export the whole Transform cloud, if you have 20 pieces all doing the same motion, to reduce...
+them as being 20 different exports and just have a single export with a single transform.
+This will reduce a lot of your overhead.
+Even though we have simplified explosions or bird flockings, we can actually put five birds on the same transform.
+When you have 100 birds, you're not going to notice that five birds are all traveling together.
+I'm going to move on to static.
+This is actually something we didn't actually focus on enough, and most of the unaccounted for time in the whole game was just cleaning up the static geometry, the end states.
+So it's really kind of a story of state changes and sequencers.
+Seems really silly because geometry caching is supposed to be moving geometry, but this is where it actually hits you.
+You don't want to have these expensive moving geometry being static.
+That's why we have so many optimizations for environment geometry.
+One of the things is also to minimize duration on these geometry classes.
+For the E3 headliner, we had 12 towers all going off in different sequences.
+When we initially exported those things, they all went off and triggered at the same time.
+This created a giant spike in the memory that was pretty drastic, but the only thing we had to do to...
+clean it up was the start of each beat in the sequencer, is that's when we triggered the exact moment for each one of those towers to collapse.
+It came to mind silly, but the fact that every single one of those towers were all drawing from the memory at the exact same moment increased the spike time so dramatically that we had a lot of people running around chasing us down.
+So if you kind of think of like the 1812 Overture for V from Vendetta, where each explosion is going off, as soon as the explosion happens, or as soon as one of those towers happens, if you just trigger it for just that amount of time, you reduce the overhead so very dramatically.
+The other thing is, it might seem a little bit weird, but perspective culling, and over in a game environment, and camera culling doesn't seem like a native intuitive thing, but if you have, say, like a small simple explosion, pieces go flying.
+The initial state, you only want the outside shell, you don't want to see inside pieces.
+But as soon as something explodes, you need to see that inside pieces as it twirls around.
+And as soon as that piece lands, you don't want to see the side that...
+It lands on you can call that side or if it goes off the side of a cliff You don't want that piece of geometry to continue and fall off the cliff So you want a camera call based on what the characters can see?
+Some of these assets depends on what you're kind of doing.
+If you're doing a simple jersey barrier and where the player can play everywhere, this might still seem kind of strange, but it helps reduce the cost overhead of all the additional polygons because if you can't see it, don't render it.
+But when you're doing with geometry where you always see the inside of this, it becomes a severe problem.
+Oh yeah, the other thing is it becomes also a handoff issue too.
+When you're doing something as big as the towers, the end states we actually just built into the actual environment geometry.
+Instead of actually loading that whole thing in the GPU process just for those geometry caches, we just built in half the towers into the sequences.
+Even though we were simulating those towers, we just picked a random point where it looked really good, and then we passed that off to the environment team.
+So it built it right into the environment pipeline.
+all your environment geometry is always going to be the most efficient.
+That's kind of what you always focus on.
+But with moving geometry, you kind of don't think about, oh, the geometry is static.
+I should probably not have this in a moving geometry sequence because we'd actually have the whole base of the tower, even though it's not moving, just continuously stay there.
+As soon as we cut that off, all the assets for all those towers got reduced in half because all of a sudden, if it's not moving, you don't have to play it.
+As far as an additional collision method, Zubir was talking about just-in-time collision.
+One of the things that we found out is, like, especially for that crack and reveal, players were never supposed to go up and touch that geometry, so we never bothered to even put collision there.
+But an alternative method is to actually do state machines or sequencers.
+You just put the geometry either in the environment or in the state machine, and you just trigger them in parallel.
+This way, you don't have to put...
+collision into your geometry caching pipeline if you don't need to.
+You can, but we actually got away with the whole Halo 5 without actually needing to have this in there arbitrarily.
+So soft is the cool invention Sabir was working on where it's just implicitly defined geometry.
+In a DLC multiplayer level called Molten that came out this past summer, we got over to 82,000 transforms playing in a multiplayer level where everybody was running around and shooting.
+So we're going to talk a little bit about the pros and cons of this, a little bit about the topology, and some lessons that we learned in extra vertex attributes.
+Soft is relatively expensive.
+If you have a character pipeline, there's a reason why you built that character pipeline.
+It's a lot more efficient means of transfer for this.
+But the offering for soft is extremely easy.
+Think of all the stuff you have to do for a character pipeline, all the rigging and stuff like that.
+You don't have to do that for soft.
+You can use any type of deformer you want.
+You can do ray projections.
+It's really easy to export.
+You don't need a whole team to build the character for you, rig it, animate it.
+I can just do a fluid particle sim, ray project on top of it and capture all the simulation data.
+It's also really kind of nice because you don't actually have to worry about the geometry at run time, so it becomes actually extremely cheap.
+The one thing we did learn though is vertex density, even though we could put 82,000 transforms in there, it was kind of silly.
+The texture density for UV space is always going to be a little bit bigger.
+So even though we could put color in there, it didn't actually express itself as best as it could.
+If we could go back and redo those assets, we would have just done a render of the texture sim.
+put that into a tessellator and put in a little bit nicer shader, I wouldn't have done it with the geometry caching method that we did.
+We would have used the same sim data, but it would have been a lot more optimized format and you could have got higher detail.
+So you kind of just want to use the geometry caching where it could be best optimized.
+And actually doing color transfer and showing that much detail wasn't really the best method for it.
+Additionally, any other additional vertex attributes, make it an option.
+Effects people will always be like, I need that one extra channel, I need that one extra channel.
+But when you're starting to push around a lot of geometry, it's not really as important.
+You're really the beauties in the motion. It's not really in whether that color goes off.
+So when you build the pipeline up, do the extra additional attributes as a secondary thing.
+Don't put it as the first thing that goes in there, because it's just going to be a lot of dead overhead for you.
+This is another topology example. If you remember the fluid before, this is a simple ray projection on top of it.
+It kind of looks silly, but all of a sudden this reduces a very expensive asset down to an extremely simple asset.
+Go a little bit faster now.
+So one of the things you can also do is optimize the topology for it.
+This is a simple grid, but when you drape it on a table, the way the triangles lay out, it actually folds really funny.
+So if you just do the same thing like character topology and you put the edges where it matters, the one on the right will actually accordion very appropriately, whereas the one on the left will just be a lot of wasted vertices on the top and in the middle.
+Finally, we're getting into skinned.
+This is where like HIK territory.
+This is when you're doing character rigs and motions.
+So it usually represents a very complex pipeline, a very complex authoring story.
+And up until this point, all we did was basic sims to form our wrappers, something simple that one artist could create.
+So.
+We didn't even actually implement this.
+We just theorized that this was it.
+There's a good talk the other day that we've been talking with, Delusion of Motion, by Mario Palmerio and Norm Schaefer.
+They actually implemented the skinning method, which was kind of cool.
+It actually saves the most amount of memory if you actually need to do GPU runtime.
+deformation, it's an extremely efficient method.
+You can get up to like 166 minutes in two 4k textures, which is cool, but we never bothered to focus on that just because the authoring story for something, say like a tower was very complex.
+And there's no sense in putting a character rig on a giant building that's gonna get continuously simmed and changed every single authoring moment.
+So this kind of led us to not even develop those things.
+But on the alternative, if you're doing something as simple as procedural rigging like a snake, this can be actually authored extremely quick and easy.
+This is something that we really didn't do a lot, but we actually had a lot of assets like this in the game.
+These would be like cables switching between buildings to buildings, cables, vines.
+We had so many vines that were put into random DLC content just because it was cheap overhead for us to put in.
+So now wrapping into the conclusion.
+So we talked about the core architecture.
+Sabir went really in-depth on the engine side.
+But we also got the static, the rigid, skinned, soft, and fluid.
+When you build based on these kind of like base definitions, and you kind of allow the author for it.
+It kind of separates out the technology for you and it comes easier to optimize.
+Now we know originally that everybody was just using fluid and then kind of moved on to rigid.
+But if everybody kind of starts moving on to soft and skin and as you guys go out and develop these systems further, you can further optimize them.
+So the people that you should reference is actually a real-time caches for CryEngine.
+This was...
+Sorry.
+I'm sorry.
+done by Axel Gneding in 2014 at SIGGRAPH.
+He was the forefather of our talk, so that's how we actually originally based all of our technology off of.
+Then we further improved it after we learned all of our life lessons in Halo 5, but also do the illusion of motion.
+It's kind of more of an intro to what we were doing.
+They used textures where we used a little bit of different streaming of data, but if you're just going off the shelf, it's a really good method, as opposed to going for the whole hardware engine that we need to do, because you have to implement that directly into your engine.
+Well, Houdini has also done some of the authoring side, and Unreal's doing some more on the engine side.
+We used our own engine, so not all these systems are going to be available in all off-the-shelf packages at the current point in time.
+If you have any questions, feel free to step up to the mic.
+If you don't want to step up to the mic, you can email me and Zabir afterwards.
+We'll be around for a little while in the wrap-up room, too, after this.
+So thank you guys all for coming, and please fill out the survey.
+We appreciate it very much.
+Hey, is this on?
+I just wanted to ask, did you guys do any blended looping simulations for like that model you had done there?
+That was going to be a repeatable sequence or something like that, or was there any other missing in there?
+Did you guys experiment with any of that?
+Yeah, so Ben can probably talk more about it, but we did have some looping sequences, right?
+So essentially you interpolate some of your ending frames back into your beginning frames, and yeah, you're able to do that.
+For all the flags, the bird flights, and cyclical things, we actually had a lot of those.
+It actually became kind of a trick, because depending on what you're doing, like a flag or something like that, it might become a staggered blend frame.
+So just like tileable textures, in order to get a tileable texture, you overlay the two ends and then you kind of stamp between that.
+So you actually time warp the geometry sequence so that the two ends actually come back onto each other, so that you get a pure, better blending.
+You can actually meet the geometry sequence at the end, but that means your end state and your first state have to match, and that's actually really hard to author.
+But what if you just drag the two pieces of geometry around?
+You can actually blend between them and it's pretty seamless.
+Every once in a while you'll notice a hitch, but you can just put a little bit of noise into that blend sequence and it actually messes it up just enough where you don't even notice that's the blend point.
+Okay, yeah, we might be out of time. We'll see you in the wrap-up.
