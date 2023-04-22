@@ -1,7 +1,3 @@
-
-
-Here is a suggested revision:
-
 # About `.metadata` Files
 
 The `.metadata` file is a JSON file that contains additional information about a subtitle or transcript file. It is located in the same directory as the subtitle or transcript file and has the same name as the file, except with the `.meta` extension.
