@@ -55,6 +55,9 @@ for idx, file_name in enumerate(srt_files):
     print(file_metadata)
     reviewed = False
     reviewer = ""
+    explicit_permission = False
+    explicit_disallowed = False
+    additional_description = ""
     if (os.path.isfile(file_metadata)):
         try:
             with open(file_metadata, 'r') as file:
@@ -63,6 +66,12 @@ for idx, file_name in enumerate(srt_files):
                     reviewed = srt_metadata["reviewed"]
                 if 'reviewer' in srt_metadata:
                     reviewer = srt_metadata["reviewer"]
+                if 'explicit_permission' in srt_metadata:
+                    explicit_permission = srt_metadata["explicit_permission"]
+                if 'explicit_disallowed' in srt_metadata:
+                    explicit_disallowed = srt_metadata["explicit_disallowed"]
+                if 'additional_description' in srt_metadata:
+                    additional_description = srt_metadata["additional_description"]
         except:
             print(f"Can't load the {file_metadata} as a json file.")
 
@@ -75,6 +84,9 @@ for idx, file_name in enumerate(srt_files):
         "subtitle": full_file_path,
         "reviewed": reviewed,
         "reviewer": reviewer,
+        "explicit_permission": explicit_permission,
+        "explicit_disallowed": explicit_disallowed,
+        "additional_description": additional_description,
         "translation": {},
     }
     video_data_dict[str(videoId)] = video_data
