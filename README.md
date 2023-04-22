@@ -44,7 +44,7 @@ Lastly in order to make sure all English speaking part is properly transcribed, 
 
 Please create Pull Request following [Contributing Guide](./.github/CONTRIBUTING.md) to help us make these awesome contents available to everyone without a hassle! Also feel free to create Issue when a video you need isn't transcribed yet.
 
-Before you start working on some new feature, it's best to check if there is an existing issue first.
+Before you start working on some new feature, it's best to check if there is an existing issue first. By opening an issue to express what you have in mind with the feature so we can have a discussion on whether the feature is desirable or not or using the best implementation.
 
 Thank you to everyone contributing to GDC-transcript!
 
