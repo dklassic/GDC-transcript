@@ -13,6 +13,8 @@ Please make sure to read the Pull Request Guidelines: https://github.com/dklassi
 - [ ] Other, please describe:
 
 ### Checklist
+<!-- Not required for functionality PRs. -->
+- [ ] This is a review for the subtitle, not the transcript. If this is a review for the transcript, I have a convincing reason for why.
 <!-- Not required for reviewing subtitle. -->
 - [ ] When resolving issues, they are referenced in the PR's title (e.g `fix: added transcript, closes #___, #___`)
 - [ ] I have added a convincing reason for adding this feature, if necessary
