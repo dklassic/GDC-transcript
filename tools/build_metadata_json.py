@@ -56,7 +56,7 @@ for idx, file_name in enumerate(srt_files):
     reviewed = False
     reviewer = ""
     explicit_permission = False
-    explicit_disallowed = False
+    explicit_disallowance = False
     additional_description = ""
     if (os.path.isfile(file_metadata)):
         try:
@@ -68,8 +68,8 @@ for idx, file_name in enumerate(srt_files):
                     reviewer = srt_metadata["reviewer"]
                 if 'explicit_permission' in srt_metadata:
                     explicit_permission = srt_metadata["explicit_permission"]
-                if 'explicit_disallowed' in srt_metadata:
-                    explicit_disallowed = srt_metadata["explicit_disallowed"]
+                if 'explicit_disallowance' in srt_metadata:
+                    explicit_disallowance = srt_metadata["explicit_disallowance"]
                 if 'additional_description' in srt_metadata:
                     additional_description = srt_metadata["additional_description"]
         except:
@@ -85,7 +85,7 @@ for idx, file_name in enumerate(srt_files):
         "reviewed": reviewed,
         "reviewer": reviewer,
         "explicit_permission": explicit_permission,
-        "explicit_disallowed": explicit_disallowed,
+        "explicit_disallowance": explicit_disallowance,
         "additional_description": additional_description,
         "translation": {},
     }
