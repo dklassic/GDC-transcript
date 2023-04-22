@@ -10,6 +10,8 @@ The tool can be accessed at [GDC-transcript](https://dklassic.github.io/GDC-tran
 
 You can also simply use GET method to link to the video. For example with https://dklassic.github.io/GDC-transcript/?v=c2YRVWZupwo or https://blog.chosenconcept.dev/GDC-transcript/?v=c2YRVWZupwo
 
+For speakers who wanted to provide explicit permission/disallowance and/or additional information on transcription, you can submit an [Issue](https://github.com/dklassic/GDC-transcript/issues/new?assignees=&labels=feedback&template=speaker-feedback.md&title=%5Bfeat%5D+%5BInsert_Video_ID%5D+speaker+feedback) or contact us via [Google Form](https://forms.gle/D68jU5FmAKoXMwhc6).
+
 ## Why
 
 In hope of helping those who need of assistance to better enjoy the content from GDC. Not only for non English speakers, but also for when the audio quality is really bad and will destroy our eardrums when listening to. For example [Integrating Narrative into Game Design: A Portal Post-Mortem](https://www.youtube.com/watch?v=c2YRVWZupwo) is a really great talk but the audio quality really suffers.
