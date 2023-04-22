@@ -1,0 +1,350 @@
+Welcome to Virtual GDC and my talk, Bringing Replays to World of Tanks Mercenaries.
+This talk will discuss what it took to get a full replay system working on World of Tanks Mercenaries on the consoles and how we replicate our full match on a live client.
+I'm Andrew Gover, Lead Software Engineer at Wargaming Sydney and I was part of the team that developed this system along with our colleagues in Wargaming Chicago, Baltimore who developed World of Tanks Mercenaries.
+So what we're going to go over today is a grounding of how we record, how we make sure our recordings are ready to play on the client.
+And then the majority of the talk will be on how all of the challenges we had in getting the replays to actually function on the client.
+And then we'll do a quick overview of how replays will help you in development and the future challenges that we decided we weren't going to do due to the complexity.
+So World of Tanks Mercenaries is a tactical arena tanks combat game on the consoles, the console version of World of Tanks on PC.
+And it had been live for approximately four years by the time we decided to integrate the replays feature.
+And this meant a build-up of a lot of assumptions and workarounds in the code that meant replays really challenged them and broke them.
+The integration took about three and a half years, three and a half months, sorry, for a...
+three-person team and it was mostly an engine we hadn't actually worked with before.
+So I hope that this talk will really help to allow you to get, do that faster and move forward quicker.
+So what is a replay?
+A replay is more than just a video recording.
+It's where the players can watch that sick flip from that, where they jumped off that cliff at any time, at any point.
+It's not just theirs, but also everyone else's.
+So any sick flips or multi-kills that happen during the game, they can watch anytime, anywhere, from any perspective.
+And this is really distinct from the console's built-in recording functionality, in that it allows you to view from everywhere.
+It's not just what you did previously, but what everyone did everywhere.
+So why do we want Replace?
+While they're great for reminiscing about the past, people love to see how they dominated a match.
+And it's really good for driving engagement outside of the gameplay loop, so getting videos up to YouTube or Twitch.
+And also eSports is another really big area where replays can really help in driving that player engagement.
+And if none of that is...
+of importance to you, then even just the in-house development testing that can really help from replays is worth it alone.
+So before we get into integrating all this cool stuff into our client, let's get a bit of understanding of how we record the replays and how we play them back and distribute them.
+So there are two types of recording you can do.
+There's server-side, which is what we did.
+which is where we have a single recording per match recorded on the server that has the entire world saved into the replay.
+This of course lacks a bit of the player context because you don't understand what exactly the player was doing.
+This is where client-side replays come in and they know the understanding of the full player context, but there's no understanding of what happens in the wider world.
+A well-designed network game.
+won't have the greater understanding of what's happening outside of what the player can actually view.
+So we went with server-side recordings and that's primarily what we'll be talking about here, but a lot of the things we discuss actually work with playing back on client-side replays as well.
+So when we do the recording, we have a very common capture technique in that we grab the properties and the events before we send them from the server to the client.
+This is opposed to capturing data as it comes into the server and using determinism to play it back, primarily due to the fact that World of Tanks is not deterministic.
+And it also means that we can create better debugging tools in order to read those sort of replays from that perspective.
+really into the how we record because it's a rather common technique.
+So if you need more information there are GDC talks on this already or just look up how Unreal does its recording because the techniques are very similar.
+For the rest of it the recording is backed up to an extra service so our recordings are always fairly stable and once the match is done we upload it to a Amazon like CDN using CPH service.
+And once that's completed, we add an entry to our catalog, so therefore it's searchable by all the players.
+Once the players want to have to find it, they send an ElastiSearch query through the server to the catalog.
+The catalog then returns the link to the location on the CDN, and the players are able to download that straight to their machines.
+Playback is the simple part.
+All we're doing is creating a fake server connection to the replay file.
+So the replay file just sends the messages, is read and sends the messages through to the real game.
+And the game doesn't actually really understand that a replay is playing.
+For all it's concerned, it's actually playing back live messages from a server.
+This means that we're not having to affect the client very much at all.
+And therefore we get the playback almost for free.
+But that doesn't solve all of the problems.
+This is where all of the challenges we had to overcome came in, and that's getting the client to work with the replays playing back in a whole bunch of different circumstances based on assumptions that no longer hold true.
+So I hope that if you have a game, then this will be a sort of cheat sheet that allows you to...
+know exactly what to do should you encounter a problem, and if you're just starting out then this is really advice on how to defensively code your systems so that you can have a much smoother integration.
+So the first point I'll make is our goal is to edit the client as little as possible, so that replays aren't a specialized thing.
+That won't always hold true as we'll find out, but in general we're trying to make it so that replays aren't something the client knows about, it's just something that happens.
+So what did we support? Well we supported being able to access all of the replays by browsing for them, such as a Netflix style system, speeding up and slowing down time, as well as jumping forwards and backwards through time.
+We have our free cameras as well as our cameras that attach around the player. And we also support being able to see through the player's vision, so we do have partial player context there on our server-side replays. We also have a highlight system.
+and entire feature parity across all of our supported consoles.
+So let's get some definitions down first.
+Time flow is the playback rate at which we're playing the replay.
+So we go from about 10% speed up to about 800% speed and that's important because having limits is really important. If you go too fast, as we found going beyond 800% is that stuff like your physics systems will break when you do that.
+The main thing that this requires is that your update loops have variable deltas so that you can change the flow of time flowing through your systems.
+Any assumptions built around a certain frame rate will not work properly once you scale time.
+Time jumping on the other hand is the ability to go directly from time A to time B without showing the intervening frames.
+So jumping forward here.
+This is where most of your problems occur.
+The flow is fine when you're...
+just got your update deltas going, but jumping through time is a concept that's not really something that's totally supported.
+If you have a join in progress mechanic, the ideas are similar but you will still probably mostly encounter your issues around jumping through time.
+So let's get into it.
+Our first problem.
+Straight off the bat, we had the replays playing back.
+We started playing one, thought it was good, we paused, we hit the menu and we couldn't do anything.
+This is down to the fact that the pause was affecting the entire game.
+From moving through the menu system to everything else, there was no concept of a split.
+So what we needed to do was to split up how our updates were affected.
+So anything for gameplay was modified by our playback rate delta.
+Things like animations, particles, physics.
+They all needed to be able to be slowed down, but things like our UI and any system timers for things like resource loading or spawning all wanted to flow at the original rate.
+So the idea is to split between gameplay and systems and this will get you around that problem.
+The next problem was entity sliding and this is something that happens when you really slow down your game to very slow speeds.
+So what's happening here is the tank is sliding straight after we come out of a jump because our network mitigation lag code was always forward predicting.
+So as soon as it came out of the jump there was no extra frames, so it was just sliding the way it was going before we started the jump.
+And at 10% speed this is especially exacerbated due to the fact we're only running a 10Hz server at 10% speed, which means we're only getting movement updates every second.
+So that's illustrated here.
+So the top one is how the real game works.
+In World of Tanks we have the benefit of a slow game, and that means we can sit slightly behind with a natural idea of built-in lag.
+So we're always 2.2 seconds behind where the server would assume it is.
+And we can move towards that, ensuring a specific flow that follows exactly the way we should.
+In a replay, we don't have those extra two frame buffer there.
+We're playing at the exact same position as we're reading the messages from.
+So it's always forward interpolating.
+And as you can see by the yellow line, it's always slightly off from where it should be.
+Now re-architecting this would have been quite a significant overhaul and we have our idea that we don't want to touch the client so much to support replays so instead we had to come up with a new solution.
+And that was to effectively mimic what the real world does.
+So when we're reading from our ticked frames from the file we don't just take the movement from the framework processing we look two frames ahead and we grab the movement from that.
+and then add that in to the movement filters.
+This allows for the interpolation to have that information to look forward and it always flows through correctly.
+If you have a game where you're always running at the bleeding edge of your time and you're relying on forward error prediction or interpolation, you can still use this technique to make sure it smooths out and you don't have any differences between what the server saw and what the replay is actually playing back.
+So our next one is a jump backwards.
+So a jump forwards is relatively simple.
+We just play the messages between time A and time B, and that's what we get.
+And we get up to exactly where we need to be.
+We can't really go from time B to time A, because we can't roll back what we've done.
+So the solution here is more to make the jump backwards just to jump forwards, but we do an entire world reset.
+Therefore we've shifted the issue from being able to do it to the amount of time it takes to do it.
+So reloading the world naively, if we just completely reload, means that we're going to have to pay the cost of a full reload.
+And that's something we didn't want to have to do.
+So we originally had a 30 second load and we got that down to about 4 seconds with some mitigation steps.
+Those being things like making sure we kept all of our assets around between a reload.
+So specializing that so any maps, textures, anything is kept in memory, it's not destroyed like the usual path would.
+And also we made sure that as our world can be destroyed and things can change and state is different we made sure that when we loaded the world we kept a vanilla copy just stored off to the side ready to go so that when we did a reset all we had to do was a simple dump of that.
+vanilla world over the top of the modified world, and we're immediately back to the starting state we needed.
+So this cut down our reload times to relatively very quickly.
+We just have to make sure that if you have any caching going on, such as putting decals in your world, or animations playing, or anything else that affects the world visually, that these things are cleared.
+Otherwise, you come back from your reset and your decals are still all over the ground of your map.
+So once we've got our reload properly optimized, we need to do the forward jump and optimize that.
+So what we can see here is, off to the left of the graph, there is a massive frame spike.
+And we see that that directly correlates to the amount of messages we're processing.
+Because during a jump forwards, we are processing all of those messages that are in between the two times.
+And if this is a jump backwards from the end of the replay, that's a lot of messages that we have to process.
+So in order to get around this, we want to limit the amount of messages we have to actually process during a jump.
+So what we did was to break up the messages into special categories.
+The first one was dropping all. So these were for messages that we didn't really need to process.
+Anything that didn't have a lasting impact on the game, such as any shot traces or flashy particles that are only there for a couple of seconds.
+Keep last is more for events that...
+have discrete property updates.
+Things like movement or health updates that are sent to the client as absolute numbers.
+The final one is the unfortunate category of always and their messages we always have to play.
+Any updates that happen via deltas or any events that required future events we'll need to reference are things that we'll have to always process.
+So in order to illustrate that, Here we have an example of a whole bunch of messages over a couple of frames.
+So we see that with this we can drop any of the shot fired messages, they're not important to play, so that gets rid of a few messages.
+Then we get to our key blast, which is where a lot of our benefits come from.
+And this is, we see the bottom few messages are both position updates and a set health, so as they're absolute we don't have to play any of the previous messages.
+And with all those gone, we get to our always.
+So anything that's adding score is a delta score time, so we have to play that.
+Or setting various enum-related flag state, we have to play that.
+But we see we've gone from about 19 to around six messages.
+So it's a significant increase in performance, because we don't have to process all of those messages.
+Unfortunately this is the level of optimization we had to stop for World of Tanks due to existing architectural decisions, but there are more you can do.
+Checkpointing is probably the best way of optimizing this.
+So that's copying your current state of the world into a certain location and being able to immediately dump that.
+So in between our world reset we would dump the world, we would take the world state, put that there.
+then we would take the checkpoint state, overlay that, and then just have to play the small amount of frames between where the checkpoint was and where we actually want to be.
+So that frame spike is more consistent because it's directly related to how big a gap there is between your checkpoints.
+Which means if you have excessively long hour-long replays, you're not getting massive spikes because your checkpoints could be approximately every minute and therefore it's more of a constant.
+In order to make full use of checkpoints, we have to make sure that our world state is set up in a certain way.
+So there are two methods of sending stuff from the client, server to the client.
+And it's either by replicating properties or by sending events.
+So in order to support checkpointing better, making sure that your state on your server is representative of what's on your client means you can actually save your state properly.
+So something like decals is not something that traditionally you would need to store on a server because it doesn't really need to know about it.
+But in the case of replays, it is better to have them actually just listed on the server so that we can store that out as a checkpoint at some point and therefore recreate the decals immediately upon just as a memory copy.
+rather than having to play back every message of an add decal every time we want to add one and therefore creating more messages and a larger spike when we do a jump forwards.
+So, our next problem is how we can see players jumping forward.
+As you can see in this video we jump forward a bunch of times, we zoom out and then all the trees collapse.
+I mean it's really cool in a samurai movie when someone seeks through everyone and then everyone collapses at the same time, but in a replay that's not entirely accurate.
+The problem here is that our tree system was not designed to operate midway through, and this is not just specific to that.
+The animations, your effects, like shot particles, anything on your HUD if you have timers that show reloads or cooldown effects.
+Our destruction, and even initialization such as spawning in resources, all of these can sometimes not be designed to be able to start midway through.
+They're either designed to start and then they take control of their own timers, or they're in one state or another.
+So what we did to fix this was to make sure that each of these systems understood when they started.
+So when the event happens, we store the time.
+that we currently started, which means we have to get the time that the replay is currently processing, not necessarily the wall clock, which can either be the start or the end of the jump.
+Then when we hit the end of the jump, we make sure that we fire off an event to each of these managers of these systems, so that we can adjust the duration of that event.
+based on the start time and therefore set the tree to where it would be as we jumped out. So trees can start falling over or they can start completely on the ground already.
+So this solves that problem of not being able to, of watching everything happen at once.
+Related to that is having things happen in the wrong position.
+So here we see a time jump and we see the explosion start back where the tank was, not where the tank actually is being destroyed.
+This is because these particles are meant to attach to the tank, but they don't know where the tank is during the time jump.
+So similar to how we needed to get the time the replay was currently processing, we also need to get the position of where the entity is as the replay is jumping through.
+So this is where we have a bit of a deviation from the rule of not modifying the client specific for replays.
+So what we need to do here is we need to store where the entities are just off to the side, not necessarily in our actual interpolation code.
+And when we want to reference or attach to something at a certain position, we pull from there during a jump only.
+We could process all of the move messages, but that's going to increase our spike because it makes the position an always message that has to always play.
+So this is a trade-off.
+We're having to modify the client, but the benefits of being able to do that and not having to play all of those move messages significantly improves the performance.
+And then all the particles and everything that's meant to happen at a certain point can actually happen at that certain point.
+So when it comes to architecture, when we're playing a real game, a client really only needs to know about its own player controller. It doesn't need to know about other player controllers. And therefore, unless you're doing a split-screen game, in which case this is probably not going to be a problem for you, for us we had a singleton that connected to the server as the authoritative controlling avatar. When we play a replay...
+That doesn't hold up anymore, as your player controller is suddenly all of the player controllers for every player in the game.
+And as a singleton, every time we tried to create a new player controller, we would override our existing one, and things would not work properly because it had no idea who it was meant to be in control of.
+For us, rewriting this would have been a massive architectural undertaking, so we had to find a way around it.
+So what we did was to take advantage of an existing observer mode.
+So World of Tanks has the ability to view and observe a match via an external observer and we leverage that functionality to do that here.
+So during the recording of the replay, right at the beginning, we insert a fake player and this player represents that observer.
+Even though they weren't actually playing in the match.
+As far as the replay was concerned, they were.
+So when we're playing it back on the client, it just creates a player without any knowledge that that player didn't actually exist in the game, and then follows our existing code paths in order to make use of this observer functionality.
+So if you have something like this in your game, you can easily get around this issue by inserting a fake player into the game, and therefore you don't have to touch your replay code at all.
+This also, the concept of this recording only message also helps with other issues as well.
+For instance, when we're recording our shot events, this could happen multiple times.
+So as you can see here, every time we send out a shot to one of our clients, we have to record it to a replay.
+So if three people see a shot, then we record that message three times into the replay.
+2, 1, or even 0, so we can get to the point where we don't actually record this into the replay.
+And this isn't great, because especially with a 30-player game, you're recording the same message 30 times.
+So instead, what we did is we don't actually record certain messages, such as firing shots.
+What we do is we specialize that and record that to our replay-only entity that we talked about earlier.
+This way, we're only recording it once.
+Even then, if no one actually saw it, we still end up recording it.
+So in this case, if a tree falls in the forest and nobody hears it, it does in fact actually make a sound.
+So this gets us to a point where we're going to need some feature requests.
+And one of those feature requests was being able to see where the player viewed from.
+So we see here that as we were in the free cam, we saw everyone, but now things are popping in as we view from the player's perspective.
+The problem here is the replay has no player context, it doesn't have the concept of what the player could see.
+So the first thing we have to do here is to actually record that information.
+So the server is sending which people the player can actually see, so we record that off to the side so we can play that message back as the replay comes in.
+Then we get to the client side and have to deal with that.
+And there are two methods for this.
+The first way we can do it aligns with our don't modify the client for replays paradigm in that at the level of processing the messages, if we are viewing from a certain perspective we don't actually play those messages. So if there's an entity that that player can't see, we don't play that message at all. We just lock it off and the client plays as normal.
+Now this works really well, but it does have some caveats in that if you want to switch players or you want to switch to FreeCam, you're always going to have to do a reset because certain messages have been played and therefore you can't guarantee the state of the world is actually consistent.
+It also means you can't do something such as ghosting where you show what players couldn't see but you actually want to show a visual representation of where that player was.
+So what we did do instead...
+was we did it a bit lower down.
+So we let the messages come through and we processed them, but if that other entity wasn't visible to that player, then we hit it.
+And it only became visible when we received the message telling us that the visibility was actually true.
+So in effect, we're modifying the client to make the replays work properly using visibility.
+But it gives us the ability to instantly switch between other players and all we're doing is toggling visibility flags or switching to full view of everything and all the other features that we can support based on having this information.
+So this is another example of you have to make the call on whether the trade-off is worth it in order to change what the client is doing for replays.
+So similar to what we did before was we wanted to see what the player could see then the request was we want to actually see exactly how the player saw that which is viewing from the camera of the player if you have a first-person game or something where the camera is generally locked to a bone this is relatively simple but for us we have a free moving camera so the only real solution would be to send the camera data up to the server.
+And this has no tangible benefits to the game.
+So you can go to your server engineers and please sir, can I have some more bandwidth?
+There's a chance you'll get a no.
+So the next option is just to fake it until you make it.
+We attached our camera to our bone at the front.
+of our turret, so we actually, we're seeing where the player was looking and when the player fires, we see exactly where the player fired. Of course we don't have any information about where they're free looking, but there's been no complaints about that not being there. Once the sniper mode went in that seemed to work properly, so it's not really that important if you don't have the exact player's experience there. If you, if that's 100%.
+important for you, then there are client-side replays that do that as well.
+So another feature is our highlight system, and this requires metadata.
+So we need to be able to store when the highlight happens.
+We had a few things that we wanted to do, and one of those was we wanted to keep everything in one single file.
+So we had one replay file to store to and distribute.
+So We didn't want to have to be able to modify the header on the fly and rewrite out the file while it's still being recorded.
+We didn't want any processing after the match had finished, which takes up time on the server before we uploaded it.
+So we needed the ability to insert that metadata into the file while it was still recording.
+And the way we do this is to leave the metadata in with the other tick blocks.
+So whenever we want to write out a piece of metadata, we have our ticks and then we'll insert the metadata.
+Then when we're playing it back, because we're reading things into memory in larger chunks, we're able to pre-process that metadata before it would actually hit it as it is playing back while faking the messages that come in from the server.
+So for us, our replays are only around 7 megabytes, so we can fit that entirely in memory, pre-process the whole thing, and strip out all the metadata before we start playing back through the file, and then just ignore the metadata when we get there.
+This also works for live streaming.
+because it's not reading from a separate file.
+As the messages are pulled into memory, you can still pull your metadata out and place your highlights on your timeline as that plays back.
+So feature parity.
+We had to support this bad boy.
+But something like this is important for things if you have a mobile game that runs across multiple platforms, or even if you're running your main game on mobile.
+Memory limitations and processing limitations mean you may have to make some trade-offs, but it's important to have feature parity as having everything work across all of your systems means that people don't have to wonder whether something is working or something is not, both for your players and for your testers.
+So we made some trade-offs.
+So when it comes to memory, specifically on the 360, we had none left.
+So we had to disable something like our world instancing.
+It meant longer load times, but it meant we still supported rewinds, which is really important for replays.
+We also had to deactivate some optimizations that would run in the game, as when you're playing back a replay, you're less concerned about maybe slight hitches in your frame rate.
+When your KB ratio isn't dependent on it, it's less of a concern.
+And we also had to put the replay file on the hard drive and stream it from there.
+As on the Xbox One and PS4 we could just store all our memory because we had the room, we had to put it on the hard drive for the 360 and that meant a whole bunch of extra TRC requirements we had to support.
+There was also some slight processing changes such as dealing with fog and loading, especially when you took a free cam and you could suddenly view the entire map.
+We had to make sure it worked in that situation, a situation that hadn't really come up before.
+So the main theme of what we've been talking about all throughout client is assumptions and that there are a lot of assumptions that can be violated by replays.
+So for instance in this specific video no one noticed during when you're playing gameplay that your tank explodes slightly before your shot can go out to it but in a replay at a slow playback rate it is incredibly obvious and that's something no one really picked up on.
+So what you have to make sure is that you check all of your assumptions.
+Here is a list of a bunch of assumptions.
+I'm not going to go through all of them.
+But just make sure that if you have an assumption, if you've said that can never happen, make sure in replays you test that that can never happen.
+And that brings us to the end of the game integration section.
+So we just have to make sure that...
+When you're integrating into your client, you make sure you take into account the flow of time and how we jump through time.
+How the network interpolation logic works and how your entities move around and to stop sliding and forward error prediction problems.
+How you represent your world and the state, so we can do things like check pointing.
+How you control your...
+Player controller controls other avatars, whether that's a singleton or whether you can actually do multiple controllers at once and also how these entities all handle time as well and especially your menus and external areas and just make sure you check all your assumptions.
+So now we have replays, replays working fine.
+They're great for players, but how can they help us in development?
+And the answer is quite a lot, actually.
+Before we can actually use these sort of replays in development, we have to make sure that our replays are trusted and tested.
+And they can be a difficult thing to diagnose issues like this because there's very time-sensitive concerns going on.
+It's very hard to debug something that is time-critical.
+So what we did do was we...
+made sure that we had the ability to output a replay file as something that's human readable putting all our messages in the parameters so we can read it.
+This not only allows you to spot things, such as that duplicate event processing that I talked about earlier but it also allows you to diff two different replays to see where something could be different see if messages are in and out of order, causing different problems.
+And you can also parse this sort of thing external to overhatching to play it in the game.
+Something like if you want to do machine learning.
+Or check for hotspots on maps.
+So once you're suddenly in development and you're using these, they're great for reliable reproductions.
+So your QA can do something, you don't have to replicate their ninja skills in order to replicate the problem they had.
+You just have to grab the replay file from what they did.
+and automatically your client will play it back without having you having to actually do it.
+And because the replays are playing back through the client as normal this means that you actually get that benefit.
+You can also share and access these replays from anywhere and therefore don't have to attach files around and potentially lose them.
+And you can also insert the metadata into the replays so that it's all...
+straight there. You can jump directly to where the issue occurred rather than having to deal with time codes and scrubbing and trying to find where the problem was.
+It's also really beneficial for performance testing and regression testing. Any form of automatic testing, replays go hand in hand with. So you're able to play the exact same thing, time and again, without running into issues.
+And as I mentioned earlier, it also represents the real game, so it's a lot better than any spin testing or just placing cameras in the world and looking at a generic thing, because you actually can see what your players are actually doing and looking at.
+So you're getting real world performance data as opposed to just generic data.
+It also means that you can take your replays used for smoke testing and use them for your performance testing.
+So this is a caveat in that replays, which we'll discuss soon, go out of date very quickly.
+And so scenarios need to be reproducible via either an automatic creation method or via manual creation in order to be able to do consistently over several days.
+They're also helpful in live. So once your game has gone live, you can use replays to help deal with players.
+So if a player finds an error in a game, in their one in a billion error, you can just grab their replay and see how that happened, rather than trying to reproduce it a million times yourself.
+It's also great for identifying if anyone's cheating, you see how they managed to get underneath a mat and get behind that zone where only they could shoot out from.
+And also if there are any complaints about balance issues you can see from a replay where potential map problems might be or where a tank or anything can be overpowered.
+It's also great for post-process analytics.
+So if you come up with some stat that you want to be tracking then you're able to just write that process a whole bunch of replays.
+and get that information immediately rather than having to wait two weeks for your players to play through it.
+This also works for something like machine learning.
+If you want to be able to have your bots learn from how other players play, you can just process your replays and it's done there.
+So, now we've discovered how they help us in development and how to get things into the client, we're going to briefly just go over some of the things we decided not to do because we considered them either to be...
+too complicated or not worth our time.
+So I'd be... feel free to try and do some one of these things.
+They're probably GDC talks on their own and I'd love to be in the front row to hear how you actually overcame these problems.
+So the first one is playback in reverse.
+So what you're seeing on the screen is me faking it by playing a video back in reverse.
+We don't actually support something like this because of how complicated it is.
+Events all have their start position, so when you're playing the replay start to end, you're hitting the correct points.
+But the server very rarely knows where an event would end, such as playing a particle effect, it has no idea when the event would end.
+So when we're playing back, it doesn't know when to start.
+So in order to support something like this, you would have to pre-process your replay before you play it in order to calculate the end times on the client.
+and store that somewhere so that when you play backwards you can actually hit that point, spawn the particle effect, jump it to its end point. I mean you've already set up your durations so you can start from any point and then play it backwards.
+But I probably haven't touched the surface of all the problems here because there will be other problems with your network latency interpolation movement code not being able to support negative times and jumping between negative and positive.
+It's something you should probably talk to your excited designer about and just temper them to say it's probably not worth it.
+The next big one is versioning, and this is something we talked about quite a lot right at the beginning.
+The main problem being that it's something that would be nice to have, but it's very difficult to support.
+So replays get out of date quite often because as soon as you change your map, move a rock somewhere or make an asset slightly wider, you're suddenly going to get clipping in your replays because that wasn't like that when the replay was recorded.
+Same thing for any entity properties or definitions and how they operate or even any code that just controls behavior.
+As these things change, the replays will not function appropriately.
+There are mitigation steps that fix this, such as for our assets, our maps, and our entity assets, we can download them on demand.
+So we use a hash to look up what we actually need, and then we're playing back with the appropriate assets.
+Of course, this is a cost factor in that you have to store the assets in an accessible location to be downloaded as required, and slows down how quickly you can start your replay.
+For properties, we can always create redirectors that redirect old properties to new properties or break things up into what they should be.
+But then we're paying a performance cost of not only doing that conversion, but also how accurate it actually is going to end up being.
+We can get around all of this and just download the entire old client and play a replay file on that.
+That's very heavyweight.
+You're now storing the entire versions of your game.
+somewhere that can be downloaded and it's not exactly something you can do on a console.
+You can't fire up another executable.
+So again, you can just ask yourself how necessary something like this is.
+We keep our replays around for two weeks, so once we release any patch update it invalidates the replays, but we've set that expectation with players that two weeks is as long as replays are going to hang around for.
+And they understand that when there's a title update that they will be invalidated.
+So that's replays. That's everything we did to get replays into a game.
+If you take away anything from this talk, then make sure that it's try keeping your replays code and your client's code so that they're the same thing.
+So you're not specializing the client just for replays.
+Unless of course, there are certain situations where the trade-off is worth it.
+Make sure you consider the flow of time.
+Time is where most of your issues will happen.
+especially time jumping, so think about how a system or a new system will handle how time changes.
+And make sure when you're storing data or writing systems that access data that you consider how the server will send to the client and what you actually need to play back should we be jumping through time.
+And if someone asks you why you possibly need this feature, well, even if it's not just because players are asking for it, it's really important for when you're in development, because it can really speed up as a valuable tool for getting reliable testing and performance analysis.
+And if anything, it makes for just bulletproof systems design that works in a whole lot more situations than what a non-replay system design would be.
+So thank you for watching.
+I hope you've learned something.
+This is the point where I normally ask for questions, but there's nobody here.
+So if you have any questions, just send it off to my email and I'll gladly be happy to respond.
+So thanks for watching and I hope to see you at a later point.
+Cheers.

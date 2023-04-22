@@ -1,0 +1,463 @@
+Awesome, well, thank you everyone for making it out here.
+It's good to see people, doors are closing.
+House cleaning tips, please silence your cell phones.
+And then, because I may forget later, once we get to Q&A, make sure you step up to the microphones.
+So a quick show of hands, if I could get some audience participation.
+How many people here just plain up gather telemetry?
+I'm hoping that all the hands go up.
+I'm seeing about 70%.
+And then lower your hands.
+Hold on.
+How many have access to reports by end of week?
+So how many people are more than a week before you can see the results of your telemetry?
+OK.
+So.
+It went from like 70% to like 30% and then 0%.
+So I'm not sure what that 40% delta there is.
+OK.
+How many people get access to their information sub-minute from the telemetry that they're gathering?
+That's awesome.
+We should definitely talk afterwards.
+I want to hear what you're doing.
+That's cool.
+It's a hard problem.
+My name is Tom Matthews, as you can see.
+I started in the mid-90s working on line of business applications for Best Western, Starwood Lodging, Universal Studios.
+After about five years there, I moved on to Microsoft, working on SQL Server Analysis Services, which is a multi-dimensional database architecture.
+Five years into that, I moved on to the Advanced Technology Group.
+developers improve their audio implementations. Five years into that, I moved on to 343 Studios to help them.
+Maintain the existing Halo architecture for gathering telemetry, and architect, what you guys are here to see, the subsequent iteration of telemetry gathering for Halo 5.
+So, if you've noticed a pattern, every five years I seem to do something different, and that was about four years ago, so I'm no longer a software senior, software engineer engineer.
+I am now going to be a senior data and applied scientist.
+So make sure you fill out the surveys.
+I want to come back next year to talk about all the cool investigations we've been doing.
+But enough about me.
+We'll start out with a bit of interesting stuff, some of the numbers of our launch.
+And then we'll go into how we actually achieved it.
+So, events per second, seems like not a lot of people talk about it.
+It was hard for me to find publication numbers.
+I found one large casual app that was saying that they hit 2 million events on their launch day when they launched their big popular app.
+And when we started working on...
+what kind of architecture we would use and land on, what kind of technologies we would use.
+That was about four years ago, three and a half years ago.
+And I was putting this talk together, I was like, oh, did we really hit big data scale?
+I mean, it seems like we did from three years ago, but times change rather rapidly.
+So for our launch day, what we were able to do is 700,000 events per second, which is 2.5 million.
+hour. So that's a pretty significant amount of data churning through the systems. And our peak volumes were 831,000 events per second. The funny story there is that half of that volume was actually One particular event a developer had left turned on for release, which was a composer event that was firing for every object in every frame and resulted in 400,000 events per second for the first few hours until we finally got around to turning that off.
+So first finding is make sure you're aware of the data that your game is transmitting in the release configuration.
+And then the next highest event is down at 90,000.
+So it's a pretty exponential tail that we have going.
+So overview of the general slide deck presentation that we are going to be presenting today is where we started, like what the Halo 4 and earlier code base looked like, what goals we wanted as we looked into overhauling that and creating something new.
+The implementation, naturally, and the results.
+There'll be some findings at the end.
+So, the existing...
+At 343 we inherited the Halo codebase from Bungie.
+So this was the existing implementation of logging.
+They had two different logging systems.
+One was this log underscore event macro.
+And this macro was very easy for developers to use.
+It was like a printf statement.
+You would key in the string that you wanted printed out over Telnet or to the screen or to log files.
+and the parameters that would go into that system.
+And then it would feed into a database architecture called data mine.
+The good thing is that it was easy to use, right?
+So developers could just write using this macro printf statement.
+The bad thing is that there was not really strong typing.
+They could pass anything in there and printf would do the best.
+that it could to create a string that was fairly legible.
+And there wasn't enforced parameter naming.
+So there were several times where developers would swap the events, seek the order of the parameters in the event, and so the meanings of the reports that were coming out would change, right, and there was no...
+warnings that something was going on different.
+Other times they would change the data type itself to be more or less precise.
+So they would go from like a map coordinate system that's in world units to a normalized map coordinate x and y that was minus one to positive one.
+And naturally that would mess up reports that were based on that.
+And the worst part about it is that what it did was it actually zipped up the results of all the telemetry generated during that particular match and upload that zip file at the end of the match.
+So it was incredibly slow.
+During internal Microsoft-wide betas, you're looking at up to several minutes to upload the telemetry that was generated.
+And players are just sitting there waiting for the next match to start.
+So naturally, this was compiled out of release.
+So there were on the order of 9,000 events that were using this log underscore message or log underscore critical format, but you didn't get any of those event information from the release build.
+What they did have in the release build and in the development builds was the binary logging.
+And so this is the binary log format, BLF files.
+And what they pretty much were was, they were good from the perspective that they were more compressed.
+The devs found it very easy to use.
+What it was was basically just a mem copy of the struct.
+So they would make sure that it wouldn't be doing any reordering or padding, and then they would mem copy that struct off and send it on the wire.
+The downside is that this is really, really frustrating to use from a services perspective.
+Because as soon as a developer adds one field in the middle of their struct, now the C-sharp code that's trying to read these two bytes and interpret it this way, and read the next three bytes and interpret it this way, That starts giving you garbage results.
+And hopefully you have the testing that identifies that bogus values are coming through.
+And hopefully the change that the developer did and the client results in bogus values that would trigger that alerting.
+So.
+The big pain from the services side, besides the fact that stuff could change on the fly, is that it requires the source code to understand.
+Depending on the level of commenting going on in your source code, that could be easy or very difficult for a services engineer to understand the intent of a particular field.
+And similar to the previous logging system, this is transmitting at the end of the match.
+So when the match is over, the game takes all of the statistics that it's gathered and aggregated and uploads it at the end of the match.
+So when looking at where we wanted to move to, one of the big key things was thinking about those easy to use printf style statements in the first logging system.
+And trying to come up with a way that we could use that in release if those events were turned on, so having a configurable system.
+That would generate telemetry in a performant way.
+But the real goal of this is to what I was calling in the slide summary, gaming intelligence. So we've all heard of business intelligence, which is the information that the business guys want, right, you know, return on investment and ARPU and churn numbers and that kind of thing. So they're looking at, you know, new unique users coming in, that kind of thing.
+But what we really wanted to do is make sure that developers had available to them the data that was most valuable for ensuring that the systems that they were writing continue to operate as they expected.
+So, towards that end, we were going to focus on reliably transmitting telemetry in real time.
+enabling sub-second service response.
+So one of the earlier requirements for this was having the player do something and within one second having, from the user's perspective, from the instant that they started an action.
+having services perform a calculation and then having that reflected in the title and the user's perception.
+So you can think of it as medals, essentially.
+You get three kills in a row within a certain time span.
+We want the services to be able to be tracking that and then show the medal within one second in a timely fashion.
+So, what we have is the rough budgets that we sketched out on the back of a napkin, essentially.
+When we first started out, it was that for the highest priority events, we would want a message pump that was firing every frame.
+Primarily because...
+We're supporting up to 400 milliseconds latency.
+So if our goal is to be responsive in a one second time frame, if that's our SLA, 400 milliseconds up and 400 milliseconds down, that's gone right away.
+So it leaves us 200 milliseconds in client side and in services side to do our operations.
+So we want to transmit as fast as possible.
+If we're waiting even two frames or three frames, that's eating up a good 20%, 30% of the budget that we have.
+Once it's in the cloud, there's a queuing and dequeuing stage that has to happen in order to support horizontal scalability.
+So that, we're budgeting at 50 milliseconds.
+Fortunately, the queuing system we're using comes in much under that.
+And then service code, it basically leaves at 70 milliseconds with a tiny bit of headroom.
+And then you've got 50 milliseconds to throw back on the queue, and 400 milliseconds transmission latency again.
+So, for the purposes of this talk, the component that I'll be referring to as cell is the client-side component.
+And the component that I'll be referring to as Maelstrom is that, those bottom three boxes.
+When we were going through this, there was Storm and Spark.
+You know, they were like research projects because this was three and a half years ago, and you're not sure which one is actually going to become adopted by the community, which ones are gonna stay university projects.
+But they all were having...
+meteorological themed names.
+So that's one reason why we settled on these.
+So in the logging architecture that we're creating, there's three primary requirements that we have.
+The first one is sequentiality.
+The reason why this is important is because in a lot of the real-time modeling, processing systems that are out there, you'll actually find that they require you to have a window of operations. So, a lot of these systems, what they do is you'll collect for five minutes, and then what you'll do is say, okay, as of this point in time, I'm going to sort all of the events that I've received. I'll take the oldest two and a half minutes and say that anything that comes in, I'm going to sort it. And then I'm going to more than two and a half minutes ago is now going to be thrown out because I've waited two and a half minutes.
+That's the latencies that I'm willing to work with.
+And I know that anything older than two and a half minutes is bogus.
+So I'll work on the worldview that I have with the events two and a half minutes out to five minutes in the past.
+And then it'll do its aggregation and calculations, and then two and a half minutes from now it'll do the same thing.
+It'll sort the last five minutes, take the oldest two and a half minutes, and process that again.
+What Sell and Maelstrom implemented, what we implemented with Sel and Mellstrom, is the concept of for high priority events, we guarantee at least once sequentiality.
+So it's kind of like the TCP style.
+We will have acknowledgments if the host is not, if the cloud service is not responding with an ACK in a timely fashion.
+We will disconnect from that service and then try connecting again, which hopefully with the load balancer will give us a host that, or I should say a cloud service entry point that is in a healthier state.
+and retransmit the events that we had been expecting to get axed.
+So you'll get repeats, but from a consumer perspective that's reading this event stream, if they see an event they haven't seen before, they can act on it immediately.
+There's no ordering that they have to do, and that really improves on the latencies that we have in the service itself.
+We also have a low priority stream, and these two concepts are very decoupled, high priority streams and low priority streams, because we don't want something like a super spammy event that should be off to affect the high priority stream.
+So anything that's user facing is going to go on that high priority stream, deaths, kills, which are the same thing, but spawn locations, that kind of thing, those are high priority.
+Oh, one thing to note is that the low priority stream, that's more of a UDP style.
+So it's an at most once transmission because there's no acts on the low priority stream because having to maintain that much state on such a high volume would be a bit catastrophic.
+Contextual events is also important.
+Events that we transmit are very small, and because we're working with the concept of a streaming architecture, where we know the events are sequential and we are subscribing to the events from the beginning of the stream.
+The consumers, and they're guaranteed, the consumers can primarily be paying attention to the client session.
+So when the client spins up and connects to the cloud service for the very first time, it will be creating its own unique GUID that's associating itself for the lifetime of that executable.
+With that, one piece of contextualization, that's associated with the stream.
+So each individual event doesn't get that GUID attached to it.
+And I've got numbers later in.
+The reason why that's important is because adding even one GUID to an event would increase our event sizes by something like 20 to 30 percent.
+So our events are so small and compact that adding a lot of contextualization information would be detrimental to the point of having this very fast system.
+So the consumers, it does shift some of the processing work onto the consumers of the streams, because they have to monitor for a match start event and say, okay, from now until I get a match end event, the events that I'm getting are actually associated with this match.
+And if they wanted to do contextualization on the duration in which a person was alive, they would also have to track spawn to death events, that kind of thing.
+But if you work with contextualization from the beginning, that means that you're thinking in terms of contextualization.
+So it is a tax on the services side, but once they start adopting that mindset, it becomes easier to be creating these kind of contextualization checkpoints.
+And some windowed processing...
+Architectures like Trill make it easier to identify new boundaries by creating new events that are injected into the stream.
+There's compatibility.
+So I alluded to this earlier with the other two systems, where developers making changes to the events can have very deleterious effects to the services downstream.
+So the architecture we wanted to implement from the beginning, the concept of having events that were both forwards and backwards compatible, meaning that.
+As you create your events, the events will be...
+You can continue to add new fields to them.
+But you can't change the types of the fields that you've already transmitted.
+And this allows us to make our reporting systems such that the reports that we generate will continue to work.
+I mean, there may be nulls there because people stopped transmitting old fields kind of thing.
+We still have to handle that.
+But you don't have bogus data creeping into your code paths.
+So, Cell.
+CEL stands for Common Event Logging Library.
+Within the CEL architecture on the client, we have a component called the telemetry manager, and you can have a number of these telemetry managers.
+In Halo 5 we have a high priority telemetry manager and a low priority telemetry manager, but you could create one for different services.
+For example, some studios that are adopting the technology, they have one manager that's for their own personal services and they have another manager that's for the...
+I forget what the latest name is, but the event tracing for Xbox or ETW style eventing that's on the Microsoft platform.
+So, there's a telemetry manager.
+Developers interact with this using a macro that's been optimized down so that the client-side impact is 15 to 30 microseconds.
+And I would get calls if that ever crept up to 50 microseconds.
+So, we spent a lot of work optimizing that macro.
+And what it's doing is it's pretty much just, it has two very small branches to determine if the overall category of event has been turned on and the overall priority threshold of the event has turned on.
+So in release, we can set a priority threshold and we can turn on or off the categories that will be emitted.
+And that's the kind of like, Nuclear option, that's the most effective and broadest scoped configuration option in our, on the client side.
+And it's also the fastest.
+There are other filters that you can apply, but those have to be processed on every event as it comes through.
+You have to crack open the event on the client and that consumes more time.
+So that macro is essentially mem copying onto a circular lockless buffer.
+And I put quotes there because it was originally implemented in a lockless fashion, and it turns out that lockless programming is as hard as all of the books say it is.
+You'd think interlocked increment, you know, what can go wrong with that?
+But you have to do a lot of fencing and thread marshaling, and...
+So, we addressed all those issues, we're pretty sure.
+But for the preview, they didn't want to take the risk, so we threw some locks around it.
+And that 15 to 30 microsecond number up there is actually using those locks.
+So we didn't take the locks out, because...
+We didn't have a performance requirement to remove them, and I was keeping it safe, so we actually left that in.
+I think we could get a bit faster performance, but at these speeds, you're pretty much waiting for cross-core synchronization issues, right, which you have whether you're dealing with interlocked increments, or if you're working with fast lock semantics.
+So, might shave a few microseconds off.
+Within the Telemetry Manager, there's a concept of an endpoint, and there's a collection of endpoints that you can create.
+We've got network endpoints and telnet endpoints and screen endpoints that display on the screen if it's critical or higher.
+And that's where I was saying each endpoint can, as it pulls an event from the circular buffer, and it's working directly with the copy that's on the circular buffer.
+So it's not getting a copy.
+and incurring that overhead.
+So theoretically, if you have a slow endpoint, that could become a bottleneck and halt the telemetry gathering system.
+But we have an awful lot of testing in the studio to make sure that that's not going to happen.
+In development time, we run with probably, I wanna say, 10 times the volume, 10 to 100 times the volume.
+as the retail configuration.
+So we're putting a lot of stress on that circular buffer already.
+So the, one thing to note, if I go back one slide, the message prompt.
+So we don't have a Telnet endpoint turned on and released.
+The main endpoint that we have is the network endpoint and an endpoint that is integrating with the Microsoft Achievement System and Present System.
+And our budget that we have is 1 millisecond.
+per frame on a single core. So we've decoupled the system in that the C++ macro is very very fast in all of the different client subsystems that we're interacting with and then we have a worker thread on a low priority core that's waking up every frame to pull off those events that have accumulated in the circular buffer.
+And with that, our targets were 2 to 4,000 events per second before the circular buffer would fill up, and keeping to the one millisecond per frame CPU guideline.
+And we were able to hit 3,000 events per second.
+So it worked out pretty well.
+So to enable this, we have a build time preprocessor.
+So the macro covers that ease of use bullet point that was important to us at the beginning.
+And it looks a lot like the log underscore event macro.
+The preprocessor, what it does, is create a global schema store.
+So at compile time on a developer's box, The preprocessor will run as part of the build step, it's a pre-build step.
+It'll parse through writable code as an optimization, assuming that those are the checked out files they may have edited, and identify if there have been new event parameters created or if there have been new events that haven't been registered in the global database.
+This is configurable. Right now we're using TFS because it allows us to do ADF security credential stuff and we can share with studios outside of the Microsoft internal corpnet and they can still access the externally public TFS address and all that. So the important thing here is that events are...
+The Schema Store stores events at the category level.
+So if you have two networking engineers that are adding events, you need to create a unique identifier for that event type that they're about to check in, and you wanna make sure that they're not stomping on each other and both saying plus one to whatever view that they have.
+So the Global Schema Store supports that.
+It also supports the enforcing the ever-growing schema requirement.
+So, which makes sure that the parameter types aren't changing in an unenforceable way.
+You know, they're not going from a UN64 down to a byte.
+And then all of our reporting infrastructure, I guess that would be supported going from, so we just don't let them change the types really, because figuring out that logic and trying to message that is a bit challenging.
+But that allows us to have our reporting stay consistent.
+Now this was a big pain point, unfortunately, because developers Sorry, my slide timer is like 20 minutes ahead of the real world time, so I had a little freak out there.
+Developers were...
+It's iterating on the events that they wanted to generate, as we all want to do.
+And every time they were compiling, they were compiling with each iteration, which was registering their event in the global schema store, which means that now they can't change the event types because they realized they needed a UN64 instead of a UN32.
+So it's on the books.
+We haven't implemented it yet.
+One of the things we need to do is support an offline...
+do not transmit this data to the cloud because we're iterating on what kinds of events we will want to transmit.
+The reason why this defaults to the behavior that we implemented is because we would have engineers that would create local one-off builds with a bunch of instrumentation.
+transmit that, run the game with that instrumentation because they're trying to track down some issue that's hard to debug, and then want to report from us saying, hey, in the cloud, I'm pulling up the session that I just ran through and I don't see my data.
+So there's, the power of this is that developers have access to their data in less than a minute.
+They have access to the full log of events that's being generated in real time.
+And our developers are, Most slash some developers are making use of that particular feature.
+So and it's a really powerful feature.
+The ones that use it are strong advocates for it.
+And finally, the preprocessor handles the bond serialization.
+And we're using Bond, which is a Microsoft protocol.
+It's open source.
+And it's similar to Google's protocol buffer.
+And so it does bit packing.
+Like in the first four fields, the first four fields on an event, they're ordinals.
+They're positioned in that event.
+1, 2, 3, 4 is actually stored in like the first couple bits of a particular entry within the bond serialization format.
+And then the next few bits store the type of the entity.
+And this lets us get away with an average event size of only 120 bytes.
+You can't do bit packing on GUIDs, which is why if people are adding in match ID and If you have a vehicle ID and life instance ID and all these other things, your event sizes start getting rather large.
+So that was Cell.
+That's the client-side architecture.
+On the service side, we've got Maelstrom.
+And this is, the Maelstrom component is fairly small because it is the, it's small in concept I suppose, but not necessarily in implementation.
+Because it's focus is to be the event pipeline that all of our other services can tie into and work with.
+So we have the ingestion service, and this is the primary service the clients are connecting to.
+The clients, what we're using is WebSocket protocol to connect up to the cloud, to the ingestion service.
+We're using a single WebSocket connection for both the high and the low priority channels, which adds a little bit of complexity.
+And in order to multiplex over that path, we're using AMQP, which is a queuing protocol.
+So, the clients are connecting to the ingestion service, and then the ingestion service, as it receives the events from the client, now remember I said we weren't transmitting the session information or the authentication claims with every event payload, every frame.
+What we are instead doing is transmitting those during the connection negotiation for the web socket, and then the ingestion service keeps track of that as part of that web socket information.
+It will then stick that onto the payload that it receives from the client and injects that into the event queue that we're using in the cloud.
+And that way, whoever's reading off the data, then they can have access to that session GUID and say, oh, this is something I've subscribed to.
+I want this event and this event and this event off that queue.
+And then we're transmitting our primary queuing system that we're using is the Azure Event Hub, which has performed quite well for our needs.
+It's stood up to some pretty high volume stuff.
+We also, in the ingestion service, support non-AMQP paths.
+So we're getting telemetry from other.
+components that might only transmit JSON payloads, for example.
+And so the ingestion service will take those JSON payloads and convert them into bond. Those are much lower volume streams, and so it's something we can do in the ingestion service.
+But for the most part, the ingestion service never cracks open any already encoded in bond payload.
+Its sole purpose is to...
+Take the claims and the session ID, associate it with whatever it just received from the client, and let someone else deal with authorization.
+So ingestion service will do authentication to ensure that you're allowed to talk to it, but then the authorization is offloaded to whoever's going to actually use that information.
+So, I mean, that's Maelstrom, it's the event hub and the ingestion service, mostly.
+So there's also the common API we have for consuming those event streams.
+So the API layer that allows you to connect to that event stream on event hub, and then allows you to read the stream of events.
+Coupled with the global schema story I was talking about.
+Right, so we have a global registry of what every event should be interpreted as.
+Field number two, it's an int.
+Okay, that's part of the bond protocol, but understanding that that is a weapon ID, for example, that's metadata that's stored in the schema store.
+So we have a common set of APIs that allow for understanding the event streams as they're coming off.
+Then we have several services that feed off of the Maelstrom pipeline.
+The stats service.
+is the primary one that is in charge of the leaderboards and the end of game stats that you see, hopefully, at the end of the game.
+And the storage service is the one that takes off Event Hub because that retains for so many days into the past.
+You can recover your services anytime within like a seven-day window.
+And as long as you've persisted where you were in the Event Hub queue, you can spin everything up and read everything out again.
+that you're using the right offset.
+Funny anecdote time, there was a partner team we were working with that always spun up their service using offset zero.
+So they were reading from the beginning of time and at that time there weren't very many safeguards to throttle the reading.
+So it kind of took things down during the Halo preview.
+So, lesson learned.
+Make sure that everybody's using and persisting their offsets as part of their checkpointing process.
+And also make sure that you've got throttling naturally in there.
+So storage sends stuff off to blobs, and then later on, as I'll be getting into, we can crack open those blobs for doing some larger scale reporting.
+The stats service is essentially a state machine.
+So since we don't have to do any of the windowing processing, I think at one point they did have Trill implemented so they could do more complex windowed processing style queries as part of the event stream, but at its most basic level it's not necessarily necessary.
+They just read the events and increment their internal counters and persist their state.
+I didn't go into it.
+We have several talks.
+If you go into, I think the GDC Vault, as well as the, I think we've given talks at Build that cover how.
+343 uses the Orleans technology, which is another open source technology bed that allows for these things called virtual actors, which are essentially your, they call them stateless state machines, because they're state machines, but then they can migrate as the servers go up and down and everything's handled for you, and it's really cool tech.
+that we leverage a lot in 343.
+So I recommend looking into that.
+Finally, we have the librarian.
+And what the librarian does is it's cracking open, finally, we're cracking open these events from a BI perspective, right?
+So the stats.
+Components are cracking open the events that they want to read, and they're subscribing to the events that they want to subscribe to in order to drive the end-of-game leaderboards in a real-time fashion.
+But they're only really subscribing to the high-priority feed, which allows them to shave off, like, 80% of the network volumes and processing requirements that they would otherwise have.
+So, the librarian, what it does is it's actually parsing the events and we've stored just enough information in the headers of the events.
+And Bond is really great in that you can deserialize in the event stream just as much as you need.
+and then skip the rest of the payload and not incur any of the overhead in deserializing the rest of that event.
+So our events are architected such that the information you need, the event type ID, the title ID, the session information, timestamp, those are all in the very first few dozen bytes.
+And so the librarian is parsing out that header and making a note of...
+What time stamp, different events happened.
+And so now we can do reporting on the session, observed this many of this kind of event.
+And then if that's, if we're looking for a very rare event, then we can say, well, just give us the 20 sessions where this event happened, for example.
+And then we get the full context.
+Finally, we've got the telemetry event viewer.
+And the telemetry event viewer.
+is a work in progress.
+So right now, it actually just outputs a CSV file that developers can open in Excel.
+I wish I had a screenshot of it, actually, because it gives you a lot of data.
+But it's essentially the event stream in human-readable format, but also with every column.
+Each field has been separated into its own column.
+which allows you to do filtering and sorting and what have you on the fields within those events.
+And this has been an amazingly useful tool in debugging what exactly is going on in the game, especially for the networking guys, because networking is inherently an integrated problem.
+So you've got 24 clients and a server and several services that are all interacting.
+And as soon as you hit a bug, then you've got to figure out what were the states of all the different actors at the time that that negative event happened.
+So with the Telemetry Event Viewer, you can actually pull down all of the events from all of the clients that were connected.
+within like a five minute window from when the event happened.
+And you can see what everybody's doing up to when the event happened.
+So that's been a really useful tool.
+And because we're flushing every 30 to 60 seconds for the larger blobs in storage, we're able to pull up sessions as they're live.
+So if somebody's saying, hey, you know, I'm getting some warping going on in this game.
+We can actually load it up and see what's going on in less than a minute.
+The corollary to that, one reason why we have to support so much volume, is that the networking guys generate the most events.
+So there were something like 9,000 events in the legacy system, the old system, that was log underscore event.
+We migrated probably a thousand events into Cell before we launched.
+And of those, I would say probably three-fourths of them are networking related, just because they have so many things that they need to track.
+And then for doing our big data processing, we're using Hadoop and Hive, and we have a custom Java bond Sirday that is reading the roblobs so we have a job every hour that runs that traverses through the roblobs that are stored in bond and Converts the events that we're interested in into the orc format which is It's a columnar format, so it's very, if your data is slowly changing, it's a very highly compressed and efficient way to store your data.
+So if you have data that's like, if you always have a map name in your event, then it only stores the map name once and then has like a vector that says, okay, well, this value, it's like run length encoding.
+This value applies for the next 20,000 entries for this hour.
+So it creates very small files and it's fairly standard in the big data world.
+And I just spoke to all of that.
+And then we've got ad hoc and regular reports that are running in the Hive query language.
+And we're also using Tableau and R for visualization tools and to create our dashboards.
+So some of the gotchas in implementing this.
+The client implementation took time.
+It took a lot of time, I have to say.
+We originally anticipated it to be something that was on the six-month scale.
+And I think we ended up spending most of the three years continually working on the client-side implementation and ensuring the performance was right.
+And A fair amount of that was working with the build integration systems that are part of game development.
+You know, somebody breaks the build and you've got to integrate and you've got to figure out was it you that broke the build, etc., etc.
+A lot of people that I've been working with are more on the services side, so helping those teams understand the implications of doing client-side development, making sure that they understand how absolutely critical it is for a high-performance, low-latency, client-side impact was pivotal for the success of making this happen.
+We wouldn't have had client team buy-off if we didn't convey how much we understood.
+It was important to keep this at the microsecond level.
+There's this thing called a statistics event that I haven't spoken to until now.
+Every minute, the client side writes a little histogram event into the stream that says here's all the events that I've seen, so that we can do matchups to say, oh, well, we didn't It was a high priority stream, we shouldn't have any dropped events, but apparently we did drop these three events.
+We need to go investigate that.
+We actually had to turn that off for release because...
+Actually, no, it is in release, but it's got an issue in that every event is sequentially incrementing its sequence ID, right?
+Everything is sequential.
+The statistics event is attached as part of the header of the event, but its sequence ID is allocated at the end of the event because the batch it's about to send, it wants to report on it.
+So we had some issues with people that were doing the right thing and making sure they only interpreted sequential events, but they were having all sorts of dropouts because once a minute this particular event would show up out of sequence.
+Whenever you're doing these kinds of custom scenarios, you really have to keep track of all the different systems that could be impacted by it.
+from the beginning that a client session would be the instance of the executable from when the executable started to when the executable was terminated and released from memory.
+The thing we didn't really account for is that on the Xbox One, titles go to sleep.
+And it could be a week before the person comes back and fires up their console again.
+Or they could go off and play Netflix for several hours or days, and then come back and start the title again.
+At which point, the title instantly comes on.
+You don't have to load the waiting screen or anything, but you're using the same session ID.
+And that's caused a fair amount of headaches for our reporting systems, because now instead of...
+carrying forward the information from the previous hour and aggregating that information.
+Now, like if they're playing a campaign game and they're mid-game and then they go to sleep, now you wake up a week later and you need to figure out what map they were on.
+But because of the contextualization decisions we made, that information is stored a week ago.
+That was a headache and it's still not solved.
+We basically carry forward summary information for players as a stopgap.
+And then things came in a bit hot, and we needed to get our actual business intelligence reports going.
+So the stream querying that we really wanted to make a lot of use with, so we're using the non-windowed streaming analytics in our stat screens.
+But we haven't had an opportunity yet to implement Trill and some of these other technologies, like Esper is one that we've been looking at, to have kind of business intelligence-driven streaming queries off this stuff.
+And as I said earlier, the schema store caused some problems during developer iteration.
+So.
+Running low on time, but I do want to show you some cool graphs, right?
+The map balance.
+So I don't know, how many people here saw the community news article about red team versus blue team?
+Awesome, great, this is going to be new to all of you.
+So there were concerns in our community that our maps were not balanced, red team versus blue team.
+Indeed, if you look at the raw numbers, you can see that blue team seems to be doing, these are wins versus red team wins, and blue team seems to be winning more frequently except for the line at the very top.
+This is all on one map, these are just different game modes on that map.
+And then the previous one was all up across for that entire day.
+This one is broken out by, let's see, I think the previous one was all up for the entire week.
+The next one is broken out by day, but significantly, it's looking at even team versus even team.
+So it's taking out the noise that can happen if a really strong team is playing one color consistently for some reason, which did happen.
+And so these are even teams that we're comparing, and we see there's a lot of blue there.
+And then you can also do something cool like looking at what is the matchmaking rating delta at which you now get an even win-loss rate.
+So with that, you can see that in some game modes, red team has to be several, it's like 0.3.
+Let's see, I don't really have a pointer.
+But some of those lines indicate that you have to be 0.3 mu better on the red team versus the blue team before you start having an even match.
+And so we wanted to look into this, and our hypothesis was that some of the maps allowed for blue to blend in easier.
+In fact, we think that blue is just generally a harder color to get target acquisition on, because red is a much more high-contrast color versus blue.
+So we were looking at heat maps, and I'll speed up through this.
+So deaths.
+Red versus blue, there's more red deaths there, but it's kind of hard to make out.
+A pattern doesn't really show up well.
+So what you can do is you can look at traversals, and you can see that red base is at the bottom, and blue base is at the top, right?
+So on the previous slide, there's more red deaths on the bottom, but that's red's base, right?
+So I mean, it makes sense that red would die more if they're spawning down there.
+And so you can get this lethality matrix, although looking at it at the individual dots, it's hard to make out, but you can see that there's some patterns starting to emerge.
+So what I did was we've got these things called call-outs in the maps.
+that tell you where you are in the map.
+So you can say, oh, there's somebody in upper catwalk or lower catwalk or what have you.
+So I actually walked the borders of these callouts just as a prototype.
+And outputted my XYZ coordinates at a regular interval, like every second, threw them into Excel so that I could make sure that I was collecting the right kind of information.
+Imported that into SQL Server using a, a two-dimensional, they've got a 2D query extension that's part of SQL Server, so you can do bounded queries.
+And then correlated the traversal information with the death information to say, okay, inside this polygon, how many deaths happen, that kind of thing.
+in this heat map, which is much more useful in my opinion.
+And because I have the Z order, I can layer the polygons one on top of each other.
+So you can see the catwalks are above the courtyards.
+And now you can see that red is not having the greatest time.
+Red seems to be dying regardless.
+Now that we take into account traversals, especially when red is entering blue base, and blue is finally dying when blue is entering red base, and the walls have a slight hue that...
+make those opposing colors much more visible.
+Except for this little blue circle that's really, really strong in the bottom right.
+There you go. I circled it.
+And so I loaded up the map and I'm like, what's going on with this little circle? That's curious.
+And there's this big red wall right behind.
+This little platform that people can stand on and shoot.
+So it was kind of a nice confirmation that the hypothesis of hue versus background color and what have you was being borne out.
+So we took that to the map designers, and what they did was they said, well, so this particular map, we're at like 54% blue win versus 46% red.
+And they said, well, okay, there's this bug where the best player always, in particular scenarios, the best player is always put on the blue team.
+So maybe that's what we're seeing, right?
+So it's like, fine, we waited for that fix to go out.
+And did my, yeah, there we go.
+And so we went down a percent point.
+So the effect was there, and we're able to measure it and show that.
+And then they tweaked the hue of the color to be a brighter hue.
+And the day that, or the week that that patch went out, there was an immediate, Advantage seen. Now this is across all maps. So the thing to remember when you're looking at the data is There's always another story, right? So you go digging into it and you're like, well, you know, let me look at a map that's that's kind of Reddish so in this case the Advantage that red has is like a few percentage points Versus the column on the left which is the overall advantage And the fix went out, and sure enough, that dropped by a percentage point, just like it did for the average across everything.
+And the blue color went out, and now red team is actually getting an advantage that they didn't have before.
+So blue is now at a consistent two or three percentage point disadvantage, but that is now being bad on the redder maps, right?
+And there's one other map that's even worse than this, and they went really not good.
+So we're going to have to do something like a per map color variation or something.
+But I'm out of time, so I'm going to play these two things.
+There you go.
+This is a war zone map.
+Blue team crushing red team.
+Play it one more time.
+And then conversely, this is blue team versus red team are evenly matched.
+And so they just sit there duking it out.
+Oh, except the wrong animation got in.
+So it was the same thing.
+That's a bummer.
+Get my card afterwards.
+We'll go outside, and we'll have lots of questions, I'm sure, and I'll email you the real animation.
+So thank you all for your time.
+I appreciate it.
