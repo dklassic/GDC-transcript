@@ -7,14 +7,14 @@ assignees: ''
 
 ---
 
-**Alternative way of feedback [in the form of Google Form](https://forms.gle/D68jU5FmAKoXMwhc6) is available**
+**Alternative way of feedback [in the form of Google Form](https://forms.gle/D68jU5FmAKoXMwhc6) is available if you wish to give feedback privately**
 
 **Explicit permission for transcription**
 - [ ] Allowed
 - [ ] Disallowed
 
 **Additional contact information for verification**
-not required if the GitHub account is clearly linked to you
+not required if your GitHub account is clearly linked to you
 
 **Additional context**
 Add anything you want here. If you're allowing the transcription, you can provide extra links and stuffs to show alongside the transcript.
