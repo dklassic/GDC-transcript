@@ -8,6 +8,7 @@ assignees: ''
 ---
 
 **Checklist**
+<!-- Only submit when all three checked -->
 - [ ] This is a publicly available video from Game Developer Conference youtube channel
 - [ ] There's no subtitle available for this video
 - [ ] I've searched in issues and found no issue mentioning this video
