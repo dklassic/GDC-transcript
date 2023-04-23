@@ -7,7 +7,7 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 ## Issue Reporting Guidelines
 
-- The issue list of this repo is **exclusively** for feature requests (i.e. requesting for new transcription or tool function). Non-conforming issues will be closed immediately.
+- The issue list of this repo is **exclusively** for bug reports and feature requests (i.e. requesting for new transcription or tool function). Non-conforming issues will be closed immediately.
 
 - Transcription and translation error definitely exists so please don't open an issue for that, help us fix it instead!
 
@@ -19,7 +19,7 @@ Hi! We are really excited that you are interested in contributing to GDC-transci
 
 ## Pull Request Guidelines
 
-- **Please do not review the transcripts directly, review the subtitles instead**. Transcripts can be generated from subtitles but not the other way around.
+- **Please do not review the transcripts directly, review the subtitles instead**. Transcripts can be generated from subtitles but not the other way around. We will be reviewing this process in near future.
 
 - It's OK to have multiple small commits as you work on the PR - we will let GitHub automatically squash it before merging.
 
