@@ -3,22 +3,19 @@ import json
 import os
 
 
-def file_path(id, langcode):
-    if(langcode == 'en'):
-        file_path = f"static/src/subtitle/{id}.srt.meta"
-    else:
-        file_path = f'static/src/translation/{langcode}/subtitle/{id}.srt.meta'.format(langcode)
+def file_path(id):
+    file_path = f"static/src/subtitle/{id}.srt.meta"
     return file_path
 
-def main(id, langcode, jsondata):
-    metadata_file_path = file_path(id, langcode)
+def main(id, jsondata):
+    metadata_file_path = file_path(id)
     # Create the directory if it doesn't exist
     os.makedirs(os.path.dirname(metadata_file_path), exist_ok=True)
     with open(metadata_file_path, 'w') as outfile:
         json.dump(jsondata, outfile)
 
 def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_disallowance,additional_description):
-    if not os.path.isfile(file_path(id, langcode)):
+    if not os.path.isfile(file_path(id)):
         jsondata = {
             "reviewed": False,
             "reviewer": {},
@@ -27,7 +24,7 @@ def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_dis
             "additional_description": ""
         }
     else:
-        with open(file_path(id, langcode)) as json_file:
+        with open(file_path(id)) as json_file:
             jsondata = json.load(json_file)
     if reviewed != "null":
         if reviewed == "true":
@@ -62,4 +59,4 @@ if __name__ == "__main__":
     parser.add_argument('additional_description', type=str)
     args = parser.parse_args()
     jsondata = json_setup(args.id, args.langcode, args.reviewed, args.reviewer,args.explicit_permission,args.explicit_disallowance,args.additional_description)
-    main(args.id, args.langcode, jsondata)
+    main(args.id, jsondata)
