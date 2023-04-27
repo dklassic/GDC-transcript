@@ -54,7 +54,6 @@ for idx, file_name in enumerate(srt_files):
 
     file_metadata = os.path.join(metadata_directory, file_name_without_ext + ".meta")
     print(file_metadata)
-    reviewed = False
     reviewer = ""
     explicit_permission = False
     explicit_disallowance = False
