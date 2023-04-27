@@ -29,15 +29,24 @@ def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_dis
     else:
         with open(file_path(id, langcode)) as json_file:
             jsondata = json.load(json_file)
-    if reviewed is not None:
-        jsondata["reviewed"] = reviewed
-    if reviewer is not None:
+    if reviewed != "null":
+        if reviewed == "true":
+            jsondata["reviewed"] = True
+        else:
+            jsondata["reviewed"] = False
+    if reviewer != "null":
         jsondata["reviewer"] = reviewer
-    if explicit_permission is not None:
-        jsondata["explicit_permission"] = explicit_permission
-    if explicit_disallowance is not None:
-        jsondata["explicit_disallowance"] = explicit_disallowance
-    if additional_description is not None:
+    if explicit_permission != "null":
+        if explicit_permission == "true":
+            jsondata["explicit_permission"] = True
+        else:
+            jsondata["explicit_permission"] = False
+    if explicit_disallowance != "null":
+        if explicit_disallowance == "true":
+            jsondata["explicit_disallowance"] = True
+        else:
+            jsondata["explicit_disallowance"] = False
+    if additional_description != "null":
         jsondata["additional_description"] = additional_description
     return jsondata
 
@@ -46,11 +55,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Create a JSON file with reviewed flag.')
     parser.add_argument('id', type=str, help='The id of the subtitle file.')
     parser.add_argument('langcode', type=str)
-    parser.add_argument('--reviewed', type=bool)
-    parser.add_argument('--reviewer', type=str)
-    parser.add_argument('--explicit_permission', type=bool)
-    parser.add_argument('--explicit_disallowance', type=bool)
-    parser.add_argument('--additional_description', type=str)
+    parser.add_argument('reviewed', type=str)
+    parser.add_argument('reviewer', type=str)
+    parser.add_argument('explicit_permission', type=str)
+    parser.add_argument('explicit_disallowance', type=str)
+    parser.add_argument('additional_description', type=str)
     args = parser.parse_args()
     jsondata = json_setup(args.id, args.langcode, args.reviewed, args.reviewer,args.explicit_permission,args.explicit_disallowance,args.additional_description)
     main(args.id, args.langcode, jsondata)
