@@ -64,7 +64,6 @@ for idx, file_name in enumerate(srt_files):
         "additional_description": additional_description,
         "translation": {},
     }
-    print(video_data)
     video_data_dict[str(videoId)] = video_data
     srt_list.append(videoId)
 
