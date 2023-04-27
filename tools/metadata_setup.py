@@ -21,7 +21,7 @@ def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_dis
     if not os.path.isfile(file_path(id, langcode)):
         jsondata = {
             "reviewed": False,
-            "reviewer": "",
+            "reviewer": {},
             "explicit_permission": False,
             "explicit_disallowance": False,
             "additional_description": ""
@@ -35,7 +35,7 @@ def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_dis
         else:
             jsondata["reviewed"] = False
     if reviewer != "null":
-        jsondata["reviewer"] = reviewer
+        jsondata["reviewer"][langcode] = reviewer
     if explicit_permission != "null":
         if explicit_permission == "true":
             jsondata["explicit_permission"] = True
