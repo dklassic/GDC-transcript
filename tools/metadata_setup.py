@@ -17,7 +17,6 @@ def main(id, jsondata):
 def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_disallowance,additional_description):
     if not os.path.isfile(file_path(id)):
         jsondata = {
-            "reviewed": False,
             "reviewer": {},
             "explicit_permission": False,
             "explicit_disallowance": False,
@@ -26,11 +25,6 @@ def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_dis
     else:
         with open(file_path(id)) as json_file:
             jsondata = json.load(json_file)
-    if reviewed != "null":
-        if reviewed == "true":
-            jsondata["reviewed"] = True
-        else:
-            jsondata["reviewed"] = False
     if reviewer != "null":
         jsondata["reviewer"][langcode] = reviewer
     if explicit_permission != "null":
@@ -52,11 +46,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Create a JSON file with reviewed flag.')
     parser.add_argument('id', type=str, help='The id of the subtitle file.')
     parser.add_argument('langcode', type=str)
-    parser.add_argument('reviewed', type=str)
     parser.add_argument('reviewer', type=str)
     parser.add_argument('explicit_permission', type=str)
     parser.add_argument('explicit_disallowance', type=str)
     parser.add_argument('additional_description', type=str)
     args = parser.parse_args()
-    jsondata = json_setup(args.id, args.langcode, args.reviewed, args.reviewer,args.explicit_permission,args.explicit_disallowance,args.additional_description)
+    jsondata = json_setup(args.id, args.langcode, args.reviewer,args.explicit_permission,args.explicit_disallowance,args.additional_description)
     main(args.id, jsondata)
