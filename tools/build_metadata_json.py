@@ -14,30 +14,11 @@ subtitles_json = "./json/subtitles.json"
 titles_json = "./json/titles.json"
 os.makedirs(json_directory, exist_ok=True)
 
-def getYoutubeTitle(yt : YouTube):
-        # https://github.com/pytube/pytube/issues/1479
-        exception_count = 0
-        title = "<fetch_title_failed>"
-        # while (exception_count < 100):
-        #     try:
-        #         title = yt.title
-        #         break
-        #     except:
-        #         print(f'fetch failed ({exception_count})')
-        #         exception_count += 1
-        #         try:
-        #             stream = yt.streams.first()
-        #         except:
-        #             print('issues accessing stream')
-                    
-        return title
-
 
 srt_files = [f for f in os.listdir(subtitle_directory) if f.endswith('.srt')]
 
 srt_list = []
 reviewed_list = []
-titles_dict = {}
 
 video_data_dict = {}
 
@@ -49,7 +30,6 @@ for idx, file_name in enumerate(srt_files):
     videoId = file_name_without_ext
     yt = YouTube("https://www.youtube.com/watch?v=" + videoId)
     
-    title = getYoutubeTitle(yt)
     #yt_length = yt.length
 
     file_metadata = os.path.join(metadata_directory, file_name_without_ext + ".meta")
@@ -74,10 +54,8 @@ for idx, file_name in enumerate(srt_files):
             print(f"Can't load the {file_metadata} as a json file.")
 
 
-    print(title)
     video_data = {
         "id": videoId,
-        "title": title,
         #"length": yt_length,
         "subtitle": full_file_path,
         "reviewer": reviewer,
@@ -86,10 +64,9 @@ for idx, file_name in enumerate(srt_files):
         "additional_description": additional_description,
         "translation": {},
     }
+    print(video_data)
     video_data_dict[str(videoId)] = video_data
-    
     srt_list.append(videoId)
-    titles_dict[str(videoId)] = title
 
 # Iterate all language directories.
 subdirInTranslation = [f.path for f in os.scandir(translation_directory) if f.is_dir()]
@@ -114,7 +91,3 @@ for videoId, video_data in video_data_dict.items():
 with open(subtitles_json, "w") as outfile:
     json.dump(srt_list, outfile)
 print(f"Created {subtitles_json}")
-
-with open(titles_json, "w") as outfile:
-    json.dump(titles_dict, outfile)
-print(f"Created {titles_json}")
