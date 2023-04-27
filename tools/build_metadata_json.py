@@ -90,8 +90,6 @@ for idx, file_name in enumerate(srt_files):
     video_data_dict[str(videoId)] = video_data
     
     srt_list.append(videoId)
-    if (video_data["reviewed"]):
-        reviewed_list.append(videoId)
     titles_dict[str(videoId)] = title
 
 # Iterate all language directories.
