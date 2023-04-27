@@ -4,7 +4,7 @@ import os
 
 
 def file_path(id):
-    file_path = f"static/src/subtitle/{id}.srt.meta"
+    file_path = f"static/src/metadata/{id}.meta"
     return file_path
 
 def main(id, jsondata):
