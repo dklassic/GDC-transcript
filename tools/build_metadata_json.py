@@ -6,11 +6,11 @@ import json
 from pytube import YouTube
 
 subtitle_directory = "./static/src/subtitle"
+metadata_directory = "./static/src/metadata"
 translation_directory = "./static/src/translation"
 
 json_directory = "./json"
 subtitles_json = "./json/subtitles.json"
-reviewed_subtitles_json = "./json/reviewed.json"
 titles_json = "./json/titles.json"
 os.makedirs(json_directory, exist_ok=True)
 
@@ -44,6 +44,7 @@ video_data_dict = {}
 for idx, file_name in enumerate(srt_files):
     file_name_without_ext = os.path.splitext(os.path.basename(file_name))[0]
     full_file_path = os.path.join(subtitle_directory, file_name)
+    
 
     videoId = file_name_without_ext
     yt = YouTube("https://www.youtube.com/watch?v=" + videoId)
@@ -51,7 +52,7 @@ for idx, file_name in enumerate(srt_files):
     title = getYoutubeTitle(yt)
     #yt_length = yt.length
 
-    file_metadata = full_file_path + ".meta"
+    file_metadata = os.path.join(metadata_directory, file_name_without_ext + ".meta")
     print(file_metadata)
     reviewed = False
     reviewer = ""
@@ -62,8 +63,6 @@ for idx, file_name in enumerate(srt_files):
         try:
             with open(file_metadata, 'r') as file:
                 srt_metadata = json.load(file)
-                if 'reviewed' in srt_metadata:
-                    reviewed = srt_metadata["reviewed"]
                 if 'reviewer' in srt_metadata:
                     reviewer = srt_metadata["reviewer"]
                 if 'explicit_permission' in srt_metadata:
@@ -82,7 +81,6 @@ for idx, file_name in enumerate(srt_files):
         "title": title,
         #"length": yt_length,
         "subtitle": full_file_path,
-        "reviewed": reviewed,
         "reviewer": reviewer,
         "explicit_permission": explicit_permission,
         "explicit_disallowance": explicit_disallowance,
@@ -119,10 +117,6 @@ for videoId, video_data in video_data_dict.items():
 with open(subtitles_json, "w") as outfile:
     json.dump(srt_list, outfile)
 print(f"Created {subtitles_json}")
-
-with open(reviewed_subtitles_json, "w") as outfile:
-    json.dump(reviewed_list, outfile)
-print(f"Created {reviewed_subtitles_json}")
 
 with open(titles_json, "w") as outfile:
     json.dump(titles_dict, outfile)

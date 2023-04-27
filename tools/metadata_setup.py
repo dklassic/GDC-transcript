@@ -14,7 +14,7 @@ def main(id, jsondata):
     with open(metadata_file_path, 'w') as outfile:
         json.dump(jsondata, outfile)
 
-def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_disallowance,additional_description):
+def json_setup(id, langcode, reviewer,explicit_permission,explicit_disallowance,additional_description):
     if not os.path.isfile(file_path(id)):
         jsondata = {
             "reviewer": {},
@@ -26,7 +26,7 @@ def json_setup(id, langcode, reviewed, reviewer,explicit_permission,explicit_dis
         with open(file_path(id)) as json_file:
             jsondata = json.load(json_file)
     if reviewer != "null":
-        jsondata["reviewer"][langcode] = reviewer
+        jsondata["reviewer"][langcode].append(reviewer)
     if explicit_permission != "null":
         if explicit_permission == "true":
             jsondata["explicit_permission"] = True
