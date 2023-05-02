@@ -1,4 +1,4 @@
-import argparse
+import sys
 import json
 import os
 
@@ -26,7 +26,10 @@ def json_setup(id, langcode, reviewer,explicit_permission,explicit_disallowance,
         with open(file_path(id)) as json_file:
             jsondata = json.load(json_file)
     if reviewer != "null":
-        jsondata["reviewer"][langcode].append(reviewer)
+        if(langcode in jsondata["reviewer"]):
+            jsondata["reviewer"][langcode].append(reviewer)
+        else:
+            jsondata["reviewer"][langcode] = [reviewer]
     if explicit_permission != "null":
         if explicit_permission == "true":
             jsondata["explicit_permission"] = True
@@ -41,15 +44,12 @@ def json_setup(id, langcode, reviewer,explicit_permission,explicit_disallowance,
         jsondata["additional_description"] = additional_description
     return jsondata
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Create a JSON file with reviewed flag.')
-    parser.add_argument('id', type=str, help='The id of the subtitle file.')
-    parser.add_argument('langcode', type=str)
-    parser.add_argument('reviewer', type=str)
-    parser.add_argument('explicit_permission', type=str)
-    parser.add_argument('explicit_disallowance', type=str)
-    parser.add_argument('additional_description', type=str)
-    args = parser.parse_args()
-    jsondata = json_setup(args.id, args.langcode, args.reviewer,args.explicit_permission,args.explicit_disallowance,args.additional_description)
-    main(args.id, jsondata)
+    id = sys.argv[1]
+    langcode = sys.argv[2]
+    reviewer = sys.argv[3]
+    explicit_permission = sys.argv[4]
+    explicit_disallowance = sys.argv[5]
+    additional_description = sys.argv[6]
+    jsondata = json_setup(id, langcode, reviewer, explicit_permission, explicit_disallowance, additional_description)
+    main(id, jsondata)
