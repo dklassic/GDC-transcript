@@ -7,7 +7,8 @@ Please make sure to read the Pull Request Guidelines: https://github.com/dklassi
 ### What kind of change does this PR introduce?
 <!-- Check at least one. If you are introducing a new binding, you must reference an issue where this binding has been proposed, discussed and approved by the maintainers. -->
 
-- [ ] Bugfix (Just choose this if you're reviewing subtitles)
+- [ ] Review, and I'd like to be credited as:_____
+- [ ] Bugfix
 - [ ] Feature
 - [ ] Resolve issue #___
 - [ ] Other, please describe:
