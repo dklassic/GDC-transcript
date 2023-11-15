@@ -1,0 +1,597 @@
+Hello everyone and thank you for coming to this session where we will talk about frostbite procedural drains.
+My name is Julien Cable, and I am the team lead for Frozby Terrain Tools.
+I've been at Electronic Arts on the Frozby team for some eight years now.
+And at first, I was working on the runtime side of things, where I had lots of fun.
+But later on, there was an opportunity to explore procedural creation tools, which I found really exciting.
+So I switched on the tooling side and never switched back, actually.
+And that was to lead the project, which I'm talking about today.
+As you might know, Frostbite is EA's proprietary engine that powers a large number of games ranging from sport titles to racing games, first-person shooters and space games like the well-received Dead Space remake that came out of Motive, which is a studio located in Montreal where I happen to be coming from.
+This talk focuses on terrain tools, so let's only keep those titles that actually have frostbite terrains.
+We'll remove those space games and almost all sports games, and this leaves around 60% of titles, which is quite a lot.
+So before we begin, I just want to set expectations.
+So this is not a straightforward programming talk.
+It's kind of a fusion between a programming one and a visual arts one that caters to both sides of the spectrum, so part technical info, part eye candy.
+And we will start with a short overview of the part of Frostbite Training that is relevant for this talk.
+then I will explain what we did in the editor and the reasons we did it.
+Think of it as a sort of dev diary where I'll be showcasing the features in the order we design and added them over time.
+After that, we'll go straight to ship results, where all the eye candy will be sort of like eating dessert before the main course, because all the proteins will be right after, because we will talk about implementation details and architectural choices.
+And we will conclude this with a short retrospective and Q&A, if we have time.
+So Frostbite Terrain Runtime is best in class.
+It's very scalable, supports arbitrary view distance, arbitrary levels of details, and moving speeds that range from a soldier walking to a jet flying.
+It's backed by an efficient virtual texture system, which support complex materials.
+It also has runtime mesh scattering, which is entirely GPU based for things like small environment objects like grass and small size rocks and such things.
+and being the engine used by Battlefield, it obviously has support for destruction through things like hide field deformers and local texture updates.
+So let's start by looking at a simplified view of the terrain material data flow.
+In the editor, artists author a number of data maps for various aspects of the terrain.
+We call these rasters.
+They're just essentially 2D images that are broken up in tiles of varying resolution, but they're generally around two samples per meter in the gameplay areas.
+There is, of course, a height field, which provides the topology.
+We also have a color map, which provides four channels of data that can be used in the runtime.
+And there are many other rasters, usually defined, but I won't really cover them.
+They're not so relevant for this talk, like one that controls desolation level.
+There's also one that controls how deep the terrain can be destroyed at any specific location.
+And then you have a number of material masks.
+And these all get sent through the asset pipeline to get optimized in some way.
+And in the runtime, a material has a corresponding shader that produces a continuous texture that tiles seamlessly.
+And these shaders can also read from the height field and color map, so they can be fairly complex.
+Then the opacity that the shader outputs gets multiplied with its corresponding material mask, and blending all these together, you produce one tile of terrain texture.
+So this particular one here is just programmer art, not really beautiful.
+And part of the reason is that the textures are just fading into one another.
+In reality, this blending stage is fully programmable through a node-based system.
+And if you're actually fading a texture into another, it would look more like this.
+So you can have the sand appear in cracks before they're at full opacity.
+Another thing about Frostbite is that if you take any location, you can have multiple numbers of layers there, which means you can have complex materials with interwoven different materials.
+So while the runtime aspects are really interesting, we won't be talking much about them because all I'm going to talk about happens here if we take this as a timeline.
+So meaning, it's not an acid pipeline trick.
+It's not a runtime thing.
+It's really something that is in the editor.
+And another way to frame it is to say that we will talk about controlling topology and where these material appear at medium and large scale.
+The reason is that the small surface details is essentially handled by those material shaders.
+OK, so when we started this project some five years ago, most terrain work was done through manual painting.
+And as much as it was time consuming, it paid off.
+Because, for example, DICE had a reputation for creating high quality maps.
+But this came at the cost of excessive manual work.
+And when things were not done manually, they went through expensive import-export cycles into external DCCs.
+which takes extra times and means slower iterating.
+So how can we improve from this?
+Well, one way is to externalize more train tasks into external DCC, maybe a tool specifically for procedural trains, maybe Houdini, and then we could create some kind of bridge between the two.
+Maybe it's a script that uses an API, and if you're lucky, you get a button that automatically refreshes from the editor.
+Wait a few seconds and you see the result.
+But we wanted to approach this differently.
+We decided to bring back the sort of run-of-the-mill 80% of terrain workflows directly in the editor.
+The part that is about level design, where it really makes a great impact to be able to iterate inside the editor.
+So why?
+Well, we thought it would lower the cost of entry for light procedural tasks.
+Maybe you're not making an open world game, maybe you're just a small studio and all you want is flat and near roads.
+so you don't need the full setup.
+And second, live feedback meant easier experimenting through faster iterations.
+Not live feedback as wait a few seconds, live as you drag something and you get the whole stack to refresh.
+And finally, we wanted to unlock future opportunities.
+Say UGC, for example, owning that tech means we could eventually use it in the runtime.
+I'm gonna talk more about that later.
+And we're not fooling ourselves.
+We cannot replace Houdini.
+We actually love Houdini and use it all the time everywhere, but we wanted to own a few of those workflows.
+So Houdini can still read the train data and be used for other things like procedural asset placement and some other train tasks, for example, sand simulation.
+We wouldn't try to do it in the editor.
+It's not worth it.
+So the first thing we knew we needed is to break out every raster into overlays.
+Very simple move, or obvious, should I say.
+To be fair, those should probably be called layers, but that word was already taken for terrain layers, so we named them overlays, but you can think of them as layers.
+And with that, any modification could be located on a specific overlay and happen in a non-destructive way.
+So you might notice this pattern exists in the runtime as we composite the train layers together to get one piece of texture.
+And in the editor, each material mask itself is made from compositing different overlays.
+So it's exactly like that.
+So if we zoom a bit on this, each overlay has obviously a data channel, but also an opacity one, an alpha one, that stores opacity transparency.
+And the rest is pretty standard.
+There's a blending stage.
+And in that blending stage, we support things like a global opacity multiplier, blend modes.
+I think we have 12 of them.
+And blending all overlays together, you produce your final hide field raster or maybe your mask raster, your color map raster.
+They're just generic images after all with only their pixel format varying.
+Everything is sort of interchangeable.
+Hide field or float, color map is RGBA and so on.
+This is how it looks in the editor.
+So all the rasters are like collapsible sections and their content is children overlays basically.
+We also have folders and the idea is that the folder content gets blended and then I mean the children of the folder gets blended and the folder's content is that blended result.
+So what type of overlays do we have?
+Obviously, we will need paintable overlays.
+These are your standard overlays onto which you would just brush with tools, for example.
+Or maybe you could import images from an external BCC.
+They're just static, and they're saved on disk.
+So at this point, we have a nice layered setup that is non-destructive, but we're not procedural yet.
+Everything is still manual, so that's why we added auto paint overlays, as we call them.
+There's a second type, and you cannot brush on these.
+Their content is entirely produced from objects that act as terrain brushes, essentially.
+So let's look at how this works.
+The basic idea is to have assets expose a number of what we call auto-pane behaviors that are named.
+And on the other side, you have the auto-pane overlays which sort of subscribe to these behaviors.
+And then this produces some result.
+Before we continue, I just want to talk about this rainbowy color we have here, because I'm going to be showing some more of these.
+It's essentially a heat map with zeros and ones standing out.
+Yeah.
+So what is a behavior?
+As I said, it's kind of like a terrain brush, assets behaving as terrain brushes.
+And at its core, it's simply a mesh, a transform that can deform the mesh, and some shader with some parameters.
+And as simple as it is, the power comes from the different workflows that are enabled by combining different meshes and shaders.
+Then the idea is just to take an orthographic camera and grab a snapshot of the mesh from above, and this is your result that you stamp on the overlay.
+So if we imagine a very simple case where you would use the asset's own mesh to auto-paint, just with this you can get surprisingly useful results, as we'll see in a moment.
+Since overlays have opacity information, the shaders output both the data for the content and its alpha, or opacity.
+If you're auto-painting on a mask, it's very simple.
+You just write 1 in both data and opacity.
+This gets the mesh projection stamped on the overlay.
+When auto-painting on the height field, you just output the fragment's height as the data and 1 for opacity.
+And this deforms the height field so it perfectly wraps the object.
+So let's have this shown in practice.
+The rock here is on wet sand, but we'd like to make the two better integrated together, and also add some variety.
+So let's add a little bump on the sand.
+We can limit the effect by scaling the mesh using the transform.
+then let's use a mask coat of paint on a sort of rippled sand mask, and we also make it a bit bigger.
+And the second mask, why not, some sand with gravel, and we get this effect.
+And in the editor, it's live.
+So as the rock transform is changed, the projected shapes are impacted because they inherit that transform on top of their own.
+So this is actually three rock meshes aggregated together.
+That's why they rotate a bit funny.
+Confession here.
+So not only static assets can be auto-painted, same goes for roads.
+They're also a mesh, although a dynamic one that is generated from a spline.
+So a typical workflow is to flatten the height field where roads are.
+And by generating a slightly wider mesh, we can have the auto-paint shader fade out the flattening on the sides by using the opacity channel output so that they better integrate with the environment.
+So this is how it looks like in the editor.
+So with this, we can see why interactivity is not just a nice-to-have.
+Being able to iterate that quickly has a strong impact on the final quality.
+When a user moves a spline, they're not guessing what the procedural output will be.
+They see it at in-game quality as they work.
+Another thing you can do by auto-painting a mesh directly on the height field is what we call auto-paint blockout.
+Somebody figured this out and we didn't see it coming, but the idea is to work with a library of abstract shapes, landscape features, and sculpt the height field piecewise using those shapes.
+Key to this workflow is obviously having the auto-paint work in max blend mode, so intersections are seamless.
+And yeah, you can iterate rapidly with this.
+Here's another workflow we have we call Capture.
+The idea is to have artists place assets in the level where they paint a sculpt around the assets and using a volume we capture this terrain into textures and we automatically create the behaviors in the asset prefab.
+Bottom line is when you place the asset in level the terrain follows with it.
+another combination a road mesh with the texture and you get a nice riverbed carver spline.
+So this is from an internal demo that was made by a small team of artists, and it showcases a number of techs we built.
+And it has a lot of auto-paint workflows that I just showed.
+For example, the height field is all blocked out.
+The stone stairs carve the height field around them using custom meshes, and all trees have auto-paint capture.
+Okay, there is one last type of overlay we added to get a full feature set, and it's effects overlay.
+These include generators and filters and more, but the idea is that they're applied on the whole terrain.
+They don't relate to objects, and you cannot brush on them either.
+So at first, we started adding generators like Voronoi, which can be applied on a mask, or the height field.
+Again, everything is interchangeable.
+They're all images.
+And you can create also this slightly unsettling breathing terrain, which I made by playing with a slider.
+One thing I want to mention is that to create these effects, we chose to leverage our runtime node-based shaders, which obviously had large consequences on the overall architecture.
+But I will talk more about this later.
+So the great thing about this is that since our tech artists already know this tech, they can just author their own effects, basically, to augment the basic library.
+So going back to this overlay compositing diagram, we have now overlays that get their content from shaders.
+And it seems it would be very easy to provide them with the previous stage, the previous blended overlay.
+So which means we can create filters.
+So that's the next thing we did.
+Blur, Dye Lay, Warp.
+And again, you can blur the height field or color map anything.
+But in many cases, what user want is to generate masks derived from the topology.
+For example, maybe they need a mask that matches the flat areas.
+So there's a very, very straightforward way to make this possible, which is to provide the height field to all effects systematically.
+And we did that exactly at first.
+So it unlocked a new family of interesting effects like the slope mask I was talking about, but also one to highlight height ranges, for example.
+And we also made more complex ones, like kernel-based filters, curvature filters to highlight concavity or convexity, or this relief filter, which is showing the height compared to the average height in a radius.
+And we also created ray-marching effects, like sun exposure.
+This particular one really looks like it's in-game with lighting, but it's actually just the mask that is using a black and white palette.
+And it's very useful to bake shadows, for one thing.
+Or you could use that to simulate vegetation growth, for example.
+And what's nice is you can also accumulate the whole sun arc over a day, for example.
+We have nice features like that.
+And we also have one that does ambient occlusion.
+And it's pretty much like you would do in a screen pass in runtime, except it's done in the height field.
+And it shows the amount of sky visibility.
+So far, so good.
+We can read from the height field.
+But soon enough came new requests to have things be able to write to the height field.
+Say you want the terrain to be more lumpy where the snow is, you need the height field to read from a mask.
+Or maybe you want your asphalt mask to delete the grass mask.
+So clearly, this original setup won't work.
+And you might see what is coming, but what we need is a full dependency graph.
+So if we pause a moment, we have this layered UX, and we also want this node-based thing.
+At this point, we kind of took the decision to keep the layered UX because people are familiar with this, and if you're not in a lot of spaghetti dependency, it kind of really fits the bill.
+So what we did is add navigational arrows, basically.
+Each overlay shows their incoming and outgoing connections, and the users can navigate like this.
+So this kind of sums up what we have in the end.
+Talk is not finished, but this is just one clean way to wrap things up.
+We have a graph, a node-based graph backend that is invisible and automatically generated from the layered UX that has dependency navigation.
+So there's one last piece of the puzzle that's still missing, which is iterative processes.
+A classic example would be erosion.
+This is just anything that you need to run a number of times to get the final result.
+And to do that, we added a sort of, a way to declare how output textures are routed back into input textures.
+And we can just run the effect a number of times by swapping the outputs with the input.
+And with that, we could implement things like thermal erosion, for example, which happens to be quite fast because you can still brush right under the effect and see it live with no performance impact whatsoever, which is great, but not surprising because GPUs are really fast these days.
+And at the same time, those rasters, again, are like two samples per meter.
+So unless you're painting with a one kilometer brush, you should be fine.
+And then we added also water simulation.
+That's a very important brick of a procedural toolkit.
+And we have a mode that just lets the water flow and one that accumulates water to produce flow maps.
+And we made it to the candy part.
+So time for some ship results.
+The first game I'm going to talk about is EA Sports PGA Tour golf game.
+And they have a particular setup because they work from LiDAR scans.
+They're reproducing existing courses.
+So what they get from these scans are high-density point clouds for the height field, and then a number of vector paths for important features, bunkers, fairways, greens, and roughs.
+And then through Houdini, they extract the actual height field and masks that they can import in Frosted, which is the name of the editor, by the way.
+And inside Frosted, they iterate using our tools to do minor, minor changes, but important ones.
+An example is this one, so for some reason they found they wanted to increase the lip on the sand bunkers, the bunkers, that's how it's called, and to use that, to do that they used the sand mask that was fed to the height field in subtract mode, so they could just tweak what they wanted, obviously faster than painting by hand.
+Other things they did, they added a bit of clumpiness in the rough areas using like Perlin noise modulated with the high field curvature.
+They derived a number of additional masks like dry grass versus grass versus semi-dry grass, I guess.
+And all these were driven from topology operators or filters.
+This screenshot has a number of them together.
+There's also little mounds at the base of tree that were added with auto paint and yeah, a lot of things.
+All right.
+So now let's talk about Battlefield.
+As opposed to PGSports, which works from LiDAR scans, they needed to iterate a lot more on the levels, if only for gameplay reasons.
+So they were a lot freer to experiment with the tools.
+And frankly, they surprised us in many different ways on many occasions by going beyond what we had initially made the tools for.
+So they really pushed the tools to their limit, which is great.
+So this map is a location where water has recessed, leaving pools of rusty water.
+And an important visual thematic is those sediment lines, I guess I would call, stratified lines.
+And at small scale, this is produced in the material shaders that can read from the height field.
+And at distance, you have larger ones that are coming from the color map.
+as you can see in a second.
+So if we pull back the curtain for a moment and examine the foundation of this level's terrain, there are 20 or so material layers that are used.
+And they have shaders that read from textures and break up the tiling in seamless ways.
+And they all write to the terrain virtual texture, which has typical g-buffer channels, but also vertical displacement, or should I say normal-based displacement.
+And so this view shows all the materials together with nothing else.
+Pretty patchy and kind of flat at distance.
+So that's why we have the color map.
+So the color map adds variation.
+And since all materials read from it, it can also control the overall hue of all materials.
+So this is showing both together.
+And then adding decals, which are essentially meshes that write on the virtual texture and all those same channels, including displacement.
+So that's how they can sort of dig a bit into it.
+Now adding objects, starting to come up together nicely.
+And the one missing thing is, maybe you guessed it, GPU scattering, which is small-scale vegetation and small-scale objects.
+Again, completely GPU power in the case of Frostbite, and the placement is driven by material masks.
+So if we look at how the procedural data operates together, We start with, let's say, material rasters first.
+And then they also added a number of what we call utility rasters, concept rasters.
+They're not sent in the runtime.
+They're just references for other masks to read from.
+And they influence the material masks, but also things like the color map.
+adding the height field.
+The height field pretty much writes to everything and the objects again impacts everything including the height field.
+So this is just a simplified overview.
+The actual graph looks like this.
+Nobody ever looks at that except me a couple of times, I guess, to debug.
+And one thing to mention is that you can see most connections are coming from the height field topmost overlay because everything reads from topology.
+All masks almost read from topology.
+But there's other connections as well.
+So it's impossible to look at everything.
+But let's just take one mask, for example.
+This one is called rock color.
+It's a utility mask.
+So it's not driving a shader, it's just used by other things.
+So it starts off with Cliff Mesh Autopaint.
+One thing to notice is that the Autopaint discards anything below the height field, because Autopaint can also peek at the height field.
+And then a bit of blur is added, then slope blur, which blurs in the direction of slope.
+creating a sort of leaking effect, I guess.
+And then a bit of height map is used, height range is used to trim the top off and levels for a final tweak.
+So if we follow that, it's using the color map and it's looped in one of these folders and it creates this sort of dark and brownish tint effect.
+And adding all those folders one by one, we can see how they built it, really layer by layer.
+I won't add them all one by one because it's too long.
+But the final thing, the final color map looks like this.
+This is a bird's eye view.
+And you can see it's completely procedurally generated, meaning that if anyone changes the height field, anything should readapt instantly in the editor.
+And if other rasters depend on the color map, they would get in turn updated.
+So not all levels use a procedural color map.
+Sometimes they use satellite imagery, especially when the level is based on the real life location.
+And it's the case with this next level, which I'm going to talk about.
+So again, all material masks are driven from procedural operations.
+You can see the plow lines in the back, plowing lines, I guess.
+And there's some curvature going on there probably.
+So if we take just one mask, one such mask, this one is This one is called Snowgrass.
+It's kind of snow with a bit of grass blades peeking through.
+It starts off with ambient occlusion as its basis.
+And then this is a selection from the color map, a color selection.
+Maybe the greens are pulled in, for example.
+Then the river is removed using a height selection.
+Then a bit of flow map, water simulation.
+Then a number of auto-painted things are removed, like roads and trees.
+And finally, artist touch-ups.
+So this last overlay is where artists can override anything.
+Say the game designer wants some extra cover using mesh scattering.
+For example, it can just be added using brushes there.
+The next map I'm going to talk about is called Hourglass, and it features a city that has been lost to sand as the result of desertification and sandstorms.
+So the main feature of the terrain is obviously sand dunes here.
+And before we look into this map, I want to show you again our road auto paint tool.
+So this is just two intersecting roads, very basic.
+Let's fix the intersection by using a max blend mode, which we support between objects on the same overlay.
+Making the road width zero, and then making the falloff 100 meters, we get this.
+And tweaking the curve of the falloff, we get this.
+Maybe you see where this is going.
+It's essentially looking like a sand dune, right?
+When I opened this map, this was the first map I opened, by the way, when they started production, and I saw this and I had no idea what was going on.
+And it turns out it's hundreds and hundreds of roads.
+And so I had to call the person that thought about it, and Michael Anderson is his name, I asked him, like, isn't it, it's fascinating, but isn't it a bit overkill to have all these hand placed?
+And he said, no, it just took me two days.
+And it's actually quite useful because this is a first person shooter, right?
+And so when you iterate, you can get calls very late in production that are basically, can you clear this line of sight and remove all sand dunes?
+And it turns out you can actually just grab the sand dune and move it or copy it.
+And again, showing like how Powerful it is to get instant feedback.
+You're not guessing what it will look like once you run your procedural external DCC, you just see it live.
+And if there are some effects over it, you see that as well.
+The next level I'm going to talk about was made with a lot of photogrammetry and the studio called Ripple Effect that made it found a location that matched the look they were after.
+So they went out on a field trip, probably had tons of fun, and collected materials for assets using photogrammetry.
+And they made this.
+One is the real one, one is a frostbite version, and I know because the reference ball is on a stand in one of the two.
+So pretty amazing.
+And here's a trailer, internal trailer, but I guess it's not internal anymore if I show it.
+OK, so it may be surprising considering how monochromatic this level is.
+desert essentially, but it actually has 24 different material layers, which together contribute to create a very detailed and rich landscape.
+There are also 15 utility masks that are defined and as much as 122,000 auto-painted objects, so that would be splines mainly, but also rocks and buildings.
+So let's look at the height field for a change.
+If we add every overlay one by one, what we see at first is essentially the evolution of the level over time as they were changing major features by adding mountains and things like this.
+Meaning they can just walk back their decisions since it's all overlays and it's non-destructive.
+So adding those.
+and then you get this thing which is creating flow lines in the height field and it's coming from this mask which is defined using a flow map and other things and then the roads are deleted using auto paint or maybe actually a reference to another mask and finally you have this thing which I'm going to talk about so remember how this looks It's adding detail outside of the gameplay area, essentially.
+And finally, road auto-pane, and yeah, that's it.
+So this is a texture that the runtime shader used at distance, like big boulders, essentially.
+And what they wanted to do is create more details at distance.
+They essentially wanted to bake the displacement like you would have at close distance, but they wanted to bake it in the height field at distance.
+And because we used our rendering shaders, they could just copy their runtime shaders in effect and use the same complex de-tiling algorithm like this.
+And so they could bake it in like this.
+And you can show this effect at distance where the height field has this nice texture.
+All right, we made it up to the proteins.
+So when we planned this framework, we had the ambitious goal to have live, real-time feedback.
+This not only means we need fast terrain updates, but in the first place, we need to know when a change invalidates the terrain.
+So this can get pretty tricky for AutoPaint, because One reason is that behavior definitions can be nested deep into prefabs of prefabs.
+So we need to track all this.
+In other cases, it's pretty simple.
+For example, if a brush is applied.
+So let's look at this case and sort of trace what happens when a brush stroke is applied.
+So the brush event triggers an update request, which has the ID of the modified overlay and the impacted world coverage.
+And in the editor, there is a job queue.
+So the first thing we need to do is create jobs that will refresh the modified terrain.
+As you know, the back end is a directed graph.
+So we need to walk from the the overlay where the change happened and walk to the end nodes to find what has been modified.
+So from this we can identify primary job, which is the raster that owns this overlay you're painting on, but also secondary jobs that are just the side effects.
+Primary jobs means they need to have high priority and secondary job can probably wait a little.
+But wait, right after the paintable, there's a blur.
+So let's suppose what you brushed is this GDC logo.
+The blur is going to spread the change, right?
+So you probably need to rebake a bit larger.
+And it would be the case for other things like curvature, any kernel filter, or iterative processes would be in the same situation.
+So how can we fix this?
+Well, one way, which is what we did first, again, is you could just slap an extra 30 meter everywhere, right?
+And it works.
+Until today, it doesn't work, because someone calls you and says, hey, your terrain is broken.
+Look at that.
+And you say, oh, just raise it to 100 meters.
+And it still works, but you're impacting.
+Your performance is degrading over time.
+So the right way to fix that is that as you're walking the path from the overlay, you need to add up the spread of like how much each overlay spreads change.
+In the case of blur, it's very simple.
+It's just a radius, but it can get pretty tricky, like warp has a very complex expression.
+And then you get the final coverage you actually need to refresh.
+So once the jobs are created, we don't immediately insert them in the queue.
+We try to be smart about it by recycling existing jobs that can just be extended.
+For example, if you're brushing on the height field, tons of masks are impacted.
+But until you mouse release, we won't process these.
+So while we push them in the queue, we don't create tons of fragmented, overlapping jobs because of this simplification.
+And then we just do a sort and insert in the queue and we sort by kind of obvious things like frustum intersection, you don't need to refresh what you're not looking at.
+You don't need to refresh secondary jobs as fast as primary ones and camera distance.
+And then job execution deserve its own section, so let's go.
+So the first thing to mention about job execution is that we use an external process.
+Let's call this the TrainUpdateService.
+It's actually a sort of lightweight Frostbite rendering stack.
+And why did we do that?
+Sounds like asking for trouble.
+Well, again, we wanted to leverage our node-based shader graphs that we have in runtime.
+And we also wanted to not code a whole graph engine that we have that gets compiled to bytecode in the engine in the runtime.
+And finally, as I mentioned, we wanted to sort of own this tech and having it in the runtime sounded like a good idea just to unlock future ideas like UGC, for example.
+So we did that.
+And in the end, that's what we have.
+On the one hand, you have Frosted, which has all the world data, like autopaint, objects, their transforms.
+We have spatial lookup tables to be able to know exactly what needs to be part of a bake job.
+And terrain tile data also lives there.
+And the rule graph is generated there.
+And the update service, we have built, runtime built version of the graph and the shaders.
+And we're essentially running a context agnostic image processing graph there.
+So when a job is removed from the queue to be processed, we send an RPC call that has a number of different information.
+But one thing to highlight is that we use GPU shared memory resources.
+And using this shared memory was key for us to reduce the friction involved in having those two process talking to one another.
+After all, trained data doesn't need to leave the GPU.
+You're displaying it there, but you're also processing it there.
+And when it's done, we just send an RPC back with some statistics.
+So zooming in on the active nodes that are in the input RPC data, the editor takes care of caching all the dependencies between overlays and outputs and the other direction.
+So it can provide a list of active nodes that are needed given an output node, basically.
+And it sends this as part of the information.
+We also need to provide paintable tiles.
+Paintable tiles are stored on disk, so the editor has them.
+And they actually live in tiles, as I mentioned earlier, but they're also laid out on a quadtree.
+And so we need to revisit this algorithm of spreading change, because it works in the other way as well.
+If a blur spreads the change, it also needs to read from that same radius.
+So as we walk back from the end, we need to add up these lookout ranges to get the actual coverage we need to bundle the tiles for.
+And what we do is we push them into GPU memory into the tiles are pushing 2D texture arrays.
+And we have an indirection texture that maps the world position to the tile index.
+So basically, the paintable overlay's job, in terms of processing, is just to on indirect, I guess, produce a flat tile where tiles are not separate, basically.
+Okay.
+Retrospective and takeaways.
+OK.
+So there's a very important question we can ask ourselves, which is how much of the procedural content had to be manually repainted by game studios?
+In other words, what we produce is the equivalent of macaroni art, and they needed a major surgery to make it live up to the studio standards.
+We failed, right?
+So if we look at a battlefield map from season one, We here are shown three representative masks.
+And we can see that around 15% have touch-ups.
+That's what I'm toggling on and off here.
+And if we look at season four, this is down to 1%.
+And the explanation was provided to me by a studio artist.
+And he said that as they get more familiar with the procedural tool, they can express more things and more organic looks and get closer to what they want just with the procedural tools, which is a nice thing to hear.
+So I'd like to go over a few design choices we did to see how they paid off or not.
+So the first one is this promise that we have, which is terrain is always up to date.
+Again, tracking the full auto-pane chain of dependency came to a cost.
+It's complicated.
+So maybe in hindsight I would have gone for something like Autopane gets refreshed as you move the object or change the transform, but maybe not if you change a parameter like three levels deep, then you could probably suffer a right-click and refresh object.
+Second, using Frostbite Runtime as a service, this obviously increased our dependencies and it came at a cost because we got sometimes broke by people that don't really know us being on the tool side.
+So we made a lot of friends.
+Maybe enemies, I don't know.
+But I think the decision still pays off today in new ways.
+For example, with what I've shown about using runtime shaders as effect overlays.
+And finally, the age-old debate between node-based versus layer UX.
+So in the end, obviously, levels went beyond our expectations They were way more complex than we thought they would be.
+So I think we need better tools to navigate dependencies than just these little arrows.
+Maybe we need things like this kind of diagram that I have shown where dependencies are shown at the raster level, not at the overlay level, just to sort of get an overview of what the level is like.
+Or maybe we could go hybrid and have some rasters be node-based, some others, simpler ones, could stay in the layer paradigm.
+So what lies ahead for us?
+We need better UX, and one of the examples of what we need is better presets.
+So effect presets, but also full raster presets.
+Imagine you have just a dry grass coming with all the full layer stack, or maybe biome presets even.
+And we want to tailor the visibility of things to crafts, meaning like you can gradually ramp up.
+If you are coming on a team just to do two weeks of painting, you don't need to see the whole procedural setup, for example.
+So the maps that I've shown are obviously not large in the sense of open world games, and we want to improve our multi-user workflows and tools and improve on large data management.
+And obviously performance is key, so we can, there's a lot of opportunities where we could do smarter caching and have, for example, higher GPU occupancy.
+The baking is quite sequential.
+We're not really, there are gaps where the GPU is sort of waiting for RPC calls and things like that.
+So we could probably improve on that.
+And yeah, so to summarize all this, we enable procedural terrain authoring in the editor by supporting live feedback, thanks to powerful GPUs.
+And our workflows are non-destructive because we have overlays.
+And we have rich world asset integration using AutoPaint.
+The terrain procedural rules don't live in their own little silo.
+They're aware of walls and objects.
+And we support complex data interaction because we have a node-based backend and all scenarios are possible as long as you don't create cycles, right?
+And it's extendable by tech artists because we're using runtime shaders.
+So that's pretty much it.
+A couple of people I want to thank.
+Cody Ritchie, who was there since the beginning, had a lot of foundational idea.
+Matthew Gandel made this possible also.
+My family, they saw me disappear for a month making these slides.
+And my team, obviously, Train, Tools, Jean, Vadim, and Sean, the whole procedural team, and the studios, obviously, that dared to follow us in this crazy adventure.
+That's it.
+I have a small farewell outro that I'm going to run now.
+Thank you all for coming.
+I appreciate it.
+And we have time for a little Q&A, if there are questions, hot takes, anything.
+Hello.
+Oh, hello.
+Hi.
+Yeah, thank you for the five course meal.
+It was delicious.
+I had a question regarding customization of the pipeline procedural tools relative to different studios.
+So different studios have different requirements where you have like PGA, they probably want really high level of quality for individual texel like tiles and probably large tile sizes or something, versus Battlefield.
+How customizable are those macro parameters for the toolset?
+Yeah, so there's one answer to that.
+If you're talking about like resolution specifically, maybe not.
+Tile size, resolution, textual density, all those.
+briefly about it, but like our tile resolution is, so all tiles have the same pixel size, but they're laid out on a quadtree.
+And you can just refine that quadtree, not infinitely of course, but like to maybe something like eight samples per meter.
+Typically what game team do is that they have a sort of a resolution that goes lower with distance.
+Thanks.
+Quick question.
+When you guys are bringing in the effects layers or overlay filters for the artists, like erosion and flow and stuff like that, what's the level of effort and how long does it take?
+Like if an artist comes to you guys and says, I want like sun direction or something like that, or like, is it a huge effort for you guys to pull in those filters or?
+Not really, actually.
+No, it probably... I mean, it's really using our runtime tech, so it's as quick as making a shader, which is probably around half a day, I would say, but obviously it depends on the effect, but half a day is a typical time I've seen to come up with a new shader.
+They were all made by one of our tech artists, like all the ones in the default library, and he always comes up with new ones, and so the response time...
+Pretty quick, I would say.
+So how many of those effects layers would you guys have or filters to choose from?
+Oh, the presets?
+Yeah.
+I would say, like, I would say 30 maybe.
+Okay.
+Probably not as much as a fully dedicated, like, procedural terrain DCC.
+We're not there yet.
+Like, erosion is not, like, on par with the high end, I would say.
+But that's Not where the value is.
+I mean, there would be obviously value in having top-notch erosion.
+We're working on it, actually.
+But where the value is, it's iterating with objects and things like that, like level design, not your foundational height field.
+Hi.
+Whoa, that's a lot louder than I thought it'd be.
+Hi, I'm Sasha Chacon from Venn Studio.
+I have a question on kind of the initial setup of this process.
+So you said that you maybe were considering Houdini and setting up these tools beforehand, but then decided to switch entirely to doing it all in-house on your own homebrew engine.
+Yes, I got this right?
+Well, we didn't.
+What I said is like, this would be one way, typical way to go, like using Houdini, of course.
+But we really wanted this sort of live feedback experience.
+So it wasn't really a hesitation at first, you know.
+Okay.
+But you did like most of your tools, like you built them inside your engine.
+session.
+Where did the tool generation come in when the programmers potentially might have had made those nodes?
+Did you have them at the ready, or did you have to go back and forth between them?
+So the nodes, to be clear, the nodes were, first of all, not the most time expensive thing to code.
+Really not, actually.
+Because again, we're using the runtime shader node tech.
+And the nodes were not made by programmers, they were made by mostly one tech artist, honestly.
+And so, yeah, that was really not the most complicated part.
+The most complicated part was the sort of inter-process, you know, navigation, like having this an external process.
+And then we were kind of outliers being on the tool side, using rendering side.
+So that was where most of the friction was, not creating the effects themselves, honestly.
+Obviously some are more harder, like water simulation and things like that, but even those would be maybe five days, I don't know.
+Again, we're talking about maybe 30 effects, so overall that's not where the battle was.
+a lot Yeah, no, good question.
+But again, we're not abandoning it.
+What I mean is, it's still, Turing data is still there for grabs for Houdini, for example, and in some levels, I had to cut some slides, but some levels have Houdini setups, like the last one I've shown, the height field to generate flow spline decals, roads, and Houdini is still involved in a lot of places, but we just sort of grabbed one aspect that is usually made through Houdini and we brought it back for, yeah, all the reasons I said earlier.
+Okay, cool.
+Thank you.
+Hello.
+Regarding the 1% or 15% case of people that had to do manual modifications to something after using the procedural tools, how did that affect the procedural workflow?
+Did their manual changes get blown away if they needed to make more procedural changes, or what happened?
+No, because that's the thing.
+They always had this topmost overlay that is called like artist input or something like that.
+And that's where the changes, the manual changes were done.
+So that's the whole point, actually, of being non-destructive.
+Because if you changed whatever, like your auto paint shader, touch ups would still be there and only affect those areas.
+You paint manually, all the rest was still free to move.
+Thank you.
+Hi there.
+Thanks for the talk.
+It was great.
+I'm wondering, you know, it sounds like you have a lot of overlays and a lot of textures, a lot of materials on top of that.
+Where do those fit in memory?
+How do you deal with those both in the editor and in runtime?
+Like, how do you manage all that?
+I'm sure you can't go into detail, but just curious, like, what are some strategies?
+It all just works.
+No, seriously, I mean, uh, okay.
+So just like throw it all at the GPU and sit off.
+No, no, no.
+Okay.
+Good.
+Good.
+Good.
+Okay.
+Yeah.
+So in that, from that angle, no, obviously it's not, not all on the GPU.
+Yeah.
+Yeah.
+So we have a pool, you know, a budget on GPU and like if you're brushing like those style around where you're brushing will stay on the GPU.
+But if you move around and you're brushing everywhere, uh, we, we, we noticed we're missing some tiles and we, remove some from the GPU.
+It's kind of that simple.
+I see.
+So, so like what's in memory typically, like when you're not editing is just the last layer, like the final kind of compressed layer.
+Is that like how it usually, or a few layers and the source materials are kind of Not in memory?
+Okay, so all the paintable tiles need to be in GPU memory, but the non-paintable overlays like auto-paint and effects, these are all sort of, you know, done just in time in that update service we have, and they're ephemeral, is that a word?
+Ephemeral, yeah.
+So they, you know, but the paintable ones need to be in GPU because they're controlled from the editor.
+And we actually want to move this to that service.
+They don't really need to be in the editor.
+The brushing happens in the editor, but that's just a legacy thing, honestly, because we would want the brushing to be fully done on the GPU in that service.
+But we didn't have time yet.
+All right.
+Thank you.
+Hey, thank you.
+Great talk.
+I'm curious.
+on the resources on the GPU and then the external process is able to access the same resources to avoid duplication.
+Could you explain more about the technology that allows this?
+So there is such a thing as GPU shared memory like at the OS level that exists.
+I had to Google it five years ago and we actually stress it so much that they had to fix bugs in the drivers because we're like, you're brushing and it's like, and that's basically it, you know?
+So again, like we upload what needs to be in the GPU memory only and that is Thank you.
+Final question here.
+So you mentioned the use of satellite imagery to some extent within Frostbite and this emphasis on hyper-realism, these beautiful scenes that look so real.
+I wonder to what extent you've used geospatial data within your own workflows to create scenes to make more realistic ones.
+Good question.
+The interesting thing about Battlefield, for example, I mentioned PGA Sport was LiDAR data, so that is easily explained.
+Battlefield, they were a bit freer in terms of what they could experiment with, so some maps are based from...
+I'm a programmer, I'm not a tech artist, so this is just my best, not my best guess because I know a bit about it, but some maps were made using, like the last one I've shown, a bit of satellite data, photogrammetry, and LiDAR, I don't know, I'm sorry.
+but they had really varied approaches.
+There's not one, I think they're actually coming up with probably a more unified approach as they learn the tools, but for Kingston it was different setups per level.
+Okay, thank you very much.
