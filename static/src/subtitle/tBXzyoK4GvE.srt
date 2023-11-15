@@ -1,0 +1,2480 @@
+1
+00:00:05,803 --> 00:00:18,335
+Hello everyone and thank you for coming to this session where we will talk about frostbite procedural drains.
+
+2
+00:00:19,745 --> 00:00:23,586
+My name is Julien Cable, and I am the team lead for Frozby Terrain Tools.
+
+3
+00:00:24,146 --> 00:00:28,007
+I've been at Electronic Arts on the Frozby team for some eight years now.
+
+4
+00:00:28,787 --> 00:00:33,288
+And at first, I was working on the runtime side of things, where I had lots of fun.
+
+5
+00:00:33,809 --> 00:00:40,350
+But later on, there was an opportunity to explore procedural creation tools, which I found really exciting.
+
+6
+00:00:40,450 --> 00:00:43,951
+So I switched on the tooling side and never switched back, actually.
+
+7
+00:00:44,431 --> 00:00:47,132
+And that was to lead the project, which I'm talking about today.
+
+8
+00:00:48,669 --> 00:01:05,328
+As you might know, Frostbite is EA's proprietary engine that powers a large number of games ranging from sport titles to racing games, first-person shooters and space games like the well-received Dead Space remake that came out of Motive, which is a studio located in Montreal where
+
+9
+00:01:06,189 --> 00:01:07,170
+I happen to be coming from.
+
+10
+00:01:08,311 --> 00:01:14,655
+This talk focuses on terrain tools, so let's only keep those titles that actually have frostbite terrains.
+
+11
+00:01:15,216 --> 00:01:23,682
+We'll remove those space games and almost all sports games, and this leaves around 60% of titles, which is quite a lot.
+
+12
+00:01:25,236 --> 00:01:28,039
+So before we begin, I just want to set expectations.
+
+13
+00:01:28,119 --> 00:01:30,281
+So this is not a straightforward programming talk.
+
+14
+00:01:30,361 --> 00:01:39,651
+It's kind of a fusion between a programming one and a visual arts one that caters to both sides of the spectrum, so part technical info, part eye candy.
+
+15
+00:01:41,212 --> 00:01:47,058
+And we will start with a short overview of the part of Frostbite Training that is relevant for this talk.
+
+16
+00:01:47,859 --> 00:01:51,764
+then I will explain what we did in the editor and the reasons we did it.
+
+17
+00:01:52,725 --> 00:01:59,393
+Think of it as a sort of dev diary where I'll be showcasing the features in the order we design and added them over time.
+
+18
+00:02:00,638 --> 00:02:15,615
+After that, we'll go straight to ship results, where all the eye candy will be sort of like eating dessert before the main course, because all the proteins will be right after, because we will talk about implementation details and architectural choices.
+
+19
+00:02:16,376 --> 00:02:21,922
+And we will conclude this with a short retrospective and Q&A, if we have time.
+
+20
+00:02:27,259 --> 00:02:30,921
+So Frostbite Terrain Runtime is best in class.
+
+21
+00:02:31,001 --> 00:02:40,007
+It's very scalable, supports arbitrary view distance, arbitrary levels of details, and moving speeds that range from a soldier walking to a jet flying.
+
+22
+00:02:40,607 --> 00:02:45,970
+It's backed by an efficient virtual texture system, which support complex materials.
+
+23
+00:02:47,151 --> 00:02:55,516
+It also has runtime mesh scattering, which is entirely GPU based for things like small environment objects like grass and small size rocks and such things.
+
+24
+00:02:56,807 --> 00:03:05,377
+and being the engine used by Battlefield, it obviously has support for destruction through things like hide field deformers and local texture updates.
+
+25
+00:03:07,304 --> 00:03:11,745
+So let's start by looking at a simplified view of the terrain material data flow.
+
+26
+00:03:12,485 --> 00:03:17,906
+In the editor, artists author a number of data maps for various aspects of the terrain.
+
+27
+00:03:18,007 --> 00:03:19,107
+We call these rasters.
+
+28
+00:03:19,807 --> 00:03:28,249
+They're just essentially 2D images that are broken up in tiles of varying resolution, but they're generally around two samples per meter in the gameplay areas.
+
+29
+00:03:29,278 --> 00:03:32,160
+There is, of course, a height field, which provides the topology.
+
+30
+00:03:33,020 --> 00:03:37,703
+We also have a color map, which provides four channels of data that can be used in the runtime.
+
+31
+00:03:38,624 --> 00:03:42,647
+And there are many other rasters, usually defined, but I won't really cover them.
+
+32
+00:03:43,407 --> 00:03:47,810
+They're not so relevant for this talk, like one that controls desolation level.
+
+33
+00:03:47,870 --> 00:03:54,414
+There's also one that controls how deep the terrain can be destroyed at any specific location.
+
+34
+00:03:55,615 --> 00:03:58,037
+And then you have a number of material masks.
+
+35
+00:03:58,817 --> 00:04:03,141
+And these all get sent through the asset pipeline to get optimized in some way.
+
+36
+00:04:03,921 --> 00:04:12,868
+And in the runtime, a material has a corresponding shader that produces a continuous texture that tiles seamlessly.
+
+37
+00:04:13,429 --> 00:04:17,432
+And these shaders can also read from the height field and color map, so they can be fairly complex.
+
+38
+00:04:19,312 --> 00:04:28,239
+Then the opacity that the shader outputs gets multiplied with its corresponding material mask, and blending all these together, you produce one tile of terrain texture.
+
+39
+00:04:28,959 --> 00:04:33,142
+So this particular one here is just programmer art, not really beautiful.
+
+40
+00:04:33,663 --> 00:04:37,025
+And part of the reason is that the textures are just fading into one another.
+
+41
+00:04:37,706 --> 00:04:42,469
+In reality, this blending stage is fully programmable through a node-based system.
+
+42
+00:04:43,130 --> 00:04:47,253
+And if you're actually fading a texture into another, it would look more like this.
+
+43
+00:04:48,253 --> 00:04:53,675
+So you can have the sand appear in cracks before they're at full opacity.
+
+44
+00:04:57,656 --> 00:05:09,999
+Another thing about Frostbite is that if you take any location, you can have multiple numbers of layers there, which means you can have complex materials with interwoven different materials.
+
+45
+00:05:13,757 --> 00:05:23,744
+So while the runtime aspects are really interesting, we won't be talking much about them because all I'm going to talk about happens here if we take this as a timeline.
+
+46
+00:05:24,465 --> 00:05:27,948
+So meaning, it's not an acid pipeline trick.
+
+47
+00:05:27,988 --> 00:05:28,988
+It's not a runtime thing.
+
+48
+00:05:29,048 --> 00:05:31,670
+It's really something that is in the editor.
+
+49
+00:05:32,511 --> 00:05:42,718
+And another way to frame it is to say that we will talk about controlling topology and where these material appear at medium and large scale.
+
+50
+00:05:43,519 --> 00:05:48,451
+The reason is that the small surface details is essentially handled by those material shaders.
+
+51
+00:05:51,894 --> 00:05:59,439
+OK, so when we started this project some five years ago, most terrain work was done through manual painting.
+
+52
+00:06:00,379 --> 00:06:02,761
+And as much as it was time consuming, it paid off.
+
+53
+00:06:02,801 --> 00:06:06,684
+Because, for example, DICE had a reputation for creating high quality maps.
+
+54
+00:06:07,284 --> 00:06:10,026
+But this came at the cost of excessive manual work.
+
+55
+00:06:10,826 --> 00:06:19,212
+And when things were not done manually, they went through expensive import-export cycles into external DCCs.
+
+56
+00:06:20,066 --> 00:06:22,867
+which takes extra times and means slower iterating.
+
+57
+00:06:24,448 --> 00:06:25,969
+So how can we improve from this?
+
+58
+00:06:27,069 --> 00:06:39,375
+Well, one way is to externalize more train tasks into external DCC, maybe a tool specifically for procedural trains, maybe Houdini, and then we could create some kind of bridge between the two.
+
+59
+00:06:39,915 --> 00:06:46,058
+Maybe it's a script that uses an API, and if you're lucky, you get a button that automatically refreshes from the editor.
+
+60
+00:06:47,225 --> 00:06:48,846
+Wait a few seconds and you see the result.
+
+61
+00:06:49,366 --> 00:06:51,507
+But we wanted to approach this differently.
+
+62
+00:06:52,007 --> 00:07:00,871
+We decided to bring back the sort of run-of-the-mill 80% of terrain workflows directly in the editor.
+
+63
+00:07:01,532 --> 00:07:07,514
+The part that is about level design, where it really makes a great impact to be able to iterate inside the editor.
+
+64
+00:07:09,735 --> 00:07:10,116
+So why?
+
+65
+00:07:12,113 --> 00:07:15,881
+Well, we thought it would lower the cost of entry for light procedural tasks.
+
+66
+00:07:15,941 --> 00:07:22,293
+Maybe you're not making an open world game, maybe you're just a small studio and all you want is flat and near roads.
+
+67
+00:07:23,427 --> 00:07:24,708
+so you don't need the full setup.
+
+68
+00:07:25,268 --> 00:07:30,652
+And second, live feedback meant easier experimenting through faster iterations.
+
+69
+00:07:31,212 --> 00:07:37,157
+Not live feedback as wait a few seconds, live as you drag something and you get the whole stack to refresh.
+
+70
+00:07:38,237 --> 00:07:41,660
+And finally, we wanted to unlock future opportunities.
+
+71
+00:07:43,181 --> 00:07:47,984
+Say UGC, for example, owning that tech means we could eventually use it in the runtime.
+
+72
+00:07:48,825 --> 00:07:50,266
+I'm gonna talk more about that later.
+
+73
+00:07:51,767 --> 00:07:53,388
+And we're not fooling ourselves.
+
+74
+00:07:53,428 --> 00:07:54,568
+We cannot replace Houdini.
+
+75
+00:07:54,628 --> 00:08:01,310
+We actually love Houdini and use it all the time everywhere, but we wanted to own a few of those workflows.
+
+76
+00:08:01,790 --> 00:08:13,834
+So Houdini can still read the train data and be used for other things like procedural asset placement and some other train tasks, for example, sand simulation.
+
+77
+00:08:13,874 --> 00:08:16,115
+We wouldn't try to do it in the editor.
+
+78
+00:08:16,475 --> 00:08:17,075
+It's not worth it.
+
+79
+00:08:18,649 --> 00:08:23,551
+So the first thing we knew we needed is to break out every raster into overlays.
+
+80
+00:08:24,471 --> 00:08:28,793
+Very simple move, or obvious, should I say.
+
+81
+00:08:30,414 --> 00:08:38,517
+To be fair, those should probably be called layers, but that word was already taken for terrain layers, so we named them overlays, but you can think of them as layers.
+
+82
+00:08:39,518 --> 00:08:45,340
+And with that, any modification could be located on a specific overlay and happen in a non-destructive way.
+
+83
+00:08:46,960 --> 00:08:55,249
+So you might notice this pattern exists in the runtime as we composite the train layers together to get one piece of texture.
+
+84
+00:08:56,190 --> 00:09:02,176
+And in the editor, each material mask itself is made from compositing different overlays.
+
+85
+00:09:02,857 --> 00:09:04,058
+So it's exactly like that.
+
+86
+00:09:05,697 --> 00:09:15,806
+So if we zoom a bit on this, each overlay has obviously a data channel, but also an opacity one, an alpha one, that stores opacity transparency.
+
+87
+00:09:16,586 --> 00:09:17,968
+And the rest is pretty standard.
+
+88
+00:09:18,008 --> 00:09:19,269
+There's a blending stage.
+
+89
+00:09:20,130 --> 00:09:26,295
+And in that blending stage, we support things like a global opacity multiplier, blend modes.
+
+90
+00:09:26,335 --> 00:09:27,596
+I think we have 12 of them.
+
+91
+00:09:29,097 --> 00:09:36,406
+And blending all overlays together, you produce your final hide field raster or maybe your mask raster, your color map raster.
+
+92
+00:09:36,746 --> 00:09:41,511
+They're just generic images after all with only their pixel format varying.
+
+93
+00:09:42,292 --> 00:09:44,935
+Everything is sort of interchangeable.
+
+94
+00:09:45,516 --> 00:09:48,159
+Hide field or float, color map is RGBA and so on.
+
+95
+00:09:50,718 --> 00:09:52,099
+This is how it looks in the editor.
+
+96
+00:09:52,219 --> 00:09:58,305
+So all the rasters are like collapsible sections and their content is children overlays basically.
+
+97
+00:09:58,645 --> 00:10:09,535
+We also have folders and the idea is that the folder content gets blended and then I mean the children of the folder gets blended and the folder's content is that blended result.
+
+98
+00:10:11,055 --> 00:10:12,497
+So what type of overlays do we have?
+
+99
+00:10:13,377 --> 00:10:15,079
+Obviously, we will need paintable overlays.
+
+100
+00:10:15,720 --> 00:10:19,764
+These are your standard overlays onto which you would just brush with tools, for example.
+
+101
+00:10:19,864 --> 00:10:24,028
+Or maybe you could import images from an external BCC.
+
+102
+00:10:24,088 --> 00:10:26,170
+They're just static, and they're saved on disk.
+
+103
+00:10:27,992 --> 00:10:32,877
+So at this point, we have a nice layered setup that is non-destructive, but we're not procedural yet.
+
+104
+00:10:33,723 --> 00:10:38,848
+Everything is still manual, so that's why we added auto paint overlays, as we call them.
+
+105
+00:10:39,268 --> 00:10:42,051
+There's a second type, and you cannot brush on these.
+
+106
+00:10:42,191 --> 00:10:48,577
+Their content is entirely produced from objects that act as terrain brushes, essentially.
+
+107
+00:10:48,657 --> 00:10:50,499
+So let's look at how this works.
+
+108
+00:10:52,298 --> 00:10:58,803
+The basic idea is to have assets expose a number of what we call auto-pane behaviors that are named.
+
+109
+00:10:59,604 --> 00:11:06,329
+And on the other side, you have the auto-pane overlays which sort of subscribe to these behaviors.
+
+110
+00:11:09,199 --> 00:11:12,023
+And then this produces some result.
+
+111
+00:11:13,104 --> 00:11:19,572
+Before we continue, I just want to talk about this rainbowy color we have here, because I'm going to be showing some more of these.
+
+112
+00:11:19,933 --> 00:11:23,497
+It's essentially a heat map with zeros and ones standing out.
+
+113
+00:11:23,517 --> 00:11:24,719
+Yeah.
+
+114
+00:11:28,797 --> 00:11:30,518
+So what is a behavior?
+
+115
+00:11:32,158 --> 00:11:38,120
+As I said, it's kind of like a terrain brush, assets behaving as terrain brushes.
+
+116
+00:11:38,520 --> 00:11:45,982
+And at its core, it's simply a mesh, a transform that can deform the mesh, and some shader with some parameters.
+
+117
+00:11:46,963 --> 00:11:54,145
+And as simple as it is, the power comes from the different workflows that are enabled by combining different meshes and shaders.
+
+118
+00:11:55,984 --> 00:12:03,729
+Then the idea is just to take an orthographic camera and grab a snapshot of the mesh from above, and this is your result that you stamp on the overlay.
+
+119
+00:12:05,129 --> 00:12:13,955
+So if we imagine a very simple case where you would use the asset's own mesh to auto-paint, just with this you can get surprisingly useful results, as we'll see in a moment.
+
+120
+00:12:15,415 --> 00:12:24,421
+Since overlays have opacity information, the shaders output both the data for the content and its alpha, or opacity.
+
+121
+00:12:25,526 --> 00:12:27,387
+If you're auto-painting on a mask, it's very simple.
+
+122
+00:12:27,407 --> 00:12:29,929
+You just write 1 in both data and opacity.
+
+123
+00:12:30,169 --> 00:12:32,451
+This gets the mesh projection stamped on the overlay.
+
+124
+00:12:33,472 --> 00:12:41,117
+When auto-painting on the height field, you just output the fragment's height as the data and 1 for opacity.
+
+125
+00:12:41,658 --> 00:12:44,840
+And this deforms the height field so it perfectly wraps the object.
+
+126
+00:12:46,277 --> 00:12:48,099
+So let's have this shown in practice.
+
+127
+00:12:48,580 --> 00:12:56,689
+The rock here is on wet sand, but we'd like to make the two better integrated together, and also add some variety.
+
+128
+00:12:57,550 --> 00:13:00,174
+So let's add a little bump on the sand.
+
+129
+00:13:00,514 --> 00:13:04,739
+We can limit the effect by scaling the mesh using the transform.
+
+130
+00:13:06,040 --> 00:13:12,966
+then let's use a mask coat of paint on a sort of rippled sand mask, and we also make it a bit bigger.
+
+131
+00:13:13,807 --> 00:13:18,831
+And the second mask, why not, some sand with gravel, and we get this effect.
+
+132
+00:13:20,312 --> 00:13:22,314
+And in the editor, it's live.
+
+133
+00:13:22,534 --> 00:13:29,240
+So as the rock transform is changed, the projected shapes are impacted because they inherit that transform on top of their own.
+
+134
+00:13:30,908 --> 00:13:33,836
+So this is actually three rock meshes aggregated together.
+
+135
+00:13:33,876 --> 00:13:35,279
+That's why they rotate a bit funny.
+
+136
+00:13:36,683 --> 00:13:37,445
+Confession here.
+
+137
+00:13:39,793 --> 00:13:43,794
+So not only static assets can be auto-painted, same goes for roads.
+
+138
+00:13:43,874 --> 00:13:48,595
+They're also a mesh, although a dynamic one that is generated from a spline.
+
+139
+00:13:49,395 --> 00:13:52,596
+So a typical workflow is to flatten the height field where roads are.
+
+140
+00:13:53,436 --> 00:14:05,659
+And by generating a slightly wider mesh, we can have the auto-paint shader fade out the flattening on the sides by using the opacity channel output so that they better integrate with the environment.
+
+141
+00:14:05,719 --> 00:14:07,579
+So this is how it looks like in the editor.
+
+142
+00:14:10,185 --> 00:14:13,787
+So with this, we can see why interactivity is not just a nice-to-have.
+
+143
+00:14:14,748 --> 00:14:19,550
+Being able to iterate that quickly has a strong impact on the final quality.
+
+144
+00:14:19,970 --> 00:14:23,332
+When a user moves a spline, they're not guessing what the procedural output will be.
+
+145
+00:14:23,372 --> 00:14:26,114
+They see it at in-game quality as they work.
+
+146
+00:14:28,410 --> 00:14:33,793
+Another thing you can do by auto-painting a mesh directly on the height field is what we call auto-paint blockout.
+
+147
+00:14:34,774 --> 00:14:45,701
+Somebody figured this out and we didn't see it coming, but the idea is to work with a library of abstract shapes, landscape features, and sculpt the height field piecewise using those shapes.
+
+148
+00:14:47,042 --> 00:14:52,826
+Key to this workflow is obviously having the auto-paint work in max blend mode, so intersections are seamless.
+
+149
+00:14:53,626 --> 00:14:56,108
+And yeah, you can iterate rapidly with this.
+
+150
+00:14:57,844 --> 00:15:00,425
+Here's another workflow we have we call Capture.
+
+151
+00:15:01,065 --> 00:15:13,848
+The idea is to have artists place assets in the level where they paint a sculpt around the assets and using a volume we capture this terrain into textures and we automatically create the behaviors in the asset prefab.
+
+152
+00:15:14,928 --> 00:15:19,149
+Bottom line is when you place the asset in level the terrain follows with it.
+
+153
+00:15:21,650 --> 00:15:28,489
+another combination a road mesh with the texture and you get a nice riverbed carver spline.
+
+154
+00:15:33,027 --> 00:15:41,572
+So this is from an internal demo that was made by a small team of artists, and it showcases a number of techs we built.
+
+155
+00:15:42,253 --> 00:15:44,794
+And it has a lot of auto-paint workflows that I just showed.
+
+156
+00:15:44,834 --> 00:15:47,776
+For example, the height field is all blocked out.
+
+157
+00:15:48,216 --> 00:15:55,621
+The stone stairs carve the height field around them using custom meshes, and all trees have auto-paint capture.
+
+158
+00:16:03,720 --> 00:16:10,447
+Okay, there is one last type of overlay we added to get a full feature set, and it's effects overlay.
+
+159
+00:16:11,408 --> 00:16:17,554
+These include generators and filters and more, but the idea is that they're applied on the whole terrain.
+
+160
+00:16:17,955 --> 00:16:21,939
+They don't relate to objects, and you cannot brush on them either.
+
+161
+00:16:23,891 --> 00:16:32,160
+So at first, we started adding generators like Voronoi, which can be applied on a mask, or the height field.
+
+162
+00:16:32,360 --> 00:16:33,842
+Again, everything is interchangeable.
+
+163
+00:16:34,282 --> 00:16:35,003
+They're all images.
+
+164
+00:16:35,984 --> 00:16:43,372
+And you can create also this slightly unsettling breathing terrain, which I made by playing with a slider.
+
+165
+00:16:47,185 --> 00:16:57,268
+One thing I want to mention is that to create these effects, we chose to leverage our runtime node-based shaders, which obviously had large consequences on the overall architecture.
+
+166
+00:16:58,008 --> 00:17:00,189
+But I will talk more about this later.
+
+167
+00:17:01,029 --> 00:17:11,793
+So the great thing about this is that since our tech artists already know this tech, they can just author their own effects, basically, to augment the basic library.
+
+168
+00:17:13,066 --> 00:17:20,029
+So going back to this overlay compositing diagram, we have now overlays that get their content from shaders.
+
+169
+00:17:20,989 --> 00:17:26,992
+And it seems it would be very easy to provide them with the previous stage, the previous blended overlay.
+
+170
+00:17:27,012 --> 00:17:29,393
+So which means we can create filters.
+
+171
+00:17:30,053 --> 00:17:31,373
+So that's the next thing we did.
+
+172
+00:17:32,114 --> 00:17:33,794
+Blur, Dye Lay, Warp.
+
+173
+00:17:34,515 --> 00:17:40,297
+And again, you can blur the height field or color map anything.
+
+174
+00:17:42,527 --> 00:17:47,812
+But in many cases, what user want is to generate masks derived from the topology.
+
+175
+00:17:48,112 --> 00:17:51,375
+For example, maybe they need a mask that matches the flat areas.
+
+176
+00:17:52,937 --> 00:18:00,444
+So there's a very, very straightforward way to make this possible, which is to provide the height field to all effects systematically.
+
+177
+00:18:00,784 --> 00:18:02,826
+And we did that exactly at first.
+
+178
+00:18:04,437 --> 00:18:12,737
+So it unlocked a new family of interesting effects like the slope mask I was talking about, but also one to highlight height ranges, for example.
+
+179
+00:18:13,849 --> 00:18:26,459
+And we also made more complex ones, like kernel-based filters, curvature filters to highlight concavity or convexity, or this relief filter, which is showing the height compared to the average height in a radius.
+
+180
+00:18:27,440 --> 00:18:32,464
+And we also created ray-marching effects, like sun exposure.
+
+181
+00:18:33,025 --> 00:18:40,111
+This particular one really looks like it's in-game with lighting, but it's actually just the mask that is using a black and white palette.
+
+182
+00:18:40,951 --> 00:18:44,734
+And it's very useful to bake shadows, for one thing.
+
+183
+00:18:45,434 --> 00:18:49,077
+Or you could use that to simulate vegetation growth, for example.
+
+184
+00:18:49,718 --> 00:18:53,961
+And what's nice is you can also accumulate the whole sun arc over a day, for example.
+
+185
+00:18:54,001 --> 00:18:55,082
+We have nice features like that.
+
+186
+00:18:55,822 --> 00:18:58,204
+And we also have one that does ambient occlusion.
+
+187
+00:18:58,604 --> 00:19:04,128
+And it's pretty much like you would do in a screen pass in runtime, except it's done in the height field.
+
+188
+00:19:04,689 --> 00:19:06,270
+And it shows the amount of sky visibility.
+
+189
+00:19:08,669 --> 00:19:09,370
+So far, so good.
+
+190
+00:19:09,750 --> 00:19:11,031
+We can read from the height field.
+
+191
+00:19:11,852 --> 00:19:15,815
+But soon enough came new requests to have things be able to write to the height field.
+
+192
+00:19:16,295 --> 00:19:22,621
+Say you want the terrain to be more lumpy where the snow is, you need the height field to read from a mask.
+
+193
+00:19:23,341 --> 00:19:27,064
+Or maybe you want your asphalt mask to delete the grass mask.
+
+194
+00:19:27,305 --> 00:19:30,287
+So clearly, this original setup won't work.
+
+195
+00:19:31,068 --> 00:19:35,411
+And you might see what is coming, but what we need is a full dependency graph.
+
+196
+00:19:36,331 --> 00:19:42,268
+So if we pause a moment, we have this layered UX, and we also want this node-based thing.
+
+197
+00:19:45,293 --> 00:19:56,101
+At this point, we kind of took the decision to keep the layered UX because people are familiar with this, and if you're not in a lot of spaghetti dependency, it kind of really fits the bill.
+
+198
+00:19:56,641 --> 00:20:00,564
+So what we did is add navigational arrows, basically.
+
+199
+00:20:00,664 --> 00:20:05,627
+Each overlay shows their incoming and outgoing connections, and the users can navigate like this.
+
+200
+00:20:06,528 --> 00:20:08,510
+So this kind of sums up what we have in the end.
+
+201
+00:20:09,431 --> 00:20:12,635
+Talk is not finished, but this is just one clean way to wrap things up.
+
+202
+00:20:12,715 --> 00:20:22,425
+We have a graph, a node-based graph backend that is invisible and automatically generated from the layered UX that has dependency navigation.
+
+203
+00:20:25,111 --> 00:20:29,613
+So there's one last piece of the puzzle that's still missing, which is iterative processes.
+
+204
+00:20:30,554 --> 00:20:32,715
+A classic example would be erosion.
+
+205
+00:20:33,275 --> 00:20:37,177
+This is just anything that you need to run a number of times to get the final result.
+
+206
+00:20:38,938 --> 00:20:48,382
+And to do that, we added a sort of, a way to declare how output textures are routed back into input textures.
+
+207
+00:20:48,983 --> 00:20:53,305
+And we can just run the effect a number of times by swapping the outputs with the input.
+
+208
+00:20:54,506 --> 00:21:12,760
+And with that, we could implement things like thermal erosion, for example, which happens to be quite fast because you can still brush right under the effect and see it live with no performance impact whatsoever, which is great, but not surprising because GPUs are really fast these days.
+
+209
+00:21:13,100 --> 00:21:16,363
+And at the same time, those rasters, again, are like two samples per meter.
+
+210
+00:21:16,663 --> 00:21:21,367
+So unless you're painting with a one kilometer brush, you should be fine.
+
+211
+00:21:23,160 --> 00:21:25,561
+And then we added also water simulation.
+
+212
+00:21:26,221 --> 00:21:29,043
+That's a very important brick of a procedural toolkit.
+
+213
+00:21:31,564 --> 00:21:37,547
+And we have a mode that just lets the water flow and one that accumulates water to produce flow maps.
+
+214
+00:21:40,353 --> 00:21:41,994
+And we made it to the candy part.
+
+215
+00:21:42,474 --> 00:21:44,054
+So time for some ship results.
+
+216
+00:21:44,975 --> 00:21:49,797
+The first game I'm going to talk about is EA Sports PGA Tour golf game.
+
+217
+00:21:51,237 --> 00:21:54,979
+And they have a particular setup because they work from LiDAR scans.
+
+218
+00:21:55,079 --> 00:21:57,320
+They're reproducing existing courses.
+
+219
+00:21:57,940 --> 00:22:07,924
+So what they get from these scans are high-density point clouds for the height field, and then a number of vector paths for important features, bunkers,
+
+220
+00:22:08,604 --> 00:22:10,585
+fairways, greens, and roughs.
+
+221
+00:22:11,105 --> 00:22:18,969
+And then through Houdini, they extract the actual height field and masks that they can import in Frosted, which is the name of the editor, by the way.
+
+222
+00:22:19,729 --> 00:22:27,853
+And inside Frosted, they iterate using our tools to do minor, minor changes, but important ones.
+
+223
+00:22:28,700 --> 00:22:48,595
+An example is this one, so for some reason they found they wanted to increase the lip on the sand bunkers, the bunkers, that's how it's called, and to use that, to do that they used the sand mask that was fed to the height field in subtract mode, so they could just tweak what they wanted, obviously faster than painting by hand.
+
+224
+00:22:50,656 --> 00:22:58,339
+Other things they did, they added a bit of clumpiness in the rough areas using like Perlin noise modulated with the high field curvature.
+
+225
+00:22:58,859 --> 00:23:06,562
+They derived a number of additional masks like dry grass versus grass versus semi-dry grass, I guess.
+
+226
+00:23:07,763 --> 00:23:12,705
+And all these were driven from topology operators or filters.
+
+227
+00:23:13,405 --> 00:23:15,486
+This screenshot has a number of them together.
+
+228
+00:23:16,377 --> 00:23:24,930
+There's also little mounds at the base of tree that were added with auto paint and yeah, a lot of things.
+
+229
+00:23:27,154 --> 00:23:27,414
+All right.
+
+230
+00:23:28,925 --> 00:23:30,485
+So now let's talk about Battlefield.
+
+231
+00:23:31,386 --> 00:23:40,548
+As opposed to PGSports, which works from LiDAR scans, they needed to iterate a lot more on the levels, if only for gameplay reasons.
+
+232
+00:23:41,348 --> 00:23:44,109
+So they were a lot freer to experiment with the tools.
+
+233
+00:23:44,149 --> 00:23:51,991
+And frankly, they surprised us in many different ways on many occasions by going beyond what we had initially made the tools for.
+
+234
+00:23:52,951 --> 00:23:57,212
+So they really pushed the tools to their limit, which is great.
+
+235
+00:23:59,324 --> 00:24:08,026
+So this map is a location where water has recessed, leaving pools of rusty water.
+
+236
+00:24:09,446 --> 00:24:16,888
+And an important visual thematic is those sediment lines, I guess I would call, stratified lines.
+
+237
+00:24:17,468 --> 00:24:23,330
+And at small scale, this is produced in the material shaders that can read from the height field.
+
+238
+00:24:24,690 --> 00:24:28,691
+And at distance, you have larger ones that are coming from the color map.
+
+239
+00:24:31,615 --> 00:24:32,890
+as you can see in a second.
+
+240
+00:24:38,522 --> 00:24:48,531
+So if we pull back the curtain for a moment and examine the foundation of this level's terrain, there are 20 or so material layers that are used.
+
+241
+00:24:49,292 --> 00:24:54,596
+And they have shaders that read from textures and break up the tiling in seamless ways.
+
+242
+00:24:55,097 --> 00:25:04,765
+And they all write to the terrain virtual texture, which has typical g-buffer channels, but also vertical displacement, or should I say normal-based displacement.
+
+243
+00:25:05,886 --> 00:25:10,189
+And so this view shows all the materials together with nothing else.
+
+244
+00:25:11,069 --> 00:25:13,510
+Pretty patchy and kind of flat at distance.
+
+245
+00:25:14,971 --> 00:25:16,452
+So that's why we have the color map.
+
+246
+00:25:16,612 --> 00:25:18,733
+So the color map adds variation.
+
+247
+00:25:19,554 --> 00:25:26,017
+And since all materials read from it, it can also control the overall hue of all materials.
+
+248
+00:25:26,938 --> 00:25:28,579
+So this is showing both together.
+
+249
+00:25:32,694 --> 00:25:40,801
+And then adding decals, which are essentially meshes that write on the virtual texture and all those same channels, including displacement.
+
+250
+00:25:40,821 --> 00:25:43,884
+So that's how they can sort of dig a bit into it.
+
+251
+00:25:45,786 --> 00:25:51,771
+Now adding objects, starting to come up together nicely.
+
+252
+00:25:53,348 --> 00:26:02,171
+And the one missing thing is, maybe you guessed it, GPU scattering, which is small-scale vegetation and small-scale objects.
+
+253
+00:26:03,272 --> 00:26:10,534
+Again, completely GPU power in the case of Frostbite, and the placement is driven by material masks.
+
+254
+00:26:12,735 --> 00:26:17,817
+So if we look at how the procedural data operates together,
+
+255
+00:26:19,571 --> 00:26:22,153
+We start with, let's say, material rasters first.
+
+256
+00:26:23,034 --> 00:26:30,681
+And then they also added a number of what we call utility rasters, concept rasters.
+
+257
+00:26:30,961 --> 00:26:33,524
+They're not sent in the runtime.
+
+258
+00:26:33,804 --> 00:26:37,868
+They're just references for other masks to read from.
+
+259
+00:26:38,328 --> 00:26:41,992
+And they influence the material masks, but also things like the color map.
+
+260
+00:26:43,072 --> 00:26:43,974
+adding the height field.
+
+261
+00:26:45,296 --> 00:26:52,447
+The height field pretty much writes to everything and the objects again impacts everything including the height field.
+
+262
+00:26:53,068 --> 00:26:55,091
+So this is just a simplified overview.
+
+263
+00:26:55,472 --> 00:26:57,155
+The actual graph looks like this.
+
+264
+00:26:58,712 --> 00:27:03,076
+Nobody ever looks at that except me a couple of times, I guess, to debug.
+
+265
+00:27:03,736 --> 00:27:12,304
+And one thing to mention is that you can see most connections are coming from the height field topmost overlay because everything reads from topology.
+
+266
+00:27:13,084 --> 00:27:15,026
+All masks almost read from topology.
+
+267
+00:27:15,066 --> 00:27:16,627
+But there's other connections as well.
+
+268
+00:27:18,549 --> 00:27:20,271
+So it's impossible to look at everything.
+
+269
+00:27:20,331 --> 00:27:22,392
+But let's just take one mask, for example.
+
+270
+00:27:22,833 --> 00:27:24,754
+This one is called rock color.
+
+271
+00:27:25,255 --> 00:27:26,396
+It's a utility mask.
+
+272
+00:27:27,796 --> 00:27:30,418
+So it's not driving a shader, it's just used by other things.
+
+273
+00:27:31,739 --> 00:27:34,941
+So it starts off with Cliff Mesh Autopaint.
+
+274
+00:27:35,661 --> 00:27:41,845
+One thing to notice is that the Autopaint discards anything below the height field, because Autopaint can also peek at the height field.
+
+275
+00:27:42,886 --> 00:27:49,030
+And then a bit of blur is added, then slope blur, which blurs in the direction of slope.
+
+276
+00:27:53,223 --> 00:27:55,124
+creating a sort of leaking effect, I guess.
+
+277
+00:27:56,325 --> 00:28:05,370
+And then a bit of height map is used, height range is used to trim the top off and levels for a final tweak.
+
+278
+00:28:05,790 --> 00:28:19,498
+So if we follow that, it's using the color map and it's looped in one of these folders and it creates this sort of dark and brownish tint effect.
+
+279
+00:28:20,828 --> 00:28:27,651
+And adding all those folders one by one, we can see how they built it, really layer by layer.
+
+280
+00:28:30,132 --> 00:28:32,494
+I won't add them all one by one because it's too long.
+
+281
+00:28:32,954 --> 00:28:35,375
+But the final thing, the final color map looks like this.
+
+282
+00:28:35,775 --> 00:28:36,776
+This is a bird's eye view.
+
+283
+00:28:38,156 --> 00:28:45,900
+And you can see it's completely procedurally generated, meaning that if anyone changes the height field, anything should readapt instantly in the editor.
+
+284
+00:28:46,994 --> 00:28:50,855
+And if other rasters depend on the color map, they would get in turn updated.
+
+285
+00:28:51,935 --> 00:28:54,176
+So not all levels use a procedural color map.
+
+286
+00:28:54,476 --> 00:28:59,198
+Sometimes they use satellite imagery, especially when the level is based on the real life location.
+
+287
+00:29:00,118 --> 00:29:02,298
+And it's the case with this next level, which I'm going to talk about.
+
+288
+00:29:11,921 --> 00:29:17,768
+So again, all material masks are driven from procedural operations.
+
+289
+00:29:19,150 --> 00:29:22,754
+You can see the plow lines in the back, plowing lines, I guess.
+
+290
+00:29:23,495 --> 00:29:26,158
+And there's some curvature going on there probably.
+
+291
+00:29:26,959 --> 00:29:32,005
+So if we take just one mask, one such mask, this one is
+
+292
+00:29:34,324 --> 00:29:36,505
+This one is called Snowgrass.
+
+293
+00:29:36,625 --> 00:29:40,427
+It's kind of snow with a bit of grass blades peeking through.
+
+294
+00:29:40,867 --> 00:29:44,129
+It starts off with ambient occlusion as its basis.
+
+295
+00:29:45,249 --> 00:29:51,812
+And then this is a selection from the color map, a color selection.
+
+296
+00:29:51,852 --> 00:29:53,513
+Maybe the greens are pulled in, for example.
+
+297
+00:29:54,571 --> 00:29:58,492
+Then the river is removed using a height selection.
+
+298
+00:29:59,533 --> 00:30:01,694
+Then a bit of flow map, water simulation.
+
+299
+00:30:02,794 --> 00:30:06,595
+Then a number of auto-painted things are removed, like roads and trees.
+
+300
+00:30:06,955 --> 00:30:09,296
+And finally, artist touch-ups.
+
+301
+00:30:10,116 --> 00:30:13,278
+So this last overlay is where artists can override anything.
+
+302
+00:30:13,978 --> 00:30:17,459
+Say the game designer wants some extra cover using mesh scattering.
+
+303
+00:30:17,519 --> 00:30:19,800
+For example, it can just be added using brushes there.
+
+304
+00:30:22,264 --> 00:30:33,949
+The next map I'm going to talk about is called Hourglass, and it features a city that has been lost to sand as the result of desertification and sandstorms.
+
+305
+00:30:38,392 --> 00:30:41,853
+So the main feature of the terrain is obviously sand dunes here.
+
+306
+00:30:43,034 --> 00:30:49,897
+And before we look into this map, I want to show you again our road auto paint tool.
+
+307
+00:30:51,189 --> 00:30:53,971
+So this is just two intersecting roads, very basic.
+
+308
+00:30:55,051 --> 00:31:01,695
+Let's fix the intersection by using a max blend mode, which we support between objects on the same overlay.
+
+309
+00:31:03,156 --> 00:31:08,019
+Making the road width zero, and then making the falloff 100 meters, we get this.
+
+310
+00:31:08,219 --> 00:31:10,841
+And tweaking the curve of the falloff, we get this.
+
+311
+00:31:11,581 --> 00:31:12,882
+Maybe you see where this is going.
+
+312
+00:31:13,082 --> 00:31:15,223
+It's essentially looking like a sand dune, right?
+
+313
+00:31:17,233 --> 00:31:24,942
+When I opened this map, this was the first map I opened, by the way, when they started production, and I saw this and I had no idea what was going on.
+
+314
+00:31:25,463 --> 00:31:28,627
+And it turns out it's hundreds and hundreds of roads.
+
+315
+00:31:29,708 --> 00:31:36,336
+And so I had to call the person that thought about it, and Michael Anderson is his name,
+
+316
+00:31:37,637 --> 00:31:42,879
+I asked him, like, isn't it, it's fascinating, but isn't it a bit overkill to have all these hand placed?
+
+317
+00:31:43,099 --> 00:31:44,840
+And he said, no, it just took me two days.
+
+318
+00:31:45,000 --> 00:31:48,401
+And it's actually quite useful because this is a first person shooter, right?
+
+319
+00:31:48,901 --> 00:31:57,004
+And so when you iterate, you can get calls very late in production that are basically, can you clear this line of sight and remove all sand dunes?
+
+320
+00:31:57,044 --> 00:32:00,665
+And it turns out you can actually just grab the sand dune and move it or copy it.
+
+321
+00:32:01,686 --> 00:32:04,667
+And again, showing like how
+
+322
+00:32:06,087 --> 00:32:08,290
+Powerful it is to get instant feedback.
+
+323
+00:32:08,430 --> 00:32:14,519
+You're not guessing what it will look like once you run your procedural external DCC, you just see it live.
+
+324
+00:32:15,981 --> 00:32:18,545
+And if there are some effects over it, you see that as well.
+
+325
+00:32:21,152 --> 00:32:30,698
+The next level I'm going to talk about was made with a lot of photogrammetry and the studio called Ripple Effect that made it found a location that matched the look they were after.
+
+326
+00:32:31,018 --> 00:32:37,842
+So they went out on a field trip, probably had tons of fun, and collected materials for assets using photogrammetry.
+
+327
+00:32:39,161 --> 00:32:39,741
+And they made this.
+
+328
+00:32:41,542 --> 00:32:48,324
+One is the real one, one is a frostbite version, and I know because the reference ball is on a stand in one of the two.
+
+329
+00:32:49,484 --> 00:32:50,605
+So pretty amazing.
+
+330
+00:32:52,205 --> 00:32:57,567
+And here's a trailer, internal trailer, but I guess it's not internal anymore if I show it.
+
+331
+00:34:11,516 --> 00:34:16,884
+OK, so it may be surprising considering how monochromatic this level is.
+
+332
+00:34:18,168 --> 00:34:27,796
+desert essentially, but it actually has 24 different material layers, which together contribute to create a very detailed and rich landscape.
+
+333
+00:34:30,078 --> 00:34:41,848
+There are also 15 utility masks that are defined and as much as 122,000 auto-painted objects, so that would be splines mainly, but also rocks and buildings.
+
+334
+00:34:43,956 --> 00:34:46,298
+So let's look at the height field for a change.
+
+335
+00:34:47,159 --> 00:34:59,889
+If we add every overlay one by one, what we see at first is essentially the evolution of the level over time as they were changing major features by adding mountains and things like this.
+
+336
+00:35:00,730 --> 00:35:06,254
+Meaning they can just walk back their decisions since it's all overlays and it's non-destructive.
+
+337
+00:35:07,115 --> 00:35:08,837
+So adding those.
+
+338
+00:35:09,807 --> 00:35:31,569
+and then you get this thing which is creating flow lines in the height field and it's coming from this mask which is defined using a flow map and other things and then the roads are deleted using auto paint or maybe actually a reference to another mask and finally you have this thing which I'm going to talk about so remember how this looks
+
+339
+00:35:32,426 --> 00:35:35,167
+It's adding detail outside of the gameplay area, essentially.
+
+340
+00:35:36,168 --> 00:35:39,890
+And finally, road auto-pane, and yeah, that's it.
+
+341
+00:35:40,350 --> 00:35:46,633
+So this is a texture that the runtime shader used at distance, like big boulders, essentially.
+
+342
+00:35:47,473 --> 00:35:53,176
+And what they wanted to do is create more details at distance.
+
+343
+00:35:54,500 --> 00:36:02,081
+They essentially wanted to bake the displacement like you would have at close distance, but they wanted to bake it in the height field at distance.
+
+344
+00:36:02,781 --> 00:36:15,344
+And because we used our rendering shaders, they could just copy their runtime shaders in effect and use the same complex de-tiling algorithm like this.
+
+345
+00:36:15,704 --> 00:36:17,484
+And so they could bake it in like this.
+
+346
+00:36:19,184 --> 00:36:23,825
+And you can show this effect at distance where the height field has this nice texture.
+
+347
+00:36:26,533 --> 00:36:28,734
+All right, we made it up to the proteins.
+
+348
+00:36:31,635 --> 00:36:36,997
+So when we planned this framework, we had the ambitious goal to have live, real-time feedback.
+
+349
+00:36:37,337 --> 00:36:44,360
+This not only means we need fast terrain updates, but in the first place, we need to know when a change invalidates the terrain.
+
+350
+00:36:44,660 --> 00:36:50,002
+So this can get pretty tricky for AutoPaint, because
+
+351
+00:36:50,922 --> 00:36:55,523
+One reason is that behavior definitions can be nested deep into prefabs of prefabs.
+
+352
+00:36:56,163 --> 00:36:58,184
+So we need to track all this.
+
+353
+00:36:59,164 --> 00:37:00,525
+In other cases, it's pretty simple.
+
+354
+00:37:01,165 --> 00:37:02,665
+For example, if a brush is applied.
+
+355
+00:37:03,025 --> 00:37:09,527
+So let's look at this case and sort of trace what happens when a brush stroke is applied.
+
+356
+00:37:10,444 --> 00:37:18,872
+So the brush event triggers an update request, which has the ID of the modified overlay and the impacted world coverage.
+
+357
+00:37:19,953 --> 00:37:22,035
+And in the editor, there is a job queue.
+
+358
+00:37:22,435 --> 00:37:27,300
+So the first thing we need to do is create jobs that will refresh the modified terrain.
+
+359
+00:37:29,322 --> 00:37:32,945
+As you know, the back end is a directed graph.
+
+360
+00:37:33,285 --> 00:37:35,707
+So we need to walk from the
+
+361
+00:37:37,079 --> 00:37:43,746
+the overlay where the change happened and walk to the end nodes to find what has been modified.
+
+362
+00:37:44,627 --> 00:37:53,255
+So from this we can identify primary job, which is the raster that owns this overlay you're painting on, but also secondary jobs that are just the side effects.
+
+363
+00:37:54,336 --> 00:38:01,023
+Primary jobs means they need to have high priority and secondary job can probably wait a little.
+
+364
+00:38:02,964 --> 00:38:06,730
+But wait, right after the paintable, there's a blur.
+
+365
+00:38:07,752 --> 00:38:10,436
+So let's suppose what you brushed is this GDC logo.
+
+366
+00:38:10,536 --> 00:38:12,980
+The blur is going to spread the change, right?
+
+367
+00:38:13,041 --> 00:38:15,084
+So you probably need to rebake a bit larger.
+
+368
+00:38:16,568 --> 00:38:24,558
+And it would be the case for other things like curvature, any kernel filter, or iterative processes would be in the same situation.
+
+369
+00:38:25,059 --> 00:38:25,980
+So how can we fix this?
+
+370
+00:38:26,841 --> 00:38:33,168
+Well, one way, which is what we did first, again, is you could just slap an extra 30 meter everywhere, right?
+
+371
+00:38:33,729 --> 00:38:34,109
+And it works.
+
+372
+00:38:34,889 --> 00:38:38,710
+Until today, it doesn't work, because someone calls you and says, hey, your terrain is broken.
+
+373
+00:38:38,730 --> 00:38:39,130
+Look at that.
+
+374
+00:38:39,870 --> 00:38:42,851
+And you say, oh, just raise it to 100 meters.
+
+375
+00:38:42,971 --> 00:38:45,112
+And it still works, but you're impacting.
+
+376
+00:38:45,152 --> 00:38:47,212
+Your performance is degrading over time.
+
+377
+00:38:47,713 --> 00:38:57,755
+So the right way to fix that is that as you're walking the path from the overlay, you need to add up the spread of
+
+378
+00:38:59,716 --> 00:39:02,160
+like how much each overlay spreads change.
+
+379
+00:39:03,221 --> 00:39:04,543
+In the case of blur, it's very simple.
+
+380
+00:39:04,583 --> 00:39:10,171
+It's just a radius, but it can get pretty tricky, like warp has a very complex expression.
+
+381
+00:39:11,834 --> 00:39:15,459
+And then you get the final coverage you actually need to refresh.
+
+382
+00:39:16,604 --> 00:39:22,589
+So once the jobs are created, we don't immediately insert them in the queue.
+
+383
+00:39:23,109 --> 00:39:28,253
+We try to be smart about it by recycling existing jobs that can just be extended.
+
+384
+00:39:29,734 --> 00:39:33,517
+For example, if you're brushing on the height field, tons of masks are impacted.
+
+385
+00:39:33,677 --> 00:39:36,139
+But until you mouse release, we won't process these.
+
+386
+00:39:36,680 --> 00:39:44,686
+So while we push them in the queue, we don't create tons of fragmented, overlapping jobs because of this simplification.
+
+387
+00:39:45,754 --> 00:39:54,222
+And then we just do a sort and insert in the queue and we sort by kind of obvious things like frustum intersection, you don't need to refresh what you're not looking at.
+
+388
+00:39:54,262 --> 00:40:00,008
+You don't need to refresh secondary jobs as fast as primary ones and camera distance.
+
+389
+00:40:02,010 --> 00:40:05,934
+And then job execution deserve its own section, so let's go.
+
+390
+00:40:07,654 --> 00:40:12,575
+So the first thing to mention about job execution is that we use an external process.
+
+391
+00:40:13,355 --> 00:40:15,516
+Let's call this the TrainUpdateService.
+
+392
+00:40:16,136 --> 00:40:19,837
+It's actually a sort of lightweight Frostbite rendering stack.
+
+393
+00:40:21,237 --> 00:40:23,358
+And why did we do that?
+
+394
+00:40:23,498 --> 00:40:25,258
+Sounds like asking for trouble.
+
+395
+00:40:25,758 --> 00:40:31,220
+Well, again, we wanted to leverage our node-based shader graphs that we have in runtime.
+
+396
+00:40:32,120 --> 00:40:38,984
+And we also wanted to not code a whole graph engine that we have that gets compiled to bytecode in the engine in the runtime.
+
+397
+00:40:39,745 --> 00:40:51,412
+And finally, as I mentioned, we wanted to sort of own this tech and having it in the runtime sounded like a good idea just to unlock future ideas like UGC, for example.
+
+398
+00:40:53,035 --> 00:40:53,635
+So we did that.
+
+399
+00:40:54,636 --> 00:40:55,817
+And in the end, that's what we have.
+
+400
+00:40:55,977 --> 00:41:03,482
+On the one hand, you have Frosted, which has all the world data, like autopaint, objects, their transforms.
+
+401
+00:41:03,522 --> 00:41:07,545
+We have spatial lookup tables to be able to know exactly what needs to be part of a bake job.
+
+402
+00:41:08,645 --> 00:41:10,688
+And terrain tile data also lives there.
+
+403
+00:41:11,349 --> 00:41:13,612
+And the rule graph is generated there.
+
+404
+00:41:14,153 --> 00:41:19,360
+And the update service, we have built, runtime built version of the graph and the shaders.
+
+405
+00:41:20,221 --> 00:41:24,567
+And we're essentially running a context agnostic image processing graph there.
+
+406
+00:41:27,304 --> 00:41:36,028
+So when a job is removed from the queue to be processed, we send an RPC call that has a number of different information.
+
+407
+00:41:37,169 --> 00:41:41,831
+But one thing to highlight is that we use GPU shared memory resources.
+
+408
+00:41:43,092 --> 00:41:51,356
+And using this shared memory was key for us to reduce the friction involved in having those two process talking to one another.
+
+409
+00:41:53,158 --> 00:41:55,823
+After all, trained data doesn't need to leave the GPU.
+
+410
+00:41:55,863 --> 00:41:58,648
+You're displaying it there, but you're also processing it there.
+
+411
+00:42:00,411 --> 00:42:03,417
+And when it's done, we just send an RPC back with some statistics.
+
+412
+00:42:04,949 --> 00:42:17,798
+So zooming in on the active nodes that are in the input RPC data, the editor takes care of caching all the dependencies between overlays and outputs and the other direction.
+
+413
+00:42:18,459 --> 00:42:24,904
+So it can provide a list of active nodes that are needed given an output node, basically.
+
+414
+00:42:25,024 --> 00:42:26,985
+And it sends this as part of the information.
+
+415
+00:42:28,946 --> 00:42:32,169
+We also need to provide paintable tiles.
+
+416
+00:42:33,493 --> 00:42:36,796
+Paintable tiles are stored on disk, so the editor has them.
+
+417
+00:42:38,097 --> 00:42:45,582
+And they actually live in tiles, as I mentioned earlier, but they're also laid out on a quadtree.
+
+418
+00:42:46,663 --> 00:42:57,391
+And so we need to revisit this algorithm of spreading change, because it works in the other way as well.
+
+419
+00:42:57,972 --> 00:43:02,575
+If a blur spreads the change, it also needs to read from that same radius.
+
+420
+00:43:03,706 --> 00:43:15,336
+So as we walk back from the end, we need to add up these lookout ranges to get the actual coverage we need to bundle the tiles for.
+
+421
+00:43:16,277 --> 00:43:23,503
+And what we do is we push them into GPU memory into the tiles are pushing 2D texture arrays.
+
+422
+00:43:24,324 --> 00:43:28,728
+And we have an indirection texture that maps the world position to the tile index.
+
+423
+00:43:28,788 --> 00:43:41,100
+So basically, the paintable overlay's job, in terms of processing, is just to on indirect, I guess, produce a flat tile where tiles are not separate, basically.
+
+424
+00:43:44,183 --> 00:43:44,384
+Okay.
+
+425
+00:43:47,079 --> 00:43:48,500
+Retrospective and takeaways.
+
+426
+00:43:48,900 --> 00:43:49,780
+OK.
+
+427
+00:43:50,621 --> 00:43:59,145
+So there's a very important question we can ask ourselves, which is how much of the procedural content had to be manually repainted by game studios?
+
+428
+00:44:00,646 --> 00:44:10,291
+In other words, what we produce is the equivalent of macaroni art, and they needed a major surgery to make it live up to the studio standards.
+
+429
+00:44:10,751 --> 00:44:11,391
+We failed, right?
+
+430
+00:44:12,492 --> 00:44:15,654
+So if we look at a battlefield map from season one,
+
+431
+00:44:16,618 --> 00:44:20,801
+We here are shown three representative masks.
+
+432
+00:44:24,144 --> 00:44:28,347
+And we can see that around 15% have touch-ups.
+
+433
+00:44:28,747 --> 00:44:30,269
+That's what I'm toggling on and off here.
+
+434
+00:44:30,909 --> 00:44:34,352
+And if we look at season four, this is down to 1%.
+
+435
+00:44:35,953 --> 00:44:40,316
+And the explanation was provided to me by a studio artist.
+
+436
+00:44:40,657 --> 00:44:44,420
+And he said that as they get more familiar with the procedural tool, they can
+
+437
+00:44:45,652 --> 00:44:55,581
+express more things and more organic looks and get closer to what they want just with the procedural tools, which is a nice thing to hear.
+
+438
+00:44:57,703 --> 00:45:02,487
+So I'd like to go over a few design choices we did to see how they paid off or not.
+
+439
+00:45:03,167 --> 00:45:08,352
+So the first one is this promise that we have, which is terrain is always up to date.
+
+440
+00:45:10,062 --> 00:45:15,252
+Again, tracking the full auto-pane chain of dependency came to a cost.
+
+441
+00:45:15,292 --> 00:45:16,073
+It's complicated.
+
+442
+00:45:16,614 --> 00:45:19,760
+So maybe in hindsight I would have gone for something like
+
+443
+00:45:21,448 --> 00:45:32,274
+Autopane gets refreshed as you move the object or change the transform, but maybe not if you change a parameter like three levels deep, then you could probably suffer a right-click and refresh object.
+
+444
+00:45:34,615 --> 00:45:47,322
+Second, using Frostbite Runtime as a service, this obviously increased our dependencies and it came at a cost because we got sometimes broke by people that don't really know us being on the tool side.
+
+445
+00:45:47,942 --> 00:45:49,063
+So we made a lot of friends.
+
+446
+00:45:50,003 --> 00:45:51,084
+Maybe enemies, I don't know.
+
+447
+00:45:52,644 --> 00:45:55,926
+But I think the decision still pays off today in new ways.
+
+448
+00:45:56,106 --> 00:46:01,049
+For example, with what I've shown about using runtime shaders as effect overlays.
+
+449
+00:46:02,609 --> 00:46:07,392
+And finally, the age-old debate between node-based versus layer UX.
+
+450
+00:46:09,433 --> 00:46:14,175
+So in the end, obviously, levels went beyond our expectations
+
+451
+00:46:18,223 --> 00:46:21,464
+They were way more complex than we thought they would be.
+
+452
+00:46:21,984 --> 00:46:28,406
+So I think we need better tools to navigate dependencies than just these little arrows.
+
+453
+00:46:28,466 --> 00:46:38,969
+Maybe we need things like this kind of diagram that I have shown where dependencies are shown at the raster level, not at the overlay level, just to sort of get an overview of what the level is like.
+
+454
+00:46:39,770 --> 00:46:47,572
+Or maybe we could go hybrid and have some rasters be node-based, some others, simpler ones, could stay in the layer paradigm.
+
+455
+00:46:50,586 --> 00:46:52,387
+So what lies ahead for us?
+
+456
+00:46:54,128 --> 00:47:00,093
+We need better UX, and one of the examples of what we need is better presets.
+
+457
+00:47:00,433 --> 00:47:03,855
+So effect presets, but also full raster presets.
+
+458
+00:47:04,295 --> 00:47:11,520
+Imagine you have just a dry grass coming with all the full layer stack, or maybe biome presets even.
+
+459
+00:47:12,561 --> 00:47:13,201
+And we want to
+
+460
+00:47:14,315 --> 00:47:19,178
+tailor the visibility of things to crafts, meaning like you can gradually ramp up.
+
+461
+00:47:19,638 --> 00:47:27,183
+If you are coming on a team just to do two weeks of painting, you don't need to see the whole procedural setup, for example.
+
+462
+00:47:28,924 --> 00:47:40,052
+So the maps that I've shown are obviously not large in the sense of open world games, and we want to improve our multi-user workflows and tools and improve on large data management.
+
+463
+00:47:41,351 --> 00:47:51,336
+And obviously performance is key, so we can, there's a lot of opportunities where we could do smarter caching and have, for example, higher GPU occupancy.
+
+464
+00:47:51,556 --> 00:47:53,217
+The baking is quite sequential.
+
+465
+00:47:53,297 --> 00:48:01,421
+We're not really, there are gaps where the GPU is sort of waiting for RPC calls and things like that.
+
+466
+00:48:02,182 --> 00:48:03,463
+So we could probably improve on that.
+
+467
+00:48:04,843 --> 00:48:15,472
+And yeah, so to summarize all this, we enable procedural terrain authoring in the editor by supporting live feedback, thanks to powerful GPUs.
+
+468
+00:48:15,952 --> 00:48:19,615
+And our workflows are non-destructive because we have overlays.
+
+469
+00:48:20,556 --> 00:48:24,939
+And we have rich world asset integration using AutoPaint.
+
+470
+00:48:25,259 --> 00:48:28,922
+The terrain procedural rules don't live in their own little silo.
+
+471
+00:48:28,942 --> 00:48:32,485
+They're aware of walls and objects.
+
+472
+00:48:33,966 --> 00:48:43,940
+And we support complex data interaction because we have a node-based backend and all scenarios are possible as long as you don't create cycles, right?
+
+473
+00:48:45,423 --> 00:48:49,729
+And it's extendable by tech artists because we're using runtime shaders.
+
+474
+00:48:50,882 --> 00:48:51,742
+So that's pretty much it.
+
+475
+00:48:52,522 --> 00:48:53,743
+A couple of people I want to thank.
+
+476
+00:48:54,483 --> 00:48:59,084
+Cody Ritchie, who was there since the beginning, had a lot of foundational idea.
+
+477
+00:48:59,204 --> 00:49:01,344
+Matthew Gandel made this possible also.
+
+478
+00:49:02,204 --> 00:49:05,645
+My family, they saw me disappear for a month making these slides.
+
+479
+00:49:06,545 --> 00:49:16,128
+And my team, obviously, Train, Tools, Jean, Vadim, and Sean, the whole procedural team, and the studios, obviously, that dared to follow us in this crazy adventure.
+
+480
+00:49:19,741 --> 00:49:20,062
+That's it.
+
+481
+00:49:20,742 --> 00:49:24,428
+I have a small farewell outro that I'm going to run now.
+
+482
+00:49:56,530 --> 00:49:57,591
+Thank you all for coming.
+
+483
+00:49:57,611 --> 00:49:59,572
+I appreciate it.
+
+484
+00:50:07,195 --> 00:50:14,619
+And we have time for a little Q&A, if there are questions, hot takes, anything.
+
+485
+00:50:24,584 --> 00:50:24,785
+Hello.
+
+486
+00:50:27,563 --> 00:50:28,023
+Oh, hello.
+
+487
+00:50:28,324 --> 00:50:28,504
+Hi.
+
+488
+00:50:29,365 --> 00:50:30,826
+Yeah, thank you for the five course meal.
+
+489
+00:50:30,866 --> 00:50:31,606
+It was delicious.
+
+490
+00:50:32,847 --> 00:50:39,473
+I had a question regarding customization of the pipeline procedural tools relative to different studios.
+
+491
+00:50:40,113 --> 00:50:48,360
+So different studios have different requirements where you have like PGA, they probably want really high level of quality for individual texel like tiles and
+
+492
+00:50:48,880 --> 00:50:51,923
+probably large tile sizes or something, versus Battlefield.
+
+493
+00:50:52,424 --> 00:50:57,208
+How customizable are those macro parameters for the toolset?
+
+494
+00:50:57,228 --> 00:51:00,712
+Yeah, so there's one answer to that.
+
+495
+00:51:00,772 --> 00:51:03,915
+If you're talking about like resolution specifically, maybe not.
+
+496
+00:51:04,535 --> 00:51:07,158
+Tile size, resolution, textual density, all those.
+
+497
+00:51:10,080 --> 00:51:17,683
+briefly about it, but like our tile resolution is, so all tiles have the same pixel size, but they're laid out on a quadtree.
+
+498
+00:51:18,324 --> 00:51:25,987
+And you can just refine that quadtree, not infinitely of course, but like to maybe something like eight samples per meter.
+
+499
+00:51:27,447 --> 00:51:34,450
+Typically what game team do is that they have a sort of a resolution that goes lower with distance.
+
+500
+00:51:36,772 --> 00:51:36,932
+Thanks.
+
+501
+00:51:46,973 --> 00:51:47,494
+Quick question.
+
+502
+00:51:48,254 --> 00:51:58,520
+When you guys are bringing in the effects layers or overlay filters for the artists, like erosion and flow and stuff like that, what's the level of effort and how long does it take?
+
+503
+00:51:58,781 --> 00:52:07,426
+Like if an artist comes to you guys and says, I want like sun direction or something like that, or like, is it a huge effort for you guys to pull in those filters or?
+
+504
+00:52:08,206 --> 00:52:09,347
+Not really, actually.
+
+505
+00:52:10,928 --> 00:52:26,141
+No, it probably... I mean, it's really using our runtime tech, so it's as quick as making a shader, which is probably around half a day, I would say, but obviously it depends on the effect, but half a day is a typical time I've seen to come up with a new shader.
+
+506
+00:52:28,583 --> 00:52:38,210
+They were all made by one of our tech artists, like all the ones in the default library, and he always comes up with new ones, and so the response time...
+
+507
+00:52:39,414 --> 00:52:40,335
+Pretty quick, I would say.
+
+508
+00:52:40,755 --> 00:52:44,777
+So how many of those effects layers would you guys have or filters to choose from?
+
+509
+00:52:45,717 --> 00:52:46,898
+Oh, the presets?
+
+510
+00:52:47,058 --> 00:52:47,298
+Yeah.
+
+511
+00:52:47,618 --> 00:52:51,521
+I would say, like, I would say 30 maybe.
+
+512
+00:52:51,761 --> 00:52:52,381
+Okay.
+
+513
+00:52:52,501 --> 00:52:57,144
+Probably not as much as a fully dedicated, like, procedural terrain DCC.
+
+514
+00:52:57,844 --> 00:52:59,025
+We're not there yet.
+
+515
+00:52:59,185 --> 00:53:03,307
+Like, erosion is not, like, on par with the high end, I would say.
+
+516
+00:53:04,628 --> 00:53:04,968
+But that's
+
+517
+00:53:05,268 --> 00:53:07,430
+Not where the value is.
+
+518
+00:53:08,090 --> 00:53:11,492
+I mean, there would be obviously value in having top-notch erosion.
+
+519
+00:53:11,712 --> 00:53:12,773
+We're working on it, actually.
+
+520
+00:53:13,233 --> 00:53:22,340
+But where the value is, it's iterating with objects and things like that, like level design, not your foundational height field.
+
+521
+00:53:22,600 --> 00:53:22,680
+Hi.
+
+522
+00:53:22,700 --> 00:53:29,504
+Whoa, that's a lot louder than I thought it'd be.
+
+523
+00:53:30,859 --> 00:53:33,060
+Hi, I'm Sasha Chacon from Venn Studio.
+
+524
+00:53:33,500 --> 00:53:39,404
+I have a question on kind of the initial setup of this process.
+
+525
+00:53:39,464 --> 00:53:53,071
+So you said that you maybe were considering Houdini and setting up these tools beforehand, but then decided to switch entirely to doing it all in-house on your own homebrew engine.
+
+526
+00:53:54,011 --> 00:53:55,172
+Yes, I got this right?
+
+527
+00:53:55,872 --> 00:53:56,573
+Well, we didn't.
+
+528
+00:53:57,789 --> 00:54:02,712
+What I said is like, this would be one way, typical way to go, like using Houdini, of course.
+
+529
+00:54:05,213 --> 00:54:08,355
+But we really wanted this sort of live feedback experience.
+
+530
+00:54:08,995 --> 00:54:12,437
+So it wasn't really a hesitation at first, you know.
+
+531
+00:54:14,378 --> 00:54:14,558
+Okay.
+
+532
+00:54:15,079 --> 00:54:21,082
+But you did like most of your tools, like you built them inside your engine.
+
+533
+00:54:23,587 --> 00:54:23,888
+session.
+
+534
+00:54:36,175 --> 00:54:46,082
+Where did the tool generation come in when the programmers potentially might have had made those nodes?
+
+535
+00:54:46,482 --> 00:54:49,624
+Did you have them at the ready, or did you have to go back and forth between them?
+
+536
+00:54:49,904 --> 00:54:56,609
+So the nodes, to be clear, the nodes were, first of all, not the most time expensive thing to code.
+
+537
+00:54:56,729 --> 00:54:57,590
+Really not, actually.
+
+538
+00:54:57,810 --> 00:55:00,852
+Because again, we're using the runtime shader node tech.
+
+539
+00:55:01,472 --> 00:55:04,434
+And the nodes were not made by programmers, they were made by
+
+540
+00:55:05,575 --> 00:55:07,196
+mostly one tech artist, honestly.
+
+541
+00:55:08,097 --> 00:55:14,220
+And so, yeah, that was really not the most complicated part.
+
+542
+00:55:14,260 --> 00:55:21,645
+The most complicated part was the sort of inter-process, you know, navigation, like having this an external process.
+
+543
+00:55:22,445 --> 00:55:27,128
+And then we were kind of outliers being on the tool side, using rendering side.
+
+544
+00:55:27,168 --> 00:55:32,952
+So that was where most of the friction was, not creating the effects themselves, honestly.
+
+545
+00:55:34,053 --> 00:55:41,160
+Obviously some are more harder, like water simulation and things like that, but even those would be maybe five days, I don't know.
+
+546
+00:55:43,043 --> 00:55:50,050
+Again, we're talking about maybe 30 effects, so overall that's not where the battle was.
+
+547
+00:55:54,781 --> 00:55:54,961
+a lot
+
+548
+00:56:10,859 --> 00:56:13,640
+Yeah, no, good question.
+
+549
+00:56:14,160 --> 00:56:15,901
+But again, we're not abandoning it.
+
+550
+00:56:16,481 --> 00:56:29,907
+What I mean is, it's still, Turing data is still there for grabs for Houdini, for example, and in some levels, I had to cut some slides, but some levels have Houdini setups, like the last one I've shown,
+
+551
+00:56:32,048 --> 00:56:50,529
+the height field to generate flow spline decals, roads, and Houdini is still involved in a lot of places, but we just sort of grabbed one aspect that is usually made through Houdini and we brought it back for, yeah, all the reasons I said earlier.
+
+552
+00:56:51,690 --> 00:56:52,571
+Okay, cool.
+
+553
+00:56:52,751 --> 00:56:53,051
+Thank you.
+
+554
+00:56:54,721 --> 00:56:54,981
+Hello.
+
+555
+00:56:55,961 --> 00:57:05,745
+Regarding the 1% or 15% case of people that had to do manual modifications to something after using the procedural tools, how did that affect the procedural workflow?
+
+556
+00:57:06,005 --> 00:57:10,107
+Did their manual changes get blown away if they needed to make more procedural changes, or what happened?
+
+557
+00:57:10,587 --> 00:57:11,968
+No, because that's the thing.
+
+558
+00:57:12,969 --> 00:57:19,333
+They always had this topmost overlay that is called like artist input or something like that.
+
+559
+00:57:19,673 --> 00:57:22,615
+And that's where the changes, the manual changes were done.
+
+560
+00:57:22,955 --> 00:57:25,917
+So that's the whole point, actually, of being non-destructive.
+
+561
+00:57:25,977 --> 00:57:36,304
+Because if you changed whatever, like your auto paint shader, touch ups would still be there and only affect those areas.
+
+562
+00:57:36,324 --> 00:57:39,767
+You paint manually, all the rest was still free to move.
+
+563
+00:57:41,648 --> 00:57:41,908
+Thank you.
+
+564
+00:57:44,030 --> 00:57:45,171
+Hi there.
+
+565
+00:57:45,211 --> 00:57:45,731
+Thanks for the talk.
+
+566
+00:57:46,031 --> 00:57:46,512
+It was great.
+
+567
+00:57:46,832 --> 00:57:52,356
+I'm wondering, you know, it sounds like you have a lot of overlays and a lot of textures, a lot of materials on top of that.
+
+568
+00:57:53,777 --> 00:57:55,498
+Where do those fit in memory?
+
+569
+00:57:55,578 --> 00:57:58,561
+How do you deal with those both in the editor and in runtime?
+
+570
+00:57:59,061 --> 00:58:01,003
+Like, how do you manage all that?
+
+571
+00:58:01,423 --> 00:58:04,605
+I'm sure you can't go into detail, but just curious, like, what are some strategies?
+
+572
+00:58:07,647 --> 00:58:08,731
+It all just works.
+
+573
+00:58:11,539 --> 00:58:13,300
+No, seriously, I mean, uh, okay.
+
+574
+00:58:13,460 --> 00:58:15,521
+So just like throw it all at the GPU and sit off.
+
+575
+00:58:15,841 --> 00:58:16,341
+No, no, no.
+
+576
+00:58:16,361 --> 00:58:16,581
+Okay.
+
+577
+00:58:16,621 --> 00:58:16,941
+Good.
+
+578
+00:58:16,961 --> 00:58:17,181
+Good.
+
+579
+00:58:17,202 --> 00:58:17,342
+Good.
+
+580
+00:58:17,602 --> 00:58:17,822
+Okay.
+
+581
+00:58:17,982 --> 00:58:18,242
+Yeah.
+
+582
+00:58:18,442 --> 00:58:23,764
+So in that, from that angle, no, obviously it's not, not all on the GPU.
+
+583
+00:58:24,044 --> 00:58:24,185
+Yeah.
+
+584
+00:58:24,225 --> 00:58:24,345
+Yeah.
+
+585
+00:58:24,385 --> 00:58:31,988
+So we have a pool, you know, a budget on GPU and like if you're brushing like those style around where you're brushing will stay on the GPU.
+
+586
+00:58:32,048 --> 00:58:38,191
+But if you move around and you're brushing everywhere, uh, we, we, we noticed we're missing some tiles and we,
+
+587
+00:58:39,091 --> 00:58:40,373
+remove some from the GPU.
+
+588
+00:58:40,493 --> 00:58:41,935
+It's kind of that simple.
+
+589
+00:58:42,516 --> 00:58:42,736
+I see.
+
+590
+00:58:42,917 --> 00:58:49,526
+So, so like what's in memory typically, like when you're not editing is just the last layer, like the final kind of compressed layer.
+
+591
+00:58:49,626 --> 00:58:54,473
+Is that like how it usually, or a few layers and the source materials are kind of
+
+592
+00:58:55,333 --> 00:58:55,893
+Not in memory?
+
+593
+00:58:56,874 --> 00:59:14,338
+Okay, so all the paintable tiles need to be in GPU memory, but the non-paintable overlays like auto-paint and effects, these are all sort of, you know, done just in time in that update service we have, and they're ephemeral, is that a word?
+
+594
+00:59:14,918 --> 00:59:15,738
+Ephemeral, yeah.
+
+595
+00:59:15,798 --> 00:59:20,840
+So they, you know, but the paintable ones need to be in GPU because they're controlled from the editor.
+
+596
+00:59:23,841 --> 00:59:28,085
+And we actually want to move this to that service.
+
+597
+00:59:28,165 --> 00:59:30,027
+They don't really need to be in the editor.
+
+598
+00:59:30,347 --> 00:59:39,056
+The brushing happens in the editor, but that's just a legacy thing, honestly, because we would want the brushing to be fully done on the GPU in that service.
+
+599
+00:59:39,916 --> 00:59:41,358
+But we didn't have time yet.
+
+600
+00:59:41,378 --> 00:59:42,279
+All right.
+
+601
+00:59:42,439 --> 00:59:42,699
+Thank you.
+
+602
+00:59:44,441 --> 00:59:44,881
+Hey, thank you.
+
+603
+00:59:44,921 --> 00:59:45,322
+Great talk.
+
+604
+00:59:46,242 --> 00:59:46,723
+I'm curious.
+
+605
+00:59:48,416 --> 00:59:56,551
+on the resources on the GPU and then the external process is able to access the same resources to avoid duplication.
+
+606
+00:59:57,372 --> 00:59:59,476
+Could you explain more about the technology that allows this?
+
+607
+00:59:59,781 --> 01:00:04,902
+So there is such a thing as GPU shared memory like at the OS level that exists.
+
+608
+01:00:06,183 --> 01:00:21,146
+I had to Google it five years ago and we actually stress it so much that they had to fix bugs in the drivers because we're like, you're brushing and it's like, and that's basically it, you know?
+
+609
+01:00:22,007 --> 01:00:26,788
+So again, like we upload what needs to be in the GPU memory only and that is
+
+610
+01:00:27,668 --> 01:00:28,508
+Thank you.
+
+611
+01:00:44,760 --> 01:00:45,461
+Final question here.
+
+612
+01:00:46,302 --> 01:00:54,949
+So you mentioned the use of satellite imagery to some extent within Frostbite and this emphasis on hyper-realism, these beautiful scenes that look so real.
+
+613
+01:00:55,970 --> 01:01:03,316
+I wonder to what extent you've used geospatial data within your own workflows to create scenes to make more realistic ones.
+
+614
+01:01:03,336 --> 01:01:03,877
+Good question.
+
+615
+01:01:05,598 --> 01:01:14,689
+The interesting thing about Battlefield, for example, I mentioned PGA Sport was LiDAR data, so that is easily explained.
+
+616
+01:01:15,290 --> 01:01:22,799
+Battlefield, they were a bit freer in terms of what they could experiment with, so some maps are based from...
+
+617
+01:01:25,021 --> 01:01:45,260
+I'm a programmer, I'm not a tech artist, so this is just my best, not my best guess because I know a bit about it, but some maps were made using, like the last one I've shown, a bit of satellite data, photogrammetry, and LiDAR, I don't know, I'm sorry.
+
+618
+01:01:46,361 --> 01:01:50,383
+but they had really varied approaches.
+
+619
+01:01:50,463 --> 01:02:03,907
+There's not one, I think they're actually coming up with probably a more unified approach as they learn the tools, but for Kingston it was different setups per level.
+
+620
+01:02:09,610 --> 01:02:10,670
+Okay, thank you very much.
+
