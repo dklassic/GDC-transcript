@@ -1,0 +1,3148 @@
+1
+00:00:06,220 --> 00:00:09,141
+Hello everybody, this is Overwatch Gameplay Architecture and Netcode.
+
+2
+00:00:09,741 --> 00:00:10,782
+Standard rules apply.
+
+3
+00:00:11,362 --> 00:00:12,162
+Silence your phones.
+
+4
+00:00:13,242 --> 00:00:14,783
+Fill out the session feedback form.
+
+5
+00:00:15,743 --> 00:00:17,284
+Switch off Hanzo and get on the fucking payload.
+
+6
+00:00:18,244 --> 00:00:21,105
+My name's Tim Ford, I'm the lead gameplay programmer on Overwatch.
+
+7
+00:00:21,585 --> 00:00:25,407
+I've worked on Overwatch in that capacity since its inception in the summer of 2013.
+
+8
+00:00:25,467 --> 00:00:26,567
+Before that I worked on Titan.
+
+9
+00:00:27,047 --> 00:00:29,268
+This talk is not about Titan.
+
+10
+00:00:30,882 --> 00:00:36,864
+The goal of this talk is to share some techniques for reducing complexity in an ever-growing code base.
+
+11
+00:00:37,504 --> 00:00:40,265
+We achieve this goal by adhering to a strict architecture.
+
+12
+00:00:41,225 --> 00:00:47,467
+Finally, we'll demonstrate an example of managing complexity by talking about an intrinsically complex problem, netcode.
+
+13
+00:00:48,748 --> 00:00:53,869
+Overwatch, for those of you who aren't familiar with the game, is a team-based online hero shooter set in the near future.
+
+14
+00:00:54,629 --> 00:00:59,751
+It features a diverse cast of heroes, each with their own unique, over-the-top abilities.
+
+15
+00:01:02,338 --> 00:01:08,743
+Overwatch uses what is called an entity component system architecture, which I will say and mumble as ECS from here on out.
+
+16
+00:01:09,403 --> 00:01:17,909
+ECS is different from the component model popular in several off-the-shelf engines and much different from the classic actor model that dominated the late 90s and early 2000s.
+
+17
+00:01:18,950 --> 00:01:25,074
+Our team had several years of experience with these other architectures, so choosing ECS instead was a bit of a grass is greener move.
+
+18
+00:01:26,075 --> 00:01:29,817
+We did audit a prototype first, so the decision wasn't entirely emotional.
+
+19
+00:01:30,765 --> 00:01:38,278
+That said, the idea that ECS architectures can manage complexity on a quickly growing code base was discovered over three years of development.
+
+20
+00:01:38,658 --> 00:01:44,148
+I'm happy to espouse ECS's virtues, but know that I do so today with the clarity of hindsight.
+
+21
+00:01:45,776 --> 00:01:48,437
+The canonical ECS architecture looks like this.
+
+22
+00:01:48,797 --> 00:01:52,957
+You have a world, and it is simply a collection of systems and entities.
+
+23
+00:01:53,798 --> 00:01:57,258
+An entity is really just an ID that corresponds to a collection of components.
+
+24
+00:01:57,838 --> 00:02:00,479
+Components store game state and have no behaviors.
+
+25
+00:02:01,419 --> 00:02:03,980
+Systems have behaviors and store no game state.
+
+26
+00:02:04,200 --> 00:02:05,160
+Here's the shocking thing.
+
+27
+00:02:05,200 --> 00:02:11,261
+When I say they have behaviors, components have no functions, and systems have no fields.
+
+28
+00:02:14,849 --> 00:02:19,993
+Here are the systems and components of a simple ECS engine that we archetyped.
+
+29
+00:02:20,594 --> 00:02:21,274
+This is what it looks like.
+
+30
+00:02:21,754 --> 00:02:24,576
+On the left-hand side here you can see the systems in tick order.
+
+31
+00:02:24,997 --> 00:02:27,158
+These are the different components that different entities have.
+
+32
+00:02:28,039 --> 00:02:33,323
+The components lighting up on the right like chords of a piano refer to what we call tuples of components.
+
+33
+00:02:33,983 --> 00:02:35,544
+The system tick iterates through the tuples.
+
+34
+00:02:36,585 --> 00:02:38,907
+and performs operation, that's the behavior, on their state.
+
+35
+00:02:39,448 --> 00:02:40,949
+Remember, the components have no functions.
+
+36
+00:02:41,489 --> 00:02:42,490
+Their state is laid bare.
+
+37
+00:02:42,930 --> 00:02:45,753
+The overwhelming majority of systems care about more than one component.
+
+38
+00:02:45,773 --> 00:02:48,015
+You can see here transform component's pretty popular.
+
+39
+00:02:50,396 --> 00:02:53,639
+Here's an example of what a system tick looks like from our prototype engine.
+
+40
+00:02:54,220 --> 00:02:55,381
+This is the physics system tick.
+
+41
+00:02:56,530 --> 00:03:03,913
+Pretty straightforward, you basically have an internal underlying physics update, could be Havok, could be Box2D, or Domino, which is our proprietary physics engine.
+
+42
+00:03:05,493 --> 00:03:19,658
+After you run the world sim, the physics world sim, you iterate over a set of tuples, you use whatever proxy was stored in this dynamic physics component to pull out the underlying physics representation, and you copy it across to the transform and contact components.
+
+43
+00:03:23,720 --> 00:03:25,961
+A system has no idea what each entity is.
+
+44
+00:03:26,261 --> 00:03:32,142
+It only cares about a tiny slice of the components and executes a set of behaviors common to that slice of components.
+
+45
+00:03:32,523 --> 00:03:34,723
+Some entities might have 30 components, some might have two or three.
+
+46
+00:03:35,003 --> 00:03:35,984
+The systems don't really care.
+
+47
+00:03:36,024 --> 00:03:39,705
+They just care about the subset of components on which their behavior operates.
+
+48
+00:03:40,185 --> 00:03:45,126
+So here in our prototype engine, this is an entity that's the player character that can do a bunch of cool behaviors.
+
+49
+00:03:45,846 --> 00:03:47,507
+This is like a bullet that the player can shoot.
+
+50
+00:03:49,867 --> 00:03:53,431
+Each of the systems as they run don't know or care what those entities are.
+
+51
+00:03:53,511 --> 00:03:56,033
+They just operate on the subset of components that are relevant to them.
+
+52
+00:04:00,458 --> 00:04:02,560
+Overwatch's implementation looks like this, mostly.
+
+53
+00:04:03,741 --> 00:04:05,904
+The world is something we call the entity admin.
+
+54
+00:04:06,424 --> 00:04:11,810
+It stores an array of systems and a hash map of entities that are keyed by entity ID.
+
+55
+00:04:13,749 --> 00:04:18,190
+The entity ID is just an unsigned 32 that uniquely identifies this entity in the entity admin array.
+
+56
+00:04:20,071 --> 00:04:27,273
+The entity stores that entity ID in this optional resource handle that points back to the asset, what we call the entity definition, that defines that entity.
+
+57
+00:04:29,273 --> 00:04:32,194
+Component is simply a base class with hundreds of subclasses.
+
+58
+00:04:33,155 --> 00:04:37,936
+Each subclass component has member variables required for the behaviors that will be run against it from systems.
+
+59
+00:04:39,295 --> 00:04:42,098
+Polymorphism is used almost exclusively for lifetime.
+
+60
+00:04:42,138 --> 00:04:45,102
+We override the create function and the destructor, but that's pretty much it.
+
+61
+00:04:45,462 --> 00:04:54,332
+The only other functions that might make their way into an actual instantiation of a component would be little helper functions that make accessing its internal state easier, but they aren't really behaviors.
+
+62
+00:04:54,352 --> 00:04:55,434
+These are just simple accessors.
+
+63
+00:04:59,246 --> 00:05:03,630
+So the entity admin is going to call update on every single system, and then each system, they're going to do some stuff.
+
+64
+00:05:03,671 --> 00:05:10,197
+So here, the way we work, instead of operating over these fixed tuples of components, we choose like a primary component we're going to iterate over.
+
+65
+00:05:12,259 --> 00:05:16,023
+And then our behavior invariably is going to involve other components, we grab them through a sibling.
+
+66
+00:05:16,123 --> 00:05:21,709
+So here, some system operates on tuples of entities that have the derp component and the herp component.
+
+67
+00:05:25,731 --> 00:05:28,354
+The Overwatch client system and component breakdown looks like this.
+
+68
+00:05:28,935 --> 00:05:31,778
+Here we show about 46 different systems and 103 component types.
+
+69
+00:05:32,358 --> 00:05:33,820
+This is just designed to impress you.
+
+70
+00:05:37,165 --> 00:05:42,907
+This is the server, and you can see some systems operate on a lot of components, some systems operate on very few.
+
+71
+00:05:43,367 --> 00:05:51,289
+Ideally, we try to make sure that systems that work on lots of components do so by reading them as pure functions as opposed to mutating all those things.
+
+72
+00:05:51,689 --> 00:05:57,331
+There are a handful of systems that do need to mutate a lot of those components, and by virtue of that, they have to kind of manage that complexity themselves.
+
+73
+00:05:59,551 --> 00:06:01,272
+Here's an example of what a system actually looks like.
+
+74
+00:06:01,312 --> 00:06:02,672
+This is the player connection system.
+
+75
+00:06:03,012 --> 00:06:06,934
+It's responsible for enforcing AFK behavior on all of our game servers.
+
+76
+00:06:07,494 --> 00:06:09,335
+The system iterates over connection components.
+
+77
+00:06:09,815 --> 00:06:12,996
+Connection is the component that corresponds to the player network connection on the server.
+
+78
+00:06:13,637 --> 00:06:16,058
+It exists on the entity that represents the player.
+
+79
+00:06:16,698 --> 00:06:21,040
+The entity itself could be an active game participant, could be a spectator, or some other player-controlled role.
+
+80
+00:06:21,420 --> 00:06:22,720
+This system doesn't know or care.
+
+81
+00:06:22,860 --> 00:06:24,061
+Its job is just to enforce AFK.
+
+82
+00:06:25,478 --> 00:06:29,622
+For each connection component, here's our tuple, connection component that has an input stream and a stats.
+
+83
+00:06:30,523 --> 00:06:37,569
+We're going to read your input stream, make sure you did something, you pressed a button, read your stats component, make sure you contributed to the game in some sort of way.
+
+84
+00:06:37,869 --> 00:06:39,571
+As long as you do that, we'll reset your AFK timer.
+
+85
+00:06:40,071 --> 00:06:46,117
+Otherwise, we will use the connection handle, that state stored on the connection component, to send you a message to move.
+
+86
+00:06:50,902 --> 00:06:56,185
+So in order for this behavior to run, an entity that's going to be cast against the system must have the entire tuple.
+
+87
+00:06:56,905 --> 00:07:02,207
+For example, an AI bot has a stats component, but it doesn't have a connection component or an input stream.
+
+88
+00:07:02,247 --> 00:07:03,828
+So it's not going to be subject to this behavior.
+
+89
+00:07:03,928 --> 00:07:07,330
+Again, the system behaviors look at those slices, and you must have the whole set.
+
+90
+00:07:09,351 --> 00:07:11,092
+And if we AFKed out AI, that'd be kind of wasteful.
+
+91
+00:07:11,692 --> 00:07:12,172
+Let's be honest.
+
+92
+00:07:13,393 --> 00:07:15,594
+OK, so the system update function raises this question.
+
+93
+00:07:15,634 --> 00:07:20,136
+So why not just do a traditional object-oriented programming component model update?
+
+94
+00:07:20,816 --> 00:07:25,179
+have the connection component override a virtual update function that does all the AFK tracking.
+
+95
+00:07:25,839 --> 00:07:27,801
+Well, connection fulfills multiple behaviors.
+
+96
+00:07:28,121 --> 00:07:30,122
+It corresponds to the subject of an AFK.
+
+97
+00:07:30,703 --> 00:07:34,465
+It corresponds to the list of connected players who are subject to a broadcasted network message.
+
+98
+00:07:34,826 --> 00:07:36,987
+It stores the state by which you determine a player's name.
+
+99
+00:07:37,347 --> 00:07:41,070
+It stores the state by which you can get, like, a player's persistence record, see what unlocks they have.
+
+100
+00:07:41,830 --> 00:07:44,152
+So which behaviors should be in that component's update?
+
+101
+00:07:44,352 --> 00:07:45,213
+Where would you put the rest?
+
+102
+00:07:46,133 --> 00:07:52,358
+In object-oriented programming, a class is both behavior and state, but connection component is not a behavior, it's only state.
+
+103
+00:07:52,858 --> 00:07:55,540
+Connection's not an object in the object-oriented programming sense.
+
+104
+00:07:55,840 --> 00:07:58,622
+It means different things to different systems at different times.
+
+105
+00:07:59,603 --> 00:08:03,326
+So what are the conceptual advantages of the separation between behavior and state?
+
+106
+00:08:03,986 --> 00:08:04,787
+Bear with me for a sec.
+
+107
+00:08:04,847 --> 00:08:09,170
+So, imagine these are the cherry blossoms in your front yard.
+
+108
+00:08:10,251 --> 00:08:14,154
+These trees in your front yard mean something subjectively different to you
+
+109
+00:08:15,285 --> 00:08:20,850
+The President of your HOA, a gardener, a bird, a property tax assessor, and a termite.
+
+110
+00:08:21,270 --> 00:08:26,014
+Each observer sees different behavior in the state that describes that tree.
+
+111
+00:08:26,615 --> 00:08:30,779
+That is, the tree is a subject that is dealt with differently by various observers.
+
+112
+00:08:31,199 --> 00:08:38,926
+To complete the analogy, the player entity, and more specifically the connection component therein, is a subject that is dealt with differently by various systems.
+
+113
+00:08:39,386 --> 00:08:43,149
+The player connection system that we saw before views connection as the subject of an AFK kick.
+
+114
+00:08:43,529 --> 00:08:47,512
+The connection util views connection as the subject of a broadcaster player's network message.
+
+115
+00:08:47,832 --> 00:08:54,577
+On the client, the UX game system views connection as the subject that populates the UI element on the scoreboard with the player's name.
+
+116
+00:08:55,678 --> 00:08:57,039
+Why author behaviors this way?
+
+117
+00:08:57,719 --> 00:09:06,546
+It turns out it's much easier to describe all the behaviors of a tree when you compartmentalize individual behaviors by their subjective perceptions, and this is also true of game objects.
+
+118
+00:09:08,305 --> 00:09:13,507
+Anyway, as we dug out our industrial strength ECS architecture, we ran into a couple problems.
+
+119
+00:09:13,948 --> 00:09:18,310
+First, we struggled with this rule that components have no functions and systems have no state.
+
+120
+00:09:18,810 --> 00:09:20,971
+Surely systems can have just a little bit of state, right?
+
+121
+00:09:21,771 --> 00:09:27,614
+A few legacy systems were ported over to Overwatch from other non-ECS architectures.
+
+122
+00:09:28,234 --> 00:09:30,035
+They had member variables, so what's wrong with that?
+
+123
+00:09:30,075 --> 00:09:31,096
+For example, the input system.
+
+124
+00:09:32,895 --> 00:09:38,699
+You can store the input state in the input system, and any system that needs to know if a button is pressed can just grab a pointer to the input system and ask.
+
+125
+00:09:39,139 --> 00:09:42,362
+It seems silly to store global input in a single component.
+
+126
+00:09:44,223 --> 00:09:47,705
+Surely there should be more than one instance of a component if you're going to make a new component type.
+
+127
+00:09:48,826 --> 00:09:51,908
+There's no need in order to substantiate writing that code.
+
+128
+00:09:53,850 --> 00:09:56,512
+Components are usually accessed through these iterators, like we saw before.
+
+129
+00:09:56,552 --> 00:10:00,695
+It's kind of bizarre to iterate over a component whose domain is exactly one.
+
+130
+00:10:01,852 --> 00:10:02,672
+Anyway, this worked for a while.
+
+131
+00:10:03,293 --> 00:10:06,534
+We stored this one-off state in systems and then made global accessors.
+
+132
+00:10:06,554 --> 00:10:12,157
+You can see here this global variable accessing the system that one system could call from another.
+
+133
+00:10:12,797 --> 00:10:17,199
+It was kind of crummy for compile times because the systems were being included, right, in other systems.
+
+134
+00:10:17,999 --> 00:10:21,921
+Let's say I was refactoring input system and moving some functions around and modifying that header.
+
+135
+00:10:22,001 --> 00:10:25,883
+Well, now every single system that needed to get that state was going to get recompiled, and that's just annoying.
+
+136
+00:10:27,577 --> 00:10:28,718
+Also made of a bunch of coupling.
+
+137
+00:10:28,798 --> 00:10:30,919
+You have systems behavior leaking into other systems.
+
+138
+00:10:30,959 --> 00:10:35,601
+So here we have this post build player command that the input system is responsible for doing.
+
+139
+00:10:36,101 --> 00:10:46,586
+If I needed to add new stuff to this function call, this command system's job is to fill out this struct with a bunch of bits based on player input that'll be sent up to the server.
+
+140
+00:10:47,246 --> 00:10:51,588
+If I want to extend that, add new things, do I add it to the command system or do I add it to this funky little function over here?
+
+141
+00:10:52,833 --> 00:10:55,854
+Are we leaking behaviors from command system into other systems?
+
+142
+00:10:56,794 --> 00:11:00,014
+As the systems grow naturally, choosing where to author the behavior becomes ambiguous.
+
+143
+00:11:00,874 --> 00:11:04,835
+Here, the command system's behavior fills out those structs, so why mix it?
+
+144
+00:11:04,855 --> 00:11:05,955
+Why put it in one system or the other?
+
+145
+00:11:06,455 --> 00:11:10,076
+Anyway, we did this this way for a while, and it worked decent until Killcam.
+
+146
+00:11:12,596 --> 00:11:19,418
+All right, so Killcam, we're going to have two different simulation environments, one the live game and one the Killcam.
+
+147
+00:11:19,478 --> 00:11:21,578
+I'll show you how that works.
+
+148
+00:11:22,500 --> 00:11:25,181
+It's pretty straightforward, you add a second pristine ECS world.
+
+149
+00:11:26,941 --> 00:11:28,762
+One for the live game and one for the replay.
+
+150
+00:11:29,462 --> 00:11:34,063
+The way the replay works is the server's going to send down a big, fat network stream of 8 to 12 seconds.
+
+151
+00:11:34,823 --> 00:11:40,405
+Then we're going to spin up and point to start render the replay admin and give it that network stream as if it came off the wire.
+
+152
+00:11:40,765 --> 00:11:45,746
+And that all those systems, all those components, all those behaviors don't know that they're not being predicted on that client.
+
+153
+00:11:45,766 --> 00:11:48,407
+They're just running the network stream as if it was normal gameplay.
+
+154
+00:11:49,047 --> 00:11:49,467
+It's kind of cool.
+
+155
+00:11:49,608 --> 00:11:54,709
+If you guys want to learn more about this, I suggest going to Phil Orwick's talk tomorrow, I believe, in this room at 11 o'clock.
+
+156
+00:11:56,987 --> 00:12:01,891
+Anyway, what we learned after doing that was all these call sites where we had these globally accessed systems were suddenly wrong.
+
+157
+00:12:02,452 --> 00:12:04,974
+There wasn't a single global entity admin anymore, there were two.
+
+158
+00:12:05,814 --> 00:12:10,899
+System A couldn't grab the global system B, it now had to grab system B through their shared entity admin somehow, and that's just icky.
+
+159
+00:12:11,279 --> 00:12:19,806
+Well, after Killcam, we took a long look in the mirror, and between the bizarre access patterns, the compile overhead, and most dangerously, this inter-system coupling, we had a problem.
+
+160
+00:12:22,551 --> 00:12:29,847
+The solution was to come to terms with the fact that it's okay to define a component type that will only ever have one instance per entity admin.
+
+161
+00:12:30,448 --> 00:12:32,693
+We created this notion of singleton components.
+
+162
+00:12:34,144 --> 00:12:39,586
+These are components that live on an anonymous single entity and are usually accessed directly through the entity admin.
+
+163
+00:12:40,227 --> 00:12:43,188
+We moved most of the state that was in systems into these singletons.
+
+164
+00:12:43,868 --> 00:12:48,350
+I should mention that it's very rare for a singleton state to be accessed by exactly one system.
+
+165
+00:12:48,610 --> 00:12:53,292
+Moving forward, we got in this habit where we would write a new system and realize that system was begging for some state.
+
+166
+00:12:53,532 --> 00:12:56,814
+We would go ahead and make a singleton for that system to store that state in.
+
+167
+00:12:57,194 --> 00:12:59,895
+And almost every single time, some other system was going to want that state.
+
+168
+00:12:59,955 --> 00:13:01,516
+So it really got ahead of this kind of
+
+169
+00:13:01,696 --> 00:13:04,437
+of intrinsic coupling that the previous architecture was demonstrating.
+
+170
+00:13:06,879 --> 00:13:08,079
+Here's an example, singleton input.
+
+171
+00:13:09,800 --> 00:13:12,702
+All the button press information is stored into that singleton input.
+
+172
+00:13:12,722 --> 00:13:13,962
+We just moved it out of the input system.
+
+173
+00:13:14,583 --> 00:13:18,665
+Any system that wants to know whether a button's up or down just grabs that component and asks.
+
+174
+00:13:19,345 --> 00:13:23,727
+This immediately removes some nasty coupling and aligned us more with the ECS philosophy.
+
+175
+00:13:24,488 --> 00:13:27,009
+Systems have no state and components have no behavior.
+
+176
+00:13:29,082 --> 00:13:30,363
+The button state is not behavior.
+
+177
+00:13:30,703 --> 00:13:35,806
+The local player movement system has a behavior that it uses this singleton to predict local player movement.
+
+178
+00:13:36,126 --> 00:13:40,069
+The movement state system has a behavior that packages this input up to the server to be consumed.
+
+179
+00:13:40,689 --> 00:13:45,792
+The pattern of singletons turned out to be so common that about 40% of our components are actually singleton components.
+
+180
+00:13:47,799 --> 00:13:55,583
+Once we move some system state into singletons, we address a bit more coupling by breaking out shared system functions into utility functions that operate on those singletons.
+
+181
+00:13:55,603 --> 00:13:56,384
+We'll talk about that next.
+
+182
+00:13:57,124 --> 00:13:58,565
+The input system still exists.
+
+183
+00:13:58,985 --> 00:14:02,807
+It's responsible for reading input from the OS and filling out singleton input.
+
+184
+00:14:03,387 --> 00:14:05,969
+And then other systems downstream can just read singleton input to do what they need to do.
+
+185
+00:14:06,989 --> 00:14:14,013
+It's responsible for other stuff like applying the button bindings, the per hero button settings, but it's no longer coupled at all with the command system.
+
+186
+00:14:14,613 --> 00:14:19,396
+We also moved this little post build player command function into command system, that's where it really belonged anyway.
+
+187
+00:14:20,237 --> 00:14:27,561
+And now you can guarantee that all of the mutations to player command, this important structure that'll be networked and used for simulation, is all modified in this one spot.
+
+188
+00:14:30,598 --> 00:14:36,884
+At the time we adopted singleton components, we didn't know we were establishing patterns like this to reduce coupling and therefore reduce complexity.
+
+189
+00:14:37,504 --> 00:14:44,090
+In this example, command system becomes the only place that generates side effect on this player command struct.
+
+190
+00:14:44,911 --> 00:14:53,118
+Any programmer can easily understand mutations to player commands because it all happens in this one file, imperatively, at one time in one system update call.
+
+191
+00:14:53,698 --> 00:14:54,980
+It's also clear to any programmer
+
+192
+00:14:55,600 --> 00:15:00,504
+that any new mutations we need to add to the player command happen in this one file, in this one update function.
+
+193
+00:15:00,825 --> 00:15:02,006
+All that ambiguity goes away.
+
+194
+00:15:03,814 --> 00:15:06,656
+Let's talk about another problem we have, this idea of shared behavior.
+
+195
+00:15:07,917 --> 00:15:15,604
+The way this works is if you have some behavior that's invoked from multiple system updates, sometimes two observers of a subject are interested in the same behavior.
+
+196
+00:15:15,624 --> 00:15:24,331
+Going back to the tree analogy, the president of your HOA and your gardener may both want to know how many leaves are going to fall out of this tree during the spring, right?
+
+197
+00:15:24,792 --> 00:15:30,957
+They'll each do something different with that output, like the president of your HOA will probably yell at you and the gardener will just get back to work, but the behavior is the same.
+
+198
+00:15:32,722 --> 00:15:34,924
+For example, a lot of code is curious about relative hostility.
+
+199
+00:15:34,984 --> 00:15:37,125
+Is entity A hostile to entity B?
+
+200
+00:15:38,086 --> 00:15:43,090
+Hostility is determined by three optional components, FilterBits, PetMaster, and Pet.
+
+201
+00:15:43,811 --> 00:15:46,173
+FilterBits stores an entity team's index.
+
+202
+00:15:46,953 --> 00:15:50,716
+The PetMaster stores a unique key that matches all of his corresponding pets.
+
+203
+00:15:51,357 --> 00:15:53,018
+You'd use Pet on like Torbjorn's turret.
+
+204
+00:15:55,160 --> 00:15:57,301
+If either entity has no FilterBits, they aren't hostile.
+
+205
+00:15:57,481 --> 00:15:59,163
+So two doors are not hostile to each other.
+
+206
+00:15:59,183 --> 00:16:01,885
+They don't have teams set up on their FilterBit components.
+
+207
+00:16:03,427 --> 00:16:05,808
+If they're on the same team, they also aren't hostile, that's pretty easy.
+
+208
+00:16:07,349 --> 00:16:16,534
+If they are on the always hostile team, they will check their pet master pair and make sure that they are related to one another.
+
+209
+00:16:17,775 --> 00:16:22,438
+This solves the problem of if you're on the hostile to everyone team and you spawn a turret, it doesn't immediately start attacking you.
+
+210
+00:16:22,918 --> 00:16:23,978
+I mean, it did, but we fixed that bug.
+
+211
+00:16:23,998 --> 00:16:31,483
+When you want to check hostility for a projectile in flight, you simply fall back to the instigator, the guy who shot that projectile.
+
+212
+00:16:31,503 --> 00:16:32,123
+It's pretty straightforward.
+
+213
+00:16:33,479 --> 00:16:39,885
+Anyway, the example I described above is this function called CombatUtilIsHostileTo, and it takes two entities and returns true or false if there's hostility.
+
+214
+00:16:40,225 --> 00:16:41,806
+And a ton of systems call this function.
+
+215
+00:16:42,387 --> 00:16:44,969
+So here's a bunch of systems that call it.
+
+216
+00:16:45,610 --> 00:16:49,693
+But as you can see, it only reads these three components that I enumerated.
+
+217
+00:16:49,773 --> 00:16:54,758
+So its surface area is fairly low, and more importantly, it's pure.
+
+218
+00:16:54,858 --> 00:16:57,180
+It's not going to actually mutate these guys at all, it's just going to read them.
+
+219
+00:17:01,371 --> 00:17:06,528
+As an example, using that as an example, we have a couple different rules when it comes to these utility functions, the shared behavior.
+
+220
+00:17:08,061 --> 00:17:15,244
+If you want to invoke a utility from several call sites, the function should read very few components and have very few, hopefully little, or no side effects.
+
+221
+00:17:16,044 --> 00:17:21,046
+If you have a utility function that reads several components and has several side effects, try to limit the number of call sites.
+
+222
+00:17:21,146 --> 00:17:23,427
+So one example of that is what we call the character move util.
+
+223
+00:17:23,787 --> 00:17:29,609
+This is a host of functions that moves the player one tick in the simulation, and that's called in two spots.
+
+224
+00:17:30,349 --> 00:17:34,171
+Once on the server to simulate your input, and once on your client to predict your input.
+
+225
+00:17:37,950 --> 00:17:44,455
+So we continue to replace these inner system calls with utility functions and move state out of systems into these singletons.
+
+226
+00:17:45,455 --> 00:17:51,159
+If you replace an inner system function call with a shared utility function, you don't magically avoid complexity.
+
+227
+00:17:51,199 --> 00:17:52,800
+It's mostly syntactic and organizational.
+
+228
+00:17:53,801 --> 00:18:00,585
+Just as you can hide a lot of side effects behind a publicly accessible system function, you can hide a lot of side effects behind a utility function as well.
+
+229
+00:18:01,105 --> 00:18:07,269
+So if you're calling that utility function from several sites, you're invoking several major side effects all over your game update loop.
+
+230
+00:18:07,769 --> 00:18:11,632
+It may not be obvious because it's behind a function call, but it's still pretty horrible coupling.
+
+231
+00:18:12,552 --> 00:18:14,755
+If you take away one lesson from this talk, let it be this.
+
+232
+00:18:15,356 --> 00:18:23,666
+Behaviors are much less complex if they are expressed in a single call site in which all major behavioral side effects are localized to that call site.
+
+233
+00:18:24,367 --> 00:18:27,772
+Let's explore some techniques we discovered to help reduce this type of coupling.
+
+234
+00:18:31,411 --> 00:18:39,179
+When you discover that a big side effect has to be executed in response to some behavior, ask yourself if that big chunk of work has to happen right now.
+
+235
+00:18:40,080 --> 00:18:43,983
+The best singleton components solve inter-system coupling with deferment.
+
+236
+00:18:44,604 --> 00:18:52,732
+Deferment is the act of storing the state required to invoke a major side effect, but putting off the side effect invocation until later at a better single moment in the frame.
+
+237
+00:18:54,701 --> 00:18:57,865
+The several call sites in the code want to spawn surface impact effects.
+
+238
+00:18:58,646 --> 00:19:10,562
+You have these hitscan projectiles, travel time projectiles with explosions, you have your Zarya beam that does like a channeled effect along a wall and has to maintain that contact as she fires, and you have sprays.
+
+239
+00:19:12,119 --> 00:19:15,523
+Creating an impact effect qualifies as a very large side effect.
+
+240
+00:19:15,824 --> 00:19:21,631
+You're creating a new entity in the scene that has repercussions with lifetime, threading, scene management, and resource management.
+
+241
+00:19:22,372 --> 00:19:26,277
+The lifetime requirement for impact effects is that they show up before the scene renders.
+
+242
+00:19:26,677 --> 00:19:30,482
+That doesn't mean they have to show up in the middle of the game simulation in a dozen different call sites though.
+
+243
+00:19:31,817 --> 00:19:31,977
+Here's
+
+244
+00:19:52,182 --> 00:20:02,006
+If you shoot a wall as Tracer and do a bunch of pockmarks, and then Pharah fires her rocket and puts a huge Scorch mark over it, you want to delete those pockmarks, otherwise you get ugly Z fighting and the effects artists yell at you.
+
+245
+00:20:02,706 --> 00:20:04,767
+I don't want to do that math all over the place.
+
+246
+00:20:04,787 --> 00:20:05,747
+I want to do that in one spot.
+
+247
+00:20:07,392 --> 00:20:14,341
+If I had to change this code, right, that's a lot, and I had a dozen different call sites invoking it, I've got to test all those call sites.
+
+248
+00:20:14,721 --> 00:20:17,845
+Invariably, more call sites would be added as folks pattern match.
+
+249
+00:20:17,865 --> 00:20:20,969
+They go, oh, I have some cool ability that needs to create a new effect.
+
+250
+00:20:21,009 --> 00:20:22,831
+I'll just copy paste this one function call.
+
+251
+00:20:22,891 --> 00:20:23,232
+It's OK.
+
+252
+00:20:23,272 --> 00:20:23,993
+It's just a function call.
+
+253
+00:20:24,033 --> 00:20:24,353
+No, it's not.
+
+254
+00:20:24,413 --> 00:20:24,934
+It's this nightmare.
+
+255
+00:20:27,006 --> 00:20:36,193
+When a lot of large side effects can be invoked from multiple different call sites, programmers tend to spend a lot more mental energy maintaining a cognitive model of how the code works.
+
+256
+00:20:36,453 --> 00:20:37,714
+That's what code complexity is.
+
+257
+00:20:37,974 --> 00:20:38,715
+You want to avoid that.
+
+258
+00:20:40,356 --> 00:20:41,357
+So, singleton contact.
+
+259
+00:20:42,658 --> 00:20:45,660
+It contains an array of pending contact records.
+
+260
+00:20:45,740 --> 00:20:48,683
+Each record has enough information to create the effect later in the frame.
+
+261
+00:20:49,551 --> 00:20:52,432
+When you want to spawn an impact effect, you just add a new entry and fill it out.
+
+262
+00:20:53,112 --> 00:21:05,317
+Later in the frame, before the scene update and the render prep, the thing's going to draw that frame's work, the resolve contact system churns through the array of pending contacts and spawns the effects with all those LOD rules and overrides and stuff.
+
+263
+00:21:05,797 --> 00:21:09,239
+The big side effects are invoked entirely from one call site every single frame.
+
+264
+00:21:10,139 --> 00:21:13,961
+Aside from the reduced complexity of the solution, the deferment has a couple other advantages.
+
+265
+00:21:14,321 --> 00:21:17,062
+You get a perf benefit because of data and instruction cache locality.
+
+266
+00:21:17,862 --> 00:21:20,243
+you can place a perf budget on impact effect creation.
+
+267
+00:21:20,303 --> 00:21:25,384
+Imagine you have like 12 divas all shooting a wall at the same time and they want to spawn like hundreds of impact effects.
+
+268
+00:21:25,844 --> 00:21:27,404
+You don't have to spawn them like now.
+
+269
+00:21:27,444 --> 00:21:32,466
+You want to spawn like your divas impact effects, but you could defer the rest and smear them out over multiple frames, smooth out spikes.
+
+270
+00:21:33,126 --> 00:21:34,586
+There's a bunch of really cool advantages to this, right?
+
+271
+00:21:34,606 --> 00:21:36,307
+You can do all the really complex stuff.
+
+272
+00:21:36,687 --> 00:21:44,349
+Even our resolve contact system does a fork and join multi-thread check in order to, you know, figure out how to orient all the little particle systems.
+
+273
+00:21:44,429 --> 00:21:45,909
+It's really cool you can defer all this stuff.
+
+274
+00:21:48,976 --> 00:21:56,158
+Utility functions, singletons, deferment, these are just a few of the patterns we established over three years of working on an ECS architecture.
+
+275
+00:21:56,819 --> 00:22:04,261
+In addition to the constraints of omitting states from systems and behaviors from components, these techniques further constrain how we solve problems on Overwatch.
+
+276
+00:22:05,310 --> 00:22:09,613
+Adhering to these constraints means you have to solve problems in a very specific way.
+
+277
+00:22:10,033 --> 00:22:15,336
+However, these techniques result in a consistent, maintainable, decoupled, and simple code.
+
+278
+00:22:16,117 --> 00:22:19,839
+We constrain you, we throw you in this pit, but it is a pit of success.
+
+279
+00:22:19,859 --> 00:22:26,043
+Alright, with that in mind, let's talk about one of the real hard problems and how ECS makes it simpler.
+
+280
+00:22:27,401 --> 00:22:30,904
+This is the most important problem, netcode, for gameplay engineers we had to solve.
+
+281
+00:22:31,304 --> 00:22:33,766
+Our objective is to make a responsive networked action game.
+
+282
+00:22:34,426 --> 00:22:36,988
+In order to make the game responsive, we have to predict player action.
+
+283
+00:22:37,308 --> 00:22:40,811
+Nothing's going to feel responsive if you have to wait for the server to tell you what happened.
+
+284
+00:22:41,231 --> 00:22:43,093
+This has been true of the genre for 20 years.
+
+285
+00:22:43,773 --> 00:22:50,178
+Despite that requirement, we really can't trust the client with any simulation authority other than their input because some clients are jerks.
+
+286
+00:22:52,076 --> 00:22:53,457
+Things that make the game feel responsive.
+
+287
+00:22:53,557 --> 00:22:54,938
+You have movement, you have ability use.
+
+288
+00:22:55,579 --> 00:22:57,140
+Weapons are an ability as far as we're concerned.
+
+289
+00:22:57,681 --> 00:22:58,341
+Hit registration.
+
+290
+00:22:59,182 --> 00:23:01,404
+In all cases, it comes down to this.
+
+291
+00:23:01,624 --> 00:23:04,146
+The player hits a button, the player should see an immediate response.
+
+292
+00:23:05,107 --> 00:23:07,609
+This should work as well as possible, even at high latency.
+
+293
+00:23:09,450 --> 00:23:11,292
+This dude's running at a quarter second ping.
+
+294
+00:23:11,973 --> 00:23:13,794
+All my button presses are immediately responsive.
+
+295
+00:23:13,834 --> 00:23:14,715
+Everything's working just fine.
+
+296
+00:23:16,056 --> 00:23:16,376
+No delay.
+
+297
+00:23:19,810 --> 00:23:25,671
+Mispredictions are a side effect of server authority and lag if you're going to have a predicted client.
+
+298
+00:23:25,931 --> 00:23:26,611
+Mispredictions are easy.
+
+299
+00:23:26,651 --> 00:23:28,692
+You didn't do what you thought you did.
+
+300
+00:23:28,732 --> 00:23:29,552
+That's pretty much what they are.
+
+301
+00:23:30,032 --> 00:23:33,373
+The server needs to correct you, but not at the expense of further responsiveness.
+
+302
+00:23:33,753 --> 00:23:36,093
+We try to reduce the chance of misprediction with determinism.
+
+303
+00:23:37,514 --> 00:23:43,975
+So here, same context.
+
+304
+00:23:44,980 --> 00:23:46,641
+quarter second, 250 millisecond ping.
+
+305
+00:23:47,981 --> 00:23:48,722
+We thought we leapt.
+
+306
+00:23:49,502 --> 00:23:50,182
+The server said no.
+
+307
+00:23:50,662 --> 00:23:52,643
+We got yanked back down to where we were before and frozen.
+
+308
+00:23:53,223 --> 00:23:55,004
+You can even see how the prediction worked.
+
+309
+00:23:55,024 --> 00:23:56,305
+The prediction tried to get us up in the air.
+
+310
+00:23:56,845 --> 00:23:58,605
+Even Winston's cooldown goes off.
+
+311
+00:24:01,227 --> 00:24:02,387
+I think it's promptly reset.
+
+312
+00:24:03,487 --> 00:24:06,549
+But we don't want to, 99.9% of the time, that prediction's going to work just fine.
+
+313
+00:24:06,709 --> 00:24:08,830
+So we want to make it as responsive as possible.
+
+314
+00:24:09,050 --> 00:24:14,532
+And if you happen to be playing from Sri Lanka and you get frozen by May, you're going to be a little mispredicted correction.
+
+315
+00:24:15,970 --> 00:24:17,871
+All right, so let me put some ground rules in place first.
+
+316
+00:24:18,271 --> 00:24:22,334
+We're going to discuss the novel techniques and how we leveraged ECS to reduce complexity here.
+
+317
+00:24:22,634 --> 00:24:28,417
+We're not going to cover general replication of entities, remote entity interpolation, or the details of backwards reconciliation.
+
+318
+00:24:28,838 --> 00:24:33,961
+We very much stand on the shoulders of giants and use well-established techniques covered by other literature.
+
+319
+00:24:34,401 --> 00:24:37,863
+The subsequent slides do, however, assume some familiarity with those techniques.
+
+320
+00:24:40,953 --> 00:24:45,275
+Our deterministic simulation relies on a synchronized clock, a fixed update, and quantization.
+
+321
+00:24:45,916 --> 00:24:50,378
+Both the server and the client operate over this synchronized clock and quantized values.
+
+322
+00:24:50,798 --> 00:24:53,059
+Time is quantized into what we call command frames.
+
+323
+00:24:53,640 --> 00:24:59,703
+Each command frame lasts a fixed 16 milliseconds, and in our tournament configuration, it's a fixed 7 milliseconds.
+
+324
+00:25:02,543 --> 00:25:09,327
+Simulation is fixed time, so it has to translate the loop clock time, whatever the computer clock says, every single render frame into fixed frames.
+
+325
+00:25:10,048 --> 00:25:13,050
+We use an accumulator with rollover remainder to accumulate command frames.
+
+326
+00:25:13,650 --> 00:25:23,536
+Within our ECS framework, any system that predicts on the client or authoritatively simulates the player based on player input uses a slightly different API.
+
+327
+00:25:23,616 --> 00:25:25,497
+It doesn't use update, it uses update fix.
+
+328
+00:25:25,757 --> 00:25:28,139
+Update fix is just done for every single fixed command frame.
+
+329
+00:25:31,294 --> 00:25:37,086
+Assuming a steady output stream, the client's clock is always ahead of the server by half RTT
+
+330
+00:25:38,615 --> 00:25:40,136
+plus one buffered command frame.
+
+331
+00:25:40,176 --> 00:25:41,656
+And RTT here really is just ping.
+
+332
+00:25:41,716 --> 00:25:42,717
+Ping plus processing time.
+
+333
+00:25:43,537 --> 00:25:49,120
+So in this example, our RTT is about 160 milliseconds, so half of that's 80, plus one buffered command frame.
+
+334
+00:25:49,140 --> 00:25:50,501
+The command frame is 16 milliseconds.
+
+335
+00:25:50,961 --> 00:25:53,722
+That's how far ahead of time the client is from the server.
+
+336
+00:25:54,142 --> 00:26:00,145
+So in this little diagram, the vertical bars here are the command frames being executed.
+
+337
+00:26:01,026 --> 00:26:01,526
+What's going to happen
+
+338
+00:26:02,708 --> 00:26:03,249
+of the project.
+
+339
+00:26:19,346 --> 00:26:32,230
+All right, because the client is always gobbling up player input as fast as it possibly can or as close to now as it possibly can based on your latency, if it has to wait to consume input, it will result in slower server response time to your input, and that makes the game less responsive.
+
+340
+00:26:32,670 --> 00:26:35,571
+You want to keep this buffer here as small as you possibly can.
+
+341
+00:26:36,351 --> 00:26:38,892
+For context, we run at 60 hertz, so this is about 1 100th speed.
+
+342
+00:26:42,298 --> 00:26:46,500
+Predicting systems on the client consume this input, and they simulate movement.
+
+343
+00:26:46,540 --> 00:26:51,322
+So here, if we're controlling tracer, the joysticks are the input I'm using and sending down.
+
+344
+00:26:51,883 --> 00:27:04,009
+The tracer here is my current movement state that I predicted, and the tracer that's gonna come back to us, the full RTT plus the buffer size later, is the server authoritative snapshot of our movement for that tracer.
+
+345
+00:27:05,850 --> 00:27:10,312
+Side effects from the server simulation are authoritative, takes that other half RTT for that stuff to arrive.
+
+346
+00:27:22,708 --> 00:27:32,135
+The reason players maintain this ring buffer of movement, this gap here, this is like all of our moves we did in the past, is so they can compare their results with the server results from the past.
+
+347
+00:27:33,513 --> 00:27:38,797
+If the client computed the same result as the server, the client will continue on its merry way to simulate the next input.
+
+348
+00:27:39,317 --> 00:27:43,220
+If the client and server disagree on the results, we have mispredicted and then have to reconcile.
+
+349
+00:27:43,840 --> 00:27:49,044
+Naively, we could just overwrite the client's results with the server's results, but these server results are old.
+
+350
+00:27:49,104 --> 00:27:52,746
+This is a server result from several hundred milliseconds ago.
+
+351
+00:27:54,267 --> 00:27:57,510
+In addition to this ring buffer of movement state, we also store a ring buffer of inputs.
+
+352
+00:27:58,629 --> 00:28:08,175
+You give it, because the character movement code is very deterministic, if you have a starting movement state that you want to run an input against, it's very reliably going to reproduce that input every single time.
+
+353
+00:28:08,716 --> 00:28:15,821
+So what we do is when you get a missed prediction from the server, we're going to replay
+
+354
+00:28:16,741 --> 00:28:16,921
+all of
+
+355
+00:28:41,667 --> 00:28:44,028
+So now, for the client, is about frame 27.
+
+356
+00:28:44,469 --> 00:28:46,149
+We're getting results for frame 17.
+
+357
+00:28:50,692 --> 00:28:53,053
+Once we synchronize, we are pretty much back in lockstep again.
+
+358
+00:28:54,074 --> 00:28:55,935
+We will know exactly how long we're stunned.
+
+359
+00:28:56,095 --> 00:28:59,316
+So by frame 33 here, we know we're no longer stunned.
+
+360
+00:28:59,597 --> 00:29:02,338
+The server simulates the same thing, and it already agrees.
+
+361
+00:29:02,678 --> 00:29:04,379
+There's no weird synchronization catch-up.
+
+362
+00:29:04,439 --> 00:29:06,780
+Once you get that movement state, you can re-assume your input.
+
+363
+00:29:06,800 --> 00:29:07,641
+You'll be caught back up to now.
+
+364
+00:29:09,773 --> 00:29:12,554
+The client outgoing network stream is inconsistent and lossy, however.
+
+365
+00:29:12,574 --> 00:29:16,195
+All of our game data is sent over UDP with an optional custom reliability layer.
+
+366
+00:29:16,736 --> 00:29:21,297
+As a result, client input packages fail to reach the server from time to time, which is loss.
+
+367
+00:29:21,737 --> 00:29:28,880
+The server tries to keep this tiny buffer of unsimulated input, but it tries to keep it as small as possible to make the game as responsive as possible.
+
+368
+00:29:29,700 --> 00:29:32,501
+If the server has to starve out this little buffer, it's just going to take a guess.
+
+369
+00:29:32,521 --> 00:29:34,002
+It's just going to duplicate your last input.
+
+370
+00:29:34,582 --> 00:29:38,944
+And by the time that real input arrives, it'll try to reconcile that and make sure you don't lose any buttons, but they're going to mispredict.
+
+371
+00:29:45,913 --> 00:29:46,774
+All right, here's the tricky part.
+
+372
+00:29:47,994 --> 00:29:49,235
+So here we are losing some packets.
+
+373
+00:29:49,916 --> 00:29:51,917
+The server realizes that.
+
+374
+00:29:52,538 --> 00:29:54,579
+It had no input to send that frame.
+
+375
+00:29:54,859 --> 00:29:58,442
+What it will have done is use the previous input, duplicate it, and hope for the best.
+
+376
+00:29:59,162 --> 00:30:02,945
+It's going to send a message back up to the client telling, hey, by the way, I lost some input.
+
+377
+00:30:03,005 --> 00:30:03,506
+Something's wrong.
+
+378
+00:30:04,312 --> 00:30:04,532
+this talk.
+
+379
+00:30:29,672 --> 00:30:30,333
+for the server.
+
+380
+00:30:30,913 --> 00:30:36,898
+By virtue of that, the server's going to have a much bigger buffer of inputs to play with while it waits for you to weather the storm of this loss.
+
+381
+00:30:39,340 --> 00:30:44,124
+This technique actually works really well on the internet where you have tiny fluctuations in loss, tiny fluctuations in ping.
+
+382
+00:30:44,604 --> 00:30:48,287
+If you were playing on the International Space Station, this probably works because of general relativity.
+
+383
+00:30:48,628 --> 00:30:49,588
+So I think it's a pretty cool solution.
+
+384
+00:30:49,608 --> 00:30:51,610
+All right, so guys, take some note.
+
+385
+00:30:52,050 --> 00:30:53,071
+Here we are receiving a message.
+
+386
+00:30:53,712 --> 00:30:54,712
+Now we start dilating time.
+
+387
+00:30:55,053 --> 00:30:56,534
+Notice that we're actually ticking faster.
+
+388
+00:30:56,554 --> 00:30:57,735
+Look at the slope of inputs here.
+
+389
+00:30:59,406 --> 00:31:02,329
+It is literally pooping out inputs much faster than before.
+
+390
+00:31:02,849 --> 00:31:03,650
+The buffer gets bigger.
+
+391
+00:31:03,770 --> 00:31:04,571
+It'll weather that loss.
+
+392
+00:31:04,591 --> 00:31:06,533
+If it was lost in here, you'd probably get the input anyway.
+
+393
+00:31:07,153 --> 00:31:11,357
+Once the server realizes that you're healthy, it'll send you messages saying, hey, you know what?
+
+394
+00:31:11,377 --> 00:31:11,697
+It's fine.
+
+395
+00:31:12,158 --> 00:31:13,439
+The client will do the opposite.
+
+396
+00:31:13,499 --> 00:31:20,485
+It'll dilate time back down the other direction and spit out inputs at a slower rate to reduce the size of that buffer.
+
+397
+00:31:20,825 --> 00:31:23,348
+And this feedback loop is happening constantly.
+
+398
+00:31:23,608 --> 00:31:25,490
+And the goal of it is to try to keep you on that razor's edge.
+
+399
+00:31:26,010 --> 00:31:30,593
+and try to minimize mispredictions because of input duplication.
+
+400
+00:31:31,894 --> 00:31:35,936
+I mentioned earlier that when the server is starved for player input, it's going to duplicate that input, right?
+
+401
+00:31:36,517 --> 00:31:39,799
+Once the client catches up, the input that was skipped is in danger of being lost.
+
+402
+00:31:40,159 --> 00:31:43,421
+To solve this problem, the client always sends up a sliding window of inputs.
+
+403
+00:31:44,082 --> 00:31:46,743
+This is a technique that's been around since Quake world, I think.
+
+404
+00:31:48,024 --> 00:31:51,186
+We don't just send the one input for the frame we just simulated, frame 19.
+
+405
+00:31:51,887 --> 00:31:57,390
+We send all of the inputs that we have simulated from the last acknowledged movement state from the server.
+
+406
+00:31:57,410 --> 00:32:00,312
+So the last acknowledged movement state we got was for command frame 4.
+
+407
+00:32:00,873 --> 00:32:01,873
+We just simmed command frame 19.
+
+408
+00:32:01,973 --> 00:32:05,676
+We're going to bundle every single input along every single frame into one packet.
+
+409
+00:32:05,896 --> 00:32:11,920
+Of course, players don't hit buttons as aggressively as 60 hertz, so this compresses really, really well.
+
+410
+00:32:11,960 --> 00:32:13,041
+It's a pretty tiny structure, right?
+
+411
+00:32:13,061 --> 00:32:15,843
+Because you probably had the same W held down before.
+
+412
+00:32:16,343 --> 00:32:17,844
+You just set a bit, so you have W still held down.
+
+413
+00:32:20,486 --> 00:32:20,907
+talk about.
+
+414
+00:32:40,181 --> 00:32:42,304
+So again, just to show off, here's double speed from before.
+
+415
+00:32:42,384 --> 00:32:45,027
+So this is 150th normal speed.
+
+416
+00:32:45,948 --> 00:32:52,075
+Here's your ping fluctuating, you having loss, dilates time on the client.
+
+417
+00:32:53,336 --> 00:32:56,800
+The window of inputs is still going to fill any holes before you miss simulation.
+
+418
+00:32:57,120 --> 00:32:57,741
+You have server corrections.
+
+419
+00:32:57,761 --> 00:33:00,204
+I'm just combining all the animations together in one thing to show off.
+
+420
+00:33:03,322 --> 00:33:11,967
+So I won't go over this in too much detail here since it's the subject of Dan Reed's talk, which I very highly recommend, because this is the opening act, and his is like the best thing ever.
+
+421
+00:33:12,027 --> 00:33:14,208
+He's right after this in this room, so make yourselves comfy.
+
+422
+00:33:15,169 --> 00:33:19,951
+All the abilities are authored in this proprietary declarative scripting language called StateScript.
+
+423
+00:33:20,431 --> 00:33:24,434
+One novel feature of the scripting system is that it can scrub back and forth through time.
+
+424
+00:33:24,974 --> 00:33:31,558
+This allows scripts to be predicted on the client and then validated just like movement, where we rewind you back and replay all your inputs.
+
+425
+00:33:33,022 --> 00:33:36,823
+Suffice to say that abilities work under the same rollback and rollforth principle as movement, right?
+
+426
+00:33:36,863 --> 00:33:40,364
+This rewind back to the authoritative snapshot and replay inputs back to now.
+
+427
+00:33:41,904 --> 00:33:46,165
+If you remember this movement stun example we had before, Tracer getting stunned and being corrected, works the same way.
+
+428
+00:33:46,685 --> 00:33:50,426
+The client and server both simulate input against abilities deterministically.
+
+429
+00:33:52,246 --> 00:33:55,667
+The client's ahead of time from the server, so the client will do it and then the server will get it later.
+
+430
+00:33:57,648 --> 00:34:03,091
+The client deals with mispredictions by rolling back, applying the server snapshot, and rolling forth, which I'll show here.
+
+431
+00:34:03,131 --> 00:34:07,533
+So this is a video of us coming out of Wraith form as Reaper.
+
+432
+00:34:09,054 --> 00:34:11,675
+These states here represent basically the state of Wraith form.
+
+433
+00:34:11,695 --> 00:34:13,156
+It says, all right, hey, make me invincible.
+
+434
+00:34:13,516 --> 00:34:14,436
+Make me play this cool effect.
+
+435
+00:34:14,476 --> 00:34:15,477
+Make me play this cool animation.
+
+436
+00:34:16,137 --> 00:34:18,558
+When we're done with Wraith form, we're going to turn all these guys off.
+
+437
+00:34:18,598 --> 00:34:22,220
+So in one frame, this little animation is going to show each of these states turning off.
+
+438
+00:34:27,198 --> 00:34:29,320
+Right after this, this is us predicting coming out of Wraith form.
+
+439
+00:34:29,680 --> 00:34:34,963
+Soon after this, we'll get an update from the server saying, okay, here's how I predicted you came out of Wraith form.
+
+440
+00:34:36,544 --> 00:34:42,708
+It's actually going to rewind it, turn all those states back on again, and then re-simulate all your input to turn those states back off.
+
+441
+00:34:42,988 --> 00:34:45,950
+So there's this constant roll back and roll forth that we're doing whenever you get these server updates.
+
+442
+00:34:47,051 --> 00:34:50,473
+Cool thing is, just like we can predict movement, it means we can predict every single ability that you do.
+
+443
+00:34:50,513 --> 00:34:52,314
+We actually have to opt out of predicting abilities.
+
+444
+00:34:54,363 --> 00:34:56,243
+which also means opt out of predicting weapons, everything else.
+
+445
+00:34:56,723 --> 00:34:59,864
+So, let's talk about predicting and acknowledging hit registration.
+
+446
+00:35:00,104 --> 00:35:01,104
+ECS comes in handy here.
+
+447
+00:35:01,424 --> 00:35:06,325
+Remember, an entity will be a subject of a behavior if it has the tuple of components required by the behavior.
+
+448
+00:35:07,086 --> 00:35:16,908
+If you're an entity that is hostile, remember that is hostile to check we talked about, and you have a modify health cue, you can be shot by a player and subject to hit registration.
+
+449
+00:35:17,228 --> 00:35:18,508
+Those are the two components that you have.
+
+450
+00:35:18,548 --> 00:35:23,249
+You have the ones required for, the set required for hostility and the modify health cue component.
+
+451
+00:35:24,298 --> 00:35:29,701
+Modify Health Queue is a component that, on the server, accumulates the set of records to damage or heal you.
+
+452
+00:35:31,501 --> 00:35:37,704
+Similar to the singleton contact, we defer accumulated damage done or healed in multiple call sites, because it's a big side effect to kill you.
+
+453
+00:35:38,525 --> 00:35:39,705
+Then we defer it and run it later.
+
+454
+00:35:40,425 --> 00:35:45,308
+Just like we don't want to spawn a bunch of particle effects right now in the middle of the game, of the projectile simulation, just defer it.
+
+455
+00:35:45,468 --> 00:35:45,868
+Same thing here.
+
+456
+00:35:47,109 --> 00:35:49,810
+Damage, by the way, is not at all simulated on the client because they're cheaters.
+
+457
+00:35:50,748 --> 00:35:52,609
+However, hit registration is predicted on the client.
+
+458
+00:35:53,489 --> 00:36:05,193
+So on the client, if you have a movement state component, and you're a remote object, you're not the locally controlled player, you will be positioned by the movement state system by some interpolated transform between the last two received movement states.
+
+459
+00:36:05,213 --> 00:36:07,593
+This is the standard interpolation technique that's been around since Quake.
+
+460
+00:36:08,454 --> 00:36:11,755
+The system doesn't care if you're a platform, a turret, a door, or Pharah.
+
+461
+00:36:11,775 --> 00:36:13,275
+You just have to have the movement state component.
+
+462
+00:36:13,295 --> 00:36:13,795
+That's all you got.
+
+463
+00:36:14,435 --> 00:36:19,197
+The movement state component is also responsible for storing that ring buffer we showed before, those little tracer positions.
+
+464
+00:36:21,628 --> 00:36:26,170
+If you have movement state, this is now describing the tool for hit registration.
+
+465
+00:36:26,831 --> 00:36:33,094
+If you have movement state, the server will have to rewind you to the player's frame of reference, that's backwards reconciliation, before it computes hit registration.
+
+466
+00:36:33,554 --> 00:36:37,716
+This is totally orthogonal to whether or not you have a modified health cue, whether you can take damage, right?
+
+467
+00:36:38,016 --> 00:36:40,557
+We have to rewind doors, platforms, payloads, doesn't matter.
+
+468
+00:36:40,577 --> 00:36:41,898
+We have to see if the bullets were blocked.
+
+469
+00:36:42,718 --> 00:36:49,942
+Naturally, if you're hostile and you have a modified health cue and a movement state component, you'll be rewound and you'll be potentially damaged.
+
+470
+00:36:51,417 --> 00:36:54,281
+Being rewound is one behavior handled by one set of utility functions.
+
+471
+00:36:54,601 --> 00:36:59,527
+And being damaged is a different behavior handled by processing the modified health cue component deferred later in the frame.
+
+472
+00:36:59,587 --> 00:37:00,609
+Again, we still isolate those.
+
+473
+00:37:00,849 --> 00:37:03,552
+The rewind behavior is its own thing that operates on its own slice.
+
+474
+00:37:04,013 --> 00:37:06,176
+And doing damage is its own thing that operates on its own slice.
+
+475
+00:37:08,188 --> 00:37:08,468
+shot at
+
+476
+00:37:30,518 --> 00:37:34,942
+I would intersect with his bounds first before I rewound the guy because he could have been anywhere in here based on my ping.
+
+477
+00:37:35,582 --> 00:37:42,507
+In this case, if I'm shooting in this direction, I'm only going to rewind Ana because the ray of my bullet is going to intersect her bounds.
+
+478
+00:37:43,008 --> 00:37:46,711
+We're not going to rewind Reinhardt or his shield or the payload or the door back over here.
+
+479
+00:37:50,674 --> 00:37:53,396
+Shots can mispredict just as movement can mispredict.
+
+480
+00:37:53,496 --> 00:37:58,500
+So here you'll see the green ragdoll that I'm drawing here.
+
+481
+00:37:59,972 --> 00:38:04,235
+is the client's view of this reaper, whereas the yellow one is the server view.
+
+482
+00:38:06,156 --> 00:38:10,699
+This tiny little green dot back here is where the client thought my bullet hit.
+
+483
+00:38:11,219 --> 00:38:13,841
+You can see this little green line is basically the path of my bullet.
+
+484
+00:38:14,521 --> 00:38:20,025
+But when the server actually validated it, this little blue sphere corresponds to where it actually hit.
+
+485
+00:38:21,616 --> 00:38:23,437
+This is a super contrived example.
+
+486
+00:38:23,617 --> 00:38:34,165
+The deterministic simulation is so reliable that in order to reproduce this misprediction on hit, I had to set my packet loss to 60% and shoot at this asshole for 20 minutes before I was able to produce this.
+
+487
+00:38:37,170 --> 00:38:45,133
+I should mention that one of the reasons this is so precise is we have a bunch of very talented QA people that will not take no for an answer.
+
+488
+00:38:45,913 --> 00:38:56,057
+And while there are other games that don't try to have this level of precise prediction for hit registration, our QA guys didn't either believe me or care, and they just kept coming back with bugs and more bugs and more bugs.
+
+489
+00:38:56,077 --> 00:39:00,539
+And every single time we dove back into it to try to find out if there was a defect there, there always was.
+
+490
+00:39:00,759 --> 00:39:06,321
+And I thank them deeply for not letting us get away with this cool stuff.
+
+491
+00:39:07,796 --> 00:39:12,059
+OK, if you have a real high ping, hit prediction is not reliable anymore.
+
+492
+00:39:12,880 --> 00:39:17,604
+Once you get above about 220 milliseconds on your RTT, we're going to start to defer some of the hit impacts as well.
+
+493
+00:39:17,624 --> 00:39:18,364
+We're not going to predict them.
+
+494
+00:39:18,524 --> 00:39:19,886
+We're going to wait until the server acknowledges it.
+
+495
+00:39:21,764 --> 00:39:27,527
+The reason we do what we do instead when you start rewinding targets that far back in time is we extrapolate them on your client.
+
+496
+00:39:27,947 --> 00:39:34,311
+We don't want the victim to feel like they're being rewound way behind a wall that they ran behind for cover, so we put clamps on it.
+
+497
+00:39:34,591 --> 00:39:35,952
+So we're only going to rewind you a certain amount.
+
+498
+00:39:36,012 --> 00:39:37,092
+After that, we're going to start to extrapolate.
+
+499
+00:39:37,112 --> 00:39:38,713
+And I'll show you a video here that demonstrates that.
+
+500
+00:39:39,193 --> 00:39:40,174
+So this is at zero ping.
+
+501
+00:39:41,827 --> 00:39:43,228
+You can see the hit impacts are predicted.
+
+502
+00:39:43,868 --> 00:39:46,189
+The hit pip and health bar are not predicted.
+
+503
+00:39:46,209 --> 00:39:47,309
+You wait for the server for those.
+
+504
+00:39:47,369 --> 00:39:51,211
+But since my ping is zero, it shows up almost instantaneously.
+
+505
+00:39:51,311 --> 00:39:55,212
+At 300 milliseconds ping, you don't predict the impact.
+
+506
+00:39:55,432 --> 00:39:58,293
+Because we're extrapolating this target.
+
+507
+00:39:58,593 --> 00:39:59,894
+He's not exactly right there.
+
+508
+00:40:01,154 --> 00:40:02,315
+On dead reckoning, it's pretty close.
+
+509
+00:40:02,355 --> 00:40:03,415
+But he's not exactly right there.
+
+510
+00:40:03,435 --> 00:40:09,017
+There's situations where when that Reaper doubles back, you might have totally mispredicted that extrapolation.
+
+511
+00:40:09,037 --> 00:40:10,018
+And we're not going to honor you.
+
+512
+00:40:10,078 --> 00:40:10,738
+Your ping is crap.
+
+513
+00:40:14,312 --> 00:40:16,374
+This is really obvious when your ping is one second.
+
+514
+00:40:20,678 --> 00:40:23,900
+Reaper's doing the exact same movement as that first video, but this is us extrapolating.
+
+515
+00:40:26,022 --> 00:40:30,626
+Note, by the way, even though my ping is one second, everything I'm doing on my client is totally predicted and totally responsive.
+
+516
+00:40:31,507 --> 00:40:32,388
+And mostly wrong.
+
+517
+00:40:35,050 --> 00:40:36,671
+I should have dead-eyed here, it's a really easy kill.
+
+518
+00:40:39,144 --> 00:40:41,065
+All right, so other examples of mispredictions.
+
+519
+00:40:42,046 --> 00:40:45,048
+Now we're back to decent ping, 150 millisecond ping.
+
+520
+00:40:46,670 --> 00:40:49,612
+You'll get hit mispredictions whenever you have movement mispredictions, okay?
+
+521
+00:40:51,834 --> 00:40:52,474
+So in slow-mo.
+
+522
+00:40:57,017 --> 00:40:58,599
+All right, we saw blood.
+
+523
+00:40:59,824 --> 00:41:04,267
+We did not see a health bar, we did not see a hit pip, so we mispredicted the impact effect.
+
+524
+00:41:04,827 --> 00:41:07,169
+The server denied it, that it wasn't actually a legit hit.
+
+525
+00:41:08,209 --> 00:41:12,152
+The reason we mispredicted the impact effect is because we just got ice walled, we got raised up.
+
+526
+00:41:12,592 --> 00:41:21,478
+So we thought we were down here on the ground when we fired, but when the server went to go simulate us, we were actually elevated slightly above that position, so that's what caused the mispredict.
+
+527
+00:41:22,959 --> 00:41:29,906
+When we were trying to fix all these little hit misprediction problems, a majority of them actually came down to making sure your position was agreed upon and was exactly right with the servers.
+
+528
+00:41:30,166 --> 00:41:31,928
+So we spent a lot of time making sure those things lined up.
+
+529
+00:41:33,710 --> 00:41:35,391
+So that's a movement-related mispredict.
+
+530
+00:41:35,411 --> 00:41:36,913
+Here's a gameplay-related mispredict.
+
+531
+00:41:38,373 --> 00:41:39,754
+We're going to shoot this Reaper.
+
+532
+00:41:40,094 --> 00:41:41,695
+Again, we have about a 150 millisecond ping.
+
+533
+00:41:41,855 --> 00:41:45,217
+We're going to shoot this Reaper, but he's going to wraith form right as the arrow hits him.
+
+534
+00:41:45,537 --> 00:41:46,657
+So on our client, we'll predict it.
+
+535
+00:41:46,677 --> 00:41:47,178
+We'll do blood.
+
+536
+00:41:47,518 --> 00:41:49,819
+There'll be no hit pip and no health bar.
+
+537
+00:41:49,859 --> 00:41:53,001
+We didn't actually hit him because the Reaper was invulnerable first.
+
+538
+00:41:54,041 --> 00:41:58,824
+This is an example of, we favor the shooter most of the time unless the victim does something to mitigate that shot.
+
+539
+00:41:59,044 --> 00:42:02,246
+In this case, the Reaper wraith formed, which makes him invincible for three seconds.
+
+540
+00:42:05,165 --> 00:42:06,806
+All right, so we did not actually damage that reaper.
+
+541
+00:42:08,307 --> 00:42:11,810
+From a philosophical standpoint, imagine you're that reaper and you got that wraith form off.
+
+542
+00:42:11,890 --> 00:42:15,132
+In fact, the server told you and all the effects started playing and then you died.
+
+543
+00:42:15,713 --> 00:42:17,374
+You'd be on the forum so fast.
+
+544
+00:42:20,737 --> 00:42:22,858
+ECS simplifies the netcode problem.
+
+545
+00:42:23,239 --> 00:42:27,222
+The systems involved in netcode understand when they're executing on behalf of the player.
+
+546
+00:42:27,782 --> 00:42:28,482
+It's really straightforward.
+
+547
+00:42:28,503 --> 00:42:32,205
+Basically, if the entity is controlled by something with a connection component, it's a player.
+
+548
+00:42:33,399 --> 00:42:38,202
+Systems also know what targets need to be rewound back to the frame of reference of the shooters or movers.
+
+549
+00:42:39,023 --> 00:42:41,024
+Any that has movement state component is going to be rewound.
+
+550
+00:42:41,625 --> 00:42:50,410
+The behavior inherent in the relationship between entities with these components is that movement state can be scrubbed along a timeline that can match the frame of reference of the player.
+
+551
+00:42:51,351 --> 00:42:57,135
+As you can see here, within this large universe of systems and components, only a handful are responsible for the behaviors of netcode.
+
+552
+00:42:59,272 --> 00:42:59,432
+on
+
+553
+00:43:22,080 --> 00:43:26,763
+in what we call netcode from a gameplay standpoint, and only these components.
+
+554
+00:43:27,123 --> 00:43:31,406
+And the majority of these components are read-only for the sake of netcode.
+
+555
+00:43:31,426 --> 00:43:38,550
+The only ones that are truly modified are things like the Modify Health Queue, for example, because you're actually going to do damage to somebody.
+
+556
+00:43:40,912 --> 00:43:44,574
+Here are some of our lessons learned and insights after using CS for a couple of years.
+
+557
+00:43:46,372 --> 00:43:51,736
+I kind of wish we required systems and utilities to go back to that canonical example of ECS to operate on tuples.
+
+558
+00:43:52,356 --> 00:43:58,661
+The ad hoc technique we use where we iterate over one component and then grab siblings really obscures component access.
+
+559
+00:43:58,861 --> 00:44:02,324
+The tuple model, you have to be really explicit about what you can possibly access.
+
+560
+00:44:03,004 --> 00:44:03,224
+this talk
+
+561
+00:44:17,563 --> 00:44:22,965
+Another cool side effect about tuples is that you have a priori knowledge of what systems can touch what states.
+
+562
+00:44:23,425 --> 00:44:34,988
+So back in our prototype engine, which used tuples, we knew that two or three systems could touch a different set of components because we knew by their tuple definitions what they could possibly do.
+
+563
+00:44:35,268 --> 00:44:37,069
+We made it really, really easy to multithread that guy.
+
+564
+00:44:37,629 --> 00:44:43,951
+So same animation from before, but you'll see multiple systems light up in parallel because they're touching a different set of components.
+
+565
+00:44:44,711 --> 00:44:51,216
+Your system ticket just naturally multi-threaded gameplay code because you can know a priori what components you're going to read or write to.
+
+566
+00:44:52,978 --> 00:44:56,260
+I should mention that you can see transform components still really popular.
+
+567
+00:44:58,001 --> 00:45:00,784
+Only a few systems actually mutate transform component.
+
+568
+00:45:00,824 --> 00:45:11,432
+Most systems read transform component, and when you define these tuples in a a priori sense, you can tag components with, oh, this one's read only, which means if you have five systems that are only reading that guy, they can still operate in parallel.
+
+569
+00:45:14,718 --> 00:45:14,918
+All right.
+
+570
+00:45:15,699 --> 00:45:19,642
+Entity lifetime is tricky, particularly when you create entities in the middle of the frame.
+
+571
+00:45:20,242 --> 00:45:22,504
+Early on, we deferred creation and destruction.
+
+572
+00:45:22,564 --> 00:45:23,905
+So you'd say, hey, I want to create this entity.
+
+573
+00:45:23,925 --> 00:45:25,586
+It wouldn't actually be created until the end of the frame.
+
+574
+00:45:26,667 --> 00:45:30,970
+While deferring destruction turned out to be totally fine, deferring creation had a bunch of annoying side effects.
+
+575
+00:45:31,430 --> 00:45:42,158
+Specifically, if you requested the creation of a new entity in system A and you really wanted to read it in system B, if you defer the creation, you're going to have these off by one frame errors.
+
+576
+00:45:42,178 --> 00:45:43,159
+It's just really irritating.
+
+577
+00:45:44,560 --> 00:45:46,160
+This added a bunch of internal complexity.
+
+578
+00:45:46,180 --> 00:45:53,562
+We wound up changing the code to when you create an entity, we actually like create it in the middle of that frame so it can be used immediately afterwards.
+
+579
+00:45:54,182 --> 00:45:56,282
+And we did that after ship, which is kind of terrifying.
+
+580
+00:45:56,322 --> 00:45:57,083
+That was patch like 1.2 or 1.3.
+
+581
+00:45:57,343 --> 00:45:59,843
+I did not sleep that night when we pushed it live.
+
+582
+00:46:01,543 --> 00:46:03,404
+Yeah, added a bunch of complexity to the component iterators.
+
+583
+00:46:03,444 --> 00:46:04,144
+It was just kind of icky.
+
+584
+00:46:04,184 --> 00:46:08,625
+So this is still, I think it's kind of an open problem that I'm still trying to, or we're still trying to wrap our heads around.
+
+585
+00:46:12,301 --> 00:46:15,544
+It took us a good year and a half to come up with our ECS rules.
+
+586
+00:46:15,664 --> 00:46:20,348
+We knew the canonical ones, but we were taking some existing code and trying to mutate it into this new architecture.
+
+587
+00:46:21,388 --> 00:46:31,617
+These rules are like components have no functions, systems have no state, put your shared code in utils, defer complex side effects by enqueuing them in components, particularly singleton components.
+
+588
+00:46:32,935 --> 00:46:34,856
+Systems shouldn't call functions on other systems.
+
+589
+00:46:35,136 --> 00:46:38,157
+Even our naming convention, those are things we evolved over the course of a couple years.
+
+590
+00:46:38,617 --> 00:46:41,658
+There's still plenty of old code that doesn't follow these rules.
+
+591
+00:46:42,198 --> 00:46:52,741
+And unsurprisingly, they're the source of a lot of complexity and maintenance issues, if you look at it in terms of how many changes they have in Perforce or how many bugs show up in that code.
+
+592
+00:46:53,661 --> 00:46:59,024
+So if you have some legacy code that doesn't actually fit well into ECS, you shouldn't shoehorn it at all, right?
+
+593
+00:46:59,584 --> 00:47:03,507
+Keep that subsystem intact and then create like a proxy component that wraps back to it.
+
+594
+00:47:04,667 --> 00:47:07,289
+Different systems want to solve problems in different ways.
+
+595
+00:47:07,369 --> 00:47:09,930
+ECS is a tool for integrating a bunch of systems together.
+
+596
+00:47:10,351 --> 00:47:12,572
+It shouldn't force us design principles where it isn't welcome.
+
+597
+00:47:14,575 --> 00:47:23,664
+Since ECS is trying to solve the problem of integrating and decoupling a bunch of different large modules, many systems and the components they operate on tend to be iceberg-shaped.
+
+598
+00:47:24,264 --> 00:47:35,735
+Iceberg components have very little surface area to the rest of the ECS systems, but they have a whole bunch of state that's internal under their proxies or in some other data structure that the ECS layer can't really touch.
+
+599
+00:47:38,157 --> 00:47:41,223
+The body of these icebergs is pretty obvious in our threading model.
+
+600
+00:47:41,283 --> 00:47:46,654
+So most ECS work, like updating systems, happens up here on the main thread.
+
+601
+00:47:48,115 --> 00:47:48,175
+I'm
+
+602
+00:48:09,986 --> 00:48:17,308
+all the underlying work for projectile simulation is isolated and pretty much not visible up at the highest level of ECS, and that's good.
+
+603
+00:48:18,068 --> 00:48:21,789
+Another cool example of this is our AI PathData system.
+
+604
+00:48:22,169 --> 00:48:31,831
+It's a good example of a fork-and-join style model, where at the ECS level, it just has a couple hooks to say, hey, this breakable broke, or this door opened.
+
+605
+00:48:32,131 --> 00:48:33,971
+You might want to rebuild PathData in these regions.
+
+606
+00:48:34,911 --> 00:48:36,552
+But under the hood, it's doing a whole bunch of
+
+607
+00:48:37,492 --> 00:48:40,374
+Take all these triangles, voxelize them, and compress the crap out of them.
+
+608
+00:48:40,614 --> 00:48:42,135
+It has nothing to do with ECS, right?
+
+609
+00:48:42,155 --> 00:48:42,715
+I mean, you shouldn't.
+
+610
+00:48:42,735 --> 00:48:44,997
+You shouldn't shoehorn ECS onto that problem space.
+
+611
+00:48:45,017 --> 00:48:46,198
+It's supposed to solve it on its own.
+
+612
+00:48:46,578 --> 00:48:49,200
+So here's a cool video of our path data invalidation system.
+
+613
+00:48:49,860 --> 00:48:51,681
+The path data here is these blue chunks.
+
+614
+00:48:51,701 --> 00:48:54,323
+These represent surfaces AI can walk on.
+
+615
+00:48:54,723 --> 00:48:56,624
+I should mention we use path data not just for AI.
+
+616
+00:48:56,664 --> 00:48:58,105
+We also use it for a bunch of hero abilities.
+
+617
+00:48:58,926 --> 00:49:01,467
+So we actually need to keep this fairly in sync between the server and the client.
+
+618
+00:49:01,988 --> 00:49:03,809
+The Zenyatta here is going to destroy these crates.
+
+619
+00:49:03,869 --> 00:49:06,711
+And you'll see the surface that was on the crates drop down below.
+
+620
+00:49:09,994 --> 00:49:11,335
+And then this door over here is going to open up.
+
+621
+00:49:11,355 --> 00:49:13,556
+When the door opens, we need to knit that back into place.
+
+622
+00:49:14,637 --> 00:49:18,719
+The path data invalidate system just has hooks saying, hey, these triangles changed.
+
+623
+00:49:18,839 --> 00:49:25,283
+And then this iceberg, the bottom half of the iceberg, goes through and churns through all that data to redo all the path data.
+
+624
+00:49:27,724 --> 00:49:30,966
+So, in closing, ECS is the glue of Overwatch.
+
+625
+00:49:32,026 --> 00:49:36,429
+ECS is cool because it helps you to integrate many disparate systems with minimal coupling.
+
+626
+00:49:37,637 --> 00:49:40,279
+If you're going to use ECS, define your rules of engagement.
+
+627
+00:49:40,819 --> 00:49:43,621
+In fact, if you're going to use any architecture, define your rules of engagement quickly.
+
+628
+00:49:44,401 --> 00:49:52,186
+Only a handful of engineers are going to touch your physics code or your scripting engine or your audio library, but everyone's going to touch the glue code that integrates every system together.
+
+629
+00:49:53,007 --> 00:49:54,808
+Enforce constraints on this glue code.
+
+630
+00:49:54,888 --> 00:49:56,029
+Dig a pit of success.
+
+631
+00:49:56,929 --> 00:50:02,293
+Netcode turns out really tricky, so decouple it as much as possible as you can from the rest of your engine.
+
+632
+00:50:02,833 --> 00:50:04,815
+ECS is a handy solution to that problem.
+
+633
+00:50:05,962 --> 00:50:12,608
+Before we take some questions, I want to thank all the engineers on Team 4, especially the gameplay engineers, for having to deal with this crap for three years.
+
+634
+00:50:13,729 --> 00:50:19,234
+We worked together to kind of come up with these rules and evolve where this architecture was going to go, and I'm happy with how it turned out.
+
+635
+00:50:20,996 --> 00:50:22,797
+All right, we have about 10 minutes for questions.
+
+636
+00:50:22,817 --> 00:50:30,324
+Thank you.
+
+637
+00:50:30,424 --> 00:50:31,025
+Over here on the right.
+
+638
+00:50:32,076 --> 00:50:33,537
+Hi.
+
+639
+00:50:33,697 --> 00:50:54,108
+So in your components, in the instances, did you use any kind of, here's my component states for frame n, for frame n plus 1, I have the second copy over here and therefore when I do modifications on them for the next frame I don't have to modify in place but I'm
+
+640
+00:50:55,228 --> 00:50:57,349
+We don't do a double buffer.
+
+641
+00:50:57,389 --> 00:51:01,971
+A double buffer is cool because you can do that to do multi-threading and deferment.
+
+642
+00:51:02,151 --> 00:51:03,031
+It's really easy to do.
+
+643
+00:51:03,071 --> 00:51:08,233
+In fact, we had another ECS prototype that did do exactly that with straight double buffering.
+
+644
+00:51:09,473 --> 00:51:10,434
+It wouldn't be hard to add.
+
+645
+00:51:10,694 --> 00:51:16,216
+So what's going to happen there is you're going to read last frame state invariably.
+
+646
+00:51:16,876 --> 00:51:18,777
+And for some systems, that works fine.
+
+647
+00:51:19,137 --> 00:51:23,560
+But for a lot of highly inter-object interaction systems, it's going to introduce one frame delays.
+
+648
+00:51:23,620 --> 00:51:25,100
+And that's going to hurt responsiveness in general.
+
+649
+00:51:25,501 --> 00:51:27,141
+So it's a your mileage may vary type of scenario.
+
+650
+00:51:27,161 --> 00:51:28,982
+But it's very easy to do in ECS.
+
+651
+00:51:29,463 --> 00:51:32,044
+In general, for us, we have two components.
+
+652
+00:51:32,124 --> 00:51:38,227
+The input stream component stores a ring buffer of all of your inputs for the last two seconds.
+
+653
+00:51:38,607 --> 00:51:45,311
+And the movement state component stores all of your movement state and movement state for any mover for the last second or two or something like that.
+
+654
+00:51:45,851 --> 00:51:50,533
+And those ones you can go back in time and read immutable versions without trouble.
+
+655
+00:51:51,533 --> 00:51:53,734
+It's not a general solution for ours, but it's not hard to add.
+
+656
+00:51:56,335 --> 00:52:00,256
+I had a question regarding looking at parent state instead of storing it locally.
+
+657
+00:52:00,276 --> 00:52:04,618
+So you mentioned that if you shoot a projectile, you could just look at who the owner was.
+
+658
+00:52:05,198 --> 00:52:09,519
+And I guess I was curious about the philosophical decision to do that versus storing that state in the projectile.
+
+659
+00:52:09,579 --> 00:52:11,060
+You get kind of weird things where
+
+660
+00:52:11,360 --> 00:52:11,440
+I'm
+
+661
+00:52:30,752 --> 00:52:32,673
+So you fire a rocket at me and I deflect it back.
+
+662
+00:52:32,753 --> 00:52:34,114
+It was your rocket, now it's my rocket.
+
+663
+00:52:34,754 --> 00:52:40,597
+So now I have to go, I would have to go into that projectile and copy off a bunch of hostility information.
+
+664
+00:52:41,158 --> 00:52:43,539
+We just say, well, let's not, let's not try to maintain that.
+
+665
+00:52:43,579 --> 00:52:47,841
+Let's just save the instigator or, oh God, there's specific titles for those things, but yeah.
+
+666
+00:52:47,881 --> 00:52:48,962
+So it was out of simplicity.
+
+667
+00:52:49,222 --> 00:52:49,982
+Yeah, simplicity, yeah.
+
+668
+00:52:50,202 --> 00:52:54,885
+And if it's, I mean, what you're describing, the technique you're describing would be probably for a perf benefit.
+
+669
+00:52:55,525 --> 00:52:55,725
+talk.
+
+670
+00:53:13,406 --> 00:53:20,948
+So I guess my question is, as you said, over three years you were building the rules to help with constraint and do the pit of success.
+
+671
+00:53:21,948 --> 00:53:25,729
+I guess, how does that factor into refactoring systems that you already developed?
+
+672
+00:53:27,889 --> 00:53:30,330
+Systems before 2013?
+
+673
+00:53:31,230 --> 00:53:32,470
+Or as we went?
+
+674
+00:53:32,790 --> 00:53:33,670
+Yeah, as you went.
+
+675
+00:53:33,710 --> 00:53:36,511
+I'm assuming you had a block of legacy code or you had a block of code.
+
+676
+00:53:38,803 --> 00:53:45,346
+shoot, a bunch of the folks that were there during that window of time on Overwatch will very fondly remember us trying to hold on to a bunch of legacy systems.
+
+677
+00:53:46,347 --> 00:53:49,248
+And then we actually had this process we called mothballing.
+
+678
+00:53:49,268 --> 00:53:50,669
+We said, well, I don't want to delete this code.
+
+679
+00:53:50,689 --> 00:53:53,270
+I'm just going to pound to find it out under a mothball to find.
+
+680
+00:53:53,590 --> 00:53:54,831
+And then we'll come back to it in a couple weeks.
+
+681
+00:53:55,931 --> 00:53:57,152
+And we just deleted all that code.
+
+682
+00:53:58,752 --> 00:53:58,832
+on
+
+683
+00:54:18,629 --> 00:54:21,271
+This is just a benefit of modularity in general.
+
+684
+00:54:21,911 --> 00:54:26,755
+If all of your behavior is isolated to systems, if you want to completely rewrite that system, that's not hard to do at all.
+
+685
+00:54:28,676 --> 00:54:37,283
+So I think less of the value was about refactoring old legacy systems and more about refactoring the new stuff as we wrote it.
+
+686
+00:54:37,343 --> 00:54:44,248
+So we rewrote whole systems multiple times for perf or for complexity or for organizational purposes or features.
+
+687
+00:54:44,728 --> 00:54:48,509
+Hi, you mentioned that you switched from deferring creating entities to doing them immediately.
+
+688
+00:55:05,533 --> 00:55:14,980
+So that's actually like my fear, the reason we made the choice early on to do deferment was, well, what's going to happen if the entity gets created halfway through and it doesn't, you know, get systems A through F run against it?
+
+689
+00:55:30,012 --> 00:55:36,894
+We just said, well, you should be able, you should be a fully formed functional thing by the time your create is done.
+
+690
+00:55:36,934 --> 00:55:39,014
+You shouldn't need some other system running against you.
+
+691
+00:55:39,654 --> 00:55:44,955
+And we very slowly took pieces of entity creation and made it happen synchronously.
+
+692
+00:55:45,716 --> 00:55:51,697
+The last one we changed after ship was whether or not we added components to these component iterators, which is what most systems run over.
+
+693
+00:55:52,317 --> 00:55:54,057
+And that was the scary one that we just waited.
+
+694
+00:55:54,918 --> 00:55:56,038
+It turns out it just worked.
+
+695
+00:55:56,718 --> 00:55:56,898
+a look.
+
+696
+00:56:07,355 --> 00:56:07,495
+a look
+
+697
+00:56:27,100 --> 00:56:33,966
+which kind of sucks, because this first array is sorted by memory address, it's super cache local, it's really fast, and these dudes over here aren't.
+
+698
+00:56:34,567 --> 00:56:40,732
+So you can get a bit of a perf hurt there for the one or two new entities that showed up during that thing, but against the other 40, who cares?
+
+699
+00:56:41,092 --> 00:56:45,056
+And then when the frame's done, you kind of merge those guys, sort them back into position, and you're good to go.
+
+700
+00:56:45,196 --> 00:56:50,401
+But yeah, that was scary and terrifying, and not thread safe, and yeah.
+
+701
+00:56:50,421 --> 00:56:51,622
+All right, thank you.
+
+702
+00:56:56,768 --> 00:57:08,184
+My question is, you mentioned the server runs 60 frames per second, and when the client is running lower
+
+703
+00:57:09,048 --> 00:57:19,701
+frame rate, the server needs 60 command in a second.
+
+704
+00:57:20,602 --> 00:57:26,209
+So client is also needs to run at 60.
+
+705
+00:57:29,268 --> 00:57:33,070
+Is your question about, does the client, must the client always run at 60?
+
+706
+00:57:33,170 --> 00:57:33,811
+What happens if it runs at 30?
+
+707
+00:57:34,051 --> 00:57:35,992
+Yeah.
+
+708
+00:57:36,612 --> 00:57:37,493
+It's a fixed simulation.
+
+709
+00:57:37,533 --> 00:57:38,113
+You must run at 60.
+
+710
+00:57:38,433 --> 00:57:41,835
+You don't have to render at 60, but the simulation has to run at 60.
+
+711
+00:57:42,195 --> 00:57:45,758
+So the simulation, here's the render part of the frame.
+
+712
+00:57:45,798 --> 00:57:47,058
+Here's the simulation part of the frame.
+
+713
+00:57:47,098 --> 00:57:50,440
+If you're running at 30 hertz, you're going to run two simulations, two time steps.
+
+714
+00:57:51,781 --> 00:57:55,123
+And the game simulation is much cheaper than the render part.
+
+715
+00:57:57,404 --> 00:57:57,484
+It's
+
+716
+00:58:15,578 --> 00:58:15,718
+that
+
+717
+00:58:35,379 --> 00:58:42,003
+and we do some cool tricks where, hey, for remote guys, a lot of the script stuff, the high-level gameplay stuff, has a budget.
+
+718
+00:58:42,284 --> 00:58:47,527
+Like, we're only going to run one and a half milliseconds for other people, and we'll just smooth spikes out that way.
+
+719
+00:58:48,127 --> 00:58:49,328
+So it works out OK, but yeah, you're right.
+
+720
+00:58:49,528 --> 00:58:50,269
+You have to be careful.
+
+721
+00:58:50,329 --> 00:58:51,309
+You have to get that work done.
+
+722
+00:58:51,710 --> 00:58:52,010
+Thank you.
+
+723
+00:58:52,831 --> 00:58:54,713
+One more question.
+
+724
+00:58:55,854 --> 00:58:58,017
+You mentioned about heat prediction.
+
+725
+00:58:59,318 --> 00:59:06,507
+Do you use it also for slow rockets or something?
+
+726
+00:59:06,787 --> 00:59:08,629
+Yeah, that was a fun day.
+
+727
+00:59:11,132 --> 00:59:11,292
+I'm
+
+728
+00:59:29,764 --> 00:59:33,045
+honking thing in the world, not like a long tracer.
+
+729
+00:59:33,686 --> 00:59:35,666
+So the rocket can disappear because of a misprediction.
+
+730
+00:59:35,846 --> 00:59:37,967
+Let's say you fired a rocket, but you got stunned by McCree.
+
+731
+00:59:38,227 --> 00:59:39,048
+The rocket just vanishes.
+
+732
+00:59:39,648 --> 00:59:43,389
+And then YouTube video forum yelling at Tim.
+
+733
+00:59:44,510 --> 00:59:46,030
+But it's so worth it.
+
+734
+00:59:46,050 --> 00:59:47,951
+Predicting rockets is rad.
+
+735
+00:59:48,391 --> 00:59:49,292
+It feels really good.
+
+736
+00:59:49,692 --> 00:59:52,393
+So if you're making a new shooter out there, just do it.
+
+737
+00:59:52,693 --> 00:59:55,554
+And you'll get one forum post saying, hey, my rocket disappeared.
+
+738
+00:59:55,574 --> 00:59:56,174
+Yeah, it doesn't matter.
+
+739
+00:59:56,234 --> 00:59:57,015
+It's totally worth it.
+
+740
+00:59:57,075 --> 00:59:57,775
+It's really, really good.
+
+741
+00:59:59,540 --> 01:00:04,423
+like the one thing we did to the genre, like the Predicted Rockets, Overwatch, Game of the Year.
+
+742
+01:00:05,143 --> 01:00:05,823
+Yeah.
+
+743
+01:00:05,883 --> 01:00:06,904
+Thanks.
+
+744
+01:00:08,005 --> 01:00:08,445
+Thank you.
+
+745
+01:00:08,765 --> 01:00:11,426
+Yeah, thanks for the pharaoh and pharaoh duels for our tribes fans.
+
+746
+01:00:11,707 --> 01:00:11,927
+Right?
+
+747
+01:00:12,267 --> 01:00:12,467
+Right.
+
+748
+01:00:12,807 --> 01:00:13,328
+Exactly.
+
+749
+01:00:13,668 --> 01:00:15,509
+The love note to the genre, tribes especially.
+
+750
+01:00:15,569 --> 01:00:15,829
+Thank you.
+
+751
+01:00:16,847 --> 01:00:20,568
+My question's about, I guess, spatial quantization, how it kind of functions with the other systems.
+
+752
+01:00:21,429 --> 01:00:24,970
+First part is about, like, how fine is your spatial quantization?
+
+753
+01:00:25,010 --> 01:00:25,410
+One millimeter.
+
+754
+01:00:25,930 --> 01:00:26,970
+Well, one divided by 1024.
+
+755
+01:00:27,370 --> 01:00:29,091
+Or one meter divided by 1024.
+
+756
+01:00:29,251 --> 01:00:30,451
+But, you know, we're engineers.
+
+757
+01:00:30,811 --> 01:00:31,912
+Divide by a thousand, what?
+
+758
+01:00:32,472 --> 01:00:33,852
+Yeah.
+
+759
+01:00:33,992 --> 01:00:35,793
+How well does the physics engine handle that?
+
+760
+01:00:35,893 --> 01:00:37,774
+Because that can introduce errors, right?
+
+761
+01:00:38,034 --> 01:00:42,155
+And how much of the important gameplay elements are actually affected by the physics engine?
+
+762
+01:00:42,998 --> 01:00:43,078
+of
+
+763
+01:00:56,778 --> 01:00:56,918
+that
+
+764
+01:01:14,289 --> 01:01:19,473
+If Clang compiles it differently and you have out-of-order execution on this set of floating-point operations, would you get different results?
+
+765
+01:01:19,874 --> 01:01:22,856
+And because of the nature of the quantization, we don't.
+
+766
+01:01:23,377 --> 01:01:27,000
+If you have specific questions on that, go to Phil Orwig's talk tomorrow.
+
+767
+01:01:27,540 --> 01:01:34,886
+He doesn't talk about that problem specifically, but he wrote the code to quantize it, so you can harass him afterwards and he'll tell you all about IEEE and fun stuff.
+
+768
+01:01:35,106 --> 01:01:39,370
+I think this might be the last question, though.
+
+769
+01:01:40,069 --> 01:01:43,350
+So your client-side prediction seems to rely on determinism.
+
+770
+01:01:43,790 --> 01:01:45,391
+Let me stop you real quick.
+
+771
+01:01:45,411 --> 01:01:45,591
+Sorry.
+
+772
+01:01:45,811 --> 01:01:47,611
+The last question here.
+
+773
+01:01:47,691 --> 01:01:49,332
+I'm going to go to the wrap room around the corner.
+
+774
+01:01:49,352 --> 01:01:50,832
+So if you have more questions, just follow me.
+
+775
+01:01:51,333 --> 01:01:51,893
+But sorry, go ahead.
+
+776
+01:01:53,033 --> 01:01:56,054
+So your client-side prediction relies on determinism.
+
+777
+01:01:56,534 --> 01:01:58,315
+And you have to support multiple platforms.
+
+778
+01:01:58,375 --> 01:02:03,116
+And it looks like, for example, your dynamic NavMesh system seems like it could be asynchronous.
+
+779
+01:02:04,297 --> 01:02:07,698
+What techniques have you developed to preserve determinism in your simulation?
+
+780
+01:02:08,863 --> 01:02:08,983
+of
+
+781
+01:02:30,779 --> 01:02:30,999
+which is
+
+782
+01:02:49,091 --> 01:02:49,111
+I
+
+783
+01:03:10,990 --> 01:03:15,533
+So like when a door opens and NavMesh changes, it happens at the same time step as the server?
+
+784
+01:03:15,713 --> 01:03:18,354
+Oh yeah, so the NavMesh thing... No floating point?
+
+785
+01:03:18,374 --> 01:03:26,720
+Yeah, the NavMesh thing doesn't... Certainly the result lines up because it's given the same input, but the amount of time it takes to recompute the NavMesh is different on the server and client, and that's okay.
+
+786
+01:03:27,400 --> 01:03:38,967
+Very few player movement abilities rely on the NavMesh, and if you mispredict, it's not horrible, and again, the server's the authority, so you'll get caught back up to the right state no matter what.
+
+787
+01:03:39,227 --> 01:03:39,628
+talk about.
+
