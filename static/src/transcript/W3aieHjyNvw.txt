@@ -1,0 +1,760 @@
+Hello everybody, this is Overwatch Gameplay Architecture and Netcode.
+Standard rules apply.
+Silence your phones.
+Fill out the session feedback form.
+Switch off Hanzo and get on the fucking payload.
+My name's Tim Ford, I'm the lead gameplay programmer on Overwatch.
+I've worked on Overwatch in that capacity since its inception in the summer of 2013.
+Before that I worked on Titan.
+This talk is not about Titan.
+The goal of this talk is to share some techniques for reducing complexity in an ever-growing code base.
+We achieve this goal by adhering to a strict architecture.
+Finally, we'll demonstrate an example of managing complexity by talking about an intrinsically complex problem, netcode.
+Overwatch, for those of you who aren't familiar with the game, is a team-based online hero shooter set in the near future.
+It features a diverse cast of heroes, each with their own unique, over-the-top abilities.
+Overwatch uses what is called an entity component system architecture, which I will say and mumble as ECS from here on out.
+ECS is different from the component model popular in several off-the-shelf engines and much different from the classic actor model that dominated the late 90s and early 2000s.
+Our team had several years of experience with these other architectures, so choosing ECS instead was a bit of a grass is greener move.
+We did audit a prototype first, so the decision wasn't entirely emotional.
+That said, the idea that ECS architectures can manage complexity on a quickly growing code base was discovered over three years of development.
+I'm happy to espouse ECS's virtues, but know that I do so today with the clarity of hindsight.
+The canonical ECS architecture looks like this.
+You have a world, and it is simply a collection of systems and entities.
+An entity is really just an ID that corresponds to a collection of components.
+Components store game state and have no behaviors.
+Systems have behaviors and store no game state.
+Here's the shocking thing.
+When I say they have behaviors, components have no functions, and systems have no fields.
+Here are the systems and components of a simple ECS engine that we archetyped.
+This is what it looks like.
+On the left-hand side here you can see the systems in tick order.
+These are the different components that different entities have.
+The components lighting up on the right like chords of a piano refer to what we call tuples of components.
+The system tick iterates through the tuples.
+and performs operation, that's the behavior, on their state.
+Remember, the components have no functions.
+Their state is laid bare.
+The overwhelming majority of systems care about more than one component.
+You can see here transform component's pretty popular.
+Here's an example of what a system tick looks like from our prototype engine.
+This is the physics system tick.
+Pretty straightforward, you basically have an internal underlying physics update, could be Havok, could be Box2D, or Domino, which is our proprietary physics engine.
+After you run the world sim, the physics world sim, you iterate over a set of tuples, you use whatever proxy was stored in this dynamic physics component to pull out the underlying physics representation, and you copy it across to the transform and contact components.
+A system has no idea what each entity is.
+It only cares about a tiny slice of the components and executes a set of behaviors common to that slice of components.
+Some entities might have 30 components, some might have two or three.
+The systems don't really care.
+They just care about the subset of components on which their behavior operates.
+So here in our prototype engine, this is an entity that's the player character that can do a bunch of cool behaviors.
+This is like a bullet that the player can shoot.
+Each of the systems as they run don't know or care what those entities are.
+They just operate on the subset of components that are relevant to them.
+Overwatch's implementation looks like this, mostly.
+The world is something we call the entity admin.
+It stores an array of systems and a hash map of entities that are keyed by entity ID.
+The entity ID is just an unsigned 32 that uniquely identifies this entity in the entity admin array.
+The entity stores that entity ID in this optional resource handle that points back to the asset, what we call the entity definition, that defines that entity.
+Component is simply a base class with hundreds of subclasses.
+Each subclass component has member variables required for the behaviors that will be run against it from systems.
+Polymorphism is used almost exclusively for lifetime.
+We override the create function and the destructor, but that's pretty much it.
+The only other functions that might make their way into an actual instantiation of a component would be little helper functions that make accessing its internal state easier, but they aren't really behaviors.
+These are just simple accessors.
+So the entity admin is going to call update on every single system, and then each system, they're going to do some stuff.
+So here, the way we work, instead of operating over these fixed tuples of components, we choose like a primary component we're going to iterate over.
+And then our behavior invariably is going to involve other components, we grab them through a sibling.
+So here, some system operates on tuples of entities that have the derp component and the herp component.
+The Overwatch client system and component breakdown looks like this.
+Here we show about 46 different systems and 103 component types.
+This is just designed to impress you.
+This is the server, and you can see some systems operate on a lot of components, some systems operate on very few.
+Ideally, we try to make sure that systems that work on lots of components do so by reading them as pure functions as opposed to mutating all those things.
+There are a handful of systems that do need to mutate a lot of those components, and by virtue of that, they have to kind of manage that complexity themselves.
+Here's an example of what a system actually looks like.
+This is the player connection system.
+It's responsible for enforcing AFK behavior on all of our game servers.
+The system iterates over connection components.
+Connection is the component that corresponds to the player network connection on the server.
+It exists on the entity that represents the player.
+The entity itself could be an active game participant, could be a spectator, or some other player-controlled role.
+This system doesn't know or care.
+Its job is just to enforce AFK.
+For each connection component, here's our tuple, connection component that has an input stream and a stats.
+We're going to read your input stream, make sure you did something, you pressed a button, read your stats component, make sure you contributed to the game in some sort of way.
+As long as you do that, we'll reset your AFK timer.
+Otherwise, we will use the connection handle, that state stored on the connection component, to send you a message to move.
+So in order for this behavior to run, an entity that's going to be cast against the system must have the entire tuple.
+For example, an AI bot has a stats component, but it doesn't have a connection component or an input stream.
+So it's not going to be subject to this behavior.
+Again, the system behaviors look at those slices, and you must have the whole set.
+And if we AFKed out AI, that'd be kind of wasteful.
+Let's be honest.
+OK, so the system update function raises this question.
+So why not just do a traditional object-oriented programming component model update?
+have the connection component override a virtual update function that does all the AFK tracking.
+Well, connection fulfills multiple behaviors.
+It corresponds to the subject of an AFK.
+It corresponds to the list of connected players who are subject to a broadcasted network message.
+It stores the state by which you determine a player's name.
+It stores the state by which you can get, like, a player's persistence record, see what unlocks they have.
+So which behaviors should be in that component's update?
+Where would you put the rest?
+In object-oriented programming, a class is both behavior and state, but connection component is not a behavior, it's only state.
+Connection's not an object in the object-oriented programming sense.
+It means different things to different systems at different times.
+So what are the conceptual advantages of the separation between behavior and state?
+Bear with me for a sec.
+So, imagine these are the cherry blossoms in your front yard.
+These trees in your front yard mean something subjectively different to you The President of your HOA, a gardener, a bird, a property tax assessor, and a termite.
+Each observer sees different behavior in the state that describes that tree.
+That is, the tree is a subject that is dealt with differently by various observers.
+To complete the analogy, the player entity, and more specifically the connection component therein, is a subject that is dealt with differently by various systems.
+The player connection system that we saw before views connection as the subject of an AFK kick.
+The connection util views connection as the subject of a broadcaster player's network message.
+On the client, the UX game system views connection as the subject that populates the UI element on the scoreboard with the player's name.
+Why author behaviors this way?
+It turns out it's much easier to describe all the behaviors of a tree when you compartmentalize individual behaviors by their subjective perceptions, and this is also true of game objects.
+Anyway, as we dug out our industrial strength ECS architecture, we ran into a couple problems.
+First, we struggled with this rule that components have no functions and systems have no state.
+Surely systems can have just a little bit of state, right?
+A few legacy systems were ported over to Overwatch from other non-ECS architectures.
+They had member variables, so what's wrong with that?
+For example, the input system.
+You can store the input state in the input system, and any system that needs to know if a button is pressed can just grab a pointer to the input system and ask.
+It seems silly to store global input in a single component.
+Surely there should be more than one instance of a component if you're going to make a new component type.
+There's no need in order to substantiate writing that code.
+Components are usually accessed through these iterators, like we saw before.
+It's kind of bizarre to iterate over a component whose domain is exactly one.
+Anyway, this worked for a while.
+We stored this one-off state in systems and then made global accessors.
+You can see here this global variable accessing the system that one system could call from another.
+It was kind of crummy for compile times because the systems were being included, right, in other systems.
+Let's say I was refactoring input system and moving some functions around and modifying that header.
+Well, now every single system that needed to get that state was going to get recompiled, and that's just annoying.
+Also made of a bunch of coupling.
+You have systems behavior leaking into other systems.
+So here we have this post build player command that the input system is responsible for doing.
+If I needed to add new stuff to this function call, this command system's job is to fill out this struct with a bunch of bits based on player input that'll be sent up to the server.
+If I want to extend that, add new things, do I add it to the command system or do I add it to this funky little function over here?
+Are we leaking behaviors from command system into other systems?
+As the systems grow naturally, choosing where to author the behavior becomes ambiguous.
+Here, the command system's behavior fills out those structs, so why mix it?
+Why put it in one system or the other?
+Anyway, we did this this way for a while, and it worked decent until Killcam.
+All right, so Killcam, we're going to have two different simulation environments, one the live game and one the Killcam.
+I'll show you how that works.
+It's pretty straightforward, you add a second pristine ECS world.
+One for the live game and one for the replay.
+The way the replay works is the server's going to send down a big, fat network stream of 8 to 12 seconds.
+Then we're going to spin up and point to start render the replay admin and give it that network stream as if it came off the wire.
+And that all those systems, all those components, all those behaviors don't know that they're not being predicted on that client.
+They're just running the network stream as if it was normal gameplay.
+It's kind of cool.
+If you guys want to learn more about this, I suggest going to Phil Orwick's talk tomorrow, I believe, in this room at 11 o'clock.
+Anyway, what we learned after doing that was all these call sites where we had these globally accessed systems were suddenly wrong.
+There wasn't a single global entity admin anymore, there were two.
+System A couldn't grab the global system B, it now had to grab system B through their shared entity admin somehow, and that's just icky.
+Well, after Killcam, we took a long look in the mirror, and between the bizarre access patterns, the compile overhead, and most dangerously, this inter-system coupling, we had a problem.
+The solution was to come to terms with the fact that it's okay to define a component type that will only ever have one instance per entity admin.
+We created this notion of singleton components.
+These are components that live on an anonymous single entity and are usually accessed directly through the entity admin.
+We moved most of the state that was in systems into these singletons.
+I should mention that it's very rare for a singleton state to be accessed by exactly one system.
+Moving forward, we got in this habit where we would write a new system and realize that system was begging for some state.
+We would go ahead and make a singleton for that system to store that state in.
+And almost every single time, some other system was going to want that state.
+So it really got ahead of this kind of of intrinsic coupling that the previous architecture was demonstrating.
+Here's an example, singleton input.
+All the button press information is stored into that singleton input.
+We just moved it out of the input system.
+Any system that wants to know whether a button's up or down just grabs that component and asks.
+This immediately removes some nasty coupling and aligned us more with the ECS philosophy.
+Systems have no state and components have no behavior.
+The button state is not behavior.
+The local player movement system has a behavior that it uses this singleton to predict local player movement.
+The movement state system has a behavior that packages this input up to the server to be consumed.
+The pattern of singletons turned out to be so common that about 40% of our components are actually singleton components.
+Once we move some system state into singletons, we address a bit more coupling by breaking out shared system functions into utility functions that operate on those singletons.
+We'll talk about that next.
+The input system still exists.
+It's responsible for reading input from the OS and filling out singleton input.
+And then other systems downstream can just read singleton input to do what they need to do.
+It's responsible for other stuff like applying the button bindings, the per hero button settings, but it's no longer coupled at all with the command system.
+We also moved this little post build player command function into command system, that's where it really belonged anyway.
+And now you can guarantee that all of the mutations to player command, this important structure that'll be networked and used for simulation, is all modified in this one spot.
+At the time we adopted singleton components, we didn't know we were establishing patterns like this to reduce coupling and therefore reduce complexity.
+In this example, command system becomes the only place that generates side effect on this player command struct.
+Any programmer can easily understand mutations to player commands because it all happens in this one file, imperatively, at one time in one system update call.
+It's also clear to any programmer that any new mutations we need to add to the player command happen in this one file, in this one update function.
+All that ambiguity goes away.
+Let's talk about another problem we have, this idea of shared behavior.
+The way this works is if you have some behavior that's invoked from multiple system updates, sometimes two observers of a subject are interested in the same behavior.
+Going back to the tree analogy, the president of your HOA and your gardener may both want to know how many leaves are going to fall out of this tree during the spring, right?
+They'll each do something different with that output, like the president of your HOA will probably yell at you and the gardener will just get back to work, but the behavior is the same.
+For example, a lot of code is curious about relative hostility.
+Is entity A hostile to entity B?
+Hostility is determined by three optional components, FilterBits, PetMaster, and Pet.
+FilterBits stores an entity team's index.
+The PetMaster stores a unique key that matches all of his corresponding pets.
+You'd use Pet on like Torbjorn's turret.
+If either entity has no FilterBits, they aren't hostile.
+So two doors are not hostile to each other.
+They don't have teams set up on their FilterBit components.
+If they're on the same team, they also aren't hostile, that's pretty easy.
+If they are on the always hostile team, they will check their pet master pair and make sure that they are related to one another.
+This solves the problem of if you're on the hostile to everyone team and you spawn a turret, it doesn't immediately start attacking you.
+I mean, it did, but we fixed that bug.
+When you want to check hostility for a projectile in flight, you simply fall back to the instigator, the guy who shot that projectile.
+It's pretty straightforward.
+Anyway, the example I described above is this function called CombatUtilIsHostileTo, and it takes two entities and returns true or false if there's hostility.
+And a ton of systems call this function.
+So here's a bunch of systems that call it.
+But as you can see, it only reads these three components that I enumerated.
+So its surface area is fairly low, and more importantly, it's pure.
+It's not going to actually mutate these guys at all, it's just going to read them.
+As an example, using that as an example, we have a couple different rules when it comes to these utility functions, the shared behavior.
+If you want to invoke a utility from several call sites, the function should read very few components and have very few, hopefully little, or no side effects.
+If you have a utility function that reads several components and has several side effects, try to limit the number of call sites.
+So one example of that is what we call the character move util.
+This is a host of functions that moves the player one tick in the simulation, and that's called in two spots.
+Once on the server to simulate your input, and once on your client to predict your input.
+So we continue to replace these inner system calls with utility functions and move state out of systems into these singletons.
+If you replace an inner system function call with a shared utility function, you don't magically avoid complexity.
+It's mostly syntactic and organizational.
+Just as you can hide a lot of side effects behind a publicly accessible system function, you can hide a lot of side effects behind a utility function as well.
+So if you're calling that utility function from several sites, you're invoking several major side effects all over your game update loop.
+It may not be obvious because it's behind a function call, but it's still pretty horrible coupling.
+If you take away one lesson from this talk, let it be this.
+Behaviors are much less complex if they are expressed in a single call site in which all major behavioral side effects are localized to that call site.
+Let's explore some techniques we discovered to help reduce this type of coupling.
+When you discover that a big side effect has to be executed in response to some behavior, ask yourself if that big chunk of work has to happen right now.
+The best singleton components solve inter-system coupling with deferment.
+Deferment is the act of storing the state required to invoke a major side effect, but putting off the side effect invocation until later at a better single moment in the frame.
+The several call sites in the code want to spawn surface impact effects.
+You have these hitscan projectiles, travel time projectiles with explosions, you have your Zarya beam that does like a channeled effect along a wall and has to maintain that contact as she fires, and you have sprays.
+Creating an impact effect qualifies as a very large side effect.
+You're creating a new entity in the scene that has repercussions with lifetime, threading, scene management, and resource management.
+The lifetime requirement for impact effects is that they show up before the scene renders.
+That doesn't mean they have to show up in the middle of the game simulation in a dozen different call sites though.
+Here's If you shoot a wall as Tracer and do a bunch of pockmarks, and then Pharah fires her rocket and puts a huge Scorch mark over it, you want to delete those pockmarks, otherwise you get ugly Z fighting and the effects artists yell at you.
+I don't want to do that math all over the place.
+I want to do that in one spot.
+If I had to change this code, right, that's a lot, and I had a dozen different call sites invoking it, I've got to test all those call sites.
+Invariably, more call sites would be added as folks pattern match.
+They go, oh, I have some cool ability that needs to create a new effect.
+I'll just copy paste this one function call.
+It's OK.
+It's just a function call.
+No, it's not.
+It's this nightmare.
+When a lot of large side effects can be invoked from multiple different call sites, programmers tend to spend a lot more mental energy maintaining a cognitive model of how the code works.
+That's what code complexity is.
+You want to avoid that.
+So, singleton contact.
+It contains an array of pending contact records.
+Each record has enough information to create the effect later in the frame.
+When you want to spawn an impact effect, you just add a new entry and fill it out.
+Later in the frame, before the scene update and the render prep, the thing's going to draw that frame's work, the resolve contact system churns through the array of pending contacts and spawns the effects with all those LOD rules and overrides and stuff.
+The big side effects are invoked entirely from one call site every single frame.
+Aside from the reduced complexity of the solution, the deferment has a couple other advantages.
+You get a perf benefit because of data and instruction cache locality.
+you can place a perf budget on impact effect creation.
+Imagine you have like 12 divas all shooting a wall at the same time and they want to spawn like hundreds of impact effects.
+You don't have to spawn them like now.
+You want to spawn like your divas impact effects, but you could defer the rest and smear them out over multiple frames, smooth out spikes.
+There's a bunch of really cool advantages to this, right?
+You can do all the really complex stuff.
+Even our resolve contact system does a fork and join multi-thread check in order to, you know, figure out how to orient all the little particle systems.
+It's really cool you can defer all this stuff.
+Utility functions, singletons, deferment, these are just a few of the patterns we established over three years of working on an ECS architecture.
+In addition to the constraints of omitting states from systems and behaviors from components, these techniques further constrain how we solve problems on Overwatch.
+Adhering to these constraints means you have to solve problems in a very specific way.
+However, these techniques result in a consistent, maintainable, decoupled, and simple code.
+We constrain you, we throw you in this pit, but it is a pit of success.
+Alright, with that in mind, let's talk about one of the real hard problems and how ECS makes it simpler.
+This is the most important problem, netcode, for gameplay engineers we had to solve.
+Our objective is to make a responsive networked action game.
+In order to make the game responsive, we have to predict player action.
+Nothing's going to feel responsive if you have to wait for the server to tell you what happened.
+This has been true of the genre for 20 years.
+Despite that requirement, we really can't trust the client with any simulation authority other than their input because some clients are jerks.
+Things that make the game feel responsive.
+You have movement, you have ability use.
+Weapons are an ability as far as we're concerned.
+Hit registration.
+In all cases, it comes down to this.
+The player hits a button, the player should see an immediate response.
+This should work as well as possible, even at high latency.
+This dude's running at a quarter second ping.
+All my button presses are immediately responsive.
+Everything's working just fine.
+No delay.
+Mispredictions are a side effect of server authority and lag if you're going to have a predicted client.
+Mispredictions are easy.
+You didn't do what you thought you did.
+That's pretty much what they are.
+The server needs to correct you, but not at the expense of further responsiveness.
+We try to reduce the chance of misprediction with determinism.
+So here, same context.
+quarter second, 250 millisecond ping.
+We thought we leapt.
+The server said no.
+We got yanked back down to where we were before and frozen.
+You can even see how the prediction worked.
+The prediction tried to get us up in the air.
+Even Winston's cooldown goes off.
+I think it's promptly reset.
+But we don't want to, 99.9% of the time, that prediction's going to work just fine.
+So we want to make it as responsive as possible.
+And if you happen to be playing from Sri Lanka and you get frozen by May, you're going to be a little mispredicted correction.
+All right, so let me put some ground rules in place first.
+We're going to discuss the novel techniques and how we leveraged ECS to reduce complexity here.
+We're not going to cover general replication of entities, remote entity interpolation, or the details of backwards reconciliation.
+We very much stand on the shoulders of giants and use well-established techniques covered by other literature.
+The subsequent slides do, however, assume some familiarity with those techniques.
+Our deterministic simulation relies on a synchronized clock, a fixed update, and quantization.
+Both the server and the client operate over this synchronized clock and quantized values.
+Time is quantized into what we call command frames.
+Each command frame lasts a fixed 16 milliseconds, and in our tournament configuration, it's a fixed 7 milliseconds.
+Simulation is fixed time, so it has to translate the loop clock time, whatever the computer clock says, every single render frame into fixed frames.
+We use an accumulator with rollover remainder to accumulate command frames.
+Within our ECS framework, any system that predicts on the client or authoritatively simulates the player based on player input uses a slightly different API.
+It doesn't use update, it uses update fix.
+Update fix is just done for every single fixed command frame.
+Assuming a steady output stream, the client's clock is always ahead of the server by half RTT plus one buffered command frame.
+And RTT here really is just ping.
+Ping plus processing time.
+So in this example, our RTT is about 160 milliseconds, so half of that's 80, plus one buffered command frame.
+The command frame is 16 milliseconds.
+That's how far ahead of time the client is from the server.
+So in this little diagram, the vertical bars here are the command frames being executed.
+What's going to happen of the project.
+All right, because the client is always gobbling up player input as fast as it possibly can or as close to now as it possibly can based on your latency, if it has to wait to consume input, it will result in slower server response time to your input, and that makes the game less responsive.
+You want to keep this buffer here as small as you possibly can.
+For context, we run at 60 hertz, so this is about 1 100th speed.
+Predicting systems on the client consume this input, and they simulate movement.
+So here, if we're controlling tracer, the joysticks are the input I'm using and sending down.
+The tracer here is my current movement state that I predicted, and the tracer that's gonna come back to us, the full RTT plus the buffer size later, is the server authoritative snapshot of our movement for that tracer.
+Side effects from the server simulation are authoritative, takes that other half RTT for that stuff to arrive.
+The reason players maintain this ring buffer of movement, this gap here, this is like all of our moves we did in the past, is so they can compare their results with the server results from the past.
+If the client computed the same result as the server, the client will continue on its merry way to simulate the next input.
+If the client and server disagree on the results, we have mispredicted and then have to reconcile.
+Naively, we could just overwrite the client's results with the server's results, but these server results are old.
+This is a server result from several hundred milliseconds ago.
+In addition to this ring buffer of movement state, we also store a ring buffer of inputs.
+You give it, because the character movement code is very deterministic, if you have a starting movement state that you want to run an input against, it's very reliably going to reproduce that input every single time.
+So what we do is when you get a missed prediction from the server, we're going to replay all of So now, for the client, is about frame 27.
+We're getting results for frame 17.
+Once we synchronize, we are pretty much back in lockstep again.
+We will know exactly how long we're stunned.
+So by frame 33 here, we know we're no longer stunned.
+The server simulates the same thing, and it already agrees.
+There's no weird synchronization catch-up.
+Once you get that movement state, you can re-assume your input.
+You'll be caught back up to now.
+The client outgoing network stream is inconsistent and lossy, however.
+All of our game data is sent over UDP with an optional custom reliability layer.
+As a result, client input packages fail to reach the server from time to time, which is loss.
+The server tries to keep this tiny buffer of unsimulated input, but it tries to keep it as small as possible to make the game as responsive as possible.
+If the server has to starve out this little buffer, it's just going to take a guess.
+It's just going to duplicate your last input.
+And by the time that real input arrives, it'll try to reconcile that and make sure you don't lose any buttons, but they're going to mispredict.
+All right, here's the tricky part.
+So here we are losing some packets.
+The server realizes that.
+It had no input to send that frame.
+What it will have done is use the previous input, duplicate it, and hope for the best.
+It's going to send a message back up to the client telling, hey, by the way, I lost some input.
+Something's wrong.
+this talk.
+for the server.
+By virtue of that, the server's going to have a much bigger buffer of inputs to play with while it waits for you to weather the storm of this loss.
+This technique actually works really well on the internet where you have tiny fluctuations in loss, tiny fluctuations in ping.
+If you were playing on the International Space Station, this probably works because of general relativity.
+So I think it's a pretty cool solution.
+All right, so guys, take some note.
+Here we are receiving a message.
+Now we start dilating time.
+Notice that we're actually ticking faster.
+Look at the slope of inputs here.
+It is literally pooping out inputs much faster than before.
+The buffer gets bigger.
+It'll weather that loss.
+If it was lost in here, you'd probably get the input anyway.
+Once the server realizes that you're healthy, it'll send you messages saying, hey, you know what?
+It's fine.
+The client will do the opposite.
+It'll dilate time back down the other direction and spit out inputs at a slower rate to reduce the size of that buffer.
+And this feedback loop is happening constantly.
+And the goal of it is to try to keep you on that razor's edge.
+and try to minimize mispredictions because of input duplication.
+I mentioned earlier that when the server is starved for player input, it's going to duplicate that input, right?
+Once the client catches up, the input that was skipped is in danger of being lost.
+To solve this problem, the client always sends up a sliding window of inputs.
+This is a technique that's been around since Quake world, I think.
+We don't just send the one input for the frame we just simulated, frame 19.
+We send all of the inputs that we have simulated from the last acknowledged movement state from the server.
+So the last acknowledged movement state we got was for command frame 4.
+We just simmed command frame 19.
+We're going to bundle every single input along every single frame into one packet.
+Of course, players don't hit buttons as aggressively as 60 hertz, so this compresses really, really well.
+It's a pretty tiny structure, right?
+Because you probably had the same W held down before.
+You just set a bit, so you have W still held down.
+talk about.
+So again, just to show off, here's double speed from before.
+So this is 150th normal speed.
+Here's your ping fluctuating, you having loss, dilates time on the client.
+The window of inputs is still going to fill any holes before you miss simulation.
+You have server corrections.
+I'm just combining all the animations together in one thing to show off.
+So I won't go over this in too much detail here since it's the subject of Dan Reed's talk, which I very highly recommend, because this is the opening act, and his is like the best thing ever.
+He's right after this in this room, so make yourselves comfy.
+All the abilities are authored in this proprietary declarative scripting language called StateScript.
+One novel feature of the scripting system is that it can scrub back and forth through time.
+This allows scripts to be predicted on the client and then validated just like movement, where we rewind you back and replay all your inputs.
+Suffice to say that abilities work under the same rollback and rollforth principle as movement, right?
+This rewind back to the authoritative snapshot and replay inputs back to now.
+If you remember this movement stun example we had before, Tracer getting stunned and being corrected, works the same way.
+The client and server both simulate input against abilities deterministically.
+The client's ahead of time from the server, so the client will do it and then the server will get it later.
+The client deals with mispredictions by rolling back, applying the server snapshot, and rolling forth, which I'll show here.
+So this is a video of us coming out of Wraith form as Reaper.
+These states here represent basically the state of Wraith form.
+It says, all right, hey, make me invincible.
+Make me play this cool effect.
+Make me play this cool animation.
+When we're done with Wraith form, we're going to turn all these guys off.
+So in one frame, this little animation is going to show each of these states turning off.
+Right after this, this is us predicting coming out of Wraith form.
+Soon after this, we'll get an update from the server saying, okay, here's how I predicted you came out of Wraith form.
+It's actually going to rewind it, turn all those states back on again, and then re-simulate all your input to turn those states back off.
+So there's this constant roll back and roll forth that we're doing whenever you get these server updates.
+Cool thing is, just like we can predict movement, it means we can predict every single ability that you do.
+We actually have to opt out of predicting abilities.
+which also means opt out of predicting weapons, everything else.
+So, let's talk about predicting and acknowledging hit registration.
+ECS comes in handy here.
+Remember, an entity will be a subject of a behavior if it has the tuple of components required by the behavior.
+If you're an entity that is hostile, remember that is hostile to check we talked about, and you have a modify health cue, you can be shot by a player and subject to hit registration.
+Those are the two components that you have.
+You have the ones required for, the set required for hostility and the modify health cue component.
+Modify Health Queue is a component that, on the server, accumulates the set of records to damage or heal you.
+Similar to the singleton contact, we defer accumulated damage done or healed in multiple call sites, because it's a big side effect to kill you.
+Then we defer it and run it later.
+Just like we don't want to spawn a bunch of particle effects right now in the middle of the game, of the projectile simulation, just defer it.
+Same thing here.
+Damage, by the way, is not at all simulated on the client because they're cheaters.
+However, hit registration is predicted on the client.
+So on the client, if you have a movement state component, and you're a remote object, you're not the locally controlled player, you will be positioned by the movement state system by some interpolated transform between the last two received movement states.
+This is the standard interpolation technique that's been around since Quake.
+The system doesn't care if you're a platform, a turret, a door, or Pharah.
+You just have to have the movement state component.
+That's all you got.
+The movement state component is also responsible for storing that ring buffer we showed before, those little tracer positions.
+If you have movement state, this is now describing the tool for hit registration.
+If you have movement state, the server will have to rewind you to the player's frame of reference, that's backwards reconciliation, before it computes hit registration.
+This is totally orthogonal to whether or not you have a modified health cue, whether you can take damage, right?
+We have to rewind doors, platforms, payloads, doesn't matter.
+We have to see if the bullets were blocked.
+Naturally, if you're hostile and you have a modified health cue and a movement state component, you'll be rewound and you'll be potentially damaged.
+Being rewound is one behavior handled by one set of utility functions.
+And being damaged is a different behavior handled by processing the modified health cue component deferred later in the frame.
+Again, we still isolate those.
+The rewind behavior is its own thing that operates on its own slice.
+And doing damage is its own thing that operates on its own slice.
+shot at I would intersect with his bounds first before I rewound the guy because he could have been anywhere in here based on my ping.
+In this case, if I'm shooting in this direction, I'm only going to rewind Ana because the ray of my bullet is going to intersect her bounds.
+We're not going to rewind Reinhardt or his shield or the payload or the door back over here.
+Shots can mispredict just as movement can mispredict.
+So here you'll see the green ragdoll that I'm drawing here.
+is the client's view of this reaper, whereas the yellow one is the server view.
+This tiny little green dot back here is where the client thought my bullet hit.
+You can see this little green line is basically the path of my bullet.
+But when the server actually validated it, this little blue sphere corresponds to where it actually hit.
+This is a super contrived example.
+The deterministic simulation is so reliable that in order to reproduce this misprediction on hit, I had to set my packet loss to 60% and shoot at this asshole for 20 minutes before I was able to produce this.
+I should mention that one of the reasons this is so precise is we have a bunch of very talented QA people that will not take no for an answer.
+And while there are other games that don't try to have this level of precise prediction for hit registration, our QA guys didn't either believe me or care, and they just kept coming back with bugs and more bugs and more bugs.
+And every single time we dove back into it to try to find out if there was a defect there, there always was.
+And I thank them deeply for not letting us get away with this cool stuff.
+OK, if you have a real high ping, hit prediction is not reliable anymore.
+Once you get above about 220 milliseconds on your RTT, we're going to start to defer some of the hit impacts as well.
+We're not going to predict them.
+We're going to wait until the server acknowledges it.
+The reason we do what we do instead when you start rewinding targets that far back in time is we extrapolate them on your client.
+We don't want the victim to feel like they're being rewound way behind a wall that they ran behind for cover, so we put clamps on it.
+So we're only going to rewind you a certain amount.
+After that, we're going to start to extrapolate.
+And I'll show you a video here that demonstrates that.
+So this is at zero ping.
+You can see the hit impacts are predicted.
+The hit pip and health bar are not predicted.
+You wait for the server for those.
+But since my ping is zero, it shows up almost instantaneously.
+At 300 milliseconds ping, you don't predict the impact.
+Because we're extrapolating this target.
+He's not exactly right there.
+On dead reckoning, it's pretty close.
+But he's not exactly right there.
+There's situations where when that Reaper doubles back, you might have totally mispredicted that extrapolation.
+And we're not going to honor you.
+Your ping is crap.
+This is really obvious when your ping is one second.
+Reaper's doing the exact same movement as that first video, but this is us extrapolating.
+Note, by the way, even though my ping is one second, everything I'm doing on my client is totally predicted and totally responsive.
+And mostly wrong.
+I should have dead-eyed here, it's a really easy kill.
+All right, so other examples of mispredictions.
+Now we're back to decent ping, 150 millisecond ping.
+You'll get hit mispredictions whenever you have movement mispredictions, okay?
+So in slow-mo.
+All right, we saw blood.
+We did not see a health bar, we did not see a hit pip, so we mispredicted the impact effect.
+The server denied it, that it wasn't actually a legit hit.
+The reason we mispredicted the impact effect is because we just got ice walled, we got raised up.
+So we thought we were down here on the ground when we fired, but when the server went to go simulate us, we were actually elevated slightly above that position, so that's what caused the mispredict.
+When we were trying to fix all these little hit misprediction problems, a majority of them actually came down to making sure your position was agreed upon and was exactly right with the servers.
+So we spent a lot of time making sure those things lined up.
+So that's a movement-related mispredict.
+Here's a gameplay-related mispredict.
+We're going to shoot this Reaper.
+Again, we have about a 150 millisecond ping.
+We're going to shoot this Reaper, but he's going to wraith form right as the arrow hits him.
+So on our client, we'll predict it.
+We'll do blood.
+There'll be no hit pip and no health bar.
+We didn't actually hit him because the Reaper was invulnerable first.
+This is an example of, we favor the shooter most of the time unless the victim does something to mitigate that shot.
+In this case, the Reaper wraith formed, which makes him invincible for three seconds.
+All right, so we did not actually damage that reaper.
+From a philosophical standpoint, imagine you're that reaper and you got that wraith form off.
+In fact, the server told you and all the effects started playing and then you died.
+You'd be on the forum so fast.
+ECS simplifies the netcode problem.
+The systems involved in netcode understand when they're executing on behalf of the player.
+It's really straightforward.
+Basically, if the entity is controlled by something with a connection component, it's a player.
+Systems also know what targets need to be rewound back to the frame of reference of the shooters or movers.
+Any that has movement state component is going to be rewound.
+The behavior inherent in the relationship between entities with these components is that movement state can be scrubbed along a timeline that can match the frame of reference of the player.
+As you can see here, within this large universe of systems and components, only a handful are responsible for the behaviors of netcode.
+on in what we call netcode from a gameplay standpoint, and only these components.
+And the majority of these components are read-only for the sake of netcode.
+The only ones that are truly modified are things like the Modify Health Queue, for example, because you're actually going to do damage to somebody.
+Here are some of our lessons learned and insights after using CS for a couple of years.
+I kind of wish we required systems and utilities to go back to that canonical example of ECS to operate on tuples.
+The ad hoc technique we use where we iterate over one component and then grab siblings really obscures component access.
+The tuple model, you have to be really explicit about what you can possibly access.
+this talk Another cool side effect about tuples is that you have a priori knowledge of what systems can touch what states.
+So back in our prototype engine, which used tuples, we knew that two or three systems could touch a different set of components because we knew by their tuple definitions what they could possibly do.
+We made it really, really easy to multithread that guy.
+So same animation from before, but you'll see multiple systems light up in parallel because they're touching a different set of components.
+Your system ticket just naturally multi-threaded gameplay code because you can know a priori what components you're going to read or write to.
+I should mention that you can see transform components still really popular.
+Only a few systems actually mutate transform component.
+Most systems read transform component, and when you define these tuples in a a priori sense, you can tag components with, oh, this one's read only, which means if you have five systems that are only reading that guy, they can still operate in parallel.
+All right.
+Entity lifetime is tricky, particularly when you create entities in the middle of the frame.
+Early on, we deferred creation and destruction.
+So you'd say, hey, I want to create this entity.
+It wouldn't actually be created until the end of the frame.
+While deferring destruction turned out to be totally fine, deferring creation had a bunch of annoying side effects.
+Specifically, if you requested the creation of a new entity in system A and you really wanted to read it in system B, if you defer the creation, you're going to have these off by one frame errors.
+It's just really irritating.
+This added a bunch of internal complexity.
+We wound up changing the code to when you create an entity, we actually like create it in the middle of that frame so it can be used immediately afterwards.
+And we did that after ship, which is kind of terrifying.
+That was patch like 1.2 or 1.3.
+I did not sleep that night when we pushed it live.
+Yeah, added a bunch of complexity to the component iterators.
+It was just kind of icky.
+So this is still, I think it's kind of an open problem that I'm still trying to, or we're still trying to wrap our heads around.
+It took us a good year and a half to come up with our ECS rules.
+We knew the canonical ones, but we were taking some existing code and trying to mutate it into this new architecture.
+These rules are like components have no functions, systems have no state, put your shared code in utils, defer complex side effects by enqueuing them in components, particularly singleton components.
+Systems shouldn't call functions on other systems.
+Even our naming convention, those are things we evolved over the course of a couple years.
+There's still plenty of old code that doesn't follow these rules.
+And unsurprisingly, they're the source of a lot of complexity and maintenance issues, if you look at it in terms of how many changes they have in Perforce or how many bugs show up in that code.
+So if you have some legacy code that doesn't actually fit well into ECS, you shouldn't shoehorn it at all, right?
+Keep that subsystem intact and then create like a proxy component that wraps back to it.
+Different systems want to solve problems in different ways.
+ECS is a tool for integrating a bunch of systems together.
+It shouldn't force us design principles where it isn't welcome.
+Since ECS is trying to solve the problem of integrating and decoupling a bunch of different large modules, many systems and the components they operate on tend to be iceberg-shaped.
+Iceberg components have very little surface area to the rest of the ECS systems, but they have a whole bunch of state that's internal under their proxies or in some other data structure that the ECS layer can't really touch.
+The body of these icebergs is pretty obvious in our threading model.
+So most ECS work, like updating systems, happens up here on the main thread.
+I'm all the underlying work for projectile simulation is isolated and pretty much not visible up at the highest level of ECS, and that's good.
+Another cool example of this is our AI PathData system.
+It's a good example of a fork-and-join style model, where at the ECS level, it just has a couple hooks to say, hey, this breakable broke, or this door opened.
+You might want to rebuild PathData in these regions.
+But under the hood, it's doing a whole bunch of Take all these triangles, voxelize them, and compress the crap out of them.
+It has nothing to do with ECS, right?
+I mean, you shouldn't.
+You shouldn't shoehorn ECS onto that problem space.
+It's supposed to solve it on its own.
+So here's a cool video of our path data invalidation system.
+The path data here is these blue chunks.
+These represent surfaces AI can walk on.
+I should mention we use path data not just for AI.
+We also use it for a bunch of hero abilities.
+So we actually need to keep this fairly in sync between the server and the client.
+The Zenyatta here is going to destroy these crates.
+And you'll see the surface that was on the crates drop down below.
+And then this door over here is going to open up.
+When the door opens, we need to knit that back into place.
+The path data invalidate system just has hooks saying, hey, these triangles changed.
+And then this iceberg, the bottom half of the iceberg, goes through and churns through all that data to redo all the path data.
+So, in closing, ECS is the glue of Overwatch.
+ECS is cool because it helps you to integrate many disparate systems with minimal coupling.
+If you're going to use ECS, define your rules of engagement.
+In fact, if you're going to use any architecture, define your rules of engagement quickly.
+Only a handful of engineers are going to touch your physics code or your scripting engine or your audio library, but everyone's going to touch the glue code that integrates every system together.
+Enforce constraints on this glue code.
+Dig a pit of success.
+Netcode turns out really tricky, so decouple it as much as possible as you can from the rest of your engine.
+ECS is a handy solution to that problem.
+Before we take some questions, I want to thank all the engineers on Team 4, especially the gameplay engineers, for having to deal with this crap for three years.
+We worked together to kind of come up with these rules and evolve where this architecture was going to go, and I'm happy with how it turned out.
+All right, we have about 10 minutes for questions.
+Thank you.
+Over here on the right.
+Hi.
+So in your components, in the instances, did you use any kind of, here's my component states for frame n, for frame n plus 1, I have the second copy over here and therefore when I do modifications on them for the next frame I don't have to modify in place but I'm We don't do a double buffer.
+A double buffer is cool because you can do that to do multi-threading and deferment.
+It's really easy to do.
+In fact, we had another ECS prototype that did do exactly that with straight double buffering.
+It wouldn't be hard to add.
+So what's going to happen there is you're going to read last frame state invariably.
+And for some systems, that works fine.
+But for a lot of highly inter-object interaction systems, it's going to introduce one frame delays.
+And that's going to hurt responsiveness in general.
+So it's a your mileage may vary type of scenario.
+But it's very easy to do in ECS.
+In general, for us, we have two components.
+The input stream component stores a ring buffer of all of your inputs for the last two seconds.
+And the movement state component stores all of your movement state and movement state for any mover for the last second or two or something like that.
+And those ones you can go back in time and read immutable versions without trouble.
+It's not a general solution for ours, but it's not hard to add.
+I had a question regarding looking at parent state instead of storing it locally.
+So you mentioned that if you shoot a projectile, you could just look at who the owner was.
+And I guess I was curious about the philosophical decision to do that versus storing that state in the projectile.
+You get kind of weird things where I'm So you fire a rocket at me and I deflect it back.
+It was your rocket, now it's my rocket.
+So now I have to go, I would have to go into that projectile and copy off a bunch of hostility information.
+We just say, well, let's not, let's not try to maintain that.
+Let's just save the instigator or, oh God, there's specific titles for those things, but yeah.
+So it was out of simplicity.
+Yeah, simplicity, yeah.
+And if it's, I mean, what you're describing, the technique you're describing would be probably for a perf benefit.
+talk.
+So I guess my question is, as you said, over three years you were building the rules to help with constraint and do the pit of success.
+I guess, how does that factor into refactoring systems that you already developed?
+Systems before 2013?
+Or as we went?
+Yeah, as you went.
+I'm assuming you had a block of legacy code or you had a block of code.
+shoot, a bunch of the folks that were there during that window of time on Overwatch will very fondly remember us trying to hold on to a bunch of legacy systems.
+And then we actually had this process we called mothballing.
+We said, well, I don't want to delete this code.
+I'm just going to pound to find it out under a mothball to find.
+And then we'll come back to it in a couple weeks.
+And we just deleted all that code.
+on This is just a benefit of modularity in general.
+If all of your behavior is isolated to systems, if you want to completely rewrite that system, that's not hard to do at all.
+So I think less of the value was about refactoring old legacy systems and more about refactoring the new stuff as we wrote it.
+So we rewrote whole systems multiple times for perf or for complexity or for organizational purposes or features.
+Hi, you mentioned that you switched from deferring creating entities to doing them immediately.
+So that's actually like my fear, the reason we made the choice early on to do deferment was, well, what's going to happen if the entity gets created halfway through and it doesn't, you know, get systems A through F run against it?
+We just said, well, you should be able, you should be a fully formed functional thing by the time your create is done.
+You shouldn't need some other system running against you.
+And we very slowly took pieces of entity creation and made it happen synchronously.
+The last one we changed after ship was whether or not we added components to these component iterators, which is what most systems run over.
+And that was the scary one that we just waited.
+It turns out it just worked.
+a look.
+a look which kind of sucks, because this first array is sorted by memory address, it's super cache local, it's really fast, and these dudes over here aren't.
+So you can get a bit of a perf hurt there for the one or two new entities that showed up during that thing, but against the other 40, who cares?
+And then when the frame's done, you kind of merge those guys, sort them back into position, and you're good to go.
+But yeah, that was scary and terrifying, and not thread safe, and yeah.
+All right, thank you.
+My question is, you mentioned the server runs 60 frames per second, and when the client is running lower frame rate, the server needs 60 command in a second.
+So client is also needs to run at 60.
+Is your question about, does the client, must the client always run at 60?
+What happens if it runs at 30?
+Yeah.
+It's a fixed simulation.
+You must run at 60.
+You don't have to render at 60, but the simulation has to run at 60.
+So the simulation, here's the render part of the frame.
+Here's the simulation part of the frame.
+If you're running at 30 hertz, you're going to run two simulations, two time steps.
+And the game simulation is much cheaper than the render part.
+It's that and we do some cool tricks where, hey, for remote guys, a lot of the script stuff, the high-level gameplay stuff, has a budget.
+Like, we're only going to run one and a half milliseconds for other people, and we'll just smooth spikes out that way.
+So it works out OK, but yeah, you're right.
+You have to be careful.
+You have to get that work done.
+Thank you.
+One more question.
+You mentioned about heat prediction.
+Do you use it also for slow rockets or something?
+Yeah, that was a fun day.
+I'm honking thing in the world, not like a long tracer.
+So the rocket can disappear because of a misprediction.
+Let's say you fired a rocket, but you got stunned by McCree.
+The rocket just vanishes.
+And then YouTube video forum yelling at Tim.
+But it's so worth it.
+Predicting rockets is rad.
+It feels really good.
+So if you're making a new shooter out there, just do it.
+And you'll get one forum post saying, hey, my rocket disappeared.
+Yeah, it doesn't matter.
+It's totally worth it.
+It's really, really good.
+like the one thing we did to the genre, like the Predicted Rockets, Overwatch, Game of the Year.
+Yeah.
+Thanks.
+Thank you.
+Yeah, thanks for the pharaoh and pharaoh duels for our tribes fans.
+Right?
+Right.
+Exactly.
+The love note to the genre, tribes especially.
+Thank you.
+My question's about, I guess, spatial quantization, how it kind of functions with the other systems.
+First part is about, like, how fine is your spatial quantization?
+One millimeter.
+Well, one divided by 1024.
+Or one meter divided by 1024.
+But, you know, we're engineers.
+Divide by a thousand, what?
+Yeah.
+How well does the physics engine handle that?
+Because that can introduce errors, right?
+And how much of the important gameplay elements are actually affected by the physics engine?
+of that If Clang compiles it differently and you have out-of-order execution on this set of floating-point operations, would you get different results?
+And because of the nature of the quantization, we don't.
+If you have specific questions on that, go to Phil Orwig's talk tomorrow.
+He doesn't talk about that problem specifically, but he wrote the code to quantize it, so you can harass him afterwards and he'll tell you all about IEEE and fun stuff.
+I think this might be the last question, though.
+So your client-side prediction seems to rely on determinism.
+Let me stop you real quick.
+Sorry.
+The last question here.
+I'm going to go to the wrap room around the corner.
+So if you have more questions, just follow me.
+But sorry, go ahead.
+So your client-side prediction relies on determinism.
+And you have to support multiple platforms.
+And it looks like, for example, your dynamic NavMesh system seems like it could be asynchronous.
+What techniques have you developed to preserve determinism in your simulation?
+of which is I So like when a door opens and NavMesh changes, it happens at the same time step as the server?
+Oh yeah, so the NavMesh thing... No floating point?
+Yeah, the NavMesh thing doesn't... Certainly the result lines up because it's given the same input, but the amount of time it takes to recompute the NavMesh is different on the server and client, and that's okay.
+Very few player movement abilities rely on the NavMesh, and if you mispredict, it's not horrible, and again, the server's the authority, so you'll get caught back up to the right state no matter what.
+talk about.
