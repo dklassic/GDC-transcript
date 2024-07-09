@@ -1,0 +1,2960 @@
+1
+00:00:08,567 --> 00:00:16,250
+So this talk is from quaternions to homogeneous points, lines, and planes, such as the ones we have down here.
+
+2
+00:00:18,251 --> 00:00:33,818
+In the previous talk, which I'm afraid to say is a little bit of a prerequisite for this talk, we were talking a lot about quaternions, so rotation composition, which we implement using quaternion multiplication, and we unified that in a sense with translation composition.
+
+3
+00:00:34,358 --> 00:00:49,061
+we unified it into a thing that we call dual quaternion multiplication another word for this is rigid transform composition because it's whenever you move and rotate something so you it's like it's a rigid object you're not squashing or stretching or scaling it
+
+4
+00:00:50,464 --> 00:00:58,429
+One thing that I didn't talk about in that previous lecture is this function which, in 3.js at least, it's called setFromUnitVectors.
+
+5
+00:00:58,489 --> 00:01:07,855
+It's when you have... you've got, like, a vector going this way and a vector going this way, and you want... you ask for the quaternion that takes you from here to here, like this.
+
+6
+00:01:09,036 --> 00:01:11,218
+But there's a reason that I didn't talk about this one.
+
+7
+00:01:11,298 --> 00:01:18,803
+It's because I wanted to leave it for this talk, because it turns out that there's a way of unifying this and this one.
+
+8
+00:01:19,588 --> 00:01:22,352
+you can even unify them with other things that you want.
+
+9
+00:01:22,452 --> 00:01:35,388
+So taking angles and distances and projections of, let's say, the distance from a point to a plane or the projection of a point onto a plane or taking the angle between a line and a plane,
+
+10
+00:01:36,806 --> 00:01:41,331
+And it also unifies it all with intersection of planes and lines.
+
+11
+00:01:41,792 --> 00:01:45,917
+What is this magical thing up here which could do all of these things together?
+
+12
+00:01:46,458 --> 00:01:50,783
+It's one function and it is called reflection composition.
+
+13
+00:01:51,684 --> 00:01:59,887
+And I would claim that a large number of video game engines contain little pieces of reflection composition.
+
+14
+00:02:00,187 --> 00:02:04,208
+The closest that they come to having actual reflection composition is in this function.
+
+15
+00:02:05,149 --> 00:02:14,632
+But yes, reflection composition is a very, very fundamental thing going on with a lot of geometry that we do for video games.
+
+16
+00:02:16,007 --> 00:02:27,735
+So we're thinking about points, lines, and planes, and we're going to think about planes as being planar reflections, and then lines do things called line reflections, and points do things called point reflections.
+
+17
+00:02:28,120 --> 00:02:28,160
+to
+
+18
+00:02:47,668 --> 00:02:54,954
+They don't cost you anything to represent them, because you actually represent them using the same technique that you already use to represent planes.
+
+19
+00:02:55,014 --> 00:02:58,596
+So it's x, y, z, and d that we use to represent a plane.
+
+20
+00:02:59,057 --> 00:03:05,622
+And a point is going to be x, y, z, and w. And then a line, well, it's part of a dual quaternion.
+
+21
+00:03:05,662 --> 00:03:07,263
+It's the line part of a dual quaternion.
+
+22
+00:03:09,537 --> 00:03:23,528
+But by thinking about these exotic objects, these point reflections and line reflections, we're going to be able to see how all of this nice functionality gets into this thing called reflection composition.
+
+23
+00:03:25,285 --> 00:03:28,787
+All right, I'm also going to give you lots of video gaming examples.
+
+24
+00:03:29,127 --> 00:03:30,789
+You know, we're not just doing pure math here.
+
+25
+00:03:30,849 --> 00:03:36,312
+So we're going to look at Lara Croft, and Dead Space, and Half-Life, and a lightsaber fighting thing.
+
+26
+00:03:37,173 --> 00:03:44,778
+And we're going to look at several problems, which are all going to be turned into problems that concern points, lines, and planes.
+
+27
+00:03:45,538 --> 00:03:48,101
+This is going to be a long time coming, though.
+
+28
+00:03:48,682 --> 00:03:59,374
+I'm afraid to say that you're going to have to learn a bunch of maths in this talk, and then there's going to be like an orgasm of usefulness, right, where you learn how to actually use the math in your game.
+
+29
+00:04:00,595 --> 00:04:11,301
+But yes, in order to get there, which we start by saying everything is reflections, and in order to climb to the top of the mountain, which is being able to write a compact game math library from scratch.
+
+30
+00:04:11,561 --> 00:04:16,043
+Maybe some of you can already do this, but I bet that using reflection composition it can be even more compact.
+
+31
+00:04:16,704 --> 00:04:24,268
+You've got a lot of things coming at you along the way, and the way that we're going to walk through these things is
+
+32
+00:04:25,339 --> 00:04:30,561
+First we're going to talk about quaternions as compositions of two planar reflections.
+
+33
+00:04:31,741 --> 00:04:38,124
+Then we're going to talk about the math of general reflections and why normal vectors are points at infinity.
+
+34
+00:04:38,364 --> 00:04:40,885
+Slightly strange sounding thing to say here, but it's true.
+
+35
+00:04:42,365 --> 00:04:51,389
+Then in section three, this is all the usefulness, we're going to do video game case studies, so getting angles, distances, intersections and projections of things that you want.
+
+36
+00:04:52,745 --> 00:04:58,310
+And then we'll look at the fully general formulas that compile to FAST-specific formulas.
+
+37
+00:04:59,191 --> 00:05:06,318
+And this is going to be, again, back to being a bit math-heavy, because we're going to try to generalize across little points, lines, and planes, so it's not very easily visualizable.
+
+38
+00:05:06,658 --> 00:05:09,481
+Well, it is visualizable, but you visualize it with specific examples.
+
+39
+00:05:09,821 --> 00:05:10,482
+But yes, anyway.
+
+40
+00:05:11,623 --> 00:05:12,243
+So part one.
+
+41
+00:05:13,124 --> 00:05:16,828
+Quaternions are compositions of two planar reflections.
+
+42
+00:05:18,375 --> 00:05:23,776
+And the motivating video gaming example that we have temporarily is a snowboarding game.
+
+43
+00:05:23,796 --> 00:05:25,317
+You want to make a game about snowboarding.
+
+44
+00:05:26,097 --> 00:05:35,239
+And to make a game about snowboarding, you're probably going to be very concerned with the plane that is defined by this snowboard and the plane that is defined by the ground.
+
+45
+00:05:36,259 --> 00:05:43,440
+In this case, this snowboarder is about to land on the ground, and you might want to do various things at that specific point when they're going to land.
+
+46
+00:05:43,761 --> 00:05:45,201
+So keeping this in mind,
+
+47
+00:05:46,523 --> 00:05:48,183
+We're going to think about representing planes.
+
+48
+00:05:48,323 --> 00:05:51,424
+So if you've never seen this representation of a plane before, don't worry.
+
+49
+00:05:51,484 --> 00:05:58,245
+You've got x, you've got y, you've got z, and you've got d. We're going to leave d alone for a second and just think about this one.
+
+50
+00:05:58,265 --> 00:06:09,088
+So if you imagine the vector in the x direction, so x equals 1, y equals 0, z equals 0, then that vector is the normal to this plane.
+
+51
+00:06:09,128 --> 00:06:10,528
+It's at a right angle to this plane.
+
+52
+00:06:11,948 --> 00:06:22,372
+If you consider this plane, so we've got x is equal to 2, this plane and this plane actually have the same geometric interpretation, right?
+
+53
+00:06:23,573 --> 00:06:28,295
+And so you actually don't need to think very much about these vectors.
+
+54
+00:06:28,355 --> 00:06:32,936
+Again, very similar to the quaternion case, you'll be distracted by the length of the vector.
+
+55
+00:06:32,956 --> 00:06:34,157
+It just doesn't matter that much.
+
+56
+00:06:35,413 --> 00:06:37,154
+So, here's our basis.
+
+57
+00:06:37,394 --> 00:06:39,535
+We've got various different planes through the origin.
+
+58
+00:06:39,595 --> 00:06:44,498
+We've got the x-plane through the origin, the y-plane through the origin, and the z-plane through the origin.
+
+59
+00:06:46,810 --> 00:06:50,352
+You can think of this as the plane, like I say, whose normal is in the x direction.
+
+60
+00:06:51,153 --> 00:06:55,537
+Points on this plane have x equal to zero, which is a little bit confusing, right?
+
+61
+00:06:55,577 --> 00:07:02,402
+The points have x equal to zero, but this plane is the x equals one or x equals two plane.
+
+62
+00:07:02,743 --> 00:07:06,386
+That's a little bit strange sounding, but you can kind of get used to it.
+
+63
+00:07:06,946 --> 00:07:16,216
+And then this is the Y plane, where it's got the plane whose normal is in the Y direction, points on it have Y equals zero, the plane whose normal is in the Z direction.
+
+64
+00:07:17,911 --> 00:07:25,594
+And by the way, other people, including Eric, call this one E1, this one E2, and this one E3.
+
+65
+00:07:25,754 --> 00:07:33,217
+And if you read more about the... You'll encounter this a lot if you... Well, you'll encounter this exclusively if you read around the stuff that I'm talking about today.
+
+66
+00:07:33,277 --> 00:07:40,080
+But for the sake of argument, because this is already in a video game engine, I want to talk in terms of the X-plane, the Y-plane, and the Z-plane.
+
+67
+00:07:41,226 --> 00:07:42,247
+and later on the D-plane.
+
+68
+00:07:42,307 --> 00:07:42,808
+Anyway, yes.
+
+69
+00:07:43,548 --> 00:07:46,091
+Mixing and weighted averaging is still addition.
+
+70
+00:07:46,191 --> 00:07:46,991
+Like, remember this?
+
+71
+00:07:47,332 --> 00:07:49,254
+So we use this to think about quaternions.
+
+72
+00:07:49,294 --> 00:07:54,679
+If you add two quaternions together and they have equal amounts, then you get a quaternion that's directly in between them.
+
+73
+00:07:54,739 --> 00:07:56,680
+Just like if you add blue and red, you get purple.
+
+74
+00:07:57,341 --> 00:08:00,324
+but you've got to be careful with that amount because you might get a different color.
+
+75
+00:08:01,686 --> 00:08:20,565
+If you add two planes together, by which I mean adding the X part and the X part, the Y part and the Y part, and the Z part and the Z part, and the D part and the D part, if these two planes have amounts that are equal to one another, then you'll get a plane that's directly in between them.
+
+76
+00:08:22,108 --> 00:08:22,368
+All right.
+
+77
+00:08:23,209 --> 00:08:28,654
+Planar reflections at an angle allow us to construct line reflections.
+
+78
+00:08:28,834 --> 00:08:32,978
+This is the first of the more exotic objects that I'm talking about here.
+
+79
+00:08:32,998 --> 00:08:34,019
+But they're very important.
+
+80
+00:08:34,259 --> 00:08:36,081
+So here we've got a planar reflection.
+
+81
+00:08:36,441 --> 00:08:37,622
+That is the plane of this mirror.
+
+82
+00:08:38,103 --> 00:08:42,747
+And like any mirror, it's taking this backwards writing, and it's turning it into forwards writing.
+
+83
+00:08:43,808 --> 00:08:44,028
+Yeah.
+
+84
+00:08:45,470 --> 00:08:47,872
+Here is a line reflection.
+
+85
+00:08:50,523 --> 00:08:53,565
+It's one constructed in the real world, this isn't a computer screen or anything.
+
+86
+00:08:59,148 --> 00:09:02,730
+This is a real mirror, or it's a certain kind of mirror.
+
+87
+00:09:03,910 --> 00:09:14,536
+You'll notice that this hand is a, it's a left hand, and this hand, the other hand, oh, dear me, the other hand is also a left hand, all right?
+
+88
+00:09:14,878 --> 00:09:19,679
+So it's not like an ordinary mirror which reverses writing, it's a special new kind of mirror.
+
+89
+00:09:20,340 --> 00:09:27,542
+The way that this mirror is constructed is that you have actually two mirrors, kind of looks like there are four, but there are actually just two.
+
+90
+00:09:28,682 --> 00:09:37,325
+And you have them at a perfect right angle, which makes it so that you get this interesting kind of non-handedness reversing mirror over here,
+
+91
+00:09:37,785 --> 00:09:47,818
+but you still have actually this mirror, this is an ordinary mirror reflection and this is an ordinary mirror reflection and what you have here is the reflection of a reflection, alright?
+
+92
+00:09:50,301 --> 00:09:55,946
+This mirror is in some very important sense defined by this line.
+
+93
+00:09:56,286 --> 00:10:02,671
+This is the line of intersection of the two mirrors, which I had to put it in there because they've been very, very careful about removing that.
+
+94
+00:10:03,292 --> 00:10:04,573
+But yes, this is a line.
+
+95
+00:10:05,473 --> 00:10:16,562
+And you can see that any object is related to its reflection in this interesting kind of mirror by a 180 degree rotation around this line.
+
+96
+00:10:17,082 --> 00:10:18,844
+It's a 180 degree rotation around a line.
+
+97
+00:10:19,878 --> 00:10:22,319
+Hmm, does that remind us of anything?
+
+98
+00:10:23,720 --> 00:10:25,501
+Well, yes, it should remind you of something.
+
+99
+00:10:25,561 --> 00:10:27,903
+It should remind you of this particular quaternion.
+
+100
+00:10:27,963 --> 00:10:33,886
+This quaternion is a 180 degree rotation around the y-axis.
+
+101
+00:10:35,427 --> 00:10:42,771
+If you write it as a dual quaternion, it looks like this, because it's rotating from z to x. It's going around here, it's rotating from z to x.
+
+102
+00:10:45,302 --> 00:10:49,126
+And okay, let me try and prove that to you by using my hands.
+
+103
+00:10:49,206 --> 00:10:51,448
+Okay, so we start with a hand like this.
+
+104
+00:10:51,808 --> 00:10:54,931
+We're going to do a mirror reflection in here, so we get this.
+
+105
+00:10:55,552 --> 00:10:57,434
+And then we're going to do a mirror reflection in here.
+
+106
+00:10:57,734 --> 00:11:00,677
+So this is at a right angle to this plane.
+
+107
+00:11:01,217 --> 00:11:05,501
+So we start out with this, we do a mirror reflection, and then we reflect to this.
+
+108
+00:11:05,842 --> 00:11:09,145
+So we start out with this, reflect, reflect, we get to here.
+
+109
+00:11:10,134 --> 00:11:13,157
+That is a 180 degree rotation.
+
+110
+00:11:13,898 --> 00:11:17,641
+Prove that to yourself as many times as you need to fully absorb it.
+
+111
+00:11:18,162 --> 00:11:18,382
+All right.
+
+112
+00:11:19,723 --> 00:11:25,569
+Here are two planes, two mirror planes, which are not at a perfect right angle to one another.
+
+113
+00:11:25,649 --> 00:11:31,074
+I was in this hotel room, and I think they've gone for this effect, but they haven't quite managed it because there's two copies of me.
+
+114
+00:11:32,466 --> 00:11:34,147
+I want to compare this one and this one.
+
+115
+00:11:34,747 --> 00:11:37,968
+So this one, I just told you, the mirrors are at a right angle.
+
+116
+00:11:38,088 --> 00:11:39,388
+It's a 180 degree turn.
+
+117
+00:11:40,189 --> 00:11:44,190
+What that means is that this is a pure line reflection, we say.
+
+118
+00:11:45,511 --> 00:11:46,871
+And it's got no identity.
+
+119
+00:11:46,911 --> 00:11:50,052
+If you write it as a dual quaternion, it's a pure line.
+
+120
+00:11:50,092 --> 00:11:51,933
+It's not got any identity component.
+
+121
+00:11:52,293 --> 00:11:53,553
+It's got this component in here.
+
+122
+00:11:53,694 --> 00:11:55,874
+And that, it defines the line of the dual quaternion.
+
+123
+00:11:56,615 --> 00:11:56,755
+It's a 180.
+
+124
+00:11:56,795 --> 00:11:56,895
+Yeah.
+
+125
+00:11:58,530 --> 00:12:02,892
+This one, so we're thinking about the reflection of me to this side.
+
+126
+00:12:03,812 --> 00:12:11,935
+This is, again, it's a special kind of handedness reversing, handedness preserving rotation where the writing on my shirt is not backwards.
+
+127
+00:12:12,816 --> 00:12:17,438
+But this one, it's not quite a 180, it's a 175 degree turn, let's say.
+
+128
+00:12:18,338 --> 00:12:22,440
+So it's got some amount of identity if you represent it as a dual quaternion.
+
+129
+00:12:23,300 --> 00:12:30,565
+There's also this one, this guy here, this is another reflection of me, and it's a minus 175 degree quaternion.
+
+130
+00:12:32,642 --> 00:12:37,344
+It's got some amount of identity again, and it goes the other way, clearly.
+
+131
+00:12:38,064 --> 00:12:46,187
+Which means that as a dual quaternion, it's got the same amount of W, and the line is the same except that it's been multiplied by minus one.
+
+132
+00:12:46,327 --> 00:12:55,130
+So we've taken the 0.99, and then we've gotten minus 0.99, because we've gone from going clockwise to counterclockwise.
+
+133
+00:12:55,610 --> 00:12:56,811
+Or the other way around, I'm not sure.
+
+134
+00:12:58,004 --> 00:13:01,387
+Okay, but I promised you a practical video gaming example.
+
+135
+00:13:01,768 --> 00:13:03,710
+We've got two planes here.
+
+136
+00:13:03,970 --> 00:13:08,675
+You're thinking about this snowboarder landing from a big jump that they've just done in your video game.
+
+137
+00:13:09,295 --> 00:13:21,908
+We're going to label these planes A and B, and we're going to write M. We're going to define M, this thing M, as being A multiplied by B in this reflection composition kind of way.
+
+138
+00:13:23,700 --> 00:13:28,101
+These are planes, which means that they are planar reflections.
+
+139
+00:13:28,301 --> 00:13:33,123
+So the composition of two planar reflections is a dual quaternion.
+
+140
+00:13:37,624 --> 00:13:42,705
+And suppose that you wanted to get the line of intersection of these two planes.
+
+141
+00:13:45,426 --> 00:13:51,548
+So this line turns out to be the line part of this dual quaternion, which makes sense, right?
+
+142
+00:13:52,568 --> 00:13:53,969
+So we've kind of gotten what we want from
+
+143
+00:14:09,687 --> 00:14:15,011
+Reflecting in A, then reflecting in B, even though this snowboard, you know, it's not a mirror.
+
+144
+00:14:15,892 --> 00:14:18,674
+And the ground beneath them, that's not a mirror either.
+
+145
+00:14:18,975 --> 00:14:24,439
+So these are two planes, and we're treating them as mirrors in terms of our mathematics in order to get this line.
+
+146
+00:14:25,520 --> 00:14:30,544
+So long as we have this thing called reflection composition implemented in our engine, we can get this line.
+
+147
+00:14:31,765 --> 00:14:37,067
+But we don't actually have to think about these things as being mirrors.
+
+148
+00:14:37,147 --> 00:14:40,028
+Even though they're not mirrors, treating them as mirrors is helpful.
+
+149
+00:14:40,829 --> 00:14:53,033
+Okay, suppose that instead you wanted the angle between these two planes, because maybe you're landing in your snowboarding game, and if you land at the wrong angle, then you're going to tumble over, right?
+
+150
+00:14:53,073 --> 00:14:57,475
+It's not a proper landing, so you're going to play in the tumble animation, and maybe you lose the race or something.
+
+151
+00:14:58,581 --> 00:14:59,342
+So you want this angle.
+
+152
+00:15:00,063 --> 00:15:05,170
+Once again, this angle is available to you if you get this dual quaternion.
+
+153
+00:15:05,551 --> 00:15:09,917
+If you compose a reflection in A with a reflection in B, you get a dual quaternion.
+
+154
+00:15:10,478 --> 00:15:15,745
+And it turns out that this angle is equal to the arc tangent 2 of the square root of the sum of the squares of
+
+155
+00:15:16,165 --> 00:15:20,589
+these parts of this dual quaternion and the identity part of the dual quaternion.
+
+156
+00:15:21,009 --> 00:15:23,371
+All right, this is weird sounding.
+
+157
+00:15:23,491 --> 00:15:24,953
+This has come out of nowhere.
+
+158
+00:15:25,613 --> 00:15:26,694
+I haven't introduced this.
+
+159
+00:15:26,734 --> 00:15:29,256
+Don't worry if you're like, why the hell does that work?
+
+160
+00:15:30,017 --> 00:15:32,259
+I'm going to go through it very carefully soon.
+
+161
+00:15:33,567 --> 00:15:38,053
+Okay, but sometimes we want to think of planes that are displaced from the origin.
+
+162
+00:15:38,093 --> 00:15:40,576
+We want to think about planes that are not through the origin.
+
+163
+00:15:41,257 --> 00:15:45,002
+One reason that we might want to think about this is we might want to think about parallel planes.
+
+164
+00:15:45,042 --> 00:15:50,289
+So this snowboarder, I would say, is approximately parallel to the ground down here.
+
+165
+00:15:51,004 --> 00:15:54,045
+to which you might say, well, that's a pretty unlikely situation.
+
+166
+00:15:54,965 --> 00:16:01,388
+But notice that if you're actually, if you're going along the ground, your board should be, is in some sense parallel.
+
+167
+00:16:01,948 --> 00:16:05,149
+It's either close to or it's exactly parallel with the ground.
+
+168
+00:16:05,249 --> 00:16:08,270
+So this isn't that unlikely of a situation in a snowboarding game.
+
+169
+00:16:08,890 --> 00:16:13,332
+Another reason that we might want to think about parallel planes is because many games happen on grids.
+
+170
+00:16:13,372 --> 00:16:23,397
+So, for example, if you're building a city on a grid, you will, if you think about the plane that's defined by the front of this building and the plane that's defined by the front of this building, these planes are clearly parallel to each other.
+
+171
+00:16:23,657 --> 00:16:23,858
+Okay.
+
+172
+00:16:25,418 --> 00:16:33,822
+So, in order to think about parallel planes, or planes displaced from the origin, we need to think about a certain extra kind of plane, right?
+
+173
+00:16:34,083 --> 00:16:34,863
+This plane.
+
+174
+00:16:36,784 --> 00:16:42,227
+If you're used to this kind of way of representing planes, you might look at this and say, that's not a plane, man.
+
+175
+00:16:42,247 --> 00:16:43,768
+That's a really weird kind of thing.
+
+176
+00:16:43,828 --> 00:16:44,248
+I mean, what?
+
+177
+00:16:44,288 --> 00:16:52,652
+Like, OK, so we've got x equals 0, y equals 0, z equals 0, which means that this plane is like it's not facing in any direction, right?
+
+178
+00:16:53,372 --> 00:16:54,353
+That doesn't sound like a plane.
+
+179
+00:16:54,593 --> 00:16:54,853
+But what?
+
+180
+00:16:54,873 --> 00:16:59,615
+You're telling me that it's somehow got d. Like, we often think about d as representing distance.
+
+181
+00:16:59,675 --> 00:17:03,237
+So it's got some distance from the origin, but it's not facing in any direction.
+
+182
+00:17:04,444 --> 00:17:04,964
+What is that?
+
+183
+00:17:05,004 --> 00:17:06,185
+Well, let me show you what it is.
+
+184
+00:17:06,545 --> 00:17:08,565
+It's basically this.
+
+185
+00:17:10,166 --> 00:17:11,466
+Okay, that sounds really weird.
+
+186
+00:17:11,506 --> 00:17:13,247
+I mean, that isn't even a plane.
+
+187
+00:17:13,267 --> 00:17:14,587
+That's a freaking sphere, right?
+
+188
+00:17:14,787 --> 00:17:20,449
+It's the sky sphere that you surround the player with in order to give them the impression that they're looking at the sky.
+
+189
+00:17:21,129 --> 00:17:30,492
+Well, I put to you that not exactly this sphere, but a thing like this sphere is that plane that we've got there.
+
+190
+00:17:30,652 --> 00:17:32,172
+X is 0, Y is 0, Z is 0, D is 1.
+
+191
+00:17:35,046 --> 00:17:36,527
+This is the sky.
+
+192
+00:17:37,107 --> 00:17:51,555
+And I put to you, if you can think of the sky as being a great big sphere surrounding you, but it's a sphere that's so big, that's so very, very big, that if you imagine like, oh, I've got a sphere like this.
+
+193
+00:17:51,695 --> 00:17:55,897
+If I measure like the curvature of this sphere, then it's got some curvature.
+
+194
+00:17:56,378 --> 00:17:58,759
+If I increase the size of my sphere like this,
+
+195
+00:17:59,468 --> 00:18:05,149
+then, and I measure this curvature, well this is a little bit less curved than the smaller sphere that I had.
+
+196
+00:18:06,130 --> 00:18:14,452
+If you take the limit, we say, you're talking about a sphere that is so big that if you went up to it, you would measure no curvature on it.
+
+197
+00:18:15,252 --> 00:18:17,372
+Alright, so it's a surface with no curvature.
+
+198
+00:18:17,993 --> 00:18:19,113
+That sounds like a plane.
+
+199
+00:18:19,753 --> 00:18:22,894
+So I put to you that this thing is a plane.
+
+200
+00:18:23,874 --> 00:18:27,255
+There's another word for it, which is the plane at infinity.
+
+201
+00:18:28,618 --> 00:18:31,063
+Why on earth do we care about this though?
+
+202
+00:18:31,704 --> 00:18:38,859
+Well, in a video game engine you can actually represent a plane like this and you can use it to represent more useful planes.
+
+203
+00:18:38,879 --> 00:18:39,641
+So here we've got
+
+204
+00:18:41,438 --> 00:18:50,282
+I'm putting into, I'm creating a plane here, this is my plane, and I'm initially putting in d equal to zero, right?
+
+205
+00:18:50,642 --> 00:18:53,424
+Which means that this plane here is the x-plane.
+
+206
+00:18:53,624 --> 00:18:55,044
+That's not very surprising, right?
+
+207
+00:18:55,605 --> 00:18:58,766
+So this is the x-plane, it's normal vector points in the x direction.
+
+208
+00:19:00,247 --> 00:19:07,090
+But if I increase this number here, what I'm doing is that I am putting some amount of
+
+209
+00:19:08,011 --> 00:19:10,012
+a plane at infinity in there.
+
+210
+00:19:10,212 --> 00:19:12,334
+I was about to say sphere at infinity, I shouldn't say that.
+
+211
+00:19:12,694 --> 00:19:15,897
+It's a plane at infinity that just happens to feel a little bit like a sphere.
+
+212
+00:19:16,418 --> 00:19:31,390
+So a plane that's displaced from the origin, I claim, is some amount of plane that is through the origin mixed with some amount of plane through plane at infinity.
+
+213
+00:19:31,930 --> 00:19:32,210
+Okay.
+
+214
+00:19:34,312 --> 00:19:35,113
+I didn't want to do that.
+
+215
+00:19:36,144 --> 00:19:38,445
+I looked very surprised in that momentary image you got there.
+
+216
+00:19:38,465 --> 00:19:38,745
+Okay.
+
+217
+00:19:40,485 --> 00:19:42,506
+Here's how you make a plane in Unity.
+
+218
+00:19:43,126 --> 00:19:53,429
+I haven't tried it, but in my opinion, if it's not already true, if you give this a value of 0 0 0 in the normal, but you give it some d,
+
+219
+00:19:55,925 --> 00:20:06,211
+I claim that this should give you a valid plane because this is, and has always been, some amount of plane at infinity, or some amount of sky that you use to displace from the origin.
+
+220
+00:20:06,791 --> 00:20:10,473
+If it's equal to zero, you've got a plane through the origin with that normal vector.
+
+221
+00:20:10,873 --> 00:20:12,034
+If it's not equal to zero,
+
+222
+00:20:14,499 --> 00:20:16,620
+then yes, you have a plane that isn't through the origin.
+
+223
+00:20:16,780 --> 00:20:20,002
+Potentially a plane at infinity if the normal is equal to 0, 0, 0.
+
+224
+00:20:20,322 --> 00:20:21,243
+Alright.
+
+225
+00:20:22,343 --> 00:20:29,007
+The composition of two reflections in parallel planes is a translation, which is a dual quaternion.
+
+226
+00:20:30,488 --> 00:20:31,428
+Let me demonstrate that to you.
+
+227
+00:20:31,608 --> 00:20:32,869
+So, here's my hand.
+
+228
+00:20:33,373 --> 00:20:34,894
+Let's say that this is our starting point.
+
+229
+00:20:35,375 --> 00:20:36,616
+We're going to reflect in this plane.
+
+230
+00:20:37,296 --> 00:20:37,617
+Reflect.
+
+231
+00:20:38,217 --> 00:20:41,700
+We're going to now reflect in this plane, which is parallel to this plane.
+
+232
+00:20:41,980 --> 00:20:42,801
+And we get this.
+
+233
+00:20:43,441 --> 00:20:43,562
+Oh.
+
+234
+00:20:44,362 --> 00:20:44,582
+Okay.
+
+235
+00:20:44,662 --> 00:20:45,903
+So, started here.
+
+236
+00:20:46,584 --> 00:20:46,944
+Reflect.
+
+237
+00:20:47,505 --> 00:20:47,845
+Reflect.
+
+238
+00:20:49,286 --> 00:20:50,747
+That is a translation.
+
+239
+00:20:50,848 --> 00:20:52,009
+We've gone from here to here.
+
+240
+00:20:53,930 --> 00:20:55,952
+Prove it to yourself as many times as you need.
+
+241
+00:20:57,981 --> 00:21:00,965
+Here's a clip from just a great movie.
+
+242
+00:21:01,606 --> 00:21:02,407
+I love this movie.
+
+243
+00:21:02,768 --> 00:21:04,150
+How could anyone not like this movie?
+
+244
+00:21:04,610 --> 00:21:04,951
+I don't know.
+
+245
+00:21:21,363 --> 00:21:22,103
+So what happened there?
+
+246
+00:21:22,184 --> 00:21:26,986
+Well, we started out with the reflection planes at some angle.
+
+247
+00:21:27,667 --> 00:21:31,409
+There's the reflection plane that we've got here, we've got a reflection plane that's behind Leo.
+
+248
+00:21:32,810 --> 00:21:39,894
+If you look at the lines, some lines defined by these reflection planes, those lines meet at some specific place.
+
+249
+00:21:41,595 --> 00:21:46,278
+And what you're seeing is a rotated reflection of Leonardo DiCaprio.
+
+250
+00:21:47,895 --> 00:21:52,719
+But eventually we got to the case where the planes are parallel.
+
+251
+00:21:52,839 --> 00:21:53,980
+We've got parallel mirrors.
+
+252
+00:21:54,441 --> 00:22:00,686
+And now it's the case that these lines do not meet each other because they're parallel, or rather they maybe meet at infinity.
+
+253
+00:22:03,749 --> 00:22:05,330
+And that gives us a translation.
+
+254
+00:22:05,410 --> 00:22:08,933
+We've got translated reflections of Leonardo DiCaprio.
+
+255
+00:22:11,092 --> 00:22:15,376
+A practical place where you see this in the real world, not necessarily in video games, is periscopes.
+
+256
+00:22:16,237 --> 00:22:20,381
+Maybe if you're using a lot of ray tracing, I don't know, you might implement a periscope this way.
+
+257
+00:22:20,961 --> 00:22:29,469
+But yes, a periscope uses two parallel mirrors to translate what's above the submarine down to the level where you are looking at it.
+
+258
+00:22:30,899 --> 00:22:33,883
+We're interested in our snowboarding game, though.
+
+259
+00:22:34,443 --> 00:22:40,191
+We maybe want to know, for example, the distance between these two planes.
+
+260
+00:22:40,631 --> 00:22:46,479
+And once again, if we take reflections in these two planes, well, of course, we get a translation.
+
+261
+00:22:46,759 --> 00:22:48,862
+We get it as a dual quaternion, most likely.
+
+262
+00:22:51,531 --> 00:22:57,738
+And if you want to get that distance, you can also get it from the parts of that dual quaternion.
+
+263
+00:22:58,098 --> 00:23:08,248
+There's a little bit of extra complexity here, because if you have two planes that are at an angle to one another, then by definition they sort of don't have a distance, right?
+
+264
+00:23:08,328 --> 00:23:10,851
+So if they have an angle, they don't have a distance.
+
+265
+00:23:11,932 --> 00:23:12,393
+And if they
+
+266
+00:23:13,922 --> 00:23:16,983
+But if their angle is zero, then they can have a distance.
+
+267
+00:23:17,804 --> 00:23:20,985
+It could be a distance of zero, because they could be the same plane.
+
+268
+00:23:22,466 --> 00:23:22,846
+But yes.
+
+269
+00:23:25,407 --> 00:23:32,971
+Another thing you might want to get from this, if you take reflections in these two planes, you might want to get, for some reason, the line at infinity.
+
+270
+00:23:33,111 --> 00:23:36,673
+And that can be read off from this dual quaternion as well, it turns out.
+
+271
+00:23:38,254 --> 00:23:43,796
+Quaternions and dual quaternions are applied to planes using composition and inverses.
+
+272
+00:23:43,876 --> 00:23:45,617
+So I've used this function before.
+
+273
+00:23:45,757 --> 00:23:51,660
+I've, for example, used it to apply a quaternion to the cow model that you saw, all of the vertices in that cow model.
+
+274
+00:23:52,020 --> 00:23:54,101
+But it's time to open up this black box.
+
+275
+00:23:54,201 --> 00:23:54,481
+All right.
+
+276
+00:23:55,413 --> 00:23:58,915
+So we're thinking about Dumbledore and Harry Potter.
+
+277
+00:23:59,776 --> 00:24:02,697
+Dumbledore in this situation is trying to empathize with Harry Potter.
+
+278
+00:24:03,278 --> 00:24:05,639
+We're not interested in what happens in the actual story.
+
+279
+00:24:05,679 --> 00:24:07,260
+We're not interested in Harry's dead parents.
+
+280
+00:24:08,000 --> 00:24:21,148
+We are interested in Dumbledore being a geometer and asking himself, hmm, this mirror reflection plane that he can see, he can go like, I wonder what it looks like from Harry's point of view.
+
+281
+00:24:21,268 --> 00:24:24,570
+I wonder what that mirror looks like from Harry's point of view.
+
+282
+00:24:26,376 --> 00:24:29,457
+And note that this mirror reflection plane is, of course, a transformation.
+
+283
+00:24:29,637 --> 00:24:32,818
+It's a mirror plane that does mirror reflections, obviously.
+
+284
+00:24:34,558 --> 00:24:46,961
+Okay, and Dumbledore knows where Harry is, so he can get T. He has T, which is the transformation from Harry to Dumbledore, and he may have this as a dual quaternion.
+
+285
+00:24:48,601 --> 00:25:00,824
+He can also very easily get T inverse, because if you've got a dual quaternion, if you want the dual quaternion that goes the opposite way, the inverse of that dual quaternion, it's just some minus sign.
+
+286
+00:25:00,864 --> 00:25:03,565
+So if you've got T, you can get T inverse very easily.
+
+287
+00:25:03,585 --> 00:25:06,466
+And this is how we write T inverse, which is Dumbledore to Harry.
+
+288
+00:25:07,793 --> 00:25:11,076
+We want to know how to apply T to P1.
+
+289
+00:25:12,037 --> 00:25:26,129
+We want to get that plane, Dumbledore wants to know where that plane is from Harry's point of view, which is to say that he wants, let's guess that it's somewhere here, we can label it P2, Dumbledore wants to get P2, and note that P2
+
+290
+00:25:27,350 --> 00:25:31,291
+will also be a transformation, whether or not it is used to transform anything.
+
+291
+00:25:32,111 --> 00:25:46,775
+If Dumbledore is only interested in like, oh, I'm going to intersect this plane with some lines, or I'm going to project some, I want to know how distant this plane is from some other thing, regardless of what he wants to do with it, he could use it as a plane of reflection.
+
+292
+00:25:47,335 --> 00:25:48,635
+So it is a transformation.
+
+293
+00:25:49,656 --> 00:25:51,036
+Okay, can we use that for anything?
+
+294
+00:25:51,116 --> 00:25:54,077
+Well, consider, what if Dumbledore had a point,
+
+295
+00:25:55,376 --> 00:26:10,087
+and he wanted to apply P2 to it, well what he could do would be to apply T inverse and then reflect in P1, which he already has, and then apply T. Okay?
+
+296
+00:26:11,147 --> 00:26:12,088
+That gives him what?
+
+297
+00:26:12,128 --> 00:26:15,430
+That gives him the point reflected in this plane that he doesn't have.
+
+298
+00:26:16,151 --> 00:26:18,813
+But in a sense, he does have that plane.
+
+299
+00:26:19,332 --> 00:26:28,456
+That plane is T composed with P, composed with T inverse, it turns out, by the argument that I've just given you.
+
+300
+00:26:28,856 --> 00:26:31,997
+And since he could do that, he doesn't really need to think about that point.
+
+301
+00:26:32,377 --> 00:26:33,518
+He doesn't need to think about that point.
+
+302
+00:26:33,678 --> 00:26:46,183
+He could have chosen a point anywhere else, and this sequence of transformations would have given him the reflection in P2, which is to say that you can figure out P2 just by using composition and inverses.
+
+303
+00:26:48,203 --> 00:26:53,986
+Part two, the math of general reflections and why normals are points at infinity.
+
+304
+00:26:54,466 --> 00:26:58,528
+So we want to think about point reflections, another one of these exotic objects.
+
+305
+00:26:59,669 --> 00:27:04,512
+So suppose we start with a line reflection like this, and we add another reflection plane down here.
+
+306
+00:27:04,572 --> 00:27:05,072
+What do we get?
+
+307
+00:27:05,332 --> 00:27:07,513
+Well, we get something that's like this.
+
+308
+00:27:11,075 --> 00:27:12,536
+Quite a beautiful thing here, I would say.
+
+309
+00:27:18,894 --> 00:27:33,405
+Note that the camera's reflection, which is where we're looking at this thing, is always on the exact opposite side of the point in the middle of these mirrors from the camera, obviously.
+
+310
+00:27:37,468 --> 00:27:39,569
+Another way of looking at a point reflection is like this.
+
+311
+00:27:40,630 --> 00:27:42,511
+But this is slightly cheating, because this is 2D.
+
+312
+00:27:42,531 --> 00:27:45,274
+We're interested in point reflections in 3D, which work a bit differently.
+
+313
+00:27:49,295 --> 00:27:50,696
+Does anybody remember this from school?
+
+314
+00:27:51,516 --> 00:27:51,756
+Yeah?
+
+315
+00:27:52,637 --> 00:27:53,197
+Love it, right?
+
+316
+00:27:53,838 --> 00:27:56,019
+Turns out that this is a point reflection.
+
+317
+00:27:57,640 --> 00:27:57,860
+Oh.
+
+318
+00:27:58,400 --> 00:27:59,401
+She looks very excited.
+
+319
+00:27:59,441 --> 00:28:01,022
+She's just learned that this is a point reflection.
+
+320
+00:28:03,177 --> 00:28:11,002
+It's a point reflection because, look, if I take... I've got a little ball bearing in this specific place between my two fingers here.
+
+321
+00:28:11,622 --> 00:28:20,108
+If I walk from this fingertip to the ball bearing, and then I come out the other side by the same distance, I will get to my other fingertip.
+
+322
+00:28:22,470 --> 00:28:25,492
+The same fingertip on my other hand.
+
+323
+00:28:27,213 --> 00:28:29,374
+And you can do the same thing with any fingertip.
+
+324
+00:28:29,475 --> 00:28:31,296
+You can kind of see this from the construction of this thing.
+
+325
+00:28:31,826 --> 00:28:34,309
+Right now, my hands are clearly reflected from one another.
+
+326
+00:28:34,849 --> 00:28:38,774
+And then I rotate 180 degrees, which might remind you of a line reflection.
+
+327
+00:28:39,454 --> 00:28:44,740
+And then I put them together, and there's my... I've seen it called the worm, and I've seen it called the seesaw.
+
+328
+00:28:45,141 --> 00:28:48,665
+I should probably think of a... well, we should standardize this, because it's really important.
+
+329
+00:28:50,717 --> 00:28:53,358
+how dual quaternions are applied to points and lines.
+
+330
+00:28:53,398 --> 00:29:00,940
+This is really important because, you know, video games are mostly about vertices, but, sorry, graphics programming is significantly about vertices.
+
+331
+00:29:01,200 --> 00:29:04,361
+We want to be able to apply, if we've got some dual quaternion, we want to apply it to a point.
+
+332
+00:29:04,701 --> 00:29:06,201
+Might also want to apply it to a line as well.
+
+333
+00:29:07,041 --> 00:29:09,502
+Well, consider the Harry and Dumbledore situation again.
+
+334
+00:29:10,062 --> 00:29:16,304
+But suppose that instead of a plane, Harry, oh, and Dumbledore still has the Harry to Dumbledore transformation.
+
+335
+00:29:17,004 --> 00:29:19,385
+Instead of a plane, Harry is looking at a point.
+
+336
+00:29:20,625 --> 00:29:43,433
+If we think of this point as being, oh and Dumbledore wants to get that point from Harry's point of view, if we think of that point as being a plane reflection, sorry a plane reflection, a point reflection, if we think of that point as being a point reflection, it turns out that literally every single thing that I said to you about the plane reflection case applies in this case.
+
+337
+00:29:43,473 --> 00:29:47,455
+So Dumbledore can, if he wants to get this point reflection, he can
+
+338
+00:29:48,855 --> 00:30:02,499
+apply the inverse of the Harry to Dumbledore transformation, reflect in that point reflection, and then apply T. If Harry is looking at a line, similarly you think about it as a line reflection, and again the argument works.
+
+339
+00:30:03,279 --> 00:30:04,359
+So this is our formula.
+
+340
+00:30:04,459 --> 00:30:07,400
+This is called the sandwich product for obvious reasons.
+
+341
+00:30:07,915 --> 00:30:15,600
+To apply a transform T to an object B, where I say an object, all objects here are also transforms.
+
+342
+00:30:15,640 --> 00:30:18,582
+A plane is always a transform whether or not you use it to transform anything.
+
+343
+00:30:20,343 --> 00:30:21,904
+And you're thinking about it as a transform here.
+
+344
+00:30:22,585 --> 00:30:26,748
+If you apply T to B, you can think of it as an object if you'd like.
+
+345
+00:30:27,448 --> 00:30:32,351
+You use the sandwich product, whether it's a point, or a line, or a plane, or indeed a dual quaternion.
+
+346
+00:30:32,371 --> 00:30:36,714
+You can apply a dual quaternion to a dual quaternion this way, or a quaternion to a quaternion, whatever.
+
+347
+00:30:39,455 --> 00:30:48,118
+Dividing by a point, which is a point reflection, is like dividing by a line, where a line is a 180 degree rotation or a line reflection.
+
+348
+00:30:49,618 --> 00:30:52,659
+First a reminder of why we want to divide by things.
+
+349
+00:30:52,719 --> 00:30:57,820
+So B multiplied by A means transform by B, but transform by A first.
+
+350
+00:30:58,701 --> 00:31:04,162
+B divided by A means transform by B, but transform by the opposite of A first.
+
+351
+00:31:04,902 --> 00:31:07,063
+And we saw that in the case of these rotations.
+
+352
+00:31:08,379 --> 00:31:22,712
+Okay, so we saw that if you do a 180, and then another 180, so you square this, you take the square of a line, you compose the line reflection with itself, you get minus 1.
+
+353
+00:31:23,633 --> 00:31:25,194
+Start here, end up here.
+
+354
+00:31:25,374 --> 00:31:25,815
+That's minus 1.
+
+355
+00:31:27,416 --> 00:31:33,462
+From this you can derive, okay, we've got A times A equals minus 1, because minus 1 is where my arm is kinked up.
+
+356
+00:31:35,177 --> 00:31:36,418
+A times A equals minus one.
+
+357
+00:31:37,058 --> 00:31:48,184
+Divide both sides of this equation by A, and you get that one over A is equal to the, which is the inverse of A, is equal to minus A, quite simply.
+
+358
+00:31:49,624 --> 00:31:52,706
+And you can apply this logic to point reflections as well, it turns out.
+
+359
+00:31:52,786 --> 00:31:55,107
+So let's say I'm starting here, and I'm
+
+360
+00:31:55,689 --> 00:31:57,089
+A point reflection is what?
+
+361
+00:31:57,229 --> 00:32:01,530
+A point reflection is you reflect in a plane, then you reflect in a plane, and you reflect in a plane.
+
+362
+00:32:02,210 --> 00:32:04,091
+These two plane reflections we can think of as a 180.
+
+363
+00:32:05,831 --> 00:32:07,751
+So we're going to reflect in here, we're going to do a 180.
+
+364
+00:32:08,011 --> 00:32:12,232
+So squaring a point reflection, we're going to start here, reflect, 180.
+
+365
+00:32:12,832 --> 00:32:15,153
+That's the point reflection applied to my hand.
+
+366
+00:32:16,993 --> 00:32:18,953
+Then reflect, and 180 again.
+
+367
+00:32:19,674 --> 00:32:21,194
+And it's the 180 going in the same way.
+
+368
+00:32:22,196 --> 00:32:22,696
+We get minus 1.
+
+369
+00:32:23,817 --> 00:32:24,218
+Reflect, 180.
+
+370
+00:32:25,078 --> 00:32:25,439
+Reflect, 180.
+
+371
+00:32:25,839 --> 00:32:26,920
+All right.
+
+372
+00:32:29,682 --> 00:32:33,065
+Points at infinity, also known as directions, also known as normals.
+
+373
+00:32:33,105 --> 00:32:34,346
+This is another kind of point.
+
+374
+00:32:36,047 --> 00:32:37,788
+We've looked at this picture quite a lot.
+
+375
+00:32:37,908 --> 00:32:42,212
+We've seen that dual quaternions can involve these lines in the sky.
+
+376
+00:32:43,273 --> 00:32:46,895
+We've also thought about the sky itself, which is the plane at infinity.
+
+377
+00:32:47,396 --> 00:32:48,677
+These were the lines at infinity.
+
+378
+00:32:49,217 --> 00:32:50,818
+But what about the stars?
+
+379
+00:32:51,943 --> 00:32:56,126
+These stars act like points at infinity, I claim.
+
+380
+00:32:58,187 --> 00:32:59,968
+Having a... have a look at this animation.
+
+381
+00:33:00,048 --> 00:33:03,471
+So, this is an animation where we're moving.
+
+382
+00:33:03,491 --> 00:33:04,731
+Alright?
+
+383
+00:33:04,751 --> 00:33:05,732
+We're moving in this car.
+
+384
+00:33:05,892 --> 00:33:10,055
+We are... if we look at the telegraph poles, they're passing us by very fast.
+
+385
+00:33:10,515 --> 00:33:12,857
+If we look at the windmills, they're also passing us by.
+
+386
+00:33:13,737 --> 00:33:17,240
+The further away windmills are passing us by a lot slower.
+
+387
+00:33:17,340 --> 00:33:20,202
+And the mountains... well, the mountains are probably moving a little bit.
+
+388
+00:33:21,226 --> 00:33:25,549
+and the clouds maybe even as well, but the stars should not move.
+
+389
+00:33:25,929 --> 00:33:29,311
+Stars shouldn't move no matter how you translate, I claim.
+
+390
+00:33:30,331 --> 00:33:34,194
+Some video games involve stars in this way, so this is Kerbal Space Program.
+
+391
+00:33:35,134 --> 00:33:39,797
+Kerbal Space Program handles stars in the right way.
+
+392
+00:33:39,857 --> 00:33:41,438
+So as you're blasting off,
+
+393
+00:33:41,738 --> 00:33:45,340
+The Earth will be moving away from you, but the stars are going to stay in place.
+
+394
+00:33:45,400 --> 00:33:48,002
+But I've seen some video games where the stars move.
+
+395
+00:33:48,042 --> 00:33:49,743
+They really shouldn't move when you translate.
+
+396
+00:33:49,823 --> 00:33:51,384
+Cameltree, for example, does this.
+
+397
+00:33:53,426 --> 00:33:53,746
+Okay.
+
+398
+00:33:55,727 --> 00:33:59,069
+Stars are points at infinity, which means that you can point at them.
+
+399
+00:33:59,269 --> 00:34:00,150
+Oh, sorry.
+
+400
+00:34:02,520 --> 00:34:03,901
+This is an experiment you can do at home.
+
+401
+00:34:04,442 --> 00:34:05,242
+Point at a star.
+
+402
+00:34:05,983 --> 00:34:07,745
+Move yourself around, all right?
+
+403
+00:34:08,405 --> 00:34:11,788
+Move yourself around as much as you like, so long as you're pointing in the same direction.
+
+404
+00:34:12,869 --> 00:34:16,532
+And you will find that you are still pointing at the same star, all right?
+
+405
+00:34:20,276 --> 00:34:23,939
+Therefore, points in the sky can be thought of as directions.
+
+406
+00:34:24,380 --> 00:34:29,004
+because if you rotate yourself, you're changing your idea of left and right.
+
+407
+00:34:29,545 --> 00:34:33,588
+Your rotation, that will change where the star is from your point of view.
+
+408
+00:34:33,628 --> 00:34:35,270
+You will no longer be pointing at it.
+
+409
+00:34:35,830 --> 00:34:37,712
+But translations don't.
+
+410
+00:34:38,633 --> 00:34:40,815
+That's what defines a direction.
+
+411
+00:34:42,347 --> 00:34:45,248
+Normals are examples of these points at infinity, I claim.
+
+412
+00:34:45,328 --> 00:34:48,108
+So this is a normal map, and this is an ordinary vertex.
+
+413
+00:34:48,148 --> 00:34:55,589
+And as most game developers know, there's a fundamental difference between this kind of vector and a normal.
+
+414
+00:34:56,589 --> 00:34:59,550
+Normals don't care where the origin is, right?
+
+415
+00:34:59,750 --> 00:35:03,671
+These arrows, I mean, in general, you're supposed to say that a vector starts from the origin.
+
+416
+00:35:03,731 --> 00:35:06,311
+But these arrows are allowed to be anywhere, because they're normal vectors.
+
+417
+00:35:07,271 --> 00:35:10,852
+Vertex positions very much do care where the origin is.
+
+418
+00:35:12,746 --> 00:35:29,521
+To really hammer that home, you can have a surface like this, and I claim that the normal vector at that point is pointing at a certain star in the sky, which you can point at and imagine, like, your arm is coming from that point in the surface, and you can move yourself around.
+
+419
+00:35:31,023 --> 00:35:31,243
+Okay.
+
+420
+00:35:31,904 --> 00:35:37,489
+How do we represent points in code, though, when some of them are points at infinity?
+
+421
+00:35:38,567 --> 00:35:40,848
+So here is how we represent points in a shader.
+
+422
+00:35:40,888 --> 00:35:43,149
+We've got X part, Y part, Z part, and W part.
+
+423
+00:35:43,749 --> 00:35:48,651
+And yes, this is very confusing and annoying because that's what a quaternion had as well.
+
+424
+00:35:49,171 --> 00:35:57,795
+X, Y, Z, W. So a quaternion looks exactly like a point, but just remember that this is a fundamentally different kind of thing from a quaternion.
+
+425
+00:36:00,309 --> 00:36:06,396
+A normal vector in the context of this is, or rather a direction, you can also call it a vanishing point.
+
+426
+00:36:08,218 --> 00:36:11,822
+A normal vector in this context has w equal to zero.
+
+427
+00:36:13,504 --> 00:36:17,329
+These parts define the direction that it's going in, but the w part is equal to zero.
+
+428
+00:36:18,356 --> 00:36:27,460
+A position, or a vertex, which can be used as a point reflection, will have w equal to usually 1, but technically any other value would be allowed.
+
+429
+00:36:27,520 --> 00:36:31,962
+You can dial w up and down, and that'll move you towards and away from the origin.
+
+430
+00:36:33,723 --> 00:36:35,564
+But the fundamental thing is that it can't be 0.
+
+431
+00:36:35,804 --> 00:36:42,988
+So if it's 0, then it's a direction, whereas if it's not 0, then it's a position, or a vertex.
+
+432
+00:36:44,608 --> 00:36:47,009
+Addition, as ever, is weighted averaging.
+
+433
+00:36:47,810 --> 00:36:54,534
+So if you've got a point here and a point here, if you want to get the point that's directly in between these two points, you can add them.
+
+434
+00:36:56,435 --> 00:37:02,958
+That's going to work if the two points are coming in there in the same amount, which is defined in a specific way.
+
+435
+00:37:02,998 --> 00:37:05,099
+But it's, again, exactly like this color mixing thing.
+
+436
+00:37:06,120 --> 00:37:06,380
+All right.
+
+437
+00:37:06,980 --> 00:37:09,662
+Rotoreflections and transflexions.
+
+438
+00:37:09,802 --> 00:37:10,522
+What the hell is that?
+
+439
+00:37:11,363 --> 00:37:12,764
+So this is a rotoreflection.
+
+440
+00:37:13,530 --> 00:37:18,753
+My hands being like this, so this is like the clapping pose, which I hope to see lots of later.
+
+441
+00:37:20,214 --> 00:37:25,397
+If my hands are like this, so the sort of praying pose, then this is a reflection, right?
+
+442
+00:37:25,457 --> 00:37:27,898
+I have this hand, I reflect, and I get that hand, right?
+
+443
+00:37:29,199 --> 00:37:36,443
+This is the point reflection, so in between my wrists there's a point, and this hand is related to this hand by a point reflection.
+
+444
+00:37:37,677 --> 00:37:43,319
+So you consider the clap to be somewhere in between a reflection and a point reflection.
+
+445
+00:37:44,199 --> 00:37:51,341
+That might remind you a bit of the quaternion, because a quaternion was some amount of identity and some amount of 180 degree rotation.
+
+446
+00:37:51,981 --> 00:38:00,484
+And an arbitrary quaternion that wasn't identity or 180 degree turn was some mixture of identity and 180.
+
+447
+00:38:04,053 --> 00:38:05,254
+There's also transflexions.
+
+448
+00:38:05,594 --> 00:38:09,075
+These are the situation of I reflect and then I translate.
+
+449
+00:38:10,856 --> 00:38:11,056
+Yeah.
+
+450
+00:38:11,657 --> 00:38:15,138
+I reflect, then translate, as opposed to reflecting and then rotating.
+
+451
+00:38:15,678 --> 00:38:23,182
+And with a transflexion, the point reflection, so to speak, in this context, is a point at infinity.
+
+452
+00:38:23,715 --> 00:38:33,699
+which is a bit weird, but it's again analogous to the situation that if you have a quaternion, or rather a dual quaternion, where the line is infinitely far away, then that is a translation.
+
+453
+00:38:34,320 --> 00:38:34,580
+Okay.
+
+454
+00:38:36,901 --> 00:38:39,362
+Why do we care about these things, though?
+
+455
+00:38:39,382 --> 00:38:45,164
+Why do we care about flectors, which is the general word for rotoreflections and transflections?
+
+456
+00:38:46,065 --> 00:38:51,207
+The answer is because the planes and points inside them may be things that you want.
+
+457
+00:38:51,997 --> 00:39:07,463
+If we want to get the intersection, the place where this laser site intersects the plane defined by this rectangle, it doesn't actually intersect the rectangle, but it intersects the plane defined by this rectangle here, which you might care about a lot.
+
+458
+00:39:07,803 --> 00:39:14,046
+If you want to get that point, you will find it, we'll see later on, inside of a rotoreflection.
+
+459
+00:39:15,754 --> 00:39:24,556
+And if you want to get, say, the point on this branch that is as close as possible to Lara's hand, this is something that you'll extract from a transflexion.
+
+460
+00:39:26,216 --> 00:39:29,457
+So we probably should represent these in code, but it's very easy.
+
+461
+00:39:29,517 --> 00:39:35,218
+You just have to have a little bit of, well, a plane and a point, right?
+
+462
+00:39:36,679 --> 00:39:38,659
+And this is what defines a flector.
+
+463
+00:39:40,526 --> 00:39:45,289
+Let's recap our understanding of quaternions to see a bit more about how we're going to extract these things.
+
+464
+00:39:46,509 --> 00:39:50,992
+So, plane angle distance from quaternion is something that we did earlier.
+
+465
+00:39:54,454 --> 00:40:00,978
+If we reflect in a mirror, and then reflect back in the same mirror, that takes you back to the start.
+
+466
+00:40:01,018 --> 00:40:04,740
+So if we've got Robert De Niro here, that's Robert De Niro's reflection.
+
+467
+00:40:05,140 --> 00:40:08,642
+And if we reflect Robert De Niro's reflection, we get back to Robert De Niro.
+
+468
+00:40:10,117 --> 00:40:14,562
+Robert De Niro's relationship with Robert De Niro is the identity transform.
+
+469
+00:40:14,902 --> 00:40:20,628
+Therefore, a planar reflection composed with itself is the identity quaternion.
+
+470
+00:40:21,029 --> 00:40:24,712
+Planes, for this reason we sort of say, they square to one.
+
+471
+00:40:25,958 --> 00:40:30,941
+The identity quaternion, there's no axis to speak of, but we've got a lot of identity in there.
+
+472
+00:40:30,981 --> 00:40:35,824
+It's got w equal to 1, or something else, but not w equal to 0, anyway.
+
+473
+00:40:36,905 --> 00:40:37,445
+And nothing else.
+
+474
+00:40:37,966 --> 00:40:41,928
+Okay, reflecting in a mirror, and then in a very different mirror, i.e.
+
+475
+00:40:42,549 --> 00:40:45,410
+an orthogonal mirror, will get you a 180 degree quaternion.
+
+476
+00:40:48,717 --> 00:40:52,340
+By orthogonal, I just mean at a right angle, if you've never heard this term before.
+
+477
+00:40:53,000 --> 00:40:57,203
+In this situation, we saw that we had two mirrors that were at a perfect right angle to one another.
+
+478
+00:40:57,563 --> 00:41:01,887
+And reflecting in one mirror and then in the other gave us the reflection that was back here.
+
+479
+00:41:02,307 --> 00:41:03,808
+But this is a special kind of reflection.
+
+480
+00:41:03,828 --> 00:41:04,909
+This is the line reflection.
+
+481
+00:41:05,389 --> 00:41:12,874
+So multiplying a plane by a plane that's at a right angle to it will give you this quaternion.
+
+482
+00:41:12,954 --> 00:41:17,398
+It'll give you a quaternion that is completely a line quaternion.
+
+483
+00:41:18,659 --> 00:41:20,320
+It's a 180 degree rotation.
+
+484
+00:41:21,821 --> 00:41:30,345
+In general, a transform, such as a quaternion, has some amount of identity and some amount of line, and in specific relative amounts.
+
+485
+00:41:30,405 --> 00:41:33,847
+So the angle we saw was controlled by those relative amounts.
+
+486
+00:41:34,887 --> 00:41:37,188
+We wanted to get the angle and the distance of two planes.
+
+487
+00:41:37,428 --> 00:41:42,391
+We made our dual quaternion by reflecting in those two planes, and then we extracted
+
+488
+00:41:43,317 --> 00:41:52,844
+our distance and our angle by taking the different amounts of identity or amount of line.
+
+489
+00:41:53,484 --> 00:42:01,950
+We had two different ways of taking, of extracting something else that gave us our information that we needed to calculate our angle and our distance.
+
+490
+00:42:02,811 --> 00:42:05,413
+But all of these came from that dual quaternion.
+
+491
+00:42:05,433 --> 00:42:07,434
+They came from the line part of the dual quaternion.
+
+492
+00:42:09,329 --> 00:42:18,108
+Okay, so since we care about extracting these things, points, lines, and planes from transforms so much, we should probably develop some notation for it.
+
+493
+00:42:19,307 --> 00:42:21,108
+And there's a very elegant notation for doing this.
+
+494
+00:42:21,188 --> 00:42:30,831
+So if you've got M, and M is a flector or a dual quaternion, there's a specific shorthand notation for extracting things, and it uses this concept called the grade.
+
+495
+00:42:31,751 --> 00:42:41,095
+In this specific context, not exactly in the context that Eric will be talking about later, but in this context, a plane has grade one.
+
+496
+00:42:41,895 --> 00:42:46,937
+And the reason that it's got grade one is because you can make a plane with one planar reflection.
+
+497
+00:42:47,717 --> 00:42:47,897
+that's
+
+498
+00:42:58,427 --> 00:43:06,571
+with this, and we put a 2 here, because a line can be created with reflections in two orthogonal mirrors.
+
+499
+00:43:07,451 --> 00:43:21,258
+A point, which you might extract from a rotoreflection or a transflexion, would be a grade 3, because it's the intersection of three planes, or rather, a point reflection is a reflection in three planes.
+
+500
+00:43:22,790 --> 00:43:23,230
+How about this?
+
+501
+00:43:23,350 --> 00:43:37,381
+Well this is the identity transform, so if you have a dual quaternion and you want to extract the amount of identity in there, which you may want to do, that's written this way, and it's got a zero here, because the identity transform is a reflection in no mirrors at all.
+
+502
+00:43:38,581 --> 00:43:41,183
+And then the funny one is the screw motion.
+
+503
+00:43:41,243 --> 00:43:43,504
+It's not that common to extract this, but it's not unheard of.
+
+504
+00:43:45,346 --> 00:43:50,709
+The screwiness of a dual quaternion, you extract with the grade four, it's the grade four part of this dual quaternion.
+
+505
+00:43:51,009 --> 00:43:51,450
+Here's why.
+
+506
+00:43:51,810 --> 00:43:56,033
+So reflect and reflect, so that gives me a 180 degree rotation.
+
+507
+00:43:56,713 --> 00:43:59,895
+And then reflect and reflect, that's a translation.
+
+508
+00:44:00,215 --> 00:44:06,580
+So a rotation and translation, which is a screw motion, is four reflections, right?
+
+509
+00:44:06,740 --> 00:44:08,381
+One, two, three, four.
+
+510
+00:44:10,562 --> 00:44:10,842
+Okay.
+
+511
+00:44:11,242 --> 00:44:25,347
+To really hammer that home, if you had, for example, an ordinary quaternion, and you wanted to extract only the line part, the notation for this would be to just say, I want the 2 thing here with the angle brackets, and that'll give me this quaternion.
+
+512
+00:44:27,448 --> 00:44:31,429
+So you can see that this is the same as this, but the w part is zeroed out.
+
+513
+00:44:31,549 --> 00:44:33,050
+It's only got a line part.
+
+514
+00:44:33,936 --> 00:44:40,238
+You might care about this again, for example, because you want to find the intersection line of two planes, like in your snowboarding example.
+
+515
+00:44:42,198 --> 00:44:50,380
+If you wanted only the identity part of the quaternion, only the w part, the notation for that would be zero here, because the identity is zero reflections.
+
+516
+00:44:50,880 --> 00:44:55,201
+And yeah, that gives you this quaternion, which has some amount of identity part, but no line part.
+
+517
+00:44:55,242 --> 00:44:56,162
+That's been zeroed out.
+
+518
+00:44:58,049 --> 00:45:03,011
+figuring out what amount of point, line, and plane you have in there.
+
+519
+00:45:03,051 --> 00:45:04,072
+This is very important.
+
+520
+00:45:05,012 --> 00:45:09,614
+Um, there's a notation for the- for extracting the length of a vector, which is this.
+
+521
+00:45:09,934 --> 00:45:14,836
+So, uh, Vx squared plus Vy squared plus Vz squared, whole thing square-rooted.
+
+522
+00:45:14,856 --> 00:45:16,497
+That gives you the length of the vector, right?
+
+523
+00:45:16,537 --> 00:45:21,319
+And we write that for some reason with two, uh, with vertical lines on either side of V.
+
+524
+00:45:22,846 --> 00:45:28,110
+Incidentally, you can ask the question, where do you kind of get Vx from?
+
+525
+00:45:28,390 --> 00:45:32,052
+And it's stored on your computer, but how do you get it geometrically?
+
+526
+00:45:33,754 --> 00:45:37,856
+Obviously, it's a walk by some amount along the x-axis.
+
+527
+00:45:38,577 --> 00:45:52,226
+But note that you can only see that this point intersects the x-axis there, or is related to that part of the x-axis, by thinking about the plane that runs through this point and has normal vector in the x direction.
+
+528
+00:45:53,126 --> 00:46:03,089
+So this point is, in some sense, you get the Vy and the Vz from thinking about the intersection of these two planes and the intersection of this plane.
+
+529
+00:46:03,130 --> 00:46:08,991
+So the idea of a point as the intersection of three planes might not be as unfamiliar to you as you think.
+
+530
+00:46:10,132 --> 00:46:15,854
+So the amount of point, line, or plane reflection inside M, notation.
+
+531
+00:46:17,294 --> 00:46:19,575
+So we've got two different ways of getting it.
+
+532
+00:46:21,414 --> 00:46:28,942
+This is the one that we use to get the amount of... let's say we're thinking about a point, so a point at the intersection of three planes.
+
+533
+00:46:29,022 --> 00:46:35,729
+So we're looking for the grade 3 part of M. If it's a point at infinity, then we have this notation.
+
+534
+00:46:36,030 --> 00:46:41,615
+And the way that I think about it is that this empty circle represents that big old sky sphere, right?
+
+535
+00:46:43,157 --> 00:46:51,441
+The empty circle is the skysphere, so like a point at infinity, if you want the amount of points at infinity inside M, then that's what this thing means.
+
+536
+00:46:52,161 --> 00:47:00,925
+And if you've got something that isn't at infinity, then this is the notation for the amount of plane, amount of line, amount of point that's in there.
+
+537
+00:47:01,025 --> 00:47:05,186
+And it's a filled circle because we're looking at stuff that's inside that skysphere.
+
+538
+00:47:06,027 --> 00:47:06,247
+All right.
+
+539
+00:47:07,369 --> 00:47:27,696
+Looking at this in the case of a dual quaternion, so here's the grade 2 part of the dual quaternion, this is a line part of the dual quaternion, this is how you would extract the amount of line that's in there if we're talking about a line that isn't at infinity, and that's the way that we write this, this is the amount of line that isn't at infinity inside M.
+
+540
+00:47:29,031 --> 00:47:36,876
+This is the amount of line that is at infinity inside M. So this will give you a single, just a number.
+
+541
+00:47:37,296 --> 00:47:46,842
+You can extract the, you can just take these, read these floats off, take the square root of the sum of their squares, and you will get this thing, which is the amount of line at infinity that is inside M.
+
+542
+00:47:48,261 --> 00:47:58,968
+Another way of writing these, by the way, there's some authors who write things differently, like they write the filled circle one as having nothing here at all, and then for this one they put an infinity sign here.
+
+543
+00:48:01,090 --> 00:48:08,074
+And if you want the identity part of the quaternion, then you just read off the W part, and if you want the screwiness part, then it's like this.
+
+544
+00:48:11,035 --> 00:48:11,795
+How about for a reflector?
+
+545
+00:48:12,196 --> 00:48:13,657
+A reflector is an easier case.
+
+546
+00:48:13,917 --> 00:48:15,938
+So you've got a plane that's right there.
+
+547
+00:48:17,399 --> 00:48:26,364
+That's the grade 1 part of M. There's the grade 3 part of M, so the amount of point reflection that's inside of the reflector.
+
+548
+00:48:27,925 --> 00:48:37,251
+These are the different ways of extracting the amount of point reflection that isn't at M. Oh, this is the amount of planar reflection that isn't at infinity that's inside M.
+
+549
+00:48:37,878 --> 00:48:38,238
+this talk.
+
+550
+00:48:50,427 --> 00:48:52,968
+Finally, we're getting to some video games, right?
+
+551
+00:48:53,108 --> 00:48:54,228
+We're looking at case studies.
+
+552
+00:48:54,268 --> 00:48:57,008
+We're going to get angles, distances, intersections, and projections.
+
+553
+00:48:57,028 --> 00:49:01,009
+It's also going to be very fast because we've got so much machinery built up.
+
+554
+00:49:01,129 --> 00:49:02,329
+So, plane-line.
+
+555
+00:49:02,869 --> 00:49:06,410
+We're thinking about a plane and a line in this situation.
+
+556
+00:49:06,450 --> 00:49:09,891
+We're interested in how the laser sight cuts this rectangle that we've got here.
+
+557
+00:49:10,891 --> 00:49:15,272
+We're going to turn the laser sight in this rectangle into a plane and a line.
+
+558
+00:49:15,712 --> 00:49:21,456
+And this is an infinitely extended plane, so it's not the plane that's defined, it's not, it's not limited to this rectangle.
+
+559
+00:49:22,557 --> 00:49:24,359
+Yeah, it's an infinitely extended plane.
+
+560
+00:49:24,439 --> 00:49:28,782
+But we're interested in, for example, where to get that intersection, how to get that intersection.
+
+561
+00:49:28,862 --> 00:49:36,387
+First we're going to label the line as A and the plane as B. The line is the middle six, it's the, it's a dual quaternion.
+
+562
+00:49:36,588 --> 00:49:43,192
+It's a line, if you wanted to do a 180 rotation around this line, that would be the same thing as this.
+
+563
+00:49:44,417 --> 00:49:46,018
+that would be this dual quaternion.
+
+564
+00:49:46,058 --> 00:49:50,521
+So, it's the line part of a dual quaternion, and this plane is obviously represented in this way.
+
+565
+00:49:51,521 --> 00:49:57,945
+We define M equals A over B, which we know how to do, because we've seen how to divide most things.
+
+566
+00:49:59,326 --> 00:50:05,710
+And then we're going to... well, M is a rotoreflection, or a transflection, by the way.
+
+567
+00:50:05,950 --> 00:50:11,254
+It's going to be a rotoreflection if the line is not orthogonal to the... is not parallel to the plane.
+
+568
+00:50:11,434 --> 00:50:13,435
+It's a transflection if they are parallel, whatever.
+
+569
+00:50:15,014 --> 00:50:15,114
+this
+
+570
+00:50:32,375 --> 00:50:33,637
+They don't intersect each other.
+
+571
+00:50:33,957 --> 00:50:38,783
+If you call the intersection function with these two objects, it should give you nothing.
+
+572
+00:50:38,884 --> 00:50:40,426
+Well, no, that's not true.
+
+573
+00:50:40,746 --> 00:50:42,909
+It should give you a normal vector.
+
+574
+00:50:43,009 --> 00:50:45,272
+It should give you a point at infinity.
+
+575
+00:50:47,932 --> 00:50:50,174
+Maybe you want the angle between the line and the plane.
+
+576
+00:50:51,415 --> 00:50:53,817
+The way to get that angle is with this formula.
+
+577
+00:50:54,137 --> 00:51:07,627
+And again, it involves the amount of point reflection that's inside of M, where M is a rotoreflection, say, and the amount of planar reflection inside of M, where M is a rotoreflection.
+
+578
+00:51:09,209 --> 00:51:16,014
+There's only going to be a distance between the line and the plane, again, in the case where the line is parallel to the plane.
+
+579
+00:51:17,358 --> 00:51:21,480
+And so this, yeah, this is conditional upon the angle.
+
+580
+00:51:21,980 --> 00:51:27,242
+But it's still the ratio of two amounts of point reflection and planar reflection.
+
+581
+00:51:27,742 --> 00:51:35,165
+And, oh, and obviously another situation where a video game developer cares a lot about the angle between a plane and a line is in lighting calculations.
+
+582
+00:51:35,645 --> 00:51:35,885
+Okay.
+
+583
+00:51:36,705 --> 00:51:37,746
+Plane point.
+
+584
+00:51:38,986 --> 00:51:39,906
+Here we've got dead space.
+
+585
+00:51:40,267 --> 00:51:43,268
+In this part, you're going around on the surface of a great big spaceship.
+
+586
+00:51:44,938 --> 00:51:49,160
+You've got the ground beneath you, probably defined by a plane.
+
+587
+00:51:50,020 --> 00:51:52,001
+Your character's position is a point.
+
+588
+00:51:53,161 --> 00:51:54,182
+What can we do with this?
+
+589
+00:51:54,382 --> 00:52:03,205
+Well, let's label these as A and B, and define M equals A over B, because that's turned out to be a useful thing to do in the past.
+
+590
+00:52:04,766 --> 00:52:20,779
+Suppose that you wanted the line that is orthogonal to A, sorry, at a right angle to A, and it passes through B. Well it turns out that this is the line part of M. Surprise, surprise.
+
+591
+00:52:21,099 --> 00:52:21,980
+What else would it be though?
+
+592
+00:52:22,100 --> 00:52:24,482
+Of course it's going to be a line part of some dual quaternion.
+
+593
+00:52:25,748 --> 00:52:31,676
+Suppose you want projection, so you've got a point in the plane again, and you want to project the point onto the plane.
+
+594
+00:52:32,076 --> 00:52:42,670
+Well, this is the line part of M, which is the grade 2 part of M, they're the same thing, divided by A, it turns out.
+
+595
+00:52:44,417 --> 00:52:46,558
+Maybe you want the distance between the point and the plane.
+
+596
+00:52:47,438 --> 00:52:57,281
+It turns out that this is given by this formula, where we're taking the amount of screwiness inside of M and the amount of line inside of M. These formulas are looking pretty similar, aren't they?
+
+597
+00:52:58,001 --> 00:53:03,503
+And you can ask the question as well, is the point to the left or to the right, or is it embedded inside of the plane, right?
+
+598
+00:53:03,543 --> 00:53:09,105
+So if it is my plane, is it here, or is it here, or is it in my plane?
+
+599
+00:53:11,963 --> 00:53:19,510
+That turns out to be the sign of the screwiness of M. This is a slightly weird thing to think about.
+
+600
+00:53:20,511 --> 00:53:29,260
+It's maybe deserving of something in itself, but it's quite interesting and you can actually apply this concept to lots of other situations that I won't go into.
+
+601
+00:53:29,360 --> 00:53:34,105
+So you want to know maybe, for example, you've got two lines and you want to know whether
+
+602
+00:53:34,665 --> 00:53:41,055
+these two lines are loosely clockwise to each other, whether they're like this or like this.
+
+603
+00:53:42,477 --> 00:53:45,641
+You can similarly extract that from this screwiness part.
+
+604
+00:53:47,230 --> 00:53:48,271
+line and point though.
+
+605
+00:53:48,371 --> 00:53:49,733
+So here we're talking about Lara.
+
+606
+00:53:49,853 --> 00:53:51,455
+She's reaching out to grab a branch.
+
+607
+00:53:51,515 --> 00:53:53,838
+The branch is defined by a line.
+
+608
+00:53:54,018 --> 00:54:01,707
+The line we're going to label A. Her hand we're going to label with B. We're going to define M equals A over B. You must be getting sick of this by now.
+
+609
+00:54:02,288 --> 00:54:05,591
+Maybe you want the point on the line that's as close as possible to her hand.
+
+610
+00:54:06,252 --> 00:54:21,005
+Turns out that that is the projection of this point onto this line, and that is the planar reflection part of M divided by A. The planar reflection part of M, by the way, is going to be a transflexion.
+
+611
+00:54:23,430 --> 00:54:26,572
+Maybe you also want the distance between her hand and the line.
+
+612
+00:54:26,952 --> 00:54:28,873
+Well, that's given by this formula again.
+
+613
+00:54:28,913 --> 00:54:40,839
+It's the ratio of the amounts of point of infinity inside of M and the plane inside M. The amount of plane inside of M, sorry.
+
+614
+00:54:42,120 --> 00:54:43,701
+Okay, line and line.
+
+615
+00:54:44,621 --> 00:54:45,742
+Here we've got lightsabers.
+
+616
+00:54:45,782 --> 00:54:48,123
+I'm not going to draw lines on them because it's a bit obvious.
+
+617
+00:54:49,884 --> 00:54:52,686
+These are again represented as the middle six floats of dual quaternions.
+
+618
+00:54:54,372 --> 00:55:04,139
+We define m equals a over b, where a is one of the lightsabers and b is the line defined by the lightsaber, and b is the other line defined by the lightsaber.
+
+619
+00:55:05,059 --> 00:55:07,961
+If you want the angle between the lightsabers, then that's this formula.
+
+620
+00:55:08,041 --> 00:55:10,523
+If you want the distance between the lightsabers, that's this formula.
+
+621
+00:55:11,950 --> 00:55:20,139
+Maybe you also want to have, like, let's say the lightsaber's like this, and you want to have, like, some crackling energy going from here to here.
+
+622
+00:55:21,040 --> 00:55:23,843
+In order to get that, you use... you can use this formula.
+
+623
+00:55:24,123 --> 00:55:26,926
+Oh, sorry, I should have put in the multiplication sign.
+
+624
+00:55:26,946 --> 00:55:33,352
+So it's the... so if you want to get the line that's at a right angle to these two lines,
+
+625
+00:55:34,013 --> 00:55:42,761
+that turns out to be the orange line multiplied by the purple line minus the purple line multiplied by the orange line.
+
+626
+00:55:42,781 --> 00:55:45,784
+And that gets you this line, which is at a right angle to both lines.
+
+627
+00:55:47,125 --> 00:55:50,268
+Okay, fully general formulas and recap.
+
+628
+00:55:50,709 --> 00:55:51,810
+This part is going to have
+
+629
+00:55:52,927 --> 00:55:56,613
+Much fewer pictures than the other parts, I'm very sorry to say.
+
+630
+00:55:57,394 --> 00:56:00,618
+Yeah, because we're trying to go across points and lines and planes, but yeah.
+
+631
+00:56:01,199 --> 00:56:06,968
+Okay, distance, angle, intersection, and projection of anything and anything else, where we're talking about points, lines, and planes.
+
+632
+00:56:08,335 --> 00:56:24,066
+intersection, so if you've got the grade of A and the grade of B, so let's say that a line is grade 2, because you can make it with two planar reflections, and a plane is grade 1, because that's one planar reflection.
+
+633
+00:56:24,726 --> 00:56:29,449
+So the grade of a line and the grade of a plane is 2 plus 1 equals 3.
+
+634
+00:56:30,990 --> 00:56:37,275
+And if you take the composition of A and B, and then you take the grade G part of that,
+
+635
+00:56:38,554 --> 00:56:45,744
+G was equal to 3, so it's the grade 3 part of A composed with B. Well, that's our point.
+
+636
+00:56:45,824 --> 00:56:49,950
+So the intersection of a plane and a line is a point.
+
+637
+00:56:50,431 --> 00:56:53,415
+The intersection of a plane and a plane is a line.
+
+638
+00:56:55,740 --> 00:56:59,822
+angle and distance from anything to anything, so this is looking very gnarly at this point.
+
+639
+00:57:00,602 --> 00:57:03,924
+But for what it does, I'd say that it's not bad, right?
+
+640
+00:57:05,265 --> 00:57:12,308
+Here we're taking... so you've got A and B, where A and B are point lines or planes, so they've got some grade, which is 1, 2, or 3.
+
+641
+00:57:13,269 --> 00:57:17,411
+You do grade A minus grade B, and then you take its absolute value and you assign that to G.
+
+642
+00:57:18,758 --> 00:57:29,806
+Um, and then the angle between them is going to be about- is going to be related to the amounts of these graded parts of M in there, and the distance is going to be related to these graded parts of M in there.
+
+643
+00:57:30,166 --> 00:57:30,786
+Um, yeah.
+
+644
+00:57:34,000 --> 00:57:42,963
+And this is, sorry, this is not that fast and not that compatible because you can ask the question, well, what if this is equal to zero?
+
+645
+00:57:43,583 --> 00:57:47,965
+The arc tangent of one divided by zero is in some sense well defined, it's 90 degrees.
+
+646
+00:57:49,786 --> 00:57:56,128
+The arc tangent of infinity is 90 degrees, but the only way to guarantee that you'll get the right answer is to use arc tangent two.
+
+647
+00:57:57,796 --> 00:57:57,996
+Okay.
+
+648
+00:57:58,336 --> 00:58:00,959
+Orthogonal to a thing and overlapping another thing.
+
+649
+00:58:01,239 --> 00:58:08,465
+The example that we had of this is the line that's orthogonal at a right angle to the plane and it passes through this point.
+
+650
+00:58:10,287 --> 00:58:13,269
+But there's lots of situations where you can get this.
+
+651
+00:58:13,329 --> 00:58:20,655
+So for example, if you have a plane and you have a line, you can get the plane that is orthogonal to this plane and passes through this line.
+
+652
+00:58:21,596 --> 00:58:25,820
+You can get that whether the line is parallel to the plane or not.
+
+653
+00:58:26,854 --> 00:58:40,247
+That turns out to be this expression, so you can get the unique plane that's orthogonal to a plane and overlaps a line, the unique line that is orthogonal to a plane and overlaps a point, unique plane that's orthogonal to a line and overlaps the point, blah blah blah.
+
+654
+00:58:40,387 --> 00:58:44,972
+And then it turns out that this is a generalization of the dot product in a way that I don't really understand.
+
+655
+00:58:48,612 --> 00:58:53,155
+But that's why we write this thing as the dot product.
+
+656
+00:58:55,756 --> 00:59:00,358
+And if you take this and you divide it by B, it turns out you get projection.
+
+657
+00:59:00,458 --> 00:59:09,463
+You can project a plane onto a line, you can project a plane onto a point, a line onto a plane, a point onto a plane, all with this one formula.
+
+658
+00:59:09,583 --> 00:59:10,284
+Isn't it great?
+
+659
+00:59:11,684 --> 00:59:14,686
+Interpolation, bisectors, and transforms from A to B.
+
+660
+00:59:16,220 --> 00:59:21,644
+All right, addition is always weighted averaging across everything that we've said.
+
+661
+00:59:21,924 --> 00:59:24,586
+And this is sort of what we mean by the term homogeneous, by the way.
+
+662
+00:59:26,427 --> 00:59:31,551
+So this lets you interpolate points, lines, planes, and transformations.
+
+663
+00:59:31,591 --> 00:59:34,913
+So you can interpolate any plane to any other plane.
+
+664
+00:59:34,993 --> 00:59:36,835
+You can interpolate any point to any other point.
+
+665
+00:59:37,195 --> 00:59:39,056
+And you can interpolate any line to any other line.
+
+666
+00:59:39,517 --> 00:59:39,877
+It's great.
+
+667
+00:59:41,957 --> 00:59:47,439
+This formula gives you the thing that's exactly halfway between two things by distance and angle.
+
+668
+00:59:47,479 --> 00:59:55,822
+So suppose you've got two points and you want the point that's directly in between them, or you've got a plane and you want the plane that's guaranteed to be directly in between them.
+
+669
+00:59:56,202 --> 01:00:00,364
+Well, first you've got to normalize your A and B, and that's what this little symbol here means.
+
+670
+01:00:01,244 --> 01:00:07,827
+You can define the normalization of A as being A multiplied by 1 over the square root of the dot of A and B.
+
+671
+01:00:08,687 --> 01:00:11,731
+And bear in mind that this is just a float in this situation.
+
+672
+01:00:11,811 --> 01:00:16,397
+This is a single number, and so you can do this very quickly with fast inverse square root.
+
+673
+01:00:18,859 --> 01:00:24,687
+Okay, therefore, generalizing that, you've got the idea of a halfway rotation or translation.
+
+674
+01:00:25,487 --> 01:00:26,629
+Sorry, how much time do I have left?
+
+675
+01:00:30,464 --> 01:00:31,925
+Okay, normalization.
+
+676
+01:00:32,245 --> 01:00:43,073
+If you normalize M and you add one, you get a rotation that's halfway from the identity to M. You can also write this as the square root of M, because if you multiply it by itself, then you get M normalized.
+
+677
+01:00:44,434 --> 01:00:49,238
+Transform from A to B feels like it should be the same thing as transform composition, but there is a caveat here.
+
+678
+01:00:49,318 --> 01:00:57,684
+So if you want to go from A to B, it turns out you've got to take the square root of B over A, and the reason for that is because if you've got two planes at 90 degrees, then
+
+679
+01:00:58,244 --> 01:01:05,226
+This is actually a 180-degree rotation, so you need to take the halfway rotation of this to get the angle between these two mirror planes.
+
+680
+01:01:06,406 --> 01:01:14,188
+And this finally gives us this set-from-unit-vectors thing that I talked about at the beginning, where you want to get the quaternion that goes from here to here.
+
+681
+01:01:15,429 --> 01:01:17,429
+You just think of those as the normal vectors of planes.
+
+682
+01:01:17,469 --> 01:01:20,570
+You take the reflection composition of those two planes.
+
+683
+01:01:20,590 --> 01:01:21,470
+That gives you a quaternion.
+
+684
+01:01:21,730 --> 01:01:22,791
+Then you've got to take its square root.
+
+685
+01:01:23,231 --> 01:01:24,131
+Okay, conclusion.
+
+686
+01:01:25,271 --> 01:01:25,992
+This is a cheat sheet.
+
+687
+01:01:26,012 --> 01:01:27,212
+It says everything that I've just said.
+
+688
+01:01:29,136 --> 01:01:33,620
+All of our code here can be deduced from these very, very simple rules.
+
+689
+01:01:33,700 --> 01:01:40,066
+These are the fundamental definition of the algebra that I've just put forward.
+
+690
+01:01:40,106 --> 01:01:43,449
+So all of these reflection planes, which are through the origin,
+
+691
+01:01:43,789 --> 01:01:48,071
+They square to one, which is the identity, because you reflect and you reflect back, you get the identity.
+
+692
+01:01:48,531 --> 01:01:54,934
+And then the plane at infinity squares to zero, because you can't reflect past infinity and then reflect back again.
+
+693
+01:01:55,235 --> 01:02:00,137
+Similarly, you can't do a 180 around a line at infinity and come back again.
+
+694
+01:02:00,517 --> 01:02:01,518
+That doesn't make any sense.
+
+695
+01:02:01,678 --> 01:02:09,922
+You can translate in a way that's defined by the axis of the line at infinity, but you can't go all the way around the line at infinity.
+
+696
+01:02:10,002 --> 01:02:12,283
+Similarly, you can't reflect in the plane at infinity.
+
+697
+01:02:13,962 --> 01:02:20,209
+If you follow up on this, you'll find that this is how you compose dual quaternions, for example.
+
+698
+01:02:20,310 --> 01:02:23,093
+There's other things for composing flexions and planes and points.
+
+699
+01:02:24,254 --> 01:02:28,159
+It's a bit gnarly looking, but it's actually faster than 4x4 matrix multiplication.
+
+700
+01:02:30,534 --> 01:02:33,716
+And all of this has been geometric algebra.
+
+701
+01:02:34,236 --> 01:02:36,518
+But this is a term that's maybe worth clarifying.
+
+702
+01:02:37,398 --> 01:02:40,920
+So there are many algebraic systems for computational geometry.
+
+703
+01:02:40,980 --> 01:02:45,163
+And the cross product is one of those algebraic systems that you learn in school.
+
+704
+01:02:46,203 --> 01:02:52,126
+But what I've been talking to you about today is called 3D Euclidean plane-based geometric algebra.
+
+705
+01:02:52,687 --> 01:02:54,308
+And it's defined by what we call CL 3, 0, 1.
+
+706
+01:02:58,789 --> 01:03:05,543
+It's called that because it's got three basis elements that square to one and it's got one basis element that squares to zero.
+
+707
+01:03:07,083 --> 01:03:14,088
+A thing that Eric has talked about many times is 3D projective geometric algebra, which is able to do even cooler stuff.
+
+708
+01:03:14,168 --> 01:03:24,895
+It's able to do camera transformations, and it's able to do, for example, if you've got two points, you maybe want the line that joins those two points, or if you've got a line and a point, you want the plane that joins those.
+
+709
+01:03:26,537 --> 01:03:30,920
+So what I've been talking about is a subset of what he talks about.
+
+710
+01:03:30,980 --> 01:03:34,042
+So it's what gets called anti-space.
+
+711
+01:03:36,069 --> 01:03:41,054
+3D Conformal Geometric Algebra, as I understand it, he's about to give us some stuff about that.
+
+712
+01:03:41,094 --> 01:03:42,716
+Yep, brilliant.
+
+713
+01:03:42,736 --> 01:03:46,199
+3D Conformal Geometric Algebra lets you do even more stuff, including the spheres.
+
+714
+01:03:47,040 --> 01:03:52,225
+And then there's this thing, which is, well, you can call it Vector Space Geometric Algebra.
+
+715
+01:03:52,966 --> 01:03:57,971
+It's CL3, so it's a subset of what I've been talking about.
+
+716
+01:03:59,472 --> 01:04:08,822
+And yeah, the problem, it's fine, but the problem is that people sometimes say geometric algebra and all that they mean is this, when geometric algebra really means all of this stuff.
+
+717
+01:04:08,842 --> 01:04:10,664
+And another word for it, by the way, is Clifford algebra.
+
+718
+01:04:12,336 --> 01:04:20,258
+And if you want to learn more specifically just about 3D Euclidean plane-based geometric algebra, I recommend this lecture by Leo Dorst.
+
+719
+01:04:20,638 --> 01:04:24,218
+And he uses lots of mathematical rigor, which is something that I don't very much use.
+
+720
+01:04:25,038 --> 01:04:27,099
+This is a link to lots of other things that you might have heard of.
+
+721
+01:04:27,399 --> 01:04:30,479
+If you studied mathematics or physics in university, you might have heard of these things.
+
+722
+01:04:30,839 --> 01:04:32,040
+If you didn't, don't worry.
+
+723
+01:04:32,100 --> 01:04:33,340
+You don't need these concepts.
+
+724
+01:04:33,400 --> 01:04:38,981
+But yeah, just to say these are labels, different labels that you can give to the same things that I've been talking about.
+
+725
+01:04:40,459 --> 01:04:44,262
+And one of the fun ones is spinners, by the way, that's somewhere in here.
+
+726
+01:04:44,302 --> 01:04:46,584
+Yeah, quaternions and dual quaternions are spinners.
+
+727
+01:04:47,564 --> 01:04:59,573
+One thing that you might have noticed that I've been doing a lot of in this lecture is taking vectors and then making them fade out and replacing them with something else, with the exception of the translation vector, sort of, though I've added this line in here.
+
+728
+01:05:01,329 --> 01:05:04,791
+And the reason for that is because vectors are not that good of an idea.
+
+729
+01:05:04,931 --> 01:05:14,555
+I mean, it depends on what you mean by vector, but if you define a vector as the thing that goes into and comes out of the cross product, it's a terrible idea.
+
+730
+01:05:15,011 --> 01:05:18,113
+The cross product transforms in an inconsistent way.
+
+731
+01:05:19,273 --> 01:05:24,136
+It's a mathematical dead end because it doesn't have any connection, well, it doesn't have a proper connection to group theory.
+
+732
+01:05:25,016 --> 01:05:35,682
+And it gives you something that if you put in A and B, but A and B are, like, A and B could be planes, and then the output, what you really want is the intersection of those two planes.
+
+733
+01:05:36,883 --> 01:05:42,546
+So yeah, I think that when somebody uses the cross product, the universe should scream type error.
+
+734
+01:05:43,506 --> 01:05:48,333
+And it remains to thank the many, many people who have made it so I understand the stuff well enough to give a lecture on it.
+
+735
+01:05:49,674 --> 01:05:51,797
+And please get in touch with me.
+
+736
+01:05:52,278 --> 01:05:53,559
+I love talking about this kind of thing.
+
+737
+01:05:53,599 --> 01:05:56,523
+And I've got even more toys that I didn't get to talk about today.
+
+738
+01:05:56,863 --> 01:05:58,085
+Optical illusions as well.
+
+739
+01:05:58,425 --> 01:05:58,686
+All right.
+
+740
+01:05:58,906 --> 01:05:59,527
+Thank you very much.
+
