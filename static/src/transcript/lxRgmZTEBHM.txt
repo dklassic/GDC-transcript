@@ -1,0 +1,572 @@
+All right.
+Well, thank you for coming to our talk.
+It's called Making Connections, Real-Time Path Traced Light Transport in Game Engines.
+And it's been a great day of cool talk, so hopefully you have enough attention span left in the tank for one more.
+I'm Adam Morris.
+I'll be presenting the first part of this talk and then handing it off to Evan Hart.
+Also up here is Jiayin Cao, who isn't here today, but he's been really important in contributing to this work that we'll be showing you today.
+Here's an overview of what we'll be talking about today.
+I'll be going through some preliminaries and foundational concepts related to real-time path tracing before heading off to Evan.
+All right, so first things first.
+Why are we here?
+Better lighting, of course.
+To create richer, more realistic visuals, we want our scenes to have more lights, ultimately.
+And specifically, more shadowed lights.
+And beyond just having shadowed lights, we want shadows that have accurate penumbra.
+Importantly, we want the simulation of light transport to be completely dynamic.
+So our worlds feel alive and as interactive as possible.
+And to this end, our ultimate goal is to more accurately approximate the rendering equation and to do that in real time.
+So we also need to do this in a performant and scalable way.
+We really need to be mindful of this, even when we're on high-end PC parts.
+So most dynamic shadowing methods...
+most dynamic shadowing methods today don't scale well when we have lots of lights.
+And this is not a shadow map thing.
+I mean, memory is always an issue and performance is always an issue when you have tons of lights.
+But fortunately, today's GPUs offer a lot more, especially high-end GPUs, offer a lot more exciting possibilities that we'll be talking about through the course of this talk.
+So we really encourage you to explore these new opportunities that we talk about.
+Okay, so you may be thinking, spent the whole day talking about interesting stuff, work graphs, and I already have all of my time budgeted for the next two years to work on things like that, and it's a lot easier said than done to just go and implement all these new exciting things that you're going to talk about.
+And I understand games have a whole lot going on.
+They demand a high level of performance.
+They demand you delivering on an artistic vision.
+And the artists may not want a photorealistic, perfectly photorealistic game.
+They may want to bend or break the rules of physical reality.
+And your renderer or rendering system needs to be able to deliver on that.
+And game engines, they wrangle that complexity with systems.
+And that means we typically have a lot of systems, especially in the renderer.
+And this is because we need to support multiple platforms.
+We've had other talks talk about consoles in addition to PC.
+And this can be a huge range of hardware that you ultimately have to address with the renderer.
+And most of the time, this creates a sort of choose-your-own-adventure rendering pipeline, depending on the platforms that you support.
+So seriously, though, it becomes this tightrope walk that you have to do between overfitting your renderer to a specific problem or to a specific platform.
+So we've been working with Unreal Engine 5 And we chose it because it's a high-quality, ubiquitous, great engine that has its source fully available.
+And a whole bunch of studios, including people sitting here today, I'm sure, have used Unreal 4 and 5 at production scale.
+So we expect to encounter a lot of really great, representative, challenging graphics workloads using this engine.
+But in addition to this, a great aspect of Unreal is that we're able to branch it and then make what we do available to you.
+So you can pull it, use it, use it as a reference, and hopefully learn something from it, and tell us how you made it better.
+Everything you see today, importantly, is in or using our branch, the NV RTX branch of Unreal Engine 5.3.
+And at the end of the talk, there'll be some slides with links where you can go to get access to that.
+All right.
+Additionally, Unreal 5 has great lighting tech right out of the box.
+And this is great in general.
+It has both awesome benefits and some challenges.
+The benefit is that you have fallbacks in place already, really nice fallbacks, in place for content that may not be compatible with any new rendering tech that you put in, or workflows that might not be compatible.
+challenge is that good competition is tough to beat.
+And we really like this challenge.
+And we hope that we can show you some cool stuff today.
+Speaking of which, our team has put together a video, a demo of an amusement park scene.
+And I'd like to show it to you right now.
+So in this scene, we're showcasing where we are today with path-traced light transport in UE5.
+And the scene has well over a thousand dynamic light sources that all cast accurate shadows with Penumbra.
+We have additional dynamic lights from a Niagara particle system for the fireworks.
+These also cast shadows.
+This includes denoising with DLSS ray reconstruction, and it's running at 1080p using the DLAA preset.
+And it runs at 60 hertz or above on an RTX 4090.
+So I'll let the rest of the video play out.
+All right, very cool.
+Thanks to our team for putting that together.
+They did a great job.
+So some of what you saw there might not be obvious as to why it's super cool.
+And I'm going to dive into some of the foundations that underpin the tech behind what you saw.
+So at its core, path tracing is about simulating the transport of light along paths, where we define a path as multiple connected ray segments.
+And for many of you in the room, I'm sure this is not anything new.
+This is not a revelation by any means, but stick with me.
+Any path tracing renderer, real time or not, is going to focus more accurately on more accurately approximating our good old friend, the rendering equation.
+And I'm sure that Many of you have seen this equation in various forms.
+This is one of them.
+It's simpler, it doesn't include the emissive term, but for today, it's a pretty good example.
+Since we can't solve this equation directly, our goal is to approximate it.
+Also, not news to you.
+To start to understand how we will or could approximate it, Let's treat its integrand like any other function.
+Then employ Monte Carlo integration to create an estimator.
+And a simple Monte Carlo estimator evaluates our function at uniformly distributed points across the integration domain, and then averages those results.
+The math looks maybe complicated, right?
+But ultimately, this is essentially the path tracer that's introduced in Peter Shirley's Ray Tracing in One Weekend mini book.
+And it's probably the first path tracer that you wrote.
+And it's a great starting point.
+So before we move on, you're going to hear the word sample a lot in this presentation.
+And other presentations today use the word sample too.
+When I was first learning about sampling and ReSTIR, which is something we'll talk about during this talk, I got confused because the word sample was used so many times in papers, in blogs, and in videos, and it just confused me because it wasn't well defined.
+Sometimes it was a noun, sometimes it was a verb, sometimes it was almost every word in a sentence.
+And so then the word didn't mean anything anymore to me.
+So if you've ever been confused by this overloaded use of the word sample, this is it.
+X sub I. That is a sample.
+That's what we mean by sample in this context for this talk.
+Now you might think, well, what is that?
+That's just a function.
+I don't know what that is.
+We're graphics people.
+So in graphics speak, this sample translates to the path of light transport, and specifically the path of outgoing light in a specific direction, reflecting off a surface, given light incoming from another direction or light source.
+That's our sample.
+So keep that in the back of your head as we go through this talk, and as I say sample many more times.
+Okay, so we're going to estimate the rendering equation by sampling it.
+Cool.
+But how we generate those samples is really, really important.
+And the keys to an accurate estimator is ensuring our sampling process is both unbiased, meaning it returns the correct value on average, and consistent.
+meaning the estimator converges to the correct answer or the correct value as the number of samples goes to infinity.
+Keep in mind these things aren't the same.
+Being unbiased doesn't mean that you're automatically consistent and vice versa.
+This is an important aspect of rendering in general, path tracing in general, but less important in real time, which I'll mention a little bit more later.
+So to summarize, path tracing versus most real-time rendering today, the main differences are with path tracing, we simulate the transport of light with paths, we approximate the rendering equation with a Monte Carlo estimator, and we produce samples, or try to, in an unbiased and consistent way.
+Okay, so we're here for real-time rendering though.
+And we want to take those aspects, now that we understand them well, from a path tracer and bring them into a real-time renderer.
+So let's connect some rays, build some paths, get sampling.
+There's just one big problem.
+Why weren't we doing this all along, right?
+It's too expensive to do this.
+Evaluating all that light across all those connected segments and paths is just not practical in real time today.
+And this is where reservoir-based spatiotemporal importance resampling, ReSTIR, comes in.
+we'll need to be very, very careful to evaluate only the samples, or in other words, paths, that matter the most and lean heavily into things like reuse and clever math.
+And ReSTIR provides exactly that, the algorithmic foundation that enables us to select the essential paths and complete light transport at a reasonable cost in real time.
+So at the core of ReSTIR, is Resampled Important Sampling, or RIS.
+And RIS shows us that, somewhat surprisingly, a single sample really can provide a good approximation, and a good sample can be refined from mediocre or even truly bad samples.
+Potentially even more important to ReSTIR is Weighted Reservoir Sampling, or WRS.
+And remember the RE in ReSTIR stands for reservoir-based.
+And that's where WRS comes in.
+WRS stores selected samples and other associated information in reservoirs.
+This is crucial to the process of sample refinement and reuse.
+See, I wasn't kidding.
+I'm gonna say sample a whole lot.
+So with the combination of RIS and WRS, we'll make an estimate, compute a value, and then repeat that process to refine and improve our estimate.
+And a convenient way to configure our reservoirs is in screen space, since then we can lean into reuse in ways that are natural for us as graphics programmers.
+So things like temporal and spatial sharing where we merge reservoirs together, either from previous point in time or from spatially other pixels on the screen.
+And at first glance, you may say like, yeah, yeah, like I get it.
+We've been doing this sort of reuse, but it still seems too good to be true.
+Can we really get all the samples that we need for a converged path traced image by doing these things?
+And I think you will, and let me show you.
+So here's a shot of the amusement park scene that you just saw in the video.
+And post-processing TAA, and much of our ReSTIR goodness is disabled.
+This image shows what it looks like if we take just one sample per pixel in the scene here that has well over 1,000 lights.
+I think it's actually 1,300 lights total.
+And with so many lights to pick from, we're having a tough time finding the right light for any particular surface, meaning our estimates are pretty bad.
+Those of you in the front row may be able to see that there are some flecks of light, kind of noisy flecks throughout the scene, but those of you in the back, it probably just looks completely dark.
+So if we increase our initial sample count to eight per pixel instead of one, the result improves a whole lot, but we're still a far cry away from a good result or a usable result even.
+So let's go back to one initial sample per pixel, but add in temporal reuse.
+And this is a substantial improvement.
+So if I, this is eight, this is one sample, but with temporal.
+we get a lot more reasonable lighting.
+And we're starting to see a shadow appear underneath the character's feet.
+But we're still far away from where we really want to be.
+So let's use one of our other tools in our toolbox, which is spatial reuse.
+I've gone back to the one sample per pixel plus temporal, and then added in two samples through spatial reuse.
+So that's where we were.
+And this is with spatial and temporal.
+And now we're cooking.
+This seems like a reasonable image that is close to what our actual scene should look like once it's lit.
+So if I keep this set up and bump the samples even more, the initial samples to eight, then things are looking even better.
+Some of that noise you can see gets refined.
+And keep in mind, this is without TAA or any post-processing or denoising applied.
+This is just raw sampling, improving the signal.
+So we started here and we ended here just by improving our sampling, picking better paths.
+Pretty great transformation, I think.
+Hopefully this has you convinced just how powerful reuse and things like ReSTIR can be.
+But as good as this is, it's still a noisy image at the end of the day.
+And we have to do something about that.
+And the noisy result also isn't a surprise.
+Noise is fundamental to the paradigm shift that we've introduced into our renderer, because the very nature of Monte Carlo estimators means that we're going to introduce noise.
+Fortunately for us, noisy images aren't a new thing.
+Denoisers are gonna come to the rescue.
+Some important things to understand.
+Denoisers need noise to function properly.
+And specifically, they need high frequency noise.
+If you give a real-time denoiser a stable image, it's going to get confused and produce generally bad, meaning blurry, results.
+There are several existing off-the-shelf denoising solutions and algorithms that you can use to handle noise.
+You heard about one earlier today from Snowdrop.
+But DLSS Ray Reconstruction is an excellent one.
+And there are a variety of techniques based on either Recurrent Blurring, also called ReBlur, or Spatial Variance Guided Filtering, or SVGF.
+This includes algorithms like Relax in the NRD library that extend SVGF and make a variety of improvements.
+Denoising is a really deep topic, so I'm not going to have time to discuss it in detail today.
+But let's go back to our amusement park scene and apply some denoising to it to see how it works.
+So here's a different shot from the amusement park scene, using the same restore settings that I showed earlier, where we ended up.
+This time I've turned on TAA.
+and denoising here is disabled, so we have our nice noisy image.
+And here's what it looks like if I turn on TAA and the RelaxDenoiser that's part of the NRD library.
+So I'll go back and forth, give you a little idea of how it cleans it up.
+And the combination of TAA and the RelaxDenoiser clean up that noise really nicely.
+Now if you're in the front row, you may be looking and saying, blur there.
+It's not as sharp as it was.
+Maybe there's a little bit of energy loss in places.
+The sign isn't as bright.
+If we swap over to DLSS Ray Reconstruction, several of these areas are less blurry, they're sharper, and the fine texture details pop out in a way that they didn't previously.
+There's slightly less energy loss as well if you compare it to the noisy NRD and then DLSS.
+So ultimately we get a pretty nice image out of that.
+Okay, so hopefully at this point, you understand the anatomy of a real-time path tracer, and you believe that ReSTIR can kind of do miracles.
+So before we move forward, I want to talk a little bit about our implementation, because during this project, we've had a few guiding principles.
+The first is respect the budget, 60 hertz frame budget.
+It's okay to take shortcuts.
+if it means that we respect that budget.
+And it's okay to accept some bias where we really have to, particularly related to denoising, because the denoiser inherently adds bias to the image.
+But since we have such low sample counts or ray counts to work with, the denoiser is an essential tool to make a shippable image.
+Next, strive to be unbiased when sampling.
+This one's really important because don't get tunnel visioned on we have to be unbiased all the time or else our image is terrible and we're not path tracing.
+You can have a little bit of bias and it's okay.
+Consistency is another one I talked about a little bit earlier and being consistent is good but it's somewhat less important for real time because we have very low sample counts and one day hopefully sooner than later, when we have hundreds or thousands of samples per pixel, I'll be happy to worry about being consistent because we'll have so many samples to worry about converging.
+But today, it's less of a problem.
+And one of the other elements of this is that we're going to stochastically evaluate lights for all of our interactions.
+And this provides tangible performance benefits that Evan is going to talk about later, but it also delivers more consistent results across different effects.
+So for instance, direct lighting versus reflections.
+Alright, next.
+At each ray segment along a path, we're going to determine light transport with the best method we have available.
+And this is an important principle.
+This means that things like ray tracing, rasterization, cone tracing, ray marching, cache data, they're all on the table.
+Path tracing itself doesn't require that ray segments all be ray traced.
+and determining the best method is a combination of a few factors.
+Performance is of course a very important one that will weigh heavily in our decisions.
+But best can also include a lot of other things like the complexity, the code complexity of the implementation, compatibility with existing rendering systems, content compatibility too.
+And best can change based on your game, the game you're making, the engine that you're working within, the hardware you're targeting, and maybe even more importantly, time.
+Because one day, hopefully, we might just have GPUs that are faster than a 4090.
+So a few more notes on our implementation.
+As you'd expect, we're constructing paths from the camera to light sources, which is often referred to as backwards.
+We use rasterization for primary rays.
+This is because it's fast, Nanite's two-pass occlusion culling works great, and ultimately Nanite requires rasterization to function.
+We use a combination of ray tracing and cache data for secondary rays, where our secondary rays include diffuse and specular GI.
+And we use Unreal's high quality hit lighting path for specular.
+And we configure that such that it has an option for, it takes advantage of the option for multiple bounces.
+We disable screen traces or SSR.
+that runs as a pass before ray tracing because this often produces less than ideal results.
+For light or shadow rays, whichever one you prefer to call it, we use ray tracing and evaluate material hits so we can support alpha-tested content like foliage.
+And one more thing to mention that we noticed while doing this project and this work, introducing path tracing to the renderer.
+is that this kind of paradigm shift in the renderer forced us to continue to ask ourselves where and how much we should be rewriting, reusing, adding, or replacing different code paths in the engine.
+And I think if you do this yourself, or when you do this yourself, hopefully, you're going to run into this a lot too.
+And Evan will touch a little bit more on our thoughts on this later in the talk.
+All right, that's it for me.
+I'm going to hand it off to Evan, and he's going to talk to you about leveling up sample lighting.
+Thanks a lot.
+Thanks a lot, Adam.
+Excellent job setting up what we're talking about here.
+Let's go ahead and get into our implementation.
+So first, I want to talk about some building blocks that we're using within our ReSTIR implementation.
+First, we build ourselves a light pool that's basically the set of lights that we want to sample from.
+This is a structured buffer.
+We stick it on the GPU.
+Then we have this target function.
+This is just the evaluation of the BRDF against a light sample.
+So stuff that's already existing in the engine, we're going to reuse code in the engine for doing this evaluation.
+That's important for weighting our samples as we reprocess them.
+And finally, we're going to do this per-pixel reservoir grid that we use for storing where our samples are with their current weight.
+So these are the weighted reservoir sampling buffer, basically.
+Now, we're going to have in our implementation a few different stages that Adam referred to, the initial sampling, temporal resampling, spatial resampling, final shading.
+And for these stages, we're going to read and or write from the reservoir set to update it and reuse samples.
+Importantly, all these we're running presently as ray generation shaders because of the fact that we want to take occasional visibility samples, and we're using rays, as Adam mentioned, and relying on the anti-hit shader for dealing with transparencies and whatnot.
+But importantly, we don't shoot a ray every time we're doing the sampling.
+We just do it when we need to, basically.
+So, let's start off with the initial candidates.
+In the initial candidates, we draw samples from every class of light source, so local, directional, sky, etc., and that's because the sampling is sort of necessarily tied into some fundamental characteristics of the lights.
+And then, like I Like I mentioned a moment ago, we optionally will do some conservative visibility testing.
+And we want to do some of this because it helps us converge faster, but we want to minimize it because we don't want to shoot too many rays here.
+And importantly, conservative means that we're going to err towards visible, because we can skip the masked surfaces in this initial visibility test.
+For any final testing, we'll have to take that into account, but we can possibly skip trees when we're shooting these initial rays.
+So here's some shaky cam of me showing you an artifact that can happen with respect to merging the reservoirs before we do full visibility testing.
+So here we're merging the local and directional reservoirs prior to visibility testing.
+And we found that we may want an option for testing visibility against all of the local samples that we've taken, the merged local reservoir versus the merged directional reservoir.
+And this is because The sunlight outside of the bistro is shaded or shadowed completely inside of the bistro.
+So the very strong directional light sort of is pushing energy into the statistics for the way the reservoir is sampling.
+And by testing the directional light before we do the resample, we're good.
+You may say, okay, well, with thousands of lights, random sampling can be challenging because we have to find relevant lights, but we'd really like to find good lights, and a random sample has a tough time doing that.
+We can see that eventual convergence is going to get us there with this temporal and spatial resampling, but games can't wait around.
+We need to be able to produce an image very quickly.
+Importance sampling is a key portion of this, and the version that we're reusing today is reservoir-based, grid-based importance resampling.
+Got it correct that time.
+Pre-selecting all the lights helps with convergence, and we're going to pre-select on two sort of metrics.
+Spatial, which helps with the fact that lots of lights in games have a limited range, they only go out to 20 meters or so.
+And additionally, we'll use power as an importance factor, because the brighter a light is, the more likely we want to be able to sample from it.
+we have to be a little wary of fireflies with our regear implementation.
+And this is because undersampling these reservoirs can lead to fireflies in the reservoirs themselves, which can show up as boiling.
+And importantly, this can also happen if our PDF is being poorly matched.
+Importantly, multiple importance sampling is something that we do use to help alleviate this problem, and that's because of the fact that multiple importance sampling from using these different methods can sort of cancel out weaknesses in different sampling methods.
+So our ReGear implementation looks a little bit like this.
+That's the amusement park scene.
+And we're using clip map style grid with some temporal feedback.
+So this is what it looks like.
+And each of these different colored cells is a different cell in our ReGear grid where we are pre-selecting a bunch of lights.
+And we're using temporal feedback to refine them as we run through the scene, basically.
+So again, this is one sample per pixel using the random sampling that Adam was looking at before.
+But if we turn on ReGear, no spatial or temporal reuse, just the spatial and temporal information that's in the ReGear cells, you can see we've actually already converged to a pretty good image there.
+You can clearly see the shadow cast by the character in the scene.
+But in addition, we want to take better samples in other ways.
+Specular is tricky with respect to re-stereo.
+And this is because shiny surfaces have a narrow BRDF.
+And we don't need to just find a good light here.
+We need to be able to find the location on the light to produce that highlight.
+And I'll show you the problem now.
+So here we've got a very blobby specular highlight in the upper left portion of the sphere.
+And the reason this is happening is because we're having trouble finding the right location on the light to produce the highlight.
+So if I turn off denoising, you can see, you know, exactly what we're sticking into the denoiser.
+Now, still with denoising off, let me do some material work here, where I'm firing a material ray and finding the right location on a light, and using multiple importance sampling to combine that into our restore estimate.
+The way we've done this is with a light BVH.
+It was mentioned a little bit earlier today, and there's another talk, I guess, towards the end of the week on light BVHs, but ours is sampling the specular ray on the material.
+And unfortunately, UE out of the box doesn't have access to light sources in the BVH.
+So we're actually going to create our own special light BVH that we sample separately.
+Importantly, the light BVH, since we're just using these parametric lights, it's just really simple geometry that we can stick into them.
+So sphere, hemisphere, square, cylinder, that's all we need, just a bunch of instance transforms to make the light BVH work.
+And then we only need trace ray inline, because all we need to do is get a position and which object we hit to be able to produce the data.
+So taking a step back, here's the visualization of light BVH with the specular highlight on the sphere.
+So you can see that's where the light was existing that we had to shoot a ray to get to.
+So, let's move on to temporal resampling.
+Temporal resampling is, you know, the place that really starts making us good.
+We're never truly unbiased with our temporal resampling in UE4, or UE5, because full bias correction requires that we have a historical bounding hierarchy.
+We can't really do this in games typically, because we're doing things like refitting skeletal characters, and we just don't have the historical B-losses from the last frame, and it would take a ton of memory to, you know, do that sort of stuff.
+Additionally, we default to this modest max history of 8.
+And this max history is sort of capping out the importance of samples based on how many times they've been reused.
+And a larger history means more stability.
+A shorter history means that we can have less temporal lag on, say, a disocclusion for a shadow or something like that.
+Sometimes our artists want to turn it down even lower than 8.
+It depends on what they're doing in the scene.
+And then it's important to possibly keep your own copy of a GBuffer history, depending on how your engine operates.
+And I'll show you an important thing that we ran across in the last couple weeks.
+Normal buffer for a current frame for in the amusement park, you know, showing our opaque shading that we're doing.
+with the bottom of a pool of water.
+But if we look at the historical normal buffer that the engine keeps hold of, we see that the water's been composited in.
+This causes a bad temporal reprojection for us because we end up thinking we're a different surface.
+And the reality is we just keep a separate copy.
+And this is because the engine wants to have a G-buffer that includes this information for its own temporal anti-aliasing.
+So let's move on and let's talk about spatial resampling.
+Well, we've done a few different things that make things better.
+I'm not really going to spend any time on these.
+You can look at these slide notes after the course.
+But I will talk a little bit about this bidirectional occlusion because it's an interesting thing that you may run into when you go ahead and implement this stuff.
+So, this is a very complex occlusion scenario that we see in the bistro scene with table chairs, a whole bunch of overlapping shadows because there's a whole bunch of lights coming down from the ceiling and shining down with these overlapping shadows.
+We can occasionally run into a problem of runaway light reuse, and this causes sort of an energy runaway if we run into this runaway reuse thing.
+So what's going on here is that we have these different reservoirs that are looking out from underneath the table and seeing sort of different mismatched set of lights.
+And if they start reusing between these reservoirs, then they think that they're getting the history of those other lights that they can't really see.
+So what we can do is we can cast occlusion ray to see whether the sample I'm attempting to reuse from can see my own light.
+If it can't see my own light, we're going to avoid this reuse.
+And by avoiding the reuse, we're going to get a nice, clear, stable image here.
+Again, this is what we look like with the runaway reuse.
+And this is what we look like if we do the bidirectional occlusion test to break that.
+It's only necessary if we're doing occlusion retesting during the spatial reuse.
+Now, great, we've done all this.
+What does it all look like in the end?
+Well, when we do the final shading, we get nice soft shadows from ReSTIR, and they match up very nicely against path tracing.
+We've had this since we've had access to ray-traced shadows in games.
+But moving beyond that, things like the default Niagara particle lights can't cast shadows because it's just these simple lights that don't cast shadows.
+But with ReSTIR, we've gone ahead and we've upgraded that to be able to cast shadows from particle lights, including soft shadows.
+Additionally, we can fix the split interval problem.
+So, we've got the nice rect light with the red and green texture on it, and we are producing yellow shadows in the back of the room, along with some, you know, artifacting a little bit of, like, catching the, around the top of the room.
+We moved to ReSTIR.
+We're getting the correct color sample in the back with respect to the shadows because, you know, only one shadow can see only the red, one shadow can only see the green.
+So again, without, with.
+and the path tracer, ignore the programmer art, I made the thing invisible in the path tracer case.
+But finally, because we've done all this stuff, we can start doing some more interesting effects.
+So here, we've produced this unified framework, and so now our ray can integrate some transmissivity along the ray, and then apply that to our ReSTIR result, and we can get these nice colored shadows from the balloons.
+So I think that this is a nice example of how we can improve dynamic lighting just by applying these path tracing principles.
+So we've done this for direct lighting, and we've already improved things.
+But it's not a path tracer without some sampled indirect lighting.
+So indirect lighting, what do we mean?
+global illumination, reflections or specular GI, emissive surfaces, you could argue either way.
+For the purposes of Unreal 5, I'm going to say that it belongs in the indirect lighting case.
+I'm not going to talk about refraction today.
+Again, we want to extend, replace, rebuild.
+What do we want to do?
+Well, this is a fundamental question.
+Rebuilding allows us complete freedom, which, you know, we can do whatever we want.
+Extending allows better compatibility, right?
+So, if you've already designed something to work well with Lumen, then you've, you know, made it fit within its bounds.
+So, let's start looking at what we're doing.
+So, specular indirect paths.
+We sample the material, we shoot a ray, and we hit something, and we light it, et cetera.
+It sounds like reflections.
+So, what does the Lumen Reflections Path do for us?
+Well, the Lumen Reflections Path is going to do sample reflection paths, but we're going to talk about the hit lighting version of this, because we want to do the high quality stuff.
+So we're sampling these reflection paths, sampling the specular paths.
+It's a stochastic sampling.
+It does multi-bounce.
+And it actually has passes for water and glass, if you set things up for that.
+Unfortunately, the light evaluation is not quite what we want, because it's doing a dense evaluation, where it's evaluating all lights that it thinks is hitting that surface.
+And this limits our light count.
+So we're not really getting to the full level of path tracing that we'd like to get to here.
+So, what can we do with enhancements?
+Well, first let's create an alternate path mirroring the one that's there, just to avoid causing people to have to run the code.
+We're going to add our initial sampling loop for the light evaluation and treat the reservoir sources independently, just evaluate up to n times per reservoir.
+And with this, we can get a nice three-bounce image of the funhouse mirrors in our amusement park with the full 1,300 lights potentially affecting them.
+So I think we've got a win here.
+Now, let's talk about the diffuse indirect pass.
+Just like specular, We're going to bounce into the scene, et cetera, et cetera, and then produce our path.
+Well, what does Lumen global illumination do?
+I'm going to simplify things here, talk about it in a little rough sketch.
+We're going to self-sample the screen to generate probes.
+And then from probes, we're effectively going to have rays into the scene.
+But the scene ultimately is getting its color from a radiance cache lookup in the Lumen surface cache.
+visualization of what the Surface Cache looks like mapped to the scene in the upper right there.
+And the Surface Cache is going to get its light by evaluating direct light coming in on the Surface Cache as well as taking some bounce light from other Surface Cache cards.
+Well, this is a path.
+It's got these probes and Surface Cache's intermediaries, but it's a path.
+So how can we reuse this?
+Things are kind of interesting because...
+What's missing here is that we don't have the light scalability again like we talked about in reflections.
+So why don't we do this interesting thing of connecting at the surface cache?
+This looks like a really interesting point.
+So let's take a look at this lit scene, and then let's look at what the surface cache looks like in this lit scene.
+In this lit scene, we've got sort of a low-res version of the scene, and a low-res version of the lighting.
+Now let's go ahead and do sample lighting with ReGear.
+And you'll see that, hey, we've got a noisy version of this.
+It's kind of extra noisy, but it's definitely doing the right lighting.
+And now if we look at it with the filtering and denoising that's already going to be happening to it anyway applied, we've got what looks like a pretty decent image.
+It doesn't look perfect, but actually let's compare it to what Lumen actually produces, and you'll see that What Lumen actually produces is very, very nearly identical to what we were producing via sampling.
+So I think that's a win.
+But importantly, all we're really trying to get is this diffuse indirect.
+And this is the sampled version of the diffuse indirect.
+And I think that we're, again, getting a very, very good result here.
+So that's great.
+We've done that.
+But what can we do further?
+Well, we've now looked at re-structural illumination.
+This is something that's in development, just coming online at the moment.
+So let's utilize ReSTIR to go one step further, and let's reuse GI paths instead of reusing light paths.
+And then we'll use the same spatiotemporal framework, and we'll get per-pixel visibility for higher fidelity than what Lumen would do because of the probe-based nature of it.
+And this is going to give us nice, fine detail for emissive sampling.
+And it's important to note that, you know, we're still reusing the same frameworks here, and importantly, we'll still reuse the Lumen Radiance cache for terminating bounces.
+So let's take a look at what we get out of ReSTIR GI.
+It looks good, you know, the Cornell box scene that we all know, and it's just doing a single bounce.
+However, let's tie it into the Lumen Surface cache, and now we've got a really nice image here, and, you know, we're getting multiple bounces out of it.
+Comparing to the Path Tracer, we're very, very similar.
+So again, this is trending really well.
+Now, this got our artists excited.
+And so they put together a scene lit just by emissive materials.
+Here, we've got lumen being lit just by emissive materials from our artist's sort of dream scene.
+And here, we have it lit with ReSTIR GI.
+You can see that we're able to have less energy loss by switching to ReSTIR GI and getting that sort of finer detail into it.
+We need to talk about performance because we need to make this fast.
+Performance has several aspects, but we made these pretty pictures.
+We need to get 60 Hz or better.
+Lots of optimization opportunities.
+There's quite a bit of code that was involved in getting through all of this.
+I'm going to talk about a couple things, both on the CPU and on the GPU side.
+So on the CPU side, light management is a huge deal for performance because dynamic lighting is expensive, as we all know, from a CPU perspective.
+And it's because in a rendering engine, to do things efficiently, we're typically having to track occluders and receivers.
+M complexity task, and Unreal is no different.
+So, the nice thing about Restore is that it allows all this to be done via statistics, and it's going to scale much better.
+So, effectively, we're going to have GPU-driven lighting.
+And if we have GPU-driven lighting, and we don't have to, you know, track this M by M stuff, we can just stop updating this tracking, and we get an infinite improvement in the overhead of tracking these interactions.
+Additionally, we can also eliminate these extra per light passes that we frequently have to do for a bunch of different effects.
+So that's a win on draw call compute shader launch overhead.
+So we've cut down on CPU quite a bit, and we're rendering way more lights.
+Now, GPU execution divergence is something that everybody that has worked with ray tracing knows to be a challenge and is something that we have to address here.
+So, UE5 has native solution for divergence, and that's the trace-sort-trace algorithm that you may be familiar with.
+It requires three discrete kernel launches where we trace to find out a material ID, we bucket sort the material IDs, and then we do some retracing to actually do our shading and whatnot.
+It's a moderate code complexity and it pairs fairly poorly with multibounce because we can't do a whole bunch of sorts here.
+I have to have a confession, I'm substantially responsible for this algorithm.
+One day I said to Adam, hey, what if we did and then talked to some engineers at Epic and well, yeah, it's now in the engine and has been for a while.
+But an ideal solution would be single shader, single dispatch, recover every bit as much divergence as we were getting in this trace sort trace mechanism, but we're gonna make it work with multi-bounce as well.
+So I give you shader execution reordering.
+Now this is the only slide in this talk that has anything NVIDIA specific on it.
+So this is because shader execution reordering only exists today as an NVAPI extension.
+We can take a trace ray command and split it into effectively three NVAPI calls in the HLSL shader.
+And we can do a trace to get to the object and identify the hit object, do a sort on the hit objects, and then do the evaluation and continue on our way.
+Now, we can do things a little bit more complicated, but just doing this one-line to three-line transform is all you really need, and this is worth frequently 20-50% improvement in performance in our reflection shader that we were looking at.
+We still leave the original code there because we want to be compatible with other things as well.
+None of this work requires the shader execution reordering, it just makes things faster.
+So our reflection shader is faster, but it's still too slow when I was looking at it in the amusement park.
+And the reflection shader, the good news is it's spending most of its time shading.
+And the any hit and closest hit shaders are not a real problem because we've already gotten their divergence taken care of by our shader execution reordering.
+But 73% of our cycles are going into instruction cache misses, and this was found via Nsight, that's an Nsight shader trace.
+So, if we look down and dig down into where the functions are, we see these GPU instruction cache misses are basically 6% of it is coming from just generating random numbers, and 86%, and it's spending 86% of its time with instruction cache misses.
+And all the other functions are pretty much the same way.
+we start expanding this out, we see how many call sites things are happening at.
+And then we start kind of thinking about the fact that DXC can inline every one of these call sites.
+So this is what the original code looks like.
+Fairly reasonable software engineering.
+We've got, you know, a few different variations of samples that we need to take.
+And then this is, you know, diving into one of those functions.
+We see that, you know, hey, it's got the random number generation, and it's got this reuse and sort of evaluation function that's necessary for weighting and doing the resampling.
+And these are called in every single one of those cases.
+Now, we need to deduplicate code.
+We need to deduplicate it at a binary level.
+And this is because DXC is inlining the world and polluting the ICache.
+That's just a mess.
+We can start thinking of this as a state machine.
+State A, go to process loop.
+Go to state B, process your loop.
+And from that perspective, we can now say, hey, maybe there's a cursed control flow system that we can come up with to deal with this.
+I'm going to give you the infamous four-switch paradigm.
+So we're going to loop over all of our states.
+And then we're going to take a switch statement to evaluate the setup code tied to a particular state.
+And we're going to execute a loop to take our samples.
+Within the sample loop, we're going to execute a switch statement for which type of sample we want to generate.
+But now our random number generation code and our resampling code are at one location each within the loop, and so as long as we don't unroll these loops, we have just one location in the instruction caches for them to be pulled through.
+And poof, our instruction cache problems are fixed.
+This is 20 to 40% faster by moving to this state machine-based control flow.
+And it impacts many of the shaders in our system, and it enables addressing other performance problems that we have.
+I'm not going to talk about some next steps today.
+Fog, volumetrics, transparency.
+We've done some things in this space, but we don't have time to go deeper into it.
+As Adam mentioned previously, all this stuff is available in our NV-RTX branch, so you can go look at the source code right now if you want to.
+And then, additionally, we have some other ReSTIR and sampling talks at GDC this week.
+I point you, you know, strongly at the gentle, or sorry, this is, got the slides backwards, this is some other resources on ReSTIR and sampling that you may want to take a look at.
+We have some other talks on real-time path tracing in games this week.
+First talk is our art talk about this UE5 work, if you're interested in seeing more about it and more of the use in a workflow.
+Then we've also got talks on games with Cyberpunk and Alan Wake as well.
+Whole bunch of people to acknowledge are artists that have worked on creating these scenes and telling us what's wrong, people that have worked on ReSTIR and got the theories together, some people have helped us with some denoiser implementations, and just general advice and feedback on the talk.
+And finally, there are even more sessions in video sponsored at GDC, so please go ahead and take a look at those.
+And I would like to open it up for questions as we take a look at the video from the emissively lit scene.
+Yeah, again, there's zero parametric lights in this scene.
+It's all just emissive materials doing the lighting.
+So I think it's a pretty happy result.
+Any questions?
+Again, remember to fill out your surveys.
+Hi.
+So how many total rates per pixel do you do for these scenes?
+In this case, the total rays fired, we had one during the initial sampling in this case.
+We had none during spatial resampling because they decided that it was not necessary.
+They had one during temporal.
+And then I think they have Maybe five in the reflections, and the reflections won't fire unless it's a shiny enough surface, basically.
+And then, however many the lumen surface cache needs, because that's where, you know, it's off of the surface cache resolution, basically.
+Hi, a great welcome.
+A question about, do you guys have any plan to integrate this into the main branch of Unreal so that we can use it in the main?
+I mean, this is ultimately up to Epic.
+We're always interested in working out whether there's something that they can take from our code.
+And we've had, many times, pieces go in.
+And yeah, this is just now getting to a good place to start considering that, because we had to get all the Lumen stuff working.
+If you do want to mess with it, you can pull our branch.
+It is branched off of main.
+So you'll get the same code, ultimately.
+Hi.
+So I noticed that when speaking about ray tracing, most of the time it's about GI or reflection.
+And pretty much everybody tends to ignore the refractions.
+Is it because it's technologically more difficult?
+You have to render a refraction part with multiple bounces and a reflection part?
+Or is that simply because it's not worth it?
+For so many scenes, you don't have so many refractions to deal with.
+So is the question about what specifically makes this path tracing versus doing indirect ray tracing?
+No, the question is more like why the focus is mainly on the reflection parts and if there are some technical limitations that prevents the refraction to be investigated on.
+Yeah, so we just haven't addressed the refraction case yet.
+The way our artists had set up the scene, there wasn't much, if any, refraction there.
+And we could have done it in the water, but they had kind of set things up for just a distortion shader.
+So we worked with that.
+Yeah.
+OK, thanks.
+I think no specific reason.
+It's mostly because, like, this scene, most of the time, you just have a lot of reflection and no refraction at all.
+Yeah.
+OK, thanks.
+Yeah, also, I mean, from our perspective, we're kind of focused on things that, you know, games could use today, and you would have to kind of create special art for utilizing refractions, typically.
+So, you know, we do want this to be, you know, as drop-in as possible for people.
+Great talk, by the way.
+So a colleague in my team is actually looking at the brands right now, and he noticed that it only supports everything in the DirectX backend.
+So are you planning to enable all these features using the Vulkan backend as well?
+Yeah, so I think that the reordering stuff we don't support via the Vulkan at the moment.
+I think that's the only thing in there.
+It's something that we need to take a look at.
+We just haven't spent time on it.
+Mostly because of the fact that the Vulkan ray tracing implementation had been a little bit behind the DirectX one in UE5 from when we started building on this.
+We started building on this work back in UE4.
+So, yeah, we just haven't gotten to it.
+Right.
+Thank you.
+Hi, I have a question.
+Could you go back to the slide with regards to how you perform sampling for specular materials?
+So either I heard this wrong, you could correct me.
+Is the way that you perform sampling for specular materials to directly sample light sources and bias your samples towards that?
+Or do you do it otherwise?
+Because I wasn't really sure as to how the sampling happens specifically for specular reflections.
+This one, right?
+Yeah.
+Okay.
+So what's going on here is that we're actually, this is actually a form of multiple importance sampling.
+We're not biasing anything.
+So we do properly multiply important sample with the local light and the skylight because the ray can't hit the sky as well.
+Okay.
+Got it.
+Thanks.
+All right.
+They're telling us we're out of time.
+So fill out your surveys and have a great GDC.
