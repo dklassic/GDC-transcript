@@ -1,0 +1,2364 @@
+1
+00:00:07,938 --> 00:00:08,198
+All right.
+
+2
+00:00:08,859 --> 00:00:10,060
+Well, thank you for coming to our talk.
+
+3
+00:00:10,680 --> 00:00:15,244
+It's called Making Connections, Real-Time Path Traced Light Transport in Game Engines.
+
+4
+00:00:16,104 --> 00:00:22,529
+And it's been a great day of cool talk, so hopefully you have enough attention span left in the tank for one more.
+
+5
+00:00:24,311 --> 00:00:25,312
+I'm Adam Morris.
+
+6
+00:00:26,032 --> 00:00:29,715
+I'll be presenting the first part of this talk and then handing it off to Evan Hart.
+
+7
+00:00:31,030 --> 00:00:39,772
+Also up here is Jiayin Cao, who isn't here today, but he's been really important in contributing to this work that we'll be showing you today.
+
+8
+00:00:41,812 --> 00:00:44,633
+Here's an overview of what we'll be talking about today.
+
+9
+00:00:45,333 --> 00:00:52,835
+I'll be going through some preliminaries and foundational concepts related to real-time path tracing before heading off to Evan.
+
+10
+00:00:54,918 --> 00:00:56,419
+All right, so first things first.
+
+11
+00:00:57,380 --> 00:00:57,880
+Why are we here?
+
+12
+00:00:58,961 --> 00:01:00,262
+Better lighting, of course.
+
+13
+00:01:01,323 --> 00:01:07,088
+To create richer, more realistic visuals, we want our scenes to have more lights, ultimately.
+
+14
+00:01:07,688 --> 00:01:09,650
+And specifically, more shadowed lights.
+
+15
+00:01:10,491 --> 00:01:15,334
+And beyond just having shadowed lights, we want shadows that have accurate penumbra.
+
+16
+00:01:16,916 --> 00:01:21,579
+Importantly, we want the simulation of light transport to be completely dynamic.
+
+17
+00:01:22,525 --> 00:01:26,548
+So our worlds feel alive and as interactive as possible.
+
+18
+00:01:27,969 --> 00:01:35,955
+And to this end, our ultimate goal is to more accurately approximate the rendering equation and to do that in real time.
+
+19
+00:01:38,697 --> 00:01:43,440
+So we also need to do this in a performant and scalable way.
+
+20
+00:01:46,477 --> 00:01:52,782
+We really need to be mindful of this, even when we're on high-end PC parts.
+
+21
+00:01:54,023 --> 00:01:55,924
+So most dynamic shadowing methods...
+
+22
+00:01:58,472 --> 00:02:04,173
+most dynamic shadowing methods today don't scale well when we have lots of lights.
+
+23
+00:02:05,214 --> 00:02:08,574
+And this is not a shadow map thing.
+
+24
+00:02:08,935 --> 00:02:15,136
+I mean, memory is always an issue and performance is always an issue when you have tons of lights.
+
+25
+00:02:16,116 --> 00:02:26,619
+But fortunately, today's GPUs offer a lot more, especially high-end GPUs, offer a lot more exciting possibilities that we'll be talking about through the course of this talk.
+
+26
+00:02:27,459 --> 00:02:32,762
+So we really encourage you to explore these new opportunities that we talk about.
+
+27
+00:02:36,824 --> 00:02:56,015
+Okay, so you may be thinking, spent the whole day talking about interesting stuff, work graphs, and I already have all of my time budgeted for the next two years to work on things like that, and it's a lot easier said than done to just go and implement all these new exciting things that you're going to talk about.
+
+28
+00:02:57,010 --> 00:03:00,071
+And I understand games have a whole lot going on.
+
+29
+00:03:00,811 --> 00:03:03,012
+They demand a high level of performance.
+
+30
+00:03:03,632 --> 00:03:08,953
+They demand you delivering on an artistic vision.
+
+31
+00:03:10,194 --> 00:03:14,515
+And the artists may not want a photorealistic, perfectly photorealistic game.
+
+32
+00:03:15,255 --> 00:03:18,796
+They may want to bend or break the rules of physical reality.
+
+33
+00:03:19,696 --> 00:03:23,137
+And your renderer or rendering system needs to be able to deliver on that.
+
+34
+00:03:24,960 --> 00:03:29,241
+And game engines, they wrangle that complexity with systems.
+
+35
+00:03:30,361 --> 00:03:36,143
+And that means we typically have a lot of systems, especially in the renderer.
+
+36
+00:03:37,783 --> 00:03:40,744
+And this is because we need to support multiple platforms.
+
+37
+00:03:40,804 --> 00:03:45,565
+We've had other talks talk about consoles in addition to PC.
+
+38
+00:03:46,525 --> 00:03:51,006
+And this can be a huge range of hardware that you ultimately have to address with the renderer.
+
+39
+00:03:52,483 --> 00:04:02,607
+And most of the time, this creates a sort of choose-your-own-adventure rendering pipeline, depending on the platforms that you support.
+
+40
+00:04:04,668 --> 00:04:17,034
+So seriously, though, it becomes this tightrope walk that you have to do between overfitting your renderer to a specific problem or to a specific platform.
+
+41
+00:04:19,975 --> 00:04:21,276
+So we've been working with Unreal Engine 5
+
+42
+00:04:22,711 --> 00:04:29,957
+And we chose it because it's a high-quality, ubiquitous, great engine that has its source fully available.
+
+43
+00:04:31,178 --> 00:04:39,044
+And a whole bunch of studios, including people sitting here today, I'm sure, have used Unreal 4 and 5 at production scale.
+
+44
+00:04:39,184 --> 00:04:46,670
+So we expect to encounter a lot of really great, representative, challenging graphics workloads using this engine.
+
+45
+00:04:48,143 --> 00:04:57,051
+But in addition to this, a great aspect of Unreal is that we're able to branch it and then make what we do available to you.
+
+46
+00:04:57,972 --> 00:05:07,461
+So you can pull it, use it, use it as a reference, and hopefully learn something from it, and tell us how you made it better.
+
+47
+00:05:08,920 --> 00:05:16,422
+Everything you see today, importantly, is in or using our branch, the NV RTX branch of Unreal Engine 5.3.
+
+48
+00:05:17,562 --> 00:05:22,823
+And at the end of the talk, there'll be some slides with links where you can go to get access to that.
+
+49
+00:05:25,524 --> 00:05:25,784
+All right.
+
+50
+00:05:26,604 --> 00:05:28,645
+Additionally, Unreal 5
+
+51
+00:05:29,913 --> 00:05:32,134
+has great lighting tech right out of the box.
+
+52
+00:05:32,995 --> 00:05:36,277
+And this is great in general.
+
+53
+00:05:36,537 --> 00:05:40,720
+It has both awesome benefits and some challenges.
+
+54
+00:05:41,681 --> 00:05:54,169
+The benefit is that you have fallbacks in place already, really nice fallbacks, in place for content that may not be compatible with any new rendering tech that you put in, or workflows that might not be compatible.
+
+55
+00:05:56,305 --> 00:05:59,728
+challenge is that good competition is tough to beat.
+
+56
+00:06:00,769 --> 00:06:02,490
+And we really like this challenge.
+
+57
+00:06:03,191 --> 00:06:05,793
+And we hope that we can show you some cool stuff today.
+
+58
+00:06:07,214 --> 00:06:14,620
+Speaking of which, our team has put together a video, a demo of an amusement park scene.
+
+59
+00:06:16,242 --> 00:06:18,704
+And I'd like to show it to you right now.
+
+60
+00:06:23,437 --> 00:06:29,743
+So in this scene, we're showcasing where we are today with path-traced light transport in UE5.
+
+61
+00:06:30,864 --> 00:06:37,331
+And the scene has well over a thousand dynamic light sources that all cast accurate shadows with Penumbra.
+
+62
+00:06:39,013 --> 00:06:43,057
+We have additional dynamic lights from a Niagara particle system for the fireworks.
+
+63
+00:06:44,308 --> 00:06:45,389
+These also cast shadows.
+
+64
+00:06:46,650 --> 00:06:55,316
+This includes denoising with DLSS ray reconstruction, and it's running at 1080p using the DLAA preset.
+
+65
+00:06:56,497 --> 00:07:00,680
+And it runs at 60 hertz or above on an RTX 4090.
+
+66
+00:07:02,721 --> 00:07:04,302
+So I'll let the rest of the video play out.
+
+67
+00:07:41,211 --> 00:07:42,231
+All right, very cool.
+
+68
+00:07:42,931 --> 00:07:44,692
+Thanks to our team for putting that together.
+
+69
+00:07:44,712 --> 00:07:45,352
+They did a great job.
+
+70
+00:07:46,352 --> 00:07:51,933
+So some of what you saw there might not be obvious as to why it's super cool.
+
+71
+00:07:52,353 --> 00:07:59,014
+And I'm going to dive into some of the foundations that underpin the tech behind what you saw.
+
+72
+00:08:01,675 --> 00:08:06,176
+So at its core, path tracing is about simulating the transport of light
+
+73
+00:08:07,292 --> 00:08:11,494
+along paths, where we define a path as multiple connected ray segments.
+
+74
+00:08:12,534 --> 00:08:15,295
+And for many of you in the room, I'm sure this is not anything new.
+
+75
+00:08:15,475 --> 00:08:19,676
+This is not a revelation by any means, but stick with me.
+
+76
+00:08:21,097 --> 00:08:30,420
+Any path tracing renderer, real time or not, is going to focus more accurately on more accurately approximating our good old friend, the rendering equation.
+
+77
+00:08:31,461 --> 00:08:32,141
+And I'm sure that
+
+78
+00:08:32,841 --> 00:08:35,742
+Many of you have seen this equation in various forms.
+
+79
+00:08:36,622 --> 00:08:37,463
+This is one of them.
+
+80
+00:08:38,143 --> 00:08:44,345
+It's simpler, it doesn't include the emissive term, but for today, it's a pretty good example.
+
+81
+00:08:46,546 --> 00:08:51,408
+Since we can't solve this equation directly, our goal is to approximate it.
+
+82
+00:08:52,308 --> 00:08:53,269
+Also, not news to you.
+
+83
+00:08:55,530 --> 00:08:58,731
+To start to understand how we will or could approximate it,
+
+84
+00:09:00,138 --> 00:09:02,600
+Let's treat its integrand like any other function.
+
+85
+00:09:05,203 --> 00:09:08,145
+Then employ Monte Carlo integration to create an estimator.
+
+86
+00:09:09,366 --> 00:09:18,435
+And a simple Monte Carlo estimator evaluates our function at uniformly distributed points across the integration domain, and then averages those results.
+
+87
+00:09:21,380 --> 00:09:24,162
+The math looks maybe complicated, right?
+
+88
+00:09:24,682 --> 00:09:31,965
+But ultimately, this is essentially the path tracer that's introduced in Peter Shirley's Ray Tracing in One Weekend mini book.
+
+89
+00:09:33,105 --> 00:09:35,647
+And it's probably the first path tracer that you wrote.
+
+90
+00:09:36,827 --> 00:09:37,968
+And it's a great starting point.
+
+91
+00:09:39,768 --> 00:09:45,871
+So before we move on, you're going to hear the word sample a lot in this presentation.
+
+92
+00:09:46,711 --> 00:09:49,713
+And other presentations today use the word sample too.
+
+93
+00:09:51,070 --> 00:10:08,505
+When I was first learning about sampling and ReSTIR, which is something we'll talk about during this talk, I got confused because the word sample was used so many times in papers, in blogs, and in videos, and it just confused me because it wasn't well defined.
+
+94
+00:10:08,625 --> 00:10:13,890
+Sometimes it was a noun, sometimes it was a verb, sometimes it was almost every word in a sentence.
+
+95
+00:10:14,662 --> 00:10:17,364
+And so then the word didn't mean anything anymore to me.
+
+96
+00:10:18,726 --> 00:10:25,552
+So if you've ever been confused by this overloaded use of the word sample, this is it.
+
+97
+00:10:25,952 --> 00:10:28,014
+X sub I. That is a sample.
+
+98
+00:10:28,054 --> 00:10:30,996
+That's what we mean by sample in this context for this talk.
+
+99
+00:10:32,718 --> 00:10:35,300
+Now you might think, well, what is that?
+
+100
+00:10:36,261 --> 00:10:38,243
+That's just a function.
+
+101
+00:10:38,823 --> 00:10:39,624
+I don't know what that is.
+
+102
+00:10:41,225 --> 00:10:41,986
+We're graphics people.
+
+103
+00:10:42,674 --> 00:11:02,423
+So in graphics speak, this sample translates to the path of light transport, and specifically the path of outgoing light in a specific direction, reflecting off a surface, given light incoming from another direction or light source.
+
+104
+00:11:03,124 --> 00:11:03,784
+That's our sample.
+
+105
+00:11:04,164 --> 00:11:10,427
+So keep that in the back of your head as we go through this talk, and as I say sample many more times.
+
+106
+00:11:12,485 --> 00:11:16,887
+Okay, so we're going to estimate the rendering equation by sampling it.
+
+107
+00:11:17,308 --> 00:11:17,608
+Cool.
+
+108
+00:11:18,428 --> 00:11:21,870
+But how we generate those samples is really, really important.
+
+109
+00:11:22,830 --> 00:11:35,637
+And the keys to an accurate estimator is ensuring our sampling process is both unbiased, meaning it returns the correct value on average, and consistent.
+
+110
+00:11:36,269 --> 00:11:42,431
+meaning the estimator converges to the correct answer or the correct value as the number of samples goes to infinity.
+
+111
+00:11:44,611 --> 00:11:46,352
+Keep in mind these things aren't the same.
+
+112
+00:11:47,412 --> 00:11:52,034
+Being unbiased doesn't mean that you're automatically consistent and vice versa.
+
+113
+00:11:52,794 --> 00:12:03,817
+This is an important aspect of rendering in general, path tracing in general, but less important in real time, which I'll mention a little bit more later.
+
+114
+00:12:04,838 --> 00:12:27,461
+So to summarize, path tracing versus most real-time rendering today, the main differences are with path tracing, we simulate the transport of light with paths, we approximate the rendering equation with a Monte Carlo estimator, and we produce samples, or try to, in an unbiased and consistent way.
+
+115
+00:12:29,068 --> 00:12:31,689
+Okay, so we're here for real-time rendering though.
+
+116
+00:12:32,669 --> 00:12:39,371
+And we want to take those aspects, now that we understand them well, from a path tracer and bring them into a real-time renderer.
+
+117
+00:12:40,891 --> 00:12:44,612
+So let's connect some rays, build some paths, get sampling.
+
+118
+00:12:46,153 --> 00:12:48,493
+There's just one big problem.
+
+119
+00:12:50,394 --> 00:12:52,054
+Why weren't we doing this all along, right?
+
+120
+00:12:52,554 --> 00:12:54,235
+It's too expensive to do this.
+
+121
+00:12:56,144 --> 00:13:02,128
+Evaluating all that light across all those connected segments and paths is just not practical in real time today.
+
+122
+00:13:04,450 --> 00:13:11,735
+And this is where reservoir-based spatiotemporal importance resampling, ReSTIR, comes in.
+
+123
+00:13:13,362 --> 00:13:25,405
+we'll need to be very, very careful to evaluate only the samples, or in other words, paths, that matter the most and lean heavily into things like reuse and clever math.
+
+124
+00:13:26,425 --> 00:13:37,848
+And ReSTIR provides exactly that, the algorithmic foundation that enables us to select the essential paths and complete light transport at a reasonable cost in real time.
+
+125
+00:13:40,269 --> 00:13:41,849
+So at the core of ReSTIR,
+
+126
+00:13:42,760 --> 00:13:45,821
+is Resampled Important Sampling, or RIS.
+
+127
+00:13:47,221 --> 00:14:02,946
+And RIS shows us that, somewhat surprisingly, a single sample really can provide a good approximation, and a good sample can be refined from mediocre or even truly bad samples.
+
+128
+00:14:05,646 --> 00:14:11,148
+Potentially even more important to ReSTIR is Weighted Reservoir Sampling, or WRS.
+
+129
+00:14:12,852 --> 00:14:17,154
+And remember the RE in ReSTIR stands for reservoir-based.
+
+130
+00:14:18,255 --> 00:14:20,796
+And that's where WRS comes in.
+
+131
+00:14:21,537 --> 00:14:27,520
+WRS stores selected samples and other associated information in reservoirs.
+
+132
+00:14:28,540 --> 00:14:32,923
+This is crucial to the process of sample refinement and reuse.
+
+133
+00:14:36,705 --> 00:14:37,785
+See, I wasn't kidding.
+
+134
+00:14:37,946 --> 00:14:40,327
+I'm gonna say sample a whole lot.
+
+135
+00:14:42,957 --> 00:14:55,286
+So with the combination of RIS and WRS, we'll make an estimate, compute a value, and then repeat that process to refine and improve our estimate.
+
+136
+00:14:56,247 --> 00:15:06,534
+And a convenient way to configure our reservoirs is in screen space, since then we can lean into reuse in ways that are natural for us as graphics programmers.
+
+137
+00:15:07,595 --> 00:15:10,397
+So things like temporal and spatial sharing
+
+138
+00:15:11,715 --> 00:15:18,561
+where we merge reservoirs together, either from previous point in time or from spatially other pixels on the screen.
+
+139
+00:15:19,622 --> 00:15:23,305
+And at first glance, you may say like, yeah, yeah, like I get it.
+
+140
+00:15:23,545 --> 00:15:28,289
+We've been doing this sort of reuse, but it still seems too good to be true.
+
+141
+00:15:28,609 --> 00:15:35,735
+Can we really get all the samples that we need for a converged path traced image by doing these things?
+
+142
+00:15:36,996 --> 00:15:40,399
+And I think you will, and let me show you.
+
+143
+00:15:42,132 --> 00:15:45,734
+So here's a shot of the amusement park scene that you just saw in the video.
+
+144
+00:15:46,955 --> 00:15:51,718
+And post-processing TAA, and much of our ReSTIR goodness is disabled.
+
+145
+00:15:53,640 --> 00:16:01,905
+This image shows what it looks like if we take just one sample per pixel in the scene here that has well over 1,000 lights.
+
+146
+00:16:01,925 --> 00:16:03,326
+I think it's actually 1,300 lights total.
+
+147
+00:16:05,175 --> 00:16:14,919
+And with so many lights to pick from, we're having a tough time finding the right light for any particular surface, meaning our estimates are pretty bad.
+
+148
+00:16:15,999 --> 00:16:27,184
+Those of you in the front row may be able to see that there are some flecks of light, kind of noisy flecks throughout the scene, but those of you in the back, it probably just looks completely dark.
+
+149
+00:16:29,607 --> 00:16:41,997
+So if we increase our initial sample count to eight per pixel instead of one, the result improves a whole lot, but we're still a far cry away from a good result or a usable result even.
+
+150
+00:16:44,619 --> 00:16:49,463
+So let's go back to one initial sample per pixel, but add in temporal reuse.
+
+151
+00:16:50,624 --> 00:16:52,506
+And this is a substantial improvement.
+
+152
+00:16:52,706 --> 00:16:57,490
+So if I, this is eight, this is one sample, but with temporal.
+
+153
+00:16:58,832 --> 00:17:01,072
+we get a lot more reasonable lighting.
+
+154
+00:17:01,753 --> 00:17:06,453
+And we're starting to see a shadow appear underneath the character's feet.
+
+155
+00:17:08,274 --> 00:17:10,674
+But we're still far away from where we really want to be.
+
+156
+00:17:12,735 --> 00:17:16,635
+So let's use one of our other tools in our toolbox, which is spatial reuse.
+
+157
+00:17:18,236 --> 00:17:24,057
+I've gone back to the one sample per pixel plus temporal, and then added in two samples through spatial reuse.
+
+158
+00:17:26,017 --> 00:17:26,737
+So that's where we were.
+
+159
+00:17:27,798 --> 00:17:29,338
+And this is with spatial and temporal.
+
+160
+00:17:30,439 --> 00:17:31,339
+And now we're cooking.
+
+161
+00:17:31,679 --> 00:17:38,923
+This seems like a reasonable image that is close to what our actual scene should look like once it's lit.
+
+162
+00:17:46,006 --> 00:17:52,869
+So if I keep this set up and bump the samples even more, the initial samples to eight, then things are looking even better.
+
+163
+00:17:53,469 --> 00:17:55,710
+Some of that noise you can see gets refined.
+
+164
+00:17:57,253 --> 00:18:02,034
+And keep in mind, this is without TAA or any post-processing or denoising applied.
+
+165
+00:18:02,074 --> 00:18:04,995
+This is just raw sampling, improving the signal.
+
+166
+00:18:06,795 --> 00:18:15,037
+So we started here and we ended here just by improving our sampling, picking better paths.
+
+167
+00:18:18,658 --> 00:18:19,938
+Pretty great transformation, I think.
+
+168
+00:18:21,099 --> 00:18:26,300
+Hopefully this has you convinced just how powerful reuse and things like ReSTIR can be.
+
+169
+00:18:27,645 --> 00:18:32,108
+But as good as this is, it's still a noisy image at the end of the day.
+
+170
+00:18:33,469 --> 00:18:34,910
+And we have to do something about that.
+
+171
+00:18:35,811 --> 00:18:37,912
+And the noisy result also isn't a surprise.
+
+172
+00:18:39,173 --> 00:18:49,540
+Noise is fundamental to the paradigm shift that we've introduced into our renderer, because the very nature of Monte Carlo estimators means that we're going to introduce noise.
+
+173
+00:18:50,901 --> 00:18:53,823
+Fortunately for us, noisy images aren't a new thing.
+
+174
+00:18:54,563 --> 00:18:56,785
+Denoisers are gonna come to the rescue.
+
+175
+00:18:59,306 --> 00:19:01,768
+Some important things to understand.
+
+176
+00:19:03,509 --> 00:19:06,611
+Denoisers need noise to function properly.
+
+177
+00:19:07,251 --> 00:19:09,612
+And specifically, they need high frequency noise.
+
+178
+00:19:10,953 --> 00:19:19,578
+If you give a real-time denoiser a stable image, it's going to get confused and produce generally bad, meaning blurry, results.
+
+179
+00:19:21,660 --> 00:19:28,184
+There are several existing off-the-shelf denoising solutions and algorithms that you can use to handle noise.
+
+180
+00:19:29,157 --> 00:19:31,697
+You heard about one earlier today from Snowdrop.
+
+181
+00:19:33,198 --> 00:19:37,058
+But DLSS Ray Reconstruction is an excellent one.
+
+182
+00:19:37,959 --> 00:19:47,780
+And there are a variety of techniques based on either Recurrent Blurring, also called ReBlur, or Spatial Variance Guided Filtering, or SVGF.
+
+183
+00:19:48,661 --> 00:19:56,342
+This includes algorithms like Relax in the NRD library that extend SVGF and make a variety of improvements.
+
+184
+00:19:57,703 --> 00:20:03,667
+Denoising is a really deep topic, so I'm not going to have time to discuss it in detail today.
+
+185
+00:20:04,788 --> 00:20:11,133
+But let's go back to our amusement park scene and apply some denoising to it to see how it works.
+
+186
+00:20:12,574 --> 00:20:19,679
+So here's a different shot from the amusement park scene, using the same restore settings that I showed earlier, where we ended up.
+
+187
+00:20:20,900 --> 00:20:22,121
+This time I've turned on TAA.
+
+188
+00:20:24,385 --> 00:20:27,607
+and denoising here is disabled, so we have our nice noisy image.
+
+189
+00:20:29,648 --> 00:20:35,970
+And here's what it looks like if I turn on TAA and the RelaxDenoiser that's part of the NRD library.
+
+190
+00:20:37,331 --> 00:20:40,392
+So I'll go back and forth, give you a little idea of how it cleans it up.
+
+191
+00:20:41,513 --> 00:20:46,615
+And the combination of TAA and the RelaxDenoiser clean up that noise really nicely.
+
+192
+00:20:47,935 --> 00:20:50,577
+Now if you're in the front row, you may be looking and saying,
+
+193
+00:20:52,193 --> 00:20:52,793
+blur there.
+
+194
+00:20:54,114 --> 00:20:55,514
+It's not as sharp as it was.
+
+195
+00:20:56,154 --> 00:20:58,835
+Maybe there's a little bit of energy loss in places.
+
+196
+00:20:59,215 --> 00:21:00,575
+The sign isn't as bright.
+
+197
+00:21:03,456 --> 00:21:17,900
+If we swap over to DLSS Ray Reconstruction, several of these areas are less blurry, they're sharper, and the fine texture details pop out in a way that they didn't previously.
+
+198
+00:21:19,662 --> 00:21:27,185
+There's slightly less energy loss as well if you compare it to the noisy NRD and then DLSS.
+
+199
+00:21:28,506 --> 00:21:30,847
+So ultimately we get a pretty nice image out of that.
+
+200
+00:21:32,274 --> 00:21:44,136
+Okay, so hopefully at this point, you understand the anatomy of a real-time path tracer, and you believe that ReSTIR can kind of do miracles.
+
+201
+00:21:45,777 --> 00:21:53,178
+So before we move forward, I want to talk a little bit about our implementation, because during this project, we've had a few guiding principles.
+
+202
+00:21:54,099 --> 00:21:58,119
+The first is respect the budget, 60 hertz frame budget.
+
+203
+00:21:58,700 --> 00:22:00,100
+It's okay to take shortcuts.
+
+204
+00:22:01,052 --> 00:22:03,153
+if it means that we respect that budget.
+
+205
+00:22:03,953 --> 00:22:12,117
+And it's okay to accept some bias where we really have to, particularly related to denoising, because the denoiser inherently adds bias to the image.
+
+206
+00:22:14,459 --> 00:22:22,542
+But since we have such low sample counts or ray counts to work with, the denoiser is an essential tool to make a shippable image.
+
+207
+00:22:24,784 --> 00:22:27,425
+Next, strive to be unbiased when sampling.
+
+208
+00:22:29,902 --> 00:22:39,004
+This one's really important because don't get tunnel visioned on we have to be unbiased all the time or else our image is terrible and we're not path tracing.
+
+209
+00:22:41,445 --> 00:22:44,366
+You can have a little bit of bias and it's okay.
+
+210
+00:22:45,386 --> 00:22:56,709
+Consistency is another one I talked about a little bit earlier and being consistent is good but it's somewhat less important for real time because we have very low sample counts and one day
+
+211
+00:22:57,797 --> 00:23:08,982
+hopefully sooner than later, when we have hundreds or thousands of samples per pixel, I'll be happy to worry about being consistent because we'll have so many samples to worry about converging.
+
+212
+00:23:09,102 --> 00:23:11,683
+But today, it's less of a problem.
+
+213
+00:23:15,265 --> 00:23:21,828
+And one of the other elements of this is that we're going to stochastically evaluate lights for all of our interactions.
+
+214
+00:23:22,930 --> 00:23:31,716
+And this provides tangible performance benefits that Evan is going to talk about later, but it also delivers more consistent results across different effects.
+
+215
+00:23:32,736 --> 00:23:35,398
+So for instance, direct lighting versus reflections.
+
+216
+00:23:39,208 --> 00:23:39,909
+Alright, next.
+
+217
+00:23:40,709 --> 00:23:47,315
+At each ray segment along a path, we're going to determine light transport with the best method we have available.
+
+218
+00:23:48,075 --> 00:23:49,416
+And this is an important principle.
+
+219
+00:23:50,217 --> 00:23:57,963
+This means that things like ray tracing, rasterization, cone tracing, ray marching, cache data, they're all on the table.
+
+220
+00:23:58,344 --> 00:24:03,107
+Path tracing itself doesn't require that ray segments all be ray traced.
+
+221
+00:24:04,088 --> 00:24:08,169
+and determining the best method is a combination of a few factors.
+
+222
+00:24:08,909 --> 00:24:14,730
+Performance is of course a very important one that will weigh heavily in our decisions.
+
+223
+00:24:16,050 --> 00:24:27,493
+But best can also include a lot of other things like the complexity, the code complexity of the implementation, compatibility with existing rendering systems, content compatibility too.
+
+224
+00:24:28,713 --> 00:24:37,979
+And best can change based on your game, the game you're making, the engine that you're working within, the hardware you're targeting, and maybe even more importantly, time.
+
+225
+00:24:38,480 --> 00:24:43,203
+Because one day, hopefully, we might just have GPUs that are faster than a 4090.
+
+226
+00:24:46,525 --> 00:24:48,487
+So a few more notes on our implementation.
+
+227
+00:24:49,813 --> 00:24:56,159
+As you'd expect, we're constructing paths from the camera to light sources, which is often referred to as backwards.
+
+228
+00:24:57,160 --> 00:24:59,543
+We use rasterization for primary rays.
+
+229
+00:25:00,704 --> 00:25:08,892
+This is because it's fast, Nanite's two-pass occlusion culling works great, and ultimately Nanite requires rasterization to function.
+
+230
+00:25:10,077 --> 00:25:18,103
+We use a combination of ray tracing and cache data for secondary rays, where our secondary rays include diffuse and specular GI.
+
+231
+00:25:19,124 --> 00:25:23,688
+And we use Unreal's high quality hit lighting path for specular.
+
+232
+00:25:24,569 --> 00:25:31,434
+And we configure that such that it has an option for, it takes advantage of the option for multiple bounces.
+
+233
+00:25:32,295 --> 00:25:34,717
+We disable screen traces or SSR.
+
+234
+00:25:35,535 --> 00:25:43,643
+that runs as a pass before ray tracing because this often produces less than ideal results.
+
+235
+00:25:45,725 --> 00:25:58,378
+For light or shadow rays, whichever one you prefer to call it, we use ray tracing and evaluate material hits so we can support alpha-tested content like foliage.
+
+236
+00:26:00,924 --> 00:26:08,479
+And one more thing to mention that we noticed while doing this project and this work, introducing path tracing to the renderer.
+
+237
+00:26:09,466 --> 00:26:22,613
+is that this kind of paradigm shift in the renderer forced us to continue to ask ourselves where and how much we should be rewriting, reusing, adding, or replacing different code paths in the engine.
+
+238
+00:26:23,273 --> 00:26:29,976
+And I think if you do this yourself, or when you do this yourself, hopefully, you're going to run into this a lot too.
+
+239
+00:26:30,877 --> 00:26:37,140
+And Evan will touch a little bit more on our thoughts on this later in the talk.
+
+240
+00:26:39,916 --> 00:26:40,696
+All right, that's it for me.
+
+241
+00:26:40,716 --> 00:26:45,277
+I'm going to hand it off to Evan, and he's going to talk to you about leveling up sample lighting.
+
+242
+00:26:47,778 --> 00:26:48,218
+Thanks a lot.
+
+243
+00:26:48,598 --> 00:26:49,238
+Thanks a lot, Adam.
+
+244
+00:26:50,458 --> 00:26:53,039
+Excellent job setting up what we're talking about here.
+
+245
+00:26:53,579 --> 00:26:55,619
+Let's go ahead and get into our implementation.
+
+246
+00:26:56,479 --> 00:27:01,280
+So first, I want to talk about some building blocks that we're using within our ReSTIR implementation.
+
+247
+00:27:01,780 --> 00:27:06,301
+First, we build ourselves a light pool that's basically the set of lights that we want to sample from.
+
+248
+00:27:06,381 --> 00:27:07,742
+This is a structured buffer.
+
+249
+00:27:08,142 --> 00:27:09,022
+We stick it on the GPU.
+
+250
+00:27:10,098 --> 00:27:11,798
+Then we have this target function.
+
+251
+00:27:12,039 --> 00:27:15,159
+This is just the evaluation of the BRDF against a light sample.
+
+252
+00:27:15,460 --> 00:27:19,841
+So stuff that's already existing in the engine, we're going to reuse code in the engine for doing this evaluation.
+
+253
+00:27:20,301 --> 00:27:23,302
+That's important for weighting our samples as we reprocess them.
+
+254
+00:27:24,182 --> 00:27:31,744
+And finally, we're going to do this per-pixel reservoir grid that we use for storing where our samples are with their current weight.
+
+255
+00:27:31,764 --> 00:27:35,085
+So these are the weighted reservoir sampling buffer, basically.
+
+256
+00:27:36,065 --> 00:27:45,847
+Now, we're going to have in our implementation a few different stages that Adam referred to, the initial sampling, temporal resampling, spatial resampling, final shading.
+
+257
+00:27:46,628 --> 00:27:56,170
+And for these stages, we're going to read and or write from the reservoir set to update it and reuse samples.
+
+258
+00:27:57,463 --> 00:28:13,907
+Importantly, all these we're running presently as ray generation shaders because of the fact that we want to take occasional visibility samples, and we're using rays, as Adam mentioned, and relying on the anti-hit shader for dealing with transparencies and whatnot.
+
+259
+00:28:14,347 --> 00:28:17,988
+But importantly, we don't shoot a ray every time we're doing the sampling.
+
+260
+00:28:18,668 --> 00:28:20,309
+We just do it when we need to, basically.
+
+261
+00:28:21,867 --> 00:28:23,708
+So, let's start off with the initial candidates.
+
+262
+00:28:24,068 --> 00:28:37,917
+In the initial candidates, we draw samples from every class of light source, so local, directional, sky, etc., and that's because the sampling is sort of necessarily tied into some fundamental characteristics of the lights.
+
+263
+00:28:38,737 --> 00:28:39,238
+And then, like I
+
+264
+00:28:41,220 --> 00:28:46,462
+Like I mentioned a moment ago, we optionally will do some conservative visibility testing.
+
+265
+00:28:47,022 --> 00:28:52,904
+And we want to do some of this because it helps us converge faster, but we want to minimize it because we don't want to shoot too many rays here.
+
+266
+00:28:54,145 --> 00:29:03,368
+And importantly, conservative means that we're going to err towards visible, because we can skip the masked surfaces in this initial visibility test.
+
+267
+00:29:03,408 --> 00:29:09,991
+For any final testing, we'll have to take that into account, but we can possibly skip trees when we're shooting these initial rays.
+
+268
+00:29:11,598 --> 00:29:22,987
+So here's some shaky cam of me showing you an artifact that can happen with respect to merging the reservoirs before we do full visibility testing.
+
+269
+00:29:23,227 --> 00:29:28,531
+So here we're merging the local and directional reservoirs prior to visibility testing.
+
+270
+00:29:29,052 --> 00:29:40,020
+And we found that we may want an option for testing visibility against all of the local samples that we've taken, the merged local reservoir versus the merged directional reservoir.
+
+271
+00:29:40,040 --> 00:29:40,741
+And this is because
+
+272
+00:29:41,321 --> 00:29:47,667
+The sunlight outside of the bistro is shaded or shadowed completely inside of the bistro.
+
+273
+00:29:47,727 --> 00:29:55,134
+So the very strong directional light sort of is pushing energy into the statistics for the way the reservoir is sampling.
+
+274
+00:29:55,294 --> 00:29:59,698
+And by testing the directional light before we do the resample, we're good.
+
+275
+00:30:02,095 --> 00:30:12,905
+You may say, okay, well, with thousands of lights, random sampling can be challenging because we have to find relevant lights, but we'd really like to find good lights, and a random sample has a tough time doing that.
+
+276
+00:30:14,046 --> 00:30:20,852
+We can see that eventual convergence is going to get us there with this temporal and spatial resampling, but games can't wait around.
+
+277
+00:30:20,872 --> 00:30:22,634
+We need to be able to produce an image very quickly.
+
+278
+00:30:25,159 --> 00:30:35,380
+Importance sampling is a key portion of this, and the version that we're reusing today is reservoir-based, grid-based importance resampling.
+
+279
+00:30:36,041 --> 00:30:36,883
+Got it correct that time.
+
+280
+00:30:38,532 --> 00:30:46,581
+Pre-selecting all the lights helps with convergence, and we're going to pre-select on two sort of metrics.
+
+281
+00:30:46,881 --> 00:30:52,487
+Spatial, which helps with the fact that lots of lights in games have a limited range, they only go out to 20 meters or so.
+
+282
+00:30:53,067 --> 00:30:59,134
+And additionally, we'll use power as an importance factor, because the brighter a light is, the more likely we want to be able to sample from it.
+
+283
+00:31:00,553 --> 00:31:04,654
+we have to be a little wary of fireflies with our regear implementation.
+
+284
+00:31:04,714 --> 00:31:11,655
+And this is because undersampling these reservoirs can lead to fireflies in the reservoirs themselves, which can show up as boiling.
+
+285
+00:31:12,535 --> 00:31:15,896
+And importantly, this can also happen if our PDF is being poorly matched.
+
+286
+00:31:17,376 --> 00:31:30,259
+Importantly, multiple importance sampling is something that we do use to help alleviate this problem, and that's because of the fact that multiple importance sampling from using these different methods can sort of cancel out weaknesses in different sampling methods.
+
+287
+00:31:31,843 --> 00:31:34,184
+So our ReGear implementation looks a little bit like this.
+
+288
+00:31:34,564 --> 00:31:36,626
+That's the amusement park scene.
+
+289
+00:31:36,986 --> 00:31:40,908
+And we're using clip map style grid with some temporal feedback.
+
+290
+00:31:42,589 --> 00:31:43,789
+So this is what it looks like.
+
+291
+00:31:44,210 --> 00:31:49,593
+And each of these different colored cells is a different cell in our ReGear grid where we are pre-selecting a bunch of lights.
+
+292
+00:31:49,693 --> 00:31:54,895
+And we're using temporal feedback to refine them as we run through the scene, basically.
+
+293
+00:31:56,856 --> 00:32:01,599
+So again, this is one sample per pixel using the random sampling that Adam was looking at before.
+
+294
+00:32:02,235 --> 00:32:11,588
+But if we turn on ReGear, no spatial or temporal reuse, just the spatial and temporal information that's in the ReGear cells, you can see we've actually already converged to a pretty good image there.
+
+295
+00:32:12,189 --> 00:32:15,774
+You can clearly see the shadow cast by the character in the scene.
+
+296
+00:32:17,858 --> 00:32:20,300
+But in addition, we want to take better samples in other ways.
+
+297
+00:32:21,041 --> 00:32:25,486
+Specular is tricky with respect to re-stereo.
+
+298
+00:32:25,746 --> 00:32:28,489
+And this is because shiny surfaces have a narrow BRDF.
+
+299
+00:32:29,009 --> 00:32:31,111
+And we don't need to just find a good light here.
+
+300
+00:32:31,231 --> 00:32:34,294
+We need to be able to find the location on the light to produce that highlight.
+
+301
+00:32:35,175 --> 00:32:36,397
+And I'll show you the problem now.
+
+302
+00:32:37,938 --> 00:32:43,246
+So here we've got a very blobby specular highlight in the upper left portion of the sphere.
+
+303
+00:32:44,207 --> 00:32:49,455
+And the reason this is happening is because we're having trouble finding the right location on the light to produce the highlight.
+
+304
+00:32:49,974 --> 00:32:54,817
+So if I turn off denoising, you can see, you know, exactly what we're sticking into the denoiser.
+
+305
+00:32:55,337 --> 00:33:08,045
+Now, still with denoising off, let me do some material work here, where I'm firing a material ray and finding the right location on a light, and using multiple importance sampling to combine that into our restore estimate.
+
+306
+00:33:09,026 --> 00:33:10,867
+The way we've done this is with a light BVH.
+
+307
+00:33:11,786 --> 00:33:22,253
+It was mentioned a little bit earlier today, and there's another talk, I guess, towards the end of the week on light BVHs, but ours is sampling the specular ray on the material.
+
+308
+00:33:23,114 --> 00:33:28,778
+And unfortunately, UE out of the box doesn't have access to light sources in the BVH.
+
+309
+00:33:28,878 --> 00:33:32,681
+So we're actually going to create our own special light BVH that we sample separately.
+
+310
+00:33:33,601 --> 00:33:41,427
+Importantly, the light BVH, since we're just using these parametric lights, it's just really simple geometry that we can stick into them.
+
+311
+00:33:41,831 --> 00:33:47,933
+So sphere, hemisphere, square, cylinder, that's all we need, just a bunch of instance transforms to make the light BVH work.
+
+312
+00:33:49,074 --> 00:33:56,117
+And then we only need trace ray inline, because all we need to do is get a position and which object we hit to be able to produce the data.
+
+313
+00:33:56,817 --> 00:34:02,379
+So taking a step back, here's the visualization of light BVH with the specular highlight on the sphere.
+
+314
+00:34:02,759 --> 00:34:06,801
+So you can see that's where the light was existing that we had to shoot a ray to get to.
+
+315
+00:34:08,618 --> 00:34:10,719
+So, let's move on to temporal resampling.
+
+316
+00:34:10,859 --> 00:34:14,381
+Temporal resampling is, you know, the place that really starts making us good.
+
+317
+00:34:16,082 --> 00:34:25,508
+We're never truly unbiased with our temporal resampling in UE4, or UE5, because full bias correction requires that we have a historical bounding hierarchy.
+
+318
+00:34:25,908 --> 00:34:37,815
+We can't really do this in games typically, because we're doing things like refitting skeletal characters, and we just don't have the historical B-losses from the last frame, and it would take a ton of memory to, you know, do that sort of stuff.
+
+319
+00:34:38,770 --> 00:34:41,291
+Additionally, we default to this modest max history of 8.
+
+320
+00:34:42,851 --> 00:34:47,932
+And this max history is sort of capping out the importance of samples based on how many times they've been reused.
+
+321
+00:34:48,152 --> 00:34:50,173
+And a larger history means more stability.
+
+322
+00:34:50,993 --> 00:34:57,875
+A shorter history means that we can have less temporal lag on, say, a disocclusion for a shadow or something like that.
+
+323
+00:34:58,755 --> 00:35:00,576
+Sometimes our artists want to turn it down even lower than 8.
+
+324
+00:35:00,676 --> 00:35:02,056
+It depends on what they're doing in the scene.
+
+325
+00:35:03,857 --> 00:35:09,943
+And then it's important to possibly keep your own copy of a GBuffer history, depending on how your engine operates.
+
+326
+00:35:10,363 --> 00:35:13,025
+And I'll show you an important thing that we ran across in the last couple weeks.
+
+327
+00:35:13,866 --> 00:35:19,832
+Normal buffer for a current frame for in the amusement park, you know, showing our opaque shading that we're doing.
+
+328
+00:35:20,272 --> 00:35:22,532
+with the bottom of a pool of water.
+
+329
+00:35:23,113 --> 00:35:29,354
+But if we look at the historical normal buffer that the engine keeps hold of, we see that the water's been composited in.
+
+330
+00:35:29,434 --> 00:35:34,335
+This causes a bad temporal reprojection for us because we end up thinking we're a different surface.
+
+331
+00:35:35,775 --> 00:35:37,916
+And the reality is we just keep a separate copy.
+
+332
+00:35:37,936 --> 00:35:44,857
+And this is because the engine wants to have a G-buffer that includes this information for its own temporal anti-aliasing.
+
+333
+00:35:46,277 --> 00:35:48,578
+So let's move on and let's talk about spatial resampling.
+
+334
+00:35:49,352 --> 00:35:51,933
+Well, we've done a few different things that make things better.
+
+335
+00:35:52,233 --> 00:35:54,514
+I'm not really going to spend any time on these.
+
+336
+00:35:54,574 --> 00:35:57,555
+You can look at these slide notes after the course.
+
+337
+00:35:58,556 --> 00:36:05,638
+But I will talk a little bit about this bidirectional occlusion because it's an interesting thing that you may run into when you go ahead and implement this stuff.
+
+338
+00:36:06,619 --> 00:36:17,763
+So, this is a very complex occlusion scenario that we see in the bistro scene with table chairs, a whole bunch of overlapping shadows because there's a whole bunch of lights coming down from the ceiling and shining down with these overlapping shadows.
+
+339
+00:36:18,883 --> 00:36:26,449
+We can occasionally run into a problem of runaway light reuse, and this causes sort of an energy runaway if we run into this runaway reuse thing.
+
+340
+00:36:27,430 --> 00:36:36,878
+So what's going on here is that we have these different reservoirs that are looking out from underneath the table and seeing sort of different mismatched set of lights.
+
+341
+00:36:37,478 --> 00:36:43,440
+And if they start reusing between these reservoirs, then they think that they're getting the history of those other lights that they can't really see.
+
+342
+00:36:44,101 --> 00:36:53,104
+So what we can do is we can cast occlusion ray to see whether the sample I'm attempting to reuse from can see my own light.
+
+343
+00:36:54,165 --> 00:36:57,966
+If it can't see my own light, we're going to avoid this reuse.
+
+344
+00:36:58,286 --> 00:37:02,248
+And by avoiding the reuse, we're going to get a nice, clear, stable image here.
+
+345
+00:37:03,993 --> 00:37:07,395
+Again, this is what we look like with the runaway reuse.
+
+346
+00:37:08,175 --> 00:37:14,078
+And this is what we look like if we do the bidirectional occlusion test to break that.
+
+347
+00:37:14,479 --> 00:37:20,682
+It's only necessary if we're doing occlusion retesting during the spatial reuse.
+
+348
+00:37:22,023 --> 00:37:24,004
+Now, great, we've done all this.
+
+349
+00:37:24,564 --> 00:37:26,105
+What does it all look like in the end?
+
+350
+00:37:26,565 --> 00:37:33,329
+Well, when we do the final shading, we get nice soft shadows from ReSTIR, and they match up very nicely against path tracing.
+
+351
+00:37:33,862 --> 00:37:38,805
+We've had this since we've had access to ray-traced shadows in games.
+
+352
+00:37:39,645 --> 00:37:48,691
+But moving beyond that, things like the default Niagara particle lights can't cast shadows because it's just these simple lights that don't cast shadows.
+
+353
+00:37:49,411 --> 00:37:55,675
+But with ReSTIR, we've gone ahead and we've upgraded that to be able to cast shadows from particle lights, including soft shadows.
+
+354
+00:37:57,035 --> 00:37:59,396
+Additionally, we can fix the split interval problem.
+
+355
+00:37:59,516 --> 00:38:15,365
+So, we've got the nice rect light with the red and green texture on it, and we are producing yellow shadows in the back of the room, along with some, you know, artifacting a little bit of, like, catching the, around the top of the room.
+
+356
+00:38:16,596 --> 00:38:17,437
+We moved to ReSTIR.
+
+357
+00:38:17,677 --> 00:38:27,267
+We're getting the correct color sample in the back with respect to the shadows because, you know, only one shadow can see only the red, one shadow can only see the green.
+
+358
+00:38:27,887 --> 00:38:30,230
+So again, without, with.
+
+359
+00:38:30,957 --> 00:38:36,300
+and the path tracer, ignore the programmer art, I made the thing invisible in the path tracer case.
+
+360
+00:38:38,161 --> 00:38:42,824
+But finally, because we've done all this stuff, we can start doing some more interesting effects.
+
+361
+00:38:43,585 --> 00:39:00,415
+So here, we've produced this unified framework, and so now our ray can integrate some transmissivity along the ray, and then apply that to our ReSTIR result, and we can get these nice colored shadows from the balloons.
+
+362
+00:39:01,848 --> 00:39:07,875
+So I think that this is a nice example of how we can improve dynamic lighting just by applying these path tracing principles.
+
+363
+00:39:09,077 --> 00:39:13,022
+So we've done this for direct lighting, and we've already improved things.
+
+364
+00:39:13,142 --> 00:39:15,825
+But it's not a path tracer without some sampled indirect lighting.
+
+365
+00:39:17,487 --> 00:39:19,650
+So indirect lighting, what do we mean?
+
+366
+00:39:21,812 --> 00:39:28,243
+global illumination, reflections or specular GI, emissive surfaces, you could argue either way.
+
+367
+00:39:28,384 --> 00:39:33,332
+For the purposes of Unreal 5, I'm going to say that it belongs in the indirect lighting case.
+
+368
+00:39:33,352 --> 00:39:35,216
+I'm not going to talk about refraction today.
+
+369
+00:39:36,597 --> 00:39:38,918
+Again, we want to extend, replace, rebuild.
+
+370
+00:39:38,998 --> 00:39:39,638
+What do we want to do?
+
+371
+00:39:39,898 --> 00:39:41,098
+Well, this is a fundamental question.
+
+372
+00:39:42,179 --> 00:39:45,359
+Rebuilding allows us complete freedom, which, you know, we can do whatever we want.
+
+373
+00:39:45,980 --> 00:39:48,880
+Extending allows better compatibility, right?
+
+374
+00:39:48,900 --> 00:39:54,122
+So, if you've already designed something to work well with Lumen, then you've, you know, made it fit within its bounds.
+
+375
+00:39:55,502 --> 00:39:57,563
+So, let's start looking at what we're doing.
+
+376
+00:39:57,723 --> 00:39:59,243
+So, specular indirect paths.
+
+377
+00:39:59,683 --> 00:40:03,985
+We sample the material, we shoot a ray, and we hit something, and we light it, et cetera.
+
+378
+00:40:04,285 --> 00:40:05,545
+It sounds like reflections.
+
+379
+00:40:10,499 --> 00:40:12,862
+So, what does the Lumen Reflections Path do for us?
+
+380
+00:40:13,423 --> 00:40:22,756
+Well, the Lumen Reflections Path is going to do sample reflection paths, but we're going to talk about the hit lighting version of this, because we want to do the high quality stuff.
+
+381
+00:40:23,658 --> 00:40:27,939
+So we're sampling these reflection paths, sampling the specular paths.
+
+382
+00:40:28,839 --> 00:40:29,939
+It's a stochastic sampling.
+
+383
+00:40:30,280 --> 00:40:31,120
+It does multi-bounce.
+
+384
+00:40:32,320 --> 00:40:37,281
+And it actually has passes for water and glass, if you set things up for that.
+
+385
+00:40:38,802 --> 00:40:46,643
+Unfortunately, the light evaluation is not quite what we want, because it's doing a dense evaluation, where it's evaluating all lights that it thinks is hitting that surface.
+
+386
+00:40:47,364 --> 00:40:48,744
+And this limits our light count.
+
+387
+00:40:48,824 --> 00:40:52,985
+So we're not really getting to the full level of path tracing that we'd like to get to here.
+
+388
+00:40:54,005 --> 00:40:55,646
+So, what can we do with enhancements?
+
+389
+00:40:56,106 --> 00:41:04,831
+Well, first let's create an alternate path mirroring the one that's there, just to avoid causing people to have to run the code.
+
+390
+00:41:06,822 --> 00:41:15,308
+We're going to add our initial sampling loop for the light evaluation and treat the reservoir sources independently, just evaluate up to n times per reservoir.
+
+391
+00:41:16,409 --> 00:41:26,437
+And with this, we can get a nice three-bounce image of the funhouse mirrors in our amusement park with the full 1,300 lights potentially affecting them.
+
+392
+00:41:27,678 --> 00:41:28,678
+So I think we've got a win here.
+
+393
+00:41:30,199 --> 00:41:32,281
+Now, let's talk about the diffuse indirect pass.
+
+394
+00:41:32,681 --> 00:41:33,502
+Just like specular,
+
+395
+00:41:33,875 --> 00:41:37,577
+We're going to bounce into the scene, et cetera, et cetera, and then produce our path.
+
+396
+00:41:38,597 --> 00:41:40,938
+Well, what does Lumen global illumination do?
+
+397
+00:41:41,078 --> 00:41:44,439
+I'm going to simplify things here, talk about it in a little rough sketch.
+
+398
+00:41:45,080 --> 00:41:47,861
+We're going to self-sample the screen to generate probes.
+
+399
+00:41:48,401 --> 00:41:51,943
+And then from probes, we're effectively going to have rays into the scene.
+
+400
+00:41:52,103 --> 00:41:59,366
+But the scene ultimately is getting its color from a radiance cache lookup in the Lumen surface cache.
+
+401
+00:42:00,486 --> 00:42:04,329
+visualization of what the Surface Cache looks like mapped to the scene in the upper right there.
+
+402
+00:42:05,850 --> 00:42:16,218
+And the Surface Cache is going to get its light by evaluating direct light coming in on the Surface Cache as well as taking some bounce light from other Surface Cache cards.
+
+403
+00:42:18,340 --> 00:42:20,341
+Well, this is a path.
+
+404
+00:42:21,702 --> 00:42:25,365
+It's got these probes and Surface Cache's intermediaries, but it's a path.
+
+405
+00:42:26,386 --> 00:42:27,486
+So how can we reuse this?
+
+406
+00:42:29,188 --> 00:42:30,741
+Things are kind of interesting because...
+
+407
+00:42:32,603 --> 00:42:38,206
+What's missing here is that we don't have the light scalability again like we talked about in reflections.
+
+408
+00:42:38,987 --> 00:42:44,010
+So why don't we do this interesting thing of connecting at the surface cache?
+
+409
+00:42:44,130 --> 00:42:46,191
+This looks like a really interesting point.
+
+410
+00:42:46,651 --> 00:42:52,035
+So let's take a look at this lit scene, and then let's look at what the surface cache looks like in this lit scene.
+
+411
+00:42:52,715 --> 00:42:59,199
+In this lit scene, we've got sort of a low-res version of the scene, and a low-res version of the lighting.
+
+412
+00:42:59,620 --> 00:43:02,741
+Now let's go ahead and do sample lighting with ReGear.
+
+413
+00:43:03,902 --> 00:43:06,563
+And you'll see that, hey, we've got a noisy version of this.
+
+414
+00:43:06,623 --> 00:43:10,965
+It's kind of extra noisy, but it's definitely doing the right lighting.
+
+415
+00:43:11,925 --> 00:43:21,790
+And now if we look at it with the filtering and denoising that's already going to be happening to it anyway applied, we've got what looks like a pretty decent image.
+
+416
+00:43:21,870 --> 00:43:27,432
+It doesn't look perfect, but actually let's compare it to what Lumen actually produces, and you'll see that
+
+417
+00:43:27,897 --> 00:43:32,638
+What Lumen actually produces is very, very nearly identical to what we were producing via sampling.
+
+418
+00:43:33,499 --> 00:43:34,779
+So I think that's a win.
+
+419
+00:43:34,899 --> 00:43:38,620
+But importantly, all we're really trying to get is this diffuse indirect.
+
+420
+00:43:38,660 --> 00:43:41,141
+And this is the sampled version of the diffuse indirect.
+
+421
+00:43:41,161 --> 00:43:44,142
+And I think that we're, again, getting a very, very good result here.
+
+422
+00:43:45,182 --> 00:43:46,102
+So that's great.
+
+423
+00:43:46,162 --> 00:43:46,682
+We've done that.
+
+424
+00:43:47,163 --> 00:43:49,063
+But what can we do further?
+
+425
+00:43:49,263 --> 00:43:52,764
+Well, we've now looked at re-structural illumination.
+
+426
+00:43:52,784 --> 00:43:55,545
+This is something that's in development, just coming online at the moment.
+
+427
+00:43:56,371 --> 00:44:03,673
+So let's utilize ReSTIR to go one step further, and let's reuse GI paths instead of reusing light paths.
+
+428
+00:44:04,714 --> 00:44:15,998
+And then we'll use the same spatiotemporal framework, and we'll get per-pixel visibility for higher fidelity than what Lumen would do because of the probe-based nature of it.
+
+429
+00:44:17,158 --> 00:44:19,779
+And this is going to give us nice, fine detail for emissive sampling.
+
+430
+00:44:22,358 --> 00:44:30,425
+And it's important to note that, you know, we're still reusing the same frameworks here, and importantly, we'll still reuse the Lumen Radiance cache for terminating bounces.
+
+431
+00:44:31,206 --> 00:44:33,708
+So let's take a look at what we get out of ReSTIR GI.
+
+432
+00:44:34,229 --> 00:44:38,293
+It looks good, you know, the Cornell box scene that we all know, and it's just doing a single bounce.
+
+433
+00:44:38,813 --> 00:44:45,079
+However, let's tie it into the Lumen Surface cache, and now we've got a really nice image here, and, you know, we're getting multiple bounces out of it.
+
+434
+00:44:46,483 --> 00:44:48,684
+Comparing to the Path Tracer, we're very, very similar.
+
+435
+00:44:49,024 --> 00:44:52,225
+So again, this is trending really well.
+
+436
+00:44:53,085 --> 00:44:54,766
+Now, this got our artists excited.
+
+437
+00:44:55,286 --> 00:44:58,207
+And so they put together a scene lit just by emissive materials.
+
+438
+00:44:59,267 --> 00:45:04,809
+Here, we've got lumen being lit just by emissive materials from our artist's sort of dream scene.
+
+439
+00:45:05,549 --> 00:45:08,330
+And here, we have it lit with ReSTIR GI.
+
+440
+00:45:08,430 --> 00:45:15,353
+You can see that we're able to have less energy loss by switching to ReSTIR GI and getting that sort of finer detail into it.
+
+441
+00:45:22,203 --> 00:45:27,009
+We need to talk about performance because we need to make this fast.
+
+442
+00:45:28,311 --> 00:45:32,757
+Performance has several aspects, but we made these pretty pictures.
+
+443
+00:45:32,877 --> 00:45:34,219
+We need to get 60 Hz or better.
+
+444
+00:45:36,153 --> 00:45:37,474
+Lots of optimization opportunities.
+
+445
+00:45:37,494 --> 00:45:40,475
+There's quite a bit of code that was involved in getting through all of this.
+
+446
+00:45:41,016 --> 00:45:45,718
+I'm going to talk about a couple things, both on the CPU and on the GPU side.
+
+447
+00:45:46,138 --> 00:45:56,964
+So on the CPU side, light management is a huge deal for performance because dynamic lighting is expensive, as we all know, from a CPU perspective.
+
+448
+00:45:57,865 --> 00:46:04,028
+And it's because in a rendering engine, to do things efficiently, we're typically having to track occluders and receivers.
+
+449
+00:46:06,023 --> 00:46:08,625
+M complexity task, and Unreal is no different.
+
+450
+00:46:10,066 --> 00:46:16,832
+So, the nice thing about Restore is that it allows all this to be done via statistics, and it's going to scale much better.
+
+451
+00:46:17,332 --> 00:46:19,814
+So, effectively, we're going to have GPU-driven lighting.
+
+452
+00:46:20,355 --> 00:46:32,745
+And if we have GPU-driven lighting, and we don't have to, you know, track this M by M stuff, we can just stop updating this tracking, and we get an infinite improvement in the overhead of tracking these interactions.
+
+453
+00:46:34,577 --> 00:46:43,122
+Additionally, we can also eliminate these extra per light passes that we frequently have to do for a bunch of different effects.
+
+454
+00:46:43,342 --> 00:46:48,806
+So that's a win on draw call compute shader launch overhead.
+
+455
+00:46:49,446 --> 00:46:53,909
+So we've cut down on CPU quite a bit, and we're rendering way more lights.
+
+456
+00:46:56,090 --> 00:47:04,773
+Now, GPU execution divergence is something that everybody that has worked with ray tracing knows to be a challenge and is something that we have to address here.
+
+457
+00:47:05,813 --> 00:47:14,016
+So, UE5 has native solution for divergence, and that's the trace-sort-trace algorithm that you may be familiar with.
+
+458
+00:47:14,216 --> 00:47:20,899
+It requires three discrete kernel launches where we trace to find out a material ID, we bucket sort the material IDs, and then we
+
+459
+00:47:21,450 --> 00:47:25,132
+do some retracing to actually do our shading and whatnot.
+
+460
+00:47:26,333 --> 00:47:32,096
+It's a moderate code complexity and it pairs fairly poorly with multibounce because we can't do a whole bunch of sorts here.
+
+461
+00:47:32,296 --> 00:47:37,499
+I have to have a confession, I'm substantially responsible for this algorithm.
+
+462
+00:47:38,340 --> 00:47:45,964
+One day I said to Adam, hey, what if we did and then talked to some engineers at Epic and well, yeah, it's now in the engine and has been for a while.
+
+463
+00:47:47,977 --> 00:48:00,588
+But an ideal solution would be single shader, single dispatch, recover every bit as much divergence as we were getting in this trace sort trace mechanism, but we're gonna make it work with multi-bounce as well.
+
+464
+00:48:01,629 --> 00:48:03,851
+So I give you shader execution reordering.
+
+465
+00:48:04,352 --> 00:48:07,875
+Now this is the only slide in this talk that has anything NVIDIA specific on it.
+
+466
+00:48:08,675 --> 00:48:13,600
+So this is because shader execution reordering only exists today as an NVAPI extension.
+
+467
+00:48:14,589 --> 00:48:21,470
+We can take a trace ray command and split it into effectively three NVAPI calls in the HLSL shader.
+
+468
+00:48:22,070 --> 00:48:31,712
+And we can do a trace to get to the object and identify the hit object, do a sort on the hit objects, and then do the evaluation and continue on our way.
+
+469
+00:48:31,892 --> 00:48:39,354
+Now, we can do things a little bit more complicated, but just doing this one-line to three-line transform is all you really need, and this is worth
+
+470
+00:48:40,074 --> 00:48:45,601
+frequently 20-50% improvement in performance in our reflection shader that we were looking at.
+
+471
+00:48:45,821 --> 00:48:49,706
+We still leave the original code there because we want to be compatible with other things as well.
+
+472
+00:48:51,689 --> 00:48:55,053
+None of this work requires the shader execution reordering, it just makes things faster.
+
+473
+00:48:57,232 --> 00:49:02,814
+So our reflection shader is faster, but it's still too slow when I was looking at it in the amusement park.
+
+474
+00:49:04,055 --> 00:49:08,257
+And the reflection shader, the good news is it's spending most of its time shading.
+
+475
+00:49:09,057 --> 00:49:19,402
+And the any hit and closest hit shaders are not a real problem because we've already gotten their divergence taken care of by our shader execution reordering.
+
+476
+00:49:19,622 --> 00:49:21,903
+But 73% of our cycles are going into
+
+477
+00:49:23,093 --> 00:49:29,017
+instruction cache misses, and this was found via Nsight, that's an Nsight shader trace.
+
+478
+00:49:29,958 --> 00:49:48,550
+So, if we look down and dig down into where the functions are, we see these GPU instruction cache misses are basically 6% of it is coming from just generating random numbers, and 86%, and it's spending 86% of its time with instruction cache misses.
+
+479
+00:49:50,131 --> 00:49:52,072
+And all the other functions are pretty much the same way.
+
+480
+00:49:54,852 --> 00:49:57,856
+we start expanding this out, we see how many call sites things are happening at.
+
+481
+00:49:58,037 --> 00:50:03,785
+And then we start kind of thinking about the fact that DXC can inline every one of these call sites.
+
+482
+00:50:05,495 --> 00:50:07,136
+So this is what the original code looks like.
+
+483
+00:50:07,717 --> 00:50:09,619
+Fairly reasonable software engineering.
+
+484
+00:50:09,659 --> 00:50:13,042
+We've got, you know, a few different variations of samples that we need to take.
+
+485
+00:50:14,603 --> 00:50:17,426
+And then this is, you know, diving into one of those functions.
+
+486
+00:50:17,866 --> 00:50:26,974
+We see that, you know, hey, it's got the random number generation, and it's got this reuse and sort of evaluation function that's necessary for weighting and doing the resampling.
+
+487
+00:50:27,634 --> 00:50:30,977
+And these are called in every single one of those cases.
+
+488
+00:50:31,778 --> 00:50:33,559
+Now, we need to deduplicate code.
+
+489
+00:50:33,599 --> 00:50:35,920
+We need to deduplicate it at a binary level.
+
+490
+00:50:36,860 --> 00:50:40,562
+And this is because DXC is inlining the world and polluting the ICache.
+
+491
+00:50:40,942 --> 00:50:41,743
+That's just a mess.
+
+492
+00:50:43,443 --> 00:50:45,645
+We can start thinking of this as a state machine.
+
+493
+00:50:46,285 --> 00:50:48,746
+State A, go to process loop.
+
+494
+00:50:48,866 --> 00:50:50,907
+Go to state B, process your loop.
+
+495
+00:50:52,193 --> 00:51:00,384
+And from that perspective, we can now say, hey, maybe there's a cursed control flow system that we can come up with to deal with this.
+
+496
+00:51:01,005 --> 00:51:04,370
+I'm going to give you the infamous four-switch paradigm.
+
+497
+00:51:05,011 --> 00:51:07,414
+So we're going to loop over all of our states.
+
+498
+00:51:08,155 --> 00:51:13,138
+And then we're going to take a switch statement to evaluate the setup code tied to a particular state.
+
+499
+00:51:13,618 --> 00:51:15,879
+And we're going to execute a loop to take our samples.
+
+500
+00:51:16,320 --> 00:51:22,483
+Within the sample loop, we're going to execute a switch statement for which type of sample we want to generate.
+
+501
+00:51:23,564 --> 00:51:29,187
+But now our random number generation code and our resampling code are
+
+502
+00:51:30,216 --> 00:51:38,698
+at one location each within the loop, and so as long as we don't unroll these loops, we have just one location in the instruction caches for them to be pulled through.
+
+503
+00:51:39,858 --> 00:51:43,599
+And poof, our instruction cache problems are fixed.
+
+504
+00:51:43,739 --> 00:51:49,741
+This is 20 to 40% faster by moving to this state machine-based control flow.
+
+505
+00:51:50,801 --> 00:51:58,283
+And it impacts many of the shaders in our system, and it enables addressing other performance problems that we have.
+
+506
+00:52:00,672 --> 00:52:03,214
+I'm not going to talk about some next steps today.
+
+507
+00:52:03,514 --> 00:52:05,236
+Fog, volumetrics, transparency.
+
+508
+00:52:05,276 --> 00:52:10,662
+We've done some things in this space, but we don't have time to go deeper into it.
+
+509
+00:52:11,523 --> 00:52:17,469
+As Adam mentioned previously, all this stuff is available in our NV-RTX branch, so you can go look at the source code right now if you want to.
+
+510
+00:52:19,493 --> 00:52:24,395
+And then, additionally, we have some other ReSTIR and sampling talks at GDC this week.
+
+511
+00:52:25,115 --> 00:52:35,218
+I point you, you know, strongly at the gentle, or sorry, this is, got the slides backwards, this is some other resources on ReSTIR and sampling that you may want to take a look at.
+
+512
+00:52:36,899 --> 00:52:41,060
+We have some other talks on real-time path tracing in games this week.
+
+513
+00:52:41,535 --> 00:52:49,701
+First talk is our art talk about this UE5 work, if you're interested in seeing more about it and more of the use in a workflow.
+
+514
+00:52:50,221 --> 00:52:53,704
+Then we've also got talks on games with Cyberpunk and Alan Wake as well.
+
+515
+00:52:55,525 --> 00:53:10,516
+Whole bunch of people to acknowledge are artists that have worked on creating these scenes and telling us what's wrong, people that have worked on ReSTIR and got the theories together, some people have helped us with some denoiser implementations, and just general advice and feedback on the talk.
+
+516
+00:53:12,174 --> 00:53:17,882
+And finally, there are even more sessions in video sponsored at GDC, so please go ahead and take a look at those.
+
+517
+00:53:19,364 --> 00:53:29,398
+And I would like to open it up for questions as we take a look at the video from the emissively lit scene.
+
+518
+00:53:55,183 --> 00:53:57,547
+Yeah, again, there's zero parametric lights in this scene.
+
+519
+00:53:57,567 --> 00:54:00,312
+It's all just emissive materials doing the lighting.
+
+520
+00:54:01,173 --> 00:54:03,958
+So I think it's a pretty happy result.
+
+521
+00:54:26,135 --> 00:54:26,715
+Any questions?
+
+522
+00:54:38,742 --> 00:54:40,383
+Again, remember to fill out your surveys.
+
+523
+00:54:40,403 --> 00:54:47,247
+Hi.
+
+524
+00:54:49,869 --> 00:54:55,292
+So how many total rates per pixel do you do for these scenes?
+
+525
+00:54:57,428 --> 00:55:07,994
+In this case, the total rays fired, we had one during the initial sampling in this case.
+
+526
+00:55:08,594 --> 00:55:13,057
+We had none during spatial resampling because they decided that it was not necessary.
+
+527
+00:55:13,097 --> 00:55:14,397
+They had one during temporal.
+
+528
+00:55:15,158 --> 00:55:17,379
+And then I think they have
+
+529
+00:55:18,532 --> 00:55:25,257
+Maybe five in the reflections, and the reflections won't fire unless it's a shiny enough surface, basically.
+
+530
+00:55:26,137 --> 00:55:33,122
+And then, however many the lumen surface cache needs, because that's where, you know, it's off of the surface cache resolution, basically.
+
+531
+00:55:36,997 --> 00:55:38,159
+Hi, a great welcome.
+
+532
+00:55:38,560 --> 00:55:49,120
+A question about, do you guys have any plan to integrate this into the main branch of Unreal so that we can use it in the main?
+
+533
+00:55:50,831 --> 00:55:52,792
+I mean, this is ultimately up to Epic.
+
+534
+00:55:52,812 --> 00:55:57,573
+We're always interested in working out whether there's something that they can take from our code.
+
+535
+00:55:58,273 --> 00:56:01,114
+And we've had, many times, pieces go in.
+
+536
+00:56:01,474 --> 00:56:08,577
+And yeah, this is just now getting to a good place to start considering that, because we had to get all the Lumen stuff working.
+
+537
+00:56:10,297 --> 00:56:13,038
+If you do want to mess with it, you can pull our branch.
+
+538
+00:56:13,678 --> 00:56:14,999
+It is branched off of main.
+
+539
+00:56:15,159 --> 00:56:18,140
+So you'll get the same code, ultimately.
+
+540
+00:56:21,824 --> 00:56:22,024
+Hi.
+
+541
+00:56:22,364 --> 00:56:28,385
+So I noticed that when speaking about ray tracing, most of the time it's about GI or reflection.
+
+542
+00:56:28,805 --> 00:56:31,906
+And pretty much everybody tends to ignore the refractions.
+
+543
+00:56:33,046 --> 00:56:37,127
+Is it because it's technologically more difficult?
+
+544
+00:56:37,147 --> 00:56:42,368
+You have to render a refraction part with multiple bounces and a reflection part?
+
+545
+00:56:43,048 --> 00:56:44,908
+Or is that simply because it's not worth it?
+
+546
+00:56:47,028 --> 00:56:50,469
+For so many scenes, you don't have so many refractions to deal with.
+
+547
+00:56:57,078 --> 00:57:06,141
+So is the question about what specifically makes this path tracing versus doing indirect ray tracing?
+
+548
+00:57:06,621 --> 00:57:19,767
+No, the question is more like why the focus is mainly on the reflection parts and if there are some technical limitations that prevents the refraction to be
+
+549
+00:57:21,485 --> 00:57:22,225
+investigated on.
+
+550
+00:57:22,625 --> 00:57:26,346
+Yeah, so we just haven't addressed the refraction case yet.
+
+551
+00:57:27,826 --> 00:57:31,547
+The way our artists had set up the scene, there wasn't much, if any, refraction there.
+
+552
+00:57:31,887 --> 00:57:36,608
+And we could have done it in the water, but they had kind of set things up for just a distortion shader.
+
+553
+00:57:36,988 --> 00:57:38,148
+So we worked with that.
+
+554
+00:57:38,788 --> 00:57:39,708
+Yeah.
+
+555
+00:57:39,748 --> 00:57:40,468
+OK, thanks.
+
+556
+00:57:40,748 --> 00:57:42,149
+I think no specific reason.
+
+557
+00:57:43,289 --> 00:57:49,230
+It's mostly because, like, this scene, most of the time, you just have a lot of reflection and no refraction at all.
+
+558
+00:57:49,270 --> 00:57:49,370
+Yeah.
+
+559
+00:57:49,390 --> 00:57:49,670
+OK, thanks.
+
+560
+00:57:49,892 --> 00:58:01,904
+Yeah, also, I mean, from our perspective, we're kind of focused on things that, you know, games could use today, and you would have to kind of create special art for utilizing refractions, typically.
+
+561
+00:58:02,645 --> 00:58:08,211
+So, you know, we do want this to be, you know, as drop-in as possible for people.
+
+562
+00:58:14,069 --> 00:58:14,989
+Great talk, by the way.
+
+563
+00:58:15,770 --> 00:58:24,375
+So a colleague in my team is actually looking at the brands right now, and he noticed that it only supports everything in the DirectX backend.
+
+564
+00:58:24,935 --> 00:58:29,038
+So are you planning to enable all these features using the Vulkan backend as well?
+
+565
+00:58:33,559 --> 00:58:42,165
+Yeah, so I think that the reordering stuff we don't support via the Vulkan at the moment.
+
+566
+00:58:43,166 --> 00:58:45,167
+I think that's the only thing in there.
+
+567
+00:58:47,202 --> 00:58:48,703
+It's something that we need to take a look at.
+
+568
+00:58:49,964 --> 00:58:51,605
+We just haven't spent time on it.
+
+569
+00:58:52,786 --> 00:59:01,572
+Mostly because of the fact that the Vulkan ray tracing implementation had been a little bit behind the DirectX one in UE5 from when we started building on this.
+
+570
+00:59:01,912 --> 00:59:03,793
+We started building on this work back in UE4.
+
+571
+00:59:04,074 --> 00:59:06,415
+So, yeah, we just haven't gotten to it.
+
+572
+00:59:06,875 --> 00:59:07,036
+Right.
+
+573
+00:59:07,336 --> 00:59:07,576
+Thank you.
+
+574
+00:59:21,202 --> 00:59:22,183
+Hi, I have a question.
+
+575
+00:59:23,604 --> 00:59:27,806
+Could you go back to the slide with regards to how you perform sampling for specular materials?
+
+576
+00:59:33,650 --> 00:59:37,332
+So either I heard this wrong, you could correct me.
+
+577
+00:59:38,113 --> 00:59:48,340
+Is the way that you perform sampling for specular materials to directly sample light sources and bias your samples towards that?
+
+578
+00:59:49,359 --> 00:59:50,540
+Or do you do it otherwise?
+
+579
+00:59:50,660 --> 00:59:55,824
+Because I wasn't really sure as to how the sampling happens specifically for specular reflections.
+
+580
+00:59:58,366 --> 00:59:59,007
+This one, right?
+
+581
+01:00:11,563 --> 01:00:11,743
+Yeah.
+
+582
+01:00:12,143 --> 01:00:12,364
+Okay.
+
+583
+01:00:13,124 --> 01:00:17,567
+So what's going on here is that we're actually, this is actually a form of multiple importance sampling.
+
+584
+01:00:17,607 --> 01:00:18,968
+We're not biasing anything.
+
+585
+01:00:19,068 --> 01:00:27,154
+So we do properly multiply important sample with the local light and the skylight because the ray can't hit the sky as well.
+
+586
+01:00:27,814 --> 01:00:28,115
+Okay.
+
+587
+01:00:28,135 --> 01:00:28,475
+Got it.
+
+588
+01:00:28,515 --> 01:00:28,815
+Thanks.
+
+589
+01:00:29,215 --> 01:00:35,540
+All right.
+
+590
+01:00:35,560 --> 01:00:36,660
+They're telling us we're out of time.
+
+591
+01:00:36,680 --> 01:00:39,743
+So fill out your surveys and have a great GDC.
+
