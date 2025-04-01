@@ -7,8 +7,6 @@ assignees: ''
 
 ---
 
-**Alternative way of feedback [in the form of Google Form](https://forms.gle/D68jU5FmAKoXMwhc6) is available if you wish to give feedback privately**
-
 **Explicit permission for transcription**
 - [ ] Allowed
 - [ ] Disallowed
