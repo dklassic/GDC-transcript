@@ -1,0 +1,47 @@
+name: Check Issue Checkboxes
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  check-checkboxes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if Issue has the 'missing transcript' label
+        id: label-check
+        run: |
+          echo "labels=${{ toJson(github.event.issue.labels) }}" > labels.json
+          if grep -q 'missing transcript' labels.json; then
+            echo "missing_transcript=true" >> $GITHUB_ENV
+          else
+            echo "missing_transcript=false" >> $GITHUB_ENV
+          fi
+
+      - name: Check for unchecked checkboxes
+        id: check
+        if: ${{ env.missing_transcript == 'true' }}
+        run: |
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          
+          # Extract unchecked checkboxes
+          UNCHECKED=$(echo "$ISSUE_BODY" | grep -E '\- \[ \]' | wc -l)
+
+          # If found any unchecked checkboxes, set output to true
+          if [ "$UNCHECKED" -gt 0 ]; then
+            echo "unchecked=true" >> $GITHUB_ENV
+            echo "Unchecked checkboxes found!"
+          else
+            echo "unchecked=false" >> $GITHUB_ENV
+          fi
+
+      - name: Comment on Issue if unchecked checkboxes are found
+        if: ${{ env.unchecked == 'true' && env.missing_transcript == 'true' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: |
+            ⚠️ It looks like some checkboxes in your issue are not checked. 
+            Please ensure you have confirmed all the checkboxes are valid before opening an issue.
+            The issue will be closed if the checkboxes are not checked.
