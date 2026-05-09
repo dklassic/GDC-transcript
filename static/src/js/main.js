@@ -1,9 +1,11 @@
 // main.js — logic for index.html
 
 const ParamVideoId = 'v';
+const ParamTimestamp = 't';
 const queryString = window.location.search;
 const urlParams = new URLSearchParams(queryString);
 const videoId = urlParams.get(ParamVideoId);
+const startTime = parseInt(urlParams.get(ParamTimestamp) || '0', 10);
 
 var RedirectByVideoId = function (videoId) {
     const parser = new URL(window.location);
@@ -34,7 +36,7 @@ let elementVideo = document.getElementById('video');
 let youtubeEmbed = document.createElement('iframe');
 elementVideo.appendChild(youtubeEmbed);
 youtubeEmbed.id = 'embedded_video';
-youtubeEmbed.src = `https://www.youtube.com/embed/${videoId}`;
+youtubeEmbed.src = `https://www.youtube.com/embed/${videoId}${startTime > 0 ? '?start=' + startTime : ''}`;
 youtubeEmbed.frameBorder = 0;
 youtubeEmbed.allowFullscreen = true;
 youtubeEmbed.style.height = "100%";
