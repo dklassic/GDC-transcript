@@ -2,23 +2,7 @@ import os
 import sys
 import openai
 import subprocess
-# from pytube import YouTube
 from yt_dlp import YoutubeDL
-
-# not sure how to do this properly yet: https://platform.openai.com/docs/guides/speech-to-text/quickstart
-
-def download_video_by_pytube(video_id):
-    video_url = f'http://youtube.com/watch?v={video_id}'
-    try:
-        yt = YouTube(video_url)
-        audio_stream = yt.streams.filter(only_audio=True).first()
-        audio_stream.download(filename="video.mp3", output_path=".", skip_existing=False)
-        print(f"Audio downloaded from {video_url}")
-    except Exception as e:
-        print(f"Error downloading audio from {video_url}: {e}")
-
-    with YoutubeDL(ydl_opts) as ydl:
-        error_code = ydl.download(URLS)
 
 def download_video_by_yt_dlp(video_id):
     video_url = f'http://youtube.com/watch?v={video_id}'
@@ -67,12 +51,9 @@ def transcribe_audio():
         os.remove(new_filename)
     return transcript
 
-def main(video_id, download_method):
+def main(video_id):
     try:
-        if(download_method == "pytube"):
-            download_video_by_pytube(video_id)
-        else:
-            download_video_by_yt_dlp(video_id)
+        download_video_by_yt_dlp(video_id)
         transcript = transcribe_audio()
 
         with open(f"./static/src/subtitle/{video_id}.srt", 'w', encoding='utf-8') as f:
@@ -82,5 +63,4 @@ def main(video_id, download_method):
 
 if __name__ == "__main__":
     video_id = sys.argv[1]
-    download_method = sys.argv[2]
-    main(video_id, download_method)
+    main(video_id)
