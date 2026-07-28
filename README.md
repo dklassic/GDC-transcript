@@ -60,7 +60,7 @@ The pipeline:
 5. Plain-text transcripts are generated from the `.srt` files and saved to `static/src/transcript/`.
 6. During deployment, `build_metadata_json.py` builds JSON data files consumed by the frontend.
 
-The frontend is a static site with no build step — it embeds the YouTube player and overlays subtitles using `youtube.external.subtitle`.
+The frontend is a static site that embeds the YouTube player and overlays subtitles using `youtube.external.subtitle`. Its Tailwind stylesheet is compiled with `npm run build:css` and rebuilt during deployment.
 
 ---
 
@@ -142,7 +142,16 @@ GDC-transcript/
 
 ### Running the Tools Locally
 
-Install Python dependencies:
+Install the frontend dependencies and build the stylesheet:
+
+```bash
+npm ci
+npm run build:css
+```
+
+Use `npm run watch:css` while editing the HTML or styles.
+
+For the transcription tools, install the Python dependencies:
 
 ```bash
 pip install pytube yt-dlp openai requests
